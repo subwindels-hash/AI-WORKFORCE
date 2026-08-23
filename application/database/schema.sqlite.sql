@@ -165,3 +165,27 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   summary TEXT NOT NULL,
   detail TEXT
 );
+
+-- Lead Discovery: permanent records; Redis is optional operational cache in production.
+CREATE TABLE IF NOT EXISTS leads (
+ id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, source TEXT NOT NULL, source_id TEXT NOT NULL,
+ name TEXT NOT NULL, category TEXT, address TEXT, city TEXT, region TEXT, country TEXT, phone TEXT, website TEXT,
+ latitude REAL, longitude REAL, status TEXT NOT NULL DEFAULT 'new', owner_id INTEGER, metadata TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+ UNIQUE(organization_id, source, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_leads_org_status ON leads(organization_id, status);
+CREATE INDEX IF NOT EXISTS idx_leads_owner ON leads(organization_id, owner_id);
+CREATE INDEX IF NOT EXISTS idx_leads_created ON leads(organization_id, created_at);
+CREATE TABLE IF NOT EXISTS lead_notes (id TEXT PRIMARY KEY, lead_id TEXT NOT NULL, organization_id TEXT NOT NULL, author_id INTEGER NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS lead_activities (id TEXT PRIMARY KEY, lead_id TEXT, organization_id TEXT NOT NULL, actor_id INTEGER, type TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS collections (id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, name TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(organization_id,name));
+CREATE TABLE IF NOT EXISTS collection_leads (collection_id TEXT NOT NULL, lead_id TEXT NOT NULL, PRIMARY KEY(collection_id,lead_id));
+CREATE TABLE IF NOT EXISTS search_history (id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, user_id INTEGER NOT NULL, query TEXT NOT NULL, provider TEXT NOT NULL, filters TEXT NOT NULL DEFAULT '{}', results_returned INTEGER NOT NULL, new_leads_created INTEGER NOT NULL, duplicates_detected INTEGER NOT NULL, errors TEXT, duration_ms INTEGER NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS duplicate_candidates (id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, lead_a_id TEXT NOT NULL, lead_b_id TEXT NOT NULL, rule_name TEXT NOT NULL, confidence REAL NOT NULL, status TEXT NOT NULL DEFAULT 'open', created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS duplicate_resolutions (id TEXT PRIMARY KEY, candidate_id TEXT NOT NULL, organization_id TEXT NOT NULL, resolver_id INTEGER NOT NULL, action TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS export_history (id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, user_id INTEGER NOT NULL, format TEXT NOT NULL, filters TEXT NOT NULL, lead_count INTEGER NOT NULL, created_at TEXT NOT NULL);
+
+-- Lead Discovery tenancy: a user may belong to several workspaces; all lead records use one selected membership.
+CREATE TABLE IF NOT EXISTS lead_organizations (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS lead_organization_members (organization_id TEXT NOT NULL, user_id INTEGER NOT NULL, role TEXT NOT NULL DEFAULT 'member', created_at TEXT NOT NULL, PRIMARY KEY(organization_id,user_id));
+CREATE INDEX IF NOT EXISTS idx_lead_org_members_user ON lead_organization_members(user_id);

@@ -53,7 +53,14 @@
  *
  * NOTE: If you change these, also change the error_reporting() code below
  */
-	define('ENVIRONMENT', isset($_SERVER['CI_ENV']) ? $_SERVER['CI_ENV'] : 'development');
+	// cPanel deployments configure this application by editing a root .env file.
+	// The lightweight loader is bundled so Composer and terminal commands are never required.
+	if (is_file(__DIR__ . '/application/config/env.php')) {
+		require_once __DIR__ . '/application/config/env.php';
+		vp_load_env(__DIR__ . '/.env');
+	}
+	$ciEnvironment = getenv('CI_ENV') ?: ($_SERVER['CI_ENV'] ?? 'development');
+	define('ENVIRONMENT', $ciEnvironment);
 
 /*
  * AEGIS dev-runtime adapter: the offline WASM bridge routes every request

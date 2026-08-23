@@ -16,7 +16,7 @@ defined('BASEPATH') or exit('No direct script access allowed');
 $active_group = 'default';
 $query_builder = true;
 
-$driver = getenv('AEGIS_DB_DRIVER') ?: 'mysqli';
+$driver = getenv('VP_DB_DRIVER') ?: (getenv('AEGIS_DB_DRIVER') ?: 'mysqli');
 
 if ($driver === 'pdo_sqlite') {
     $db['default'] = [
@@ -44,10 +44,11 @@ if ($driver === 'pdo_sqlite') {
 } else {
     $db['default'] = [
         'dsn' => '',
-        'hostname' => getenv('AEGIS_DB_HOST') ?: '127.0.0.1',
-        'username' => getenv('AEGIS_DB_USER') ?: 'aegis',
-        'password' => getenv('AEGIS_DB_PASS') ?: 'aegis',
-        'database' => getenv('AEGIS_DB_NAME') ?: 'aegis_trading',
+        'hostname' => getenv('VP_DB_HOST') ?: (getenv('AEGIS_DB_HOST') ?: 'localhost'),
+        'port' => (int)(getenv('VP_DB_PORT') ?: (getenv('AEGIS_DB_PORT') ?: 3306)),
+        'username' => getenv('VP_DB_USER') ?: (getenv('AEGIS_DB_USER') ?: ''),
+        'password' => getenv('VP_DB_PASS') ?: (getenv('AEGIS_DB_PASS') ?: ''),
+        'database' => getenv('VP_DB_NAME') ?: (getenv('AEGIS_DB_NAME') ?: ''),
         'dbdriver' => 'mysqli',
         'dbprefix' => '',
         'pconnect' => false,

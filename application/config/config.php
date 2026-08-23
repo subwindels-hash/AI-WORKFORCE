@@ -28,7 +28,7 @@ defined('BASEPATH') OR exit('No direct script access allowed');
 | Base URL (auto-detected; override with AEGIS_BASE_URL in production)
 |--------------------------------------------------------------------------
 */
-$baseUrl = getenv('AEGIS_BASE_URL');
+$baseUrl = getenv('VP_BASE_URL') ?: getenv('AEGIS_BASE_URL');
 if ($baseUrl === false || $baseUrl === '') {
     $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
         || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
@@ -338,7 +338,7 @@ $config['cache_query_string'] = FALSE;
 | https://codeigniter.com/userguide3/libraries/encryption.html
 |
 */
-$config['encryption_key'] = getenv('AEGIS_ENCRYPTION_KEY') ?: '';
+$config['encryption_key'] = getenv('VP_ENCRYPTION_KEY') ?: (getenv('AEGIS_ENCRYPTION_KEY') ?: '');
 
 /*
 |--------------------------------------------------------------------------
@@ -396,10 +396,10 @@ $config['encryption_key'] = getenv('AEGIS_ENCRYPTION_KEY') ?: '';
 |
 */
 $config['sess_driver'] = 'files';
-$config['sess_cookie_name'] = 'aegis_session';
+$config['sess_cookie_name'] = getenv('VP_SESSION_COOKIE') ?: 'aegis_session';
 $config['sess_samesite'] = 'Lax';
 $config['sess_expiration'] = 7200;
-$config['sess_save_path'] = getenv('AEGIS_SESSION_PATH') ?: APPPATH . '../runtime/sessions';
+$config['sess_save_path'] = getenv('VP_SESSION_PATH') ?: (getenv('AEGIS_SESSION_PATH') ?: APPPATH . '../runtime/sessions');
 $config['sess_match_ip'] = FALSE;
 $config['sess_time_to_update'] = 300;
 $config['sess_regenerate_destroy'] = TRUE;
@@ -423,7 +423,7 @@ $config['sess_regenerate_destroy'] = TRUE;
 $config['cookie_prefix']	= '';
 $config['cookie_domain']	= '';
 $config['cookie_path']		= '/';
-$config['cookie_secure'] = getenv('AEGIS_COOKIE_SECURE') === '1';
+$config['cookie_secure'] = (getenv('VP_COOKIE_SECURE') ?: getenv('AEGIS_COOKIE_SECURE')) === '1';
 $config['cookie_httponly'] = TRUE;
 $config['cookie_samesite'] 	= 'Lax';
 
