@@ -35,8 +35,8 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | Trade journal + analytics + confidence calibration | **TESTED** |
 | ANALYSIS_ONLY + PAPER_TRADING modes, kill switch, audit trail | **TESTED** |
 | MT5 bridge health + read-only account/quote contracts | **IMPLEMENTED** (Phase 4 foundation) |
-| Execution supervisor preflight + HUMAN_APPROVAL mode | **IMPLEMENTED** (Phase 5 foundation; never routes orders) |
-| Broker order routing, approval persistence, live trading | **PLANNED** (Phase 5) |
+| Execution supervisor preflight + persistent HUMAN_APPROVAL review workflow | **IMPLEMENTED** (Phase 5 foundation; never routes orders) |
+| Broker order routing and live trading | **PLANNED** (Phase 5) |
 
 **57 automated tests** run through the real CodeIgniter stack
 (`php index.php tools tests` on any host; `node run-tests.mjs` in the offline

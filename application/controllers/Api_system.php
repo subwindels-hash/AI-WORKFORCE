@@ -147,6 +147,26 @@ class Api_system extends Api_controller
         $this->json($this->platform->execution->preflight($this->jsonBody(), $this->platform->state()));
     }
 
+    public function execution_approvals()
+    {
+        $this->json(['approvals' => $this->platform->execution->approvals($this->platform->state())]);
+    }
+
+    public function execution_request_approval()
+    {
+        try { $this->json(['approval' => $this->platform->execution->requestApproval($this->jsonBody(), $this->platform->state(), 'user')]); }
+        catch (\Throwable $e) { $this->jsonError($e->getMessage(), 409); }
+    }
+
+    public function execution_decide(string $id)
+    {
+        $body = $this->jsonBody();
+        if (!isset($body['approve']) || !is_bool($body['approve'])) return $this->jsonError('body must include approve: boolean');
+        try { $this->json(['approval' => $this->platform->execution->decide($id, $body['approve'], 'user', $body['reason'] ?? null)]); }
+        catch (\InvalidArgumentException $e) { $this->jsonError($e->getMessage(), 404); }
+        catch (\Throwable $e) { $this->jsonError($e->getMessage(), 409); }
+    }
+
     public function trading_mode()
     {
         $body = $this->jsonBody();

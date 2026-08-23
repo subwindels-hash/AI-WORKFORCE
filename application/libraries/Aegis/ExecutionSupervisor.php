@@ -2,6 +2,7 @@
 namespace Aegis;
 
 use Aegis\Persistence\AuditRepository;
+use Aegis\Persistence\PlatformStateRepository;
 
 /**
  * Phase 5 execution gate. It deliberately creates no broker order and has no
@@ -10,7 +11,41 @@ use Aegis\Persistence\AuditRepository;
  */
 class ExecutionSupervisor
 {
-    public function __construct(private AuditRepository $audit) {}
+    public function __construct(private AuditRepository $audit, private ?PlatformStateRepository $stateRepo = null) {}
+
+    /** Persist an approved preflight as a human review request; it is never routed. */
+    public function requestApproval(array $intent, array $state, string $actor = 'user'): array
+    {
+        $result = $this->preflight($intent, $state);
+        if ($result['status'] !== 'APPROVAL_REQUIRED') return $result;
+        if ($this->stateRepo === null) throw new \RuntimeException('approval persistence unavailable');
+        $state = $this->stateRepo->load();
+        $requests = $state['executionApprovals'] ?? [];
+        $request = ['id' => 'apr_' . bin2hex(random_bytes(8)), 'status' => 'PENDING', 'createdAt' => gmdate('c'), 'decidedAt' => null, 'actor' => $actor, 'decisionBy' => null, 'decisionReason' => null, 'preflight' => $result];
+        $requests[] = $request;
+        $state['executionApprovals'] = array_slice($requests, -200);
+        $this->stateRepo->save($state);
+        $this->audit->emit('EXECUTION_APPROVAL_REQUESTED', 'Human approval request created', ['id' => $request['id'], 'intent' => $result['intent']], $actor);
+        return $request;
+    }
+
+    public function approvals(array $state): array { return array_reverse($state['executionApprovals'] ?? []); }
+
+    public function decide(string $id, bool $approve, string $actor = 'user', ?string $reason = null): array
+    {
+        if ($this->stateRepo === null) throw new \RuntimeException('approval persistence unavailable');
+        $state = $this->stateRepo->load(); $requests = $state['executionApprovals'] ?? [];
+        foreach ($requests as &$request) {
+            if (($request['id'] ?? '') !== $id) continue;
+            if ($request['status'] !== 'PENDING') throw new \RuntimeException('approval request has already been decided');
+            $request['status'] = $approve ? 'APPROVED_NOT_ROUTED' : 'REJECTED';
+            $request['decidedAt'] = gmdate('c'); $request['decisionBy'] = $actor; $request['decisionReason'] = $reason;
+            $state['executionApprovals'] = $requests; $this->stateRepo->save($state);
+            $this->audit->emit($approve ? 'EXECUTION_APPROVAL_GRANTED' : 'EXECUTION_APPROVAL_REJECTED', $approve ? 'Approval granted; routing remains disabled' : 'Approval request rejected', ['id' => $id, 'reason' => $reason], $actor);
+            return $request;
+        }
+        throw new \InvalidArgumentException('approval request not found');
+    }
 
     public function preflight(array $intent, array $state): array
     {

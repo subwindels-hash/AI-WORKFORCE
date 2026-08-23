@@ -74,4 +74,7 @@ $route['api/risk/limits/update'] = 'api_system/update_risk_limits';
 $route['api/trading/kill-switch'] = 'api_system/kill_switch';
 $route['api/trading/mode'] = 'api_system/trading_mode';
 $route['api/execution/preflight'] = 'api_system/execution_preflight';
+$route['api/execution/approvals'] = 'api_system/execution_approvals';
+$route['api/execution/approvals/request'] = 'api_system/execution_request_approval';
+$route['api/execution/approvals/(:any)/decide'] = 'api_system/execution_decide/$1';
 $route['api/trading/synthetic-paper'] = 'api_system/synthetic_paper';

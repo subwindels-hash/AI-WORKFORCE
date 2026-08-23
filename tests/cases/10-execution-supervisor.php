@@ -8,7 +8,12 @@ function fx_supervisor(): array {
         public function emit(string $type, string $summary, array $detail = [], string $actor = 'system'): void { $this->events[] = $type; }
         public function recent(int $limit = 100): array { return []; }
     };
-    return [new ExecutionSupervisor($audit), $audit];
+    $state = new class implements \Aegis\Persistence\PlatformStateRepository {
+        public array $value = ['tradingMode' => 'HUMAN_APPROVAL', 'killSwitch' => ['active' => false]];
+        public function load(): array { return $this->value; }
+        public function save(array $state): void { $this->value = $state; }
+    };
+    return [new ExecutionSupervisor($audit, $state), $audit, $state];
 }
 
 test('execution supervisor rejects preflight while kill switch is active', function () {
@@ -24,6 +29,16 @@ test('execution supervisor requires a human mode and mandatory stop', function (
     $result = $supervisor->preflight(['symbol' => 'EURUSD', 'side' => 'BUY', 'quantity' => 1], $state);
     assert_equals('REJECTED', $result['status']);
     assert_contains('stopLoss', $result['reason']);
+});
+
+test('execution approvals persist a decision but remain explicitly not routed', function () {
+    [$supervisor, $audit, $store] = fx_supervisor();
+    $request = $supervisor->requestApproval(['symbol' => 'EURUSD', 'side' => 'BUY', 'quantity' => 1, 'stopLoss' => 1.07], $store->load());
+    assert_equals('PENDING', $request['status']);
+    $decision = $supervisor->decide($request['id'], true, 'reviewer', 'checked');
+    assert_equals('APPROVED_NOT_ROUTED', $decision['status']);
+    assert_equals('reviewer', $decision['decisionBy']);
+    assert_equals('APPROVED_NOT_ROUTED', $supervisor->approvals($store->load())[0]['status']);
 });
 
 test('execution supervisor passes only to approval required and never executes', function () {

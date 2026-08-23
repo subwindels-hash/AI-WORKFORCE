@@ -51,7 +51,7 @@ class Platform
         });
 
         $this->risk = new RiskEngine();
-        $this->execution = new ExecutionSupervisor($model->audit);
+        $this->execution = new ExecutionSupervisor($model->audit, $model->state);
         $this->strategies = new StrategyRegistry($model->strategies, $model->audit);
         $this->strategies->seedBuiltins();
 
