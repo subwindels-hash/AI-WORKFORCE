@@ -12,6 +12,8 @@ class SportsIntelligence
     public readonly DataQualityEngine $quality;
     public readonly OddsFreshnessEngine $oddsFreshness;
     public readonly MatchIntelligenceEngine $matchIntelligence;
+    public readonly FeatureEngineeringEngine $features;
+    public readonly PredictionEngine $predictions;
     public readonly SportsSyncService $sync;
     public function __construct(SportsRepository $repository, AuditRepository $audit)
     {
@@ -19,6 +21,8 @@ class SportsIntelligence
         $this->quality = new DataQualityEngine();
         $this->oddsFreshness = new OddsFreshnessEngine();
         $this->matchIntelligence = new MatchIntelligenceEngine($this->oddsFreshness);
+        $this->features = new FeatureEngineeringEngine();
+        $this->predictions = new PredictionEngine();
         $this->sync = new SportsSyncService($repository, $audit, $this->quality);
     }
     public function status(): array
