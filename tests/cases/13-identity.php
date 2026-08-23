@@ -10,6 +10,10 @@ function fx_identity(): array {
         public function findUserByEmail(string $email): ?array { return $email === $this->user['email'] ? $this->user : null; }
         public function findUserById(int $id): ?array { return $id === 1 ? $this->user : null; }
         public function createUser(array $user): array { return $user; }
+        public function ensureRole(string $code, string $name): int { return 1; }
+        public function ensurePermission(string $code, string $name): int { return 1; }
+        public function grantRolePermission(int $roleId, int $permissionId): void {}
+        public function assignRole(int $userId, int $roleId): void {}
         public function permissionsForUser(int $userId): array { return ['sports.manage']; }
         public function recordAuthEvent(int $userId, string $type, array $detail = []): void { $this->events[] = $type; }
     };

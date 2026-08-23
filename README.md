@@ -52,7 +52,10 @@ any web server (Apache/nginx + php-fpm).
 ```bash
 # 1. Create the database + user, then:
 export AEGIS_DB_HOST=127.0.0.1 AEGIS_DB_USER=aegis AEGIS_DB_PASS=... AEGIS_DB_NAME=aegis_trading
-php tools/install.php          # creates all tables (application/database/schema.mysql.sql)
+php tools/install.php          # creates all tables and RBAC defaults
+# Create the first operator once; values are environment-only and never committed:
+export AEGIS_BOOTSTRAP_ADMIN_EMAIL=admin@example.com AEGIS_BOOTSTRAP_ADMIN_PASSWORD='use-a-long-unique-password'
+php index.php tools bootstrap_admin
 
 # 2. Point the vhost at the repo root (index.php is the front controller),
 #    set ENVIRONMENT=production, done:

@@ -18,7 +18,7 @@ class Tools extends MY_Controller
 
     public function index()
     {
-        echo "AEGIS tools:\n  php index.php tools install   — (re)install the database schema\n  php index.php tools tests     — run the full test suite\n";
+        echo "AEGIS tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n";
     }
 
     public function install()
@@ -43,7 +43,42 @@ class Tools extends MY_Controller
                 $this->db->query($stmt);
             }
         }
-        echo 'OK — schemas installed on driver "' . $driver . "\".\n";
+        $this->seedAccessControls();
+        echo 'OK — schemas installed and RBAC defaults seeded on driver "' . $driver . "\".\n";
+    }
+
+    /** CLI only: creates the initial super-admin from environment values. */
+    public function bootstrap_admin()
+    {
+        $email = strtolower(trim((string) getenv('AEGIS_BOOTSTRAP_ADMIN_EMAIL')));
+        $password = (string) getenv('AEGIS_BOOTSTRAP_ADMIN_PASSWORD');
+        $name = trim((string) (getenv('AEGIS_BOOTSTRAP_ADMIN_NAME') ?: 'Platform Administrator'));
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 14) {
+            fwrite(STDERR, "Set AEGIS_BOOTSTRAP_ADMIN_EMAIL and a 14+ character AEGIS_BOOTSTRAP_ADMIN_PASSWORD.\n"); return;
+        }
+        $this->seedAccessControls();
+        $user = $this->Aegis_model->identity->findUserByEmail($email);
+        if ($user) { echo "Admin already exists; no change made.\n"; return; }
+        $now = gmdate('c');
+        $user = $this->Aegis_model->identity->createUser(['email' => $email, 'password_hash' => password_hash($password, PASSWORD_DEFAULT), 'display_name' => $name, 'active' => 1, 'created_at' => $now, 'updated_at' => $now, 'last_login_at' => null]);
+        $role = $this->Aegis_model->identity->ensureRole('super_admin', 'Super administrator');
+        $this->Aegis_model->identity->assignRole((int) $user['id'], $role);
+        $this->Aegis_model->audit->emit('ADMIN_BOOTSTRAPPED', 'Initial super administrator created', ['userId' => $user['id']], 'system');
+        echo "Admin created. Remove bootstrap environment variables now.\n";
+    }
+
+    private function seedAccessControls(): void
+    {
+        $identity = $this->Aegis_model->identity;
+        $roles = ['super_admin' => 'Super administrator', 'sports_admin' => 'Sports administrator', 'sports_viewer' => 'Sports viewer'];
+        $ids = []; foreach ($roles as $code => $name) $ids[$code] = $identity->ensureRole($code, $name);
+        $permissions = ['system.super_admin' => 'Full platform administration', 'sports.view' => 'View sports intelligence', 'sports.manage' => 'Manage sports providers and configuration', 'sports.approve' => 'Approve sports tickets', 'sports.settle' => 'Override sports settlements'];
+        foreach ($permissions as $code => $name) {
+            $pid = $identity->ensurePermission($code, $name);
+            $identity->grantRolePermission($ids['super_admin'], $pid);
+            if (in_array($code, ['sports.view'], true)) $identity->grantRolePermission($ids['sports_viewer'], $pid);
+            if (in_array($code, ['sports.view', 'sports.manage', 'sports.approve', 'sports.settle'], true)) $identity->grantRolePermission($ids['sports_admin'], $pid);
+        }
     }
 
     public function tests()

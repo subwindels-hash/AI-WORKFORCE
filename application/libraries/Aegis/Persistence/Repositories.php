@@ -64,6 +64,10 @@ interface IdentityRepository
     public function findUserByEmail(string $email): ?array;
     public function findUserById(int $id): ?array;
     public function createUser(array $user): array;
+    public function ensureRole(string $code, string $name): int;
+    public function ensurePermission(string $code, string $name): int;
+    public function grantRolePermission(int $roleId, int $permissionId): void;
+    public function assignRole(int $userId, int $roleId): void;
     /** @return array<int,string> */
     public function permissionsForUser(int $userId): array;
     public function recordAuthEvent(int $userId, string $type, array $detail = []): void;

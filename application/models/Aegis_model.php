@@ -153,6 +153,19 @@ class Aegis_model extends CI_Model
             public function createUser(array $user): array {
                 $this->db->insert('users', $user); $user['id'] = (int) $this->db->insert_id(); return $user;
             }
+            public function ensureRole(string $code, string $name): int { return $this->ensure('roles', $code, $name); }
+            public function ensurePermission(string $code, string $name): int { return $this->ensure('permissions', $code, $name); }
+            private function ensure(string $table, string $code, string $name): int {
+                $row = $this->db->get_where($table, ['code' => $code], 1)->row_array();
+                if ($row) return (int) $row['id'];
+                $this->db->insert($table, ['code' => $code, 'name' => $name]); return (int) $this->db->insert_id();
+            }
+            public function grantRolePermission(int $roleId, int $permissionId): void {
+                if (!$this->db->get_where('role_permissions', ['role_id' => $roleId, 'permission_id' => $permissionId], 1)->row_array()) $this->db->insert('role_permissions', ['role_id' => $roleId, 'permission_id' => $permissionId]);
+            }
+            public function assignRole(int $userId, int $roleId): void {
+                if (!$this->db->get_where('user_roles', ['user_id' => $userId, 'role_id' => $roleId], 1)->row_array()) $this->db->insert('user_roles', ['user_id' => $userId, 'role_id' => $roleId]);
+            }
             public function permissionsForUser(int $userId): array {
                 $rows = $this->db->select('p.code')->from('permissions p')->join('role_permissions rp', 'rp.permission_id = p.id')->join('user_roles ur', 'ur.role_id = rp.role_id')->where('ur.user_id', $userId)->get()->result_array();
                 return array_values(array_unique(array_map(fn($r) => $r['code'], $rows)));
