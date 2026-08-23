@@ -25,7 +25,7 @@ class SportsIntelligence
     public readonly PersistedResultVerifier $resultVerifier;
     public readonly PerformanceAnalytics $performance;
     public readonly SportsSyncService $sync;
-    public function __construct(SportsRepository $repository, AuditRepository $audit)
+    public function __construct(private SportsRepository $repository, AuditRepository $audit)
     {
         $this->providers = new SportsProviderManager();
         $this->quality = new DataQualityEngine();
@@ -45,6 +45,12 @@ class SportsIntelligence
         $this->performance = new PerformanceAnalytics();
         $this->sync = new SportsSyncService($repository, $audit, $this->quality);
     }
+    public function performanceReport(array $filter = []): array
+    {
+        $tickets = $this->repository->listTickets($filter);
+        return array_merge($this->performance->summarize($tickets), ['mode' => getenv('WINDELS_SPORTS_MODE') ?: 'SANDBOX', 'filter' => $filter]);
+    }
+
     public function status(): array
     {
         return [

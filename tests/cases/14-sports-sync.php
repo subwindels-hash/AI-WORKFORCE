@@ -26,6 +26,7 @@ function fx_sports_sync(): array {
         public function ticketSelections(string $ticketId): array { return []; }
         public function updateTicketSelection(int $id, array $patch): void {}
         public function findTicket(string $id): ?array { return null; }
+        public function listTickets(array $filter = [], int $limit = 500): array { return []; }
         public function updateTicket(string $id, array $patch): void {}
     };
     $audit = new class implements AuditRepository { public array $events = []; public function emit(string $type, string $summary, array $detail = [], string $actor = 'system'): void { $this->events[] = $type; } public function recent(int $limit = 100): array { return []; } };

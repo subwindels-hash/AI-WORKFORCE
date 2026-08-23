@@ -182,6 +182,7 @@ class Aegis_model extends CI_Model
             public function ticketSelections(string $ticketId): array { return $this->db->get_where('sports_ticket_selections', ['ticket_id' => $ticketId])->result_array(); }
             public function updateTicketSelection(int $id, array $patch): void { $this->db->where('id', $id)->update('sports_ticket_selections', $patch); }
             public function findTicket(string $id): ?array { return $this->db->get_where('sports_tickets', ['id' => $id], 1)->row_array() ?: null; }
+            public function listTickets(array $filter = [], int $limit = 500): array { if(!empty($filter['from']))$this->db->where('created_at >=',$filter['from']); if(!empty($filter['to']))$this->db->where('created_at <=',$filter['to']); if(!empty($filter['status']))$this->db->where('settlement_status',$filter['status']); if(!empty($filter['modelVersionId']))$this->db->where('model_version_id',(int)$filter['modelVersionId']); return $this->db->order_by('created_at','DESC')->limit(min(500,max(1,$limit)))->get('sports_tickets')->result_array(); }
             public function updateTicket(string $id, array $patch): void { $this->db->where('id', $id)->update('sports_tickets', $patch); }
         };
 

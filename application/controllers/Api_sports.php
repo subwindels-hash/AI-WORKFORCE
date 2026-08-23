@@ -9,6 +9,14 @@ class Api_sports extends Api_controller
         $this->json($this->platform->sports->status());
     }
 
+    public function performance()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $allowed = ['from', 'to', 'status', 'modelVersionId'];
+        $filter = array_intersect_key($this->input->get(NULL, true) ?: [], array_flip($allowed));
+        $this->json($this->platform->sports->performanceReport($filter));
+    }
+
     /** Promotes a persisted provider result only after validation. */
     public function verify_result()
     {

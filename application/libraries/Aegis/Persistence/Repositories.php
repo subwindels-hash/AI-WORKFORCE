@@ -82,6 +82,8 @@ interface SportsRepository
     public function ticketSelections(string $ticketId): array;
     public function updateTicketSelection(int $id, array $patch): void;
     public function findTicket(string $id): ?array;
+    /** @return array<int,array<string,mixed>> */
+    public function listTickets(array $filter = [], int $limit = 500): array;
     public function updateTicket(string $id, array $patch): void;
 }
 

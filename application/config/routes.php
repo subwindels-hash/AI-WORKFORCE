@@ -32,6 +32,7 @@ $route['api/auth/login'] = 'api_auth/login';
 $route['api/auth/logout'] = 'api_auth/logout';
 $route['api/auth/me'] = 'api_auth/me';
 $route['api/sports/status'] = 'api_sports/status';
+$route['api/sports/performance'] = 'api_sports/performance';
 $route['api/sports/tickets/(:any)/decide'] = 'api_sports/decide_ticket/$1';
 $route['api/sports/tickets/(:any)/settle'] = 'api_sports/settle_ticket/$1';
 $route['api/sports/results/verify'] = 'api_sports/verify_result';
