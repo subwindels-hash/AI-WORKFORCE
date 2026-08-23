@@ -13,6 +13,7 @@ function fx_sports_sync(): array {
         public function saveMatch(int $providerId, array $match): array { $id = count($this->matches) + 1; $this->matches[] = $match; return array_merge($match, ['id' => $id, 'created_at' => 'x', 'updated_at' => 'x']); }
         public function findMatch(int $providerId, string $externalId): ?array { return ['id' => 1, 'external_id' => $externalId]; }
         public function saveOdds(int $matchId, int $providerId, array $odds): void {}
+        public function saveResult(int $matchId, int $providerId, array $result): void {}
         public function saveQuality(int $matchId, array $assessment): void { $this->quality[] = $assessment; }
         public function startSync(array $run): ?array { if (isset($this->keys[$run['executionKey']])) return null; $this->keys[$run['executionKey']] = true; return $run; }
         public function finishSync(string $id, array $result): void { $this->finished[] = $result; }

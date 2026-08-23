@@ -11,6 +11,14 @@ class SportsSyncService
 {
     public function __construct(private SportsRepository $repo, private AuditRepository $audit, private DataQualityEngine $quality) {}
 
+    public function syncResults(SportsDataProvider $provider, string $fixtureExternalId, string $executionKey): array
+    {
+        $source=$this->repo->ensureProvider($provider->id(),$provider->id()); $run=['id'=>Backtester::uuid(),'providerId'=>(int)$source['id'],'jobType'=>'RESULTS','executionKey'=>$executionKey];
+        if($this->repo->startSync($run)===null) return ['status'=>'DUPLICATE_SKIPPED','executionKey'=>$executionKey]; $processed=0;$errors=[];
+        try { $health=$provider->health(); if(($health['status']??'')!=='ONLINE') throw new \RuntimeException('provider is not ONLINE'); $match=$this->repo->findMatch((int)$source['id'],$fixtureExternalId); if(!$match) throw new \RuntimeException('fixture is not synchronized for this provider'); foreach($provider->results($fixtureExternalId) as $raw){$processed++; try{$this->repo->saveResult((int)$match['id'],(int)$source['id'],SportsResultNormalizer::normalize($raw,$provider->id()));}catch(\Throwable $e){$errors[]=$e->getMessage();}} $result=['status'=>'COMPLETED','processed'=>$processed,'created'=>$processed-count($errors),'updated'=>0,'errors'=>$errors]; } catch(\Throwable $e){$result=['status'=>'FAILED','processed'=>$processed,'created'=>0,'updated'=>0,'errors'=>[$e->getMessage()]];}
+        $this->repo->finishSync($run['id'],$result); $this->audit->emit($result['status']==='COMPLETED'?'SPORTS_RESULT_SYNC_COMPLETED':'SPORTS_RESULT_SYNC_FAILED','Sports result sync '.strtolower($result['status']),['provider'=>$provider->id(),'result'=>$result]); return array_merge(['runId'=>$run['id']],$result);
+    }
+
     public function syncOdds(SportsDataProvider $provider, string $fixtureExternalId, string $executionKey): array
     {
         $source = $this->repo->ensureProvider($provider->id(), $provider->id());
