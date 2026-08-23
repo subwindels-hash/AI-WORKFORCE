@@ -5,6 +5,7 @@ import { LeadOperationalStore, type RedisClient } from "./redis.js";
 import { leadRoutes } from "./routes/leads.js";
 import { discoveryRoutes } from "./routes/discovery.js";
 import { pipelineRoutes } from "./routes/pipeline.js";
+import { intelligenceRoutes } from "./routes/intelligence.js";
 
 export async function buildApp(options: { db: Database; jwtSecret: string; redis: RedisClient }) {
   const app = Fastify({ logger: true });
@@ -22,6 +23,7 @@ export async function buildApp(options: { db: Database; jwtSecret: string; redis
   await app.register(leadRoutes, { prefix: "/api/v1/lead-discovery" });
   await app.register(discoveryRoutes, { prefix: "/api/v1/lead-discovery" });
   await app.register(pipelineRoutes, { prefix: "/api/v1/lead-discovery" });
+  await app.register(intelligenceRoutes, { prefix: "/api/v1/lead-discovery" });
   return app;
 }
 declare module "fastify" { interface FastifyInstance { operational: LeadOperationalStore } }
