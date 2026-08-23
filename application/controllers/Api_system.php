@@ -34,7 +34,7 @@ class Api_system extends Api_controller
         ['name' => 'PAPER_TRADING mode', 'category' => 'mode', 'status' => 'TESTED', 'detail' => 'Phase 3 — simulated execution with real prices when reachable'],
         ['name' => 'HUMAN_APPROVAL / SEMI_AUTONOMOUS / FULLY_AUTOMATED', 'category' => 'mode', 'status' => 'PLANNED', 'detail' => 'Phase 5, gated on brokers + execution supervisor'],
         // brokers
-        ['name' => 'MT5 bridge connector discovery', 'category' => 'broker', 'status' => 'IMPLEMENTED', 'detail' => 'Phase 4 foundation: environment-only bridge health discovery; no credentials exposed and no order submission capability'],
+        ['name' => 'MT5 bridge connector (health + read-only account/quotes)', 'category' => 'broker', 'status' => 'IMPLEMENTED', 'detail' => 'Phase 4: environment-only authenticated bridge reads; no credentials exposed and no order submission capability'],
         ['name' => 'MT4 / crypto exchange / stock broker connectors', 'category' => 'broker', 'status' => 'PLANNED', 'detail' => 'Future Phase 4 integrations; none implemented'],
         ['name' => 'Broker order routing', 'category' => 'broker', 'status' => 'PLANNED', 'detail' => 'Phase 5 only, behind the execution supervisor and explicit approval controls'],
     ];
@@ -65,6 +65,33 @@ class Api_system extends Api_controller
     public function brokers()
     {
         $this->json(['brokers' => $this->platform->brokers->allStatus()]);
+    }
+
+    /** Read-only MT5 account view. It can never submit or modify an order. */
+    public function mt5_account()
+    {
+        $connector = $this->platform->brokers->get('mt5-bridge');
+        if (!$connector instanceof \Aegis\Brokers\Mt5BridgeConnector) return $this->jsonError('MT5 connector unavailable', 503);
+        try {
+            $this->json(['account' => $connector->account()]);
+        } catch (\Throwable $e) {
+            $this->jsonError($e->getMessage(), 503);
+        }
+    }
+
+    /** Read-only MT5 quote view. */
+    public function mt5_quote()
+    {
+        $symbol = (string) $this->input->get('symbol', true);
+        $connector = $this->platform->brokers->get('mt5-bridge');
+        if (!$connector instanceof \Aegis\Brokers\Mt5BridgeConnector) return $this->jsonError('MT5 connector unavailable', 503);
+        try {
+            $this->json(['quote' => $connector->quote($symbol)]);
+        } catch (\InvalidArgumentException $e) {
+            $this->jsonError($e->getMessage());
+        } catch (\Throwable $e) {
+            $this->jsonError($e->getMessage(), 503);
+        }
     }
 
     public function events(int $limit = 100)

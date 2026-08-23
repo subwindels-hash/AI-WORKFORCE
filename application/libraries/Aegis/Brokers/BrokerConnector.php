@@ -24,6 +24,11 @@ class BrokerManager
         $this->connectors[$connector->id()] = $connector;
     }
 
+    public function get(string $id): ?BrokerConnector
+    {
+        return $this->connectors[$id] ?? null;
+    }
+
     public function allStatus(): array
     {
         $out = [];

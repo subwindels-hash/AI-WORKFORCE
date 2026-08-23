@@ -176,11 +176,12 @@ curl -X POST :8080/api/accounts/1/tick
 
 ## Roadmap
 
-- **Phase 4** — MT5 bridge discovery/health is implemented: configure only
-  `AEGIS_MT5_BRIDGE_URL` and the explicit `AEGIS_MT5_BRIDGE_ENABLED=1` switch.
-  It has no order-submission capability. Next: authenticated account and
-  market-data reads through a separately deployed Python/MT5 bridge, then
-  crypto exchanges one at a time.
+- **Phase 4** — MT5 bridge discovery plus read-only account and quote reads
+  are implemented through a separately deployed Python/MT5 bridge. Configure
+  `AEGIS_MT5_BRIDGE_URL`, `AEGIS_MT5_BRIDGE_TOKEN`, and the explicit
+  `AEGIS_MT5_BRIDGE_ENABLED=1` switch. It has no order-submission capability.
+  Next: normalize broker account/quote contracts, then add crypto exchanges
+  one at a time.
 - **Phase 5** — Trade Execution Supervisor (15-step pipeline), human
   approval, semi/fully-automated modes, and only then broker order routing.
 - **Phase 6** — fundamentals, sentiment, on-chain, options intelligence.
