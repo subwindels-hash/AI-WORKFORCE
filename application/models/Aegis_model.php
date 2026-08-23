@@ -18,6 +18,7 @@ class Aegis_model extends CI_Model
     public object $backtests;
     public object $journal;
     public object $audit;
+    public object $identity;
     public object $analysis;
     public object $state;
     public object $paper;
@@ -142,6 +143,22 @@ class Aegis_model extends CI_Model
                     $row['detail'] = json_decode($row['detail'] ?: 'null', true);
                 }
                 return $rows;
+            }
+        };
+
+        $this->identity = new class($db) implements Aegis\Persistence\IdentityRepository {
+            public function __construct(private object $db) {}
+            public function findUserByEmail(string $email): ?array { return $this->db->get_where('users', ['email' => $email], 1)->row_array() ?: null; }
+            public function findUserById(int $id): ?array { return $this->db->get_where('users', ['id' => $id], 1)->row_array() ?: null; }
+            public function createUser(array $user): array {
+                $this->db->insert('users', $user); $user['id'] = (int) $this->db->insert_id(); return $user;
+            }
+            public function permissionsForUser(int $userId): array {
+                $rows = $this->db->select('p.code')->from('permissions p')->join('role_permissions rp', 'rp.permission_id = p.id')->join('user_roles ur', 'ur.role_id = rp.role_id')->where('ur.user_id', $userId)->get()->result_array();
+                return array_values(array_unique(array_map(fn($r) => $r['code'], $rows)));
+            }
+            public function recordAuthEvent(int $userId, string $type, array $detail = []): void {
+                $this->db->insert('auth_events', ['user_id' => $userId, 'type' => $type, 'detail' => json_encode($detail), 'at' => gmdate('c')]);
             }
         };
 

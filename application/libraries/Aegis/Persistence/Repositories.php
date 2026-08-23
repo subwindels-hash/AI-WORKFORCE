@@ -58,6 +58,17 @@ interface PlatformStateRepository
     public function save(array $state): void;
 }
 
+/** Identity and access-control persistence. Password hashes only; never raw secrets. */
+interface IdentityRepository
+{
+    public function findUserByEmail(string $email): ?array;
+    public function findUserById(int $id): ?array;
+    public function createUser(array $user): array;
+    /** @return array<int,string> */
+    public function permissionsForUser(int $userId): array;
+    public function recordAuthEvent(int $userId, string $type, array $detail = []): void;
+}
+
 interface PaperRepository
 {
     /** Saves and RETURNS the record with its generated id. */

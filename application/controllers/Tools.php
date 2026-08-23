@@ -30,13 +30,17 @@ class Tools extends MY_Controller
             fwrite(STDERR, "schema not found: {$schemaFile}\n");
             exit(1);
         }
-        $sql = file_get_contents($schemaFile);
-        $statements = array_filter(array_map('trim', preg_split('/;\s*[\r\n]+/', $sql)));
-        foreach ($statements as $stmt) {
-            if ($stmt === '' || str_starts_with($stmt, '--')) continue;
-            $this->db->query($stmt);
+        $schemaFiles = [$schemaFile, APPPATH . 'database/sports_identity.' . ($driver === 'sqlite' ? 'sqlite' : 'mysql') . '.sql'];
+        foreach ($schemaFiles as $file) {
+            if (!is_file($file)) continue;
+            $sql = file_get_contents($file);
+            $statements = array_filter(array_map('trim', preg_split('/;\s*[\r\n]+/', $sql)));
+            foreach ($statements as $stmt) {
+                if ($stmt === '' || str_starts_with($stmt, '--')) continue;
+                $this->db->query($stmt);
+            }
         }
-        echo 'OK — schema installed on driver "' . $driver . "\".\n";
+        echo 'OK — schemas installed on driver "' . $driver . "\".\n";
     }
 
     public function tests()

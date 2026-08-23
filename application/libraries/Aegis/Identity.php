@@ -1,0 +1,26 @@
+<?php
+namespace Aegis;
+
+use Aegis\Persistence\IdentityRepository;
+
+/** Password verification and permission checks; HTTP/session handling stays in CI middleware. */
+class Identity
+{
+    public function __construct(private IdentityRepository $users) {}
+    public function authenticate(string $email, string $password): ?array
+    {
+        $user = $this->users->findUserByEmail(strtolower(trim($email)));
+        if (!$user || empty($user['active']) || !password_verify($password, $user['password_hash'])) {
+            if ($user) $this->users->recordAuthEvent((int) $user['id'], 'LOGIN_FAILED');
+            return null;
+        }
+        $user['permissions'] = $this->users->permissionsForUser((int) $user['id']);
+        $this->users->recordAuthEvent((int) $user['id'], 'LOGIN_SUCCEEDED');
+        unset($user['password_hash']);
+        return $user;
+    }
+    public function can(array $user, string $permission): bool
+    {
+        return in_array($permission, $user['permissions'] ?? [], true) || in_array('system.super_admin', $user['permissions'] ?? [], true);
+    }
+}

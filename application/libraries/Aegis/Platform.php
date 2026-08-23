@@ -29,6 +29,7 @@ class Platform
     public readonly BrokerManager $brokers;
     public readonly ExecutionSupervisor $execution;
     public readonly \Aegis\Sports\SportsIntelligence $sports;
+    public readonly Identity $identity;
     public readonly RiskEngine $risk;
     public readonly StrategyRegistry $strategies;
     public readonly TradingIntelligenceEngine $engine;
@@ -54,6 +55,7 @@ class Platform
         $this->risk = new RiskEngine();
         $this->execution = new ExecutionSupervisor($model->audit, $model->state);
         $this->sports = new \Aegis\Sports\SportsIntelligence();
+        $this->identity = new Identity($model->identity);
         $this->strategies = new StrategyRegistry($model->strategies, $model->audit);
         $this->strategies->seedBuiltins();
 
