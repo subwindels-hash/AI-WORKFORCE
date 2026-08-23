@@ -1,4 +1,7 @@
-import type { AnalysisRun, ConsensusSummary, IntegrationStatusEntry, RiskLimitsView, SystemStatus, AuditEvent } from './types';
+import type {
+  AnalysisRun, ConsensusSummary, IntegrationStatusEntry, RiskLimitsView, SystemStatus, AuditEvent,
+  StrategyRecord, BacktestResult, BacktestSummary, JournalEntryView, AnalyticsSummaryView, CalibrationView,
+} from './types';
 
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) } });
@@ -30,6 +33,23 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ active, reason }),
     }),
+  // ------------------------------------------------------------- phase 2 --
+  strategies: () =>
+    json<{ strategies: { strategyId: string; latest: StrategyRecord; versions: { version: string; lifecycle: string; updatedAt: string }[] }[] }>('/api/strategies'),
+  strategy: (id: string) => json<StrategyRecord>(`/api/strategies/${id}`),
+  strategyStatus: (id: string, to: string, reason?: string) =>
+    json<{ ok: boolean; strategy?: StrategyRecord; warnings?: string[] }>(`/api/strategies/${id}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ to, reason }),
+    }),
+  runBacktest: (payload: Record<string, unknown>) =>
+    json<BacktestResult>('/api/backtesting/run', { method: 'POST', body: JSON.stringify(payload) }),
+  backtestResults: (strategyId?: string) =>
+    json<{ results: BacktestSummary[] }>(`/api/backtesting/results${strategyId ? `?strategyId=${strategyId}` : ''}`),
+  backtestDetail: (id: string) => json<BacktestResult>(`/api/backtesting/results/${id}`),
+  journal: (params?: string) => json<{ entries: JournalEntryView[] }>(`/api/journal${params ? `?${params}` : ''}`),
+  analytics: (groupBy: string) => json<AnalyticsSummaryView>(`/api/analytics/summary?groupBy=${groupBy}`),
+  calibration: () => json<CalibrationView>('/api/analytics/confidence-calibration'),
 };
 
 export function formatAge(ms: number): string {

@@ -180,3 +180,106 @@ export interface RiskLimitsView {
   limits: Record<string, number | boolean>;
   portfolio: { equity: number; cash: number; openPositions: number; dailyPnl: number; weeklyPnl: number; peakEquity: number };
 }
+
+// ---------------------------------------------------------------- phase 2 --
+
+export type StrategyLifecycle =
+  | 'DRAFT' | 'BACKTESTED' | 'VALIDATED' | 'RISK_REVIEWED'
+  | 'PAPER_TRADING' | 'APPROVED' | 'RETIRED';
+
+export interface StrategyRecord {
+  strategyId: string;
+  version: string;
+  name: string;
+  description: string;
+  marketClasses: string[];
+  timeframes: string[];
+  params: Record<string, number | boolean | string>;
+  source: string;
+  lifecycle: StrategyLifecycle;
+  createdAt: string;
+  updatedAt: string;
+  lifecycleHistory: { from: string | null; to: string; at: string; reason: string }[];
+  supportsShorts?: boolean;
+  nextStage?: string | null;
+  blockedStages?: { PAPER_TRADING: string; APPROVED: string };
+}
+
+export interface BacktestMetricsView {
+  totalReturnPct: number;
+  finalEquity: number;
+  trades: number;
+  winRate: number | null;
+  lossRate: number | null;
+  profitFactor: number | null;
+  expectancyR: number | null;
+  expectancyPnl: number | null;
+  avgWin: number | null;
+  avgLoss: number | null;
+  avgTrade: number | null;
+  sharpe: number | null;
+  sortino: number | null;
+  maxDrawdownPct: number;
+  maxDrawdownAbs: number;
+  longestWinStreak: number;
+  longestLossStreak: number;
+  exposurePct: number;
+  totalFees: number;
+  totalSlippage: number;
+}
+
+export interface BacktestResult {
+  id: string;
+  createdAt: string;
+  request: {
+    strategyId: string; strategyVersion: string; symbol: string; marketClass: string; timeframe: string;
+    initialEquity: number; riskPct: number; feeBps: number; spreadBps: number; slippageBps: number; allowShorts: boolean;
+    from?: string; to?: string;
+  };
+  dataProvenance: { source: string; synthetic: boolean; candles: number; from: string; to: string };
+  metrics: BacktestMetricsView;
+  equityCurve: { time: string; equity: number; drawdownPct: number }[];
+  trades: {
+    direction: string; entryTime: string; exitTime: string; entryPrice: number; exitPrice: number;
+    units: number; rMultiple: number; netPnl: number; exitReason: string; barsHeld: number;
+    signalReason: string; confidence: number;
+    fees: { totalCost: number };
+  }[];
+  warnings: string[];
+}
+
+export interface BacktestSummary {
+  id: string; createdAt: string; strategyId: string; strategyVersion: string; symbol: string;
+  timeframe: string; synthetic: boolean; candles: number; metrics: BacktestMetricsView; warnings: string[];
+}
+
+export interface JournalEntryView {
+  id: string; source: string; symbol: string; market: string;
+  strategy: string | null; strategyVersion: string | null;
+  direction: string;
+  entry: { time: string; price: number };
+  exit: { time: string; price: number } | null;
+  positionSize: number; stopLoss: number | null; takeProfit: number | null;
+  fees: number; slippage: number;
+  pnl: number | null; pnlPct: number | null; rMultiple: number | null;
+  reasonForTrade: string; aiConfidence: number | null; confidenceSource: string | null;
+  executionTime: string; backtestId?: string; notes?: string;
+}
+
+export interface BucketMetricsView {
+  count: number; winRate: number | null; profitFactor: number | null; expectancyPnl: number | null;
+  avgWin: number | null; avgLoss: number | null; totalPnl: number; avgRMultiple: number | null;
+}
+
+export interface AnalyticsSummaryView {
+  groupBy: string;
+  groups: { key: string; metrics: BucketMetricsView }[];
+  overall: BucketMetricsView & { closedTrades: number; openOrPending: number; maxDrawdownPct: number };
+  note?: string;
+}
+
+export interface CalibrationView {
+  buckets: { key: string; count: number; winRate: number | null; expectancyR: number | null }[];
+  verdict: string;
+  sufficientData: boolean;
+}

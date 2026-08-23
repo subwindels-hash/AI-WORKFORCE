@@ -7,10 +7,12 @@ import type { AnalysisRun } from '../src/types';
  * data -> agents -> consensus -> regime -> scenarios -> setup -> risk decision.
  */
 describe('TradingIntelligenceEngine — full pipeline', () => {
-  const { engine, eventBus, riskEngine } = createPlatform({ disableRealProviders: true });
+  let engine: ReturnType<typeof createPlatform>['engine'];
+  let eventBus: ReturnType<typeof createPlatform>['eventBus'];
+  let riskEngine: ReturnType<typeof createPlatform>['riskEngine'];
 
-  beforeAll(() => {
-    // deterministic tests: freeze the kill switch off/on as needed per test
+  beforeAll(async () => {
+    ({ engine, eventBus, riskEngine } = await createPlatform({ disableRealProviders: true }));
   });
 
   it('runs a complete crypto analysis with honest synthetic provenance', async () => {
@@ -128,7 +130,7 @@ describe('TradingIntelligenceEngine — full pipeline', () => {
 
 describe('AnalysisRun shape (spec contract)', () => {
   it('matches the documented output contract', async () => {
-    const { engine } = createPlatform({ disableRealProviders: true });
+    const { engine } = await createPlatform({ disableRealProviders: true });
     const run: AnalysisRun = await engine.run({ symbol: 'BTCUSDT', marketClass: 'crypto', timeframe: '1h' });
     expect(Object.keys(run)).toEqual(
       expect.arrayContaining([

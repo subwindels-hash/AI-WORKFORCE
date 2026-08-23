@@ -10,8 +10,7 @@ import type { FastifyInstance } from 'fastify';
 let app: FastifyInstance;
 
 beforeAll(async () => {
-  app = buildApp({ auditFilePath: undefined, disableRealProviders: true });
-  await app.ready();
+  app = await buildApp({ auditFilePath: undefined, disableRealProviders: true });
 });
 
 afterAll(async () => {
@@ -25,7 +24,7 @@ describe('system endpoints', () => {
     const body = res.json();
     expect(body.tradingMode).toBe('ANALYSIS_ONLY');
     expect(body.killSwitch.active).toBe(true);
-    expect(body.phase).toBe(1);
+    expect(body.phase).toBe(2);
     expect(Array.isArray(body.providers)).toBe(true);
   });
 

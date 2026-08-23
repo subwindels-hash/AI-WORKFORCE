@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CandleChart from '@/components/ChartCard';
 import {
-  AgentGrid, BiasPanel, EventLog, HeaderBar, HistoryList, ProvenanceBanner,
+  AgentGrid, BiasPanel, EventLog, HeaderBar, HistoryList, Nav, ProvenanceBanner,
   RiskPanel, ScenarioPanel, SetupPanel, StatusMatrix, WatchStrip,
 } from '@/components/panels';
 import { api } from '@/lib/api';
@@ -131,6 +131,7 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen">
       <HeaderBar status={status} onKillSwitch={onKillSwitch} />
+      <Nav />
 
       <WatchStrip items={watch} selected={symbol} onSelect={setSymbol} loading={watchLoading} />
 
@@ -234,8 +235,8 @@ export default function Dashboard() {
         </div>
 
         <footer className="pt-2 text-center text-[10px] leading-relaxed text-slate-600">
-          AEGIS Phase 1 · ANALYSIS_ONLY — this platform generates analysis and structured trade proposals with mandatory
-          risk review. It places no orders. Synthetic demo data is always labeled. Nothing here is investment advice.
+          AEGIS Phase 2 · ANALYSIS_ONLY — analysis, structured proposals, strategy backtesting and journaling with
+          mandatory risk review. No orders are placed. Synthetic demo data is always labeled. Nothing here is investment advice.
         </footer>
       </main>
     </div>

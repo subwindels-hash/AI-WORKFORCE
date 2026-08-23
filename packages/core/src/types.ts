@@ -483,7 +483,7 @@ export interface PlatformState {
     activatedAt: string | null;
     reason: string | null;
   };
-  phase: 1;
+  phase: 2;
   buildInfo: { version: string; phaseName: string };
 }
 
@@ -499,7 +499,12 @@ export type PlatformEvent =
   | 'TRADING_MODE_CHANGED'
   | 'RISK_LIMITS_UPDATED'
   | 'PROVIDER_FALLBACK'
-  | 'SYSTEM_STARTED';
+  | 'SYSTEM_STARTED'
+  | 'STRATEGY_REGISTERED'
+  | 'STRATEGY_STATUS_CHANGED'
+  | 'BACKTEST_STARTED'
+  | 'BACKTEST_COMPLETED'
+  | 'JOURNAL_ENTRY_RECORDED';
 
 export interface AuditEvent {
   id: string;

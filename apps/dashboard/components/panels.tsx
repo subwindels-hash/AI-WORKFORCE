@@ -30,6 +30,8 @@ export function statusColor(status: string): string {
   }
 }
 
+export { default as Nav } from './nav';
+
 // ----------------------------------------------------------------- header --
 
 export function HeaderBar({ status, onKillSwitch }: { status: SystemStatus | null; onKillSwitch: (active: boolean) => void }) {
