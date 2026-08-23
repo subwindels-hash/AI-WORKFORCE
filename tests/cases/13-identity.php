@@ -17,7 +17,7 @@ function fx_identity(): array {
 }
 test('identity authenticates a password hash and removes secret hash from response', function () {
     [$identity, $repo] = fx_identity(); $user = $identity->authenticate('ADMIN@example.test', 'safe-password');
-    assert_equals('LOGIN_SUCCEEDED', $repo->events[0]); assert_false(isset($user['password_hash'])); assert_true($identity->can($user, 'sports.manage'));
+    assert_equals('LOGIN_SUCCEEDED', $repo->events[0]); assert_false(isset($user['password_hash'])); assert_true($identity->can($user, 'sports.manage')); assert_true($identity->can($user, 'system.authenticated'));
 });
 test('identity rejects invalid password and records failure', function () {
     [$identity, $repo] = fx_identity(); assert_equals(null, $identity->authenticate('admin@example.test', 'wrong'));

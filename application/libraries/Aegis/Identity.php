@@ -21,6 +21,7 @@ class Identity
     }
     public function can(array $user, string $permission): bool
     {
+        if ($permission === 'system.authenticated') return !empty($user['id']);
         return in_array($permission, $user['permissions'] ?? [], true) || in_array('system.super_admin', $user['permissions'] ?? [], true);
     }
 }

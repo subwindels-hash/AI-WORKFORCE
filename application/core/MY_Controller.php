@@ -19,6 +19,22 @@ class MY_Controller extends CI_Controller
         $this->platform = new \Aegis\Platform($this->Aegis_model, $disableReal);
             }
 
+    /** Require a signed-in user plus an explicit permission for privileged APIs. */
+    protected function requirePermission(string $permission, bool $csrf = true): ?array
+    {
+        $user = $this->session->userdata('identity');
+        if (!is_array($user) || !$this->platform->identity->can($user, $permission)) {
+            $this->jsonError('forbidden', 403); return null;
+        }
+        if ($csrf && !in_array($this->input->method(true), ['GET', 'HEAD'], true)) {
+            $token = $this->input->get_request_header('X-CSRF-Token');
+            if (!is_string($token) || !hash_equals((string) $this->session->userdata('csrf_token'), $token)) {
+                $this->jsonError('invalid CSRF token', 403); return null;
+            }
+        }
+        return $user;
+    }
+
     /** JSON response helper. */
     protected function json($data, int $status = 200): void
     {
