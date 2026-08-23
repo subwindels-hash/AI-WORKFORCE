@@ -9,6 +9,17 @@ class Api_sports extends Api_controller
         $this->json($this->platform->sports->status());
     }
 
+    /** Applies a verified provider result. Requires sports.settle; never accepts an unverified result. */
+    public function settle_ticket(string $id)
+    {
+        if (!$this->requirePermission('sports.settle')) return;
+        $body = $this->jsonBody();
+        if (!isset($body['matchId']) || !is_numeric($body['matchId']) || !isset($body['result']) || !is_array($body['result'])) return $this->jsonError('body must include matchId and result');
+        try { $this->json(['settlement' => $this->platform->sports->settlement->applyVerifiedResult($id, (int)$body['matchId'], $body['result'])]); }
+        catch (\InvalidArgumentException $e) { $this->jsonError($e->getMessage(), 404); }
+        catch (\Throwable $e) { $this->jsonError($e->getMessage(), 409); }
+    }
+
     /** Human decision only. Requires the native session, CSRF token and sports.approve. */
     public function decide_ticket(string $id)
     {

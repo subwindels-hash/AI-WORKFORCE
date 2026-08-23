@@ -33,6 +33,7 @@ $route['api/auth/logout'] = 'api_auth/logout';
 $route['api/auth/me'] = 'api_auth/me';
 $route['api/sports/status'] = 'api_sports/status';
 $route['api/sports/tickets/(:any)/decide'] = 'api_sports/decide_ticket/$1';
+$route['api/sports/tickets/(:any)/settle'] = 'api_sports/settle_ticket/$1';
 $route['api/system/features'] = 'api_system/features';
 $route['api/brokers'] = 'api_system/brokers';
 $route['api/brokers/mt5/account'] = 'api_system/mt5_account';
