@@ -18,6 +18,7 @@ class Api_system extends Api_controller
         ['name' => 'Technical Analysis Agent', 'category' => 'agent', 'status' => 'TESTED', 'detail' => 'Full indicator suite ported with fixture tests'],
         ['name' => 'Market Structure Agent', 'category' => 'agent', 'status' => 'TESTED', 'detail' => 'Swings, close-confirmed BOS/CHoCH, zones, order blocks, FVGs'],
         ['name' => 'Forex / Crypto / Sentiment agents', 'category' => 'agent', 'status' => 'TESTED', 'detail' => 'Honest unavailability for macro/on-chain/sentiment data'],
+        ['name' => 'Fundamentals Intelligence Agent', 'category' => 'agent', 'status' => 'IMPLEMENTED', 'detail' => 'Phase 6 boundary: explicit abstention until an attributable licensed fundamentals feed is configured'],
         ['name' => 'Trading Intelligence consensus', 'category' => 'agent', 'status' => 'TESTED', 'detail' => 'Confluence, confidence, conflicts, NO_TRADE gates'],
         // engines
         ['name' => 'Trading Intelligence Engine + Risk Engine', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'Full pipeline with independent risk veto and kill-switch participation'],

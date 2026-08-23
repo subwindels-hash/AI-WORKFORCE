@@ -185,7 +185,10 @@ curl -X POST :8080/api/accounts/1/tick
   one at a time.
 - **Phase 5** — Trade Execution Supervisor (15-step pipeline), human
   approval, semi/fully-automated modes, and only then broker order routing.
-- **Phase 6** — fundamentals, sentiment, on-chain, options intelligence.
+- **Phase 6** — fundamentals agent boundary is implemented and explicitly
+  abstains until a licensed, attributable feed is configured. Next: add
+  licensed fundamentals, sentiment, on-chain, and options providers one at a
+  time with provenance and freshness validation.
 
 ## Disclaimer
 
