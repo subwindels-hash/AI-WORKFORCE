@@ -19,7 +19,7 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 
 ---
 
-## Current state: Phases 1–3 complete
+## Current state: Phases 1–3 complete; Phase 4 foundation underway
 
 | Area | Status |
 |---|---|
@@ -34,7 +34,8 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **Paper Trading Engine (Phase 3): accounts, orders, fills, positions, ticks, strategy deployments** | **TESTED** |
 | Trade journal + analytics + confidence calibration | **TESTED** |
 | ANALYSIS_ONLY + PAPER_TRADING modes, kill switch, audit trail | **TESTED** |
-| Brokers (MT5 first), execution supervisor, live trading | **PLANNED** (Phases 4–5) |
+| MT5 bridge discovery / health status (environment-configured, no credentials exposed) | **IMPLEMENTED** (Phase 4 foundation) |
+| Broker order routing, execution supervisor, live trading | **PLANNED** (Phases 4–5) |
 
 **57 automated tests** run through the real CodeIgniter stack
 (`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
@@ -175,10 +176,13 @@ curl -X POST :8080/api/accounts/1/tick
 
 ## Roadmap
 
-- **Phase 4** — broker connectors, **MT5 first** (Python bridge), then crypto
-  exchanges one at a time; MySQL persistent store is already in place.
+- **Phase 4** — MT5 bridge discovery/health is implemented: configure only
+  `AEGIS_MT5_BRIDGE_URL` and the explicit `AEGIS_MT5_BRIDGE_ENABLED=1` switch.
+  It has no order-submission capability. Next: authenticated account and
+  market-data reads through a separately deployed Python/MT5 bridge, then
+  crypto exchanges one at a time.
 - **Phase 5** — Trade Execution Supervisor (15-step pipeline), human
-  approval, semi/fully-automated modes.
+  approval, semi/fully-automated modes, and only then broker order routing.
 - **Phase 6** — fundamentals, sentiment, on-chain, options intelligence.
 
 ## Disclaimer

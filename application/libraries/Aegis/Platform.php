@@ -2,6 +2,8 @@
 namespace Aegis;
 
 use Aegis\Backtest\Backtester;
+use Aegis\Brokers\BrokerManager;
+use Aegis\Brokers\Mt5BridgeConnector;
 use Aegis\Paper\PaperTradingEngine;
 use Aegis\Persistence\AuditRepository;
 use Aegis\Persistence\AnalysisRepository;
@@ -24,6 +26,7 @@ use Aegis\Strategies\TradingStrategy;
 class Platform
 {
     public readonly ProviderManager $providers;
+    public readonly BrokerManager $brokers;
     public readonly RiskEngine $risk;
     public readonly StrategyRegistry $strategies;
     public readonly TradingIntelligenceEngine $engine;
@@ -40,6 +43,8 @@ class Platform
             $this->providers->register(new FrankfurterProvider());
         }
         $this->providers->register(new SyntheticProvider()); // ALWAYS last
+        $this->brokers = new BrokerManager();
+        $this->brokers->register(new Mt5BridgeConnector());
         $this->providers->setFallbackHandler(function (array $info) use ($model) {
             $model->audit->emit('PROVIDER_FALLBACK', "{$info['symbol']}: providers [" . implode(', ', $info['failed']) . "] failed — falling back to {$info['used']}", $info);
         });

@@ -34,7 +34,9 @@ class Api_system extends Api_controller
         ['name' => 'PAPER_TRADING mode', 'category' => 'mode', 'status' => 'TESTED', 'detail' => 'Phase 3 — simulated execution with real prices when reachable'],
         ['name' => 'HUMAN_APPROVAL / SEMI_AUTONOMOUS / FULLY_AUTOMATED', 'category' => 'mode', 'status' => 'PLANNED', 'detail' => 'Phase 5, gated on brokers + execution supervisor'],
         // brokers
-        ['name' => 'MT5 / MT4 / crypto exchange / stock broker connectors', 'category' => 'broker', 'status' => 'PLANNED', 'detail' => 'Phase 4 — MT5 first (Python bridge); none implemented, none claimed'],
+        ['name' => 'MT5 bridge connector discovery', 'category' => 'broker', 'status' => 'IMPLEMENTED', 'detail' => 'Phase 4 foundation: environment-only bridge health discovery; no credentials exposed and no order submission capability'],
+        ['name' => 'MT4 / crypto exchange / stock broker connectors', 'category' => 'broker', 'status' => 'PLANNED', 'detail' => 'Future Phase 4 integrations; none implemented'],
+        ['name' => 'Broker order routing', 'category' => 'broker', 'status' => 'PLANNED', 'detail' => 'Phase 5 only, behind the execution supervisor and explicit approval controls'],
     ];
 
     public function status()
@@ -50,12 +52,19 @@ class Api_system extends Api_controller
             'supportedTradingModes' => ['ANALYSIS_ONLY', 'PAPER_TRADING', 'HUMAN_APPROVAL', 'SEMI_AUTONOMOUS', 'FULLY_AUTOMATED'],
             'killSwitch' => $state['killSwitch'],
             'providers' => $this->platform->providers->getAllHealth(),
+            'brokers' => $this->platform->brokers->allStatus(),
         ]);
     }
 
     public function features()
     {
         $this->json(self::FEATURES);
+    }
+
+    /** Connector health only; this endpoint cannot trigger broker actions. */
+    public function brokers()
+    {
+        $this->json(['brokers' => $this->platform->brokers->allStatus()]);
     }
 
     public function events(int $limit = 100)
