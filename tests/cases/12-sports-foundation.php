@@ -12,6 +12,10 @@ test('sports fixture normalizer produces source-attributed canonical data', func
     assert_equals('SCHEDULED', $fixture['status']);
 });
 
+test('sports odds normalizer rejects non-positive-value odds', function () {
+    assert_throws(InvalidArgumentException::class, fn() => SportsDataNormalizer::odds(['market' => '1X2', 'selection' => 'Home', 'decimalOdds' => 1, 'observedAt' => '2026-09-01T12:00:00Z'], 'provider-a'));
+});
+
 test('sports quality engine rejects stale and incomplete ticket data', function () {
     $fixture = SportsDataNormalizer::fixture(['externalId' => 'f-1', 'homeTeam' => 'Home', 'awayTeam' => 'Away', 'competition' => 'League', 'kickoff' => '2026-09-01T12:00:00Z'], 'provider-a');
     $q = (new DataQualityEngine())->assess($fixture, ['oddsAvailable' => false, 'recentFormAvailable' => false, 'providerReliability' => .5, 'dataAgeSeconds' => 99999]);

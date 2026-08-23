@@ -65,6 +65,8 @@ interface SportsRepository
     public function saveHealth(int $providerId, array $health): void;
     /** Returns saved canonical match, inserting/updating by provider + external ID. */
     public function saveMatch(int $providerId, array $match): array;
+    public function findMatch(int $providerId, string $externalId): ?array;
+    public function saveOdds(int $matchId, int $providerId, array $odds): void;
     public function saveQuality(int $matchId, array $assessment): void;
     /** Starts once per idempotency key, or returns null if already processed. */
     public function startSync(array $run): ?array;

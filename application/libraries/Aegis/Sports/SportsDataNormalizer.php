@@ -22,6 +22,13 @@ class SportsDataNormalizer
             'fieldsPresent' => array_keys($raw),
         ];
     }
+    public static function odds(array $raw, string $provider): array
+    {
+        foreach (['market', 'selection', 'decimalOdds', 'observedAt'] as $field) if (!isset($raw[$field]) || $raw[$field] === '') throw new \InvalidArgumentException("odds missing {$field}");
+        if (!is_numeric($raw['decimalOdds']) || (float) $raw['decimalOdds'] <= 1.0 || !is_finite((float) $raw['decimalOdds'])) throw new \InvalidArgumentException('decimal odds are invalid');
+        return ['provider' => $provider, 'market' => trim((string) $raw['market']), 'selection' => trim((string) $raw['selection']), 'decimalOdds' => (float) $raw['decimalOdds'], 'observedAt' => self::timestamp($raw['observedAt'])];
+    }
+
     private static function timestamp($value): string
     {
         if ($value === null || $value === '') return gmdate('c');
