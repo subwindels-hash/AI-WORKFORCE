@@ -34,9 +34,12 @@ class Tools extends MY_Controller
         foreach ($schemaFiles as $file) {
             if (!is_file($file)) continue;
             $sql = file_get_contents($file);
+            // Strip whole-line SQL comments before splitting: otherwise a leading
+            // comment can cause the first CREATE TABLE statement to be skipped.
+            $sql = preg_replace('/^\s*--[^\r\n]*[\r\n]?/m', '', $sql);
             $statements = array_filter(array_map('trim', preg_split('/;\s*[\r\n]+/', $sql)));
             foreach ($statements as $stmt) {
-                if ($stmt === '' || str_starts_with($stmt, '--')) continue;
+                if ($stmt === '') continue;
                 $this->db->query($stmt);
             }
         }
