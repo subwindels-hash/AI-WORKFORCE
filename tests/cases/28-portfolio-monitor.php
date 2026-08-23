@@ -10,7 +10,7 @@ function prm_monitor_with(array $withBrokers = []): PortfolioRiskMonitor
     $p = platform();
     $brokers = new \Aegis\Brokers\BrokerManager();
     foreach ($withBrokers as $connector) $brokers->register($connector);
-    return new PortfolioRiskMonitor($p->model->paper, $p->paper, $p->risk, $brokers, $p->model->audit, $p->model->state);
+    return new PortfolioRiskMonitor($p->model->paper, $p->paper, $p->risk, $brokers, $p->model->audit, $p->model->state, $p->notifications);
 }
 
 function prm_enable_paper(): void
@@ -121,9 +121,13 @@ test('portfolio scan: BROKER_DISCONNECTED fires only on a READY→DOWN transitio
     // still down → no duplicate transition alert
     $third = $monitor->scan();
     assert_equals(0, count(array_filter($third['alerts'], fn($a) => $a['code'] === 'BROKER_DISCONNECTED')), 'no duplicate alerts');
-    $events = array_filter($p->model->audit->recent(300), fn($e) => $e['type'] === 'PORTFOLIO_RISK_ALERT');
-    $disconnected = array_filter($events, fn($e) => str_contains($e['summary'], 'BROKER_DISCONNECTED'));
-    assert_equals(1, count($disconnected), 'exactly one transition audit');
+    $disconnected = array_filter($p->model->audit->recent(300), fn($e) => $e['type'] === 'BROKER_DISCONNECTED');
+    assert_equals(1, count($disconnected), 'exactly one BROKER_DISCONNECTED audit event');
+    // recovery → BROKER_CONNECTED
+    $connector->ready = true;
+    $fourth = $monitor->scan();
+    $connected = array_filter($p->model->audit->recent(300), fn($e) => $e['type'] === 'BROKER_CONNECTED');
+    assert_equals(1, count($connected), 'exactly one BROKER_CONNECTED audit event');
 });
 
 test('strategy live approval requires paper evidence (≥10 trades, PF > 1, positive expectancy)', function () {

@@ -103,6 +103,12 @@ $route['api/execution/executions'] = 'api_system/execution_recent';
 $route['api/execution/proposals/(:any)/decide'] = 'api_system/execution_decide/$1';
 $route['api/execution/proposals/(:any)/route'] = 'api_system/execution_route/$1';
 $route['api/portfolio/risk-scan'] = 'api_system/portfolio_scan';
+$route['api/notifications'] = 'api_system/notifications';
+$route['api/notifications/read-all'] = 'api_system/notification_read_all';
+$route['api/notifications/(:any)/read'] = 'api_system/notification_read/$1';
+$route['notifications'] = 'notifications';
+$route['notifications/read-all'] = 'notifications/read_all';
+$route['notifications/(:any)/read'] = 'notifications/read/$1';
 $route['api/trading/synthetic-paper'] = 'api_system/synthetic_paper';
 
 // ---- Standalone Lead Discovery & Sales Intelligence ----------------------

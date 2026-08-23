@@ -70,7 +70,7 @@ function es_supervisor(FakeTradingConnector $connector, ?int $now = null): Execu
     $brokers = new BrokerManager();
     $brokers->register($connector);
     return new ExecutionSupervisor($p->model->audit, $p->model->state, $p->model->proposals, $p->risk, $brokers, $p->strategies,
-        fn(): int => $now ?? es_now());
+        fn(): int => $now ?? es_now(), $p->notifications);
 }
 
 function es_state(array $patch = []): array

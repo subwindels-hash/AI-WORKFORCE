@@ -18,7 +18,7 @@ class Tools extends MY_Controller
 
     public function index()
     {
-        echo "AEGIS tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n";
+        echo "AEGIS tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n  php index.php tools cron              — scheduled operations: portfolio risk scan, broker transitions, proposal expiry\n";
     }
 
     public function install()
@@ -70,16 +70,37 @@ class Tools extends MY_Controller
 
     private function seedAccessControls(): void
     {
+        require_once __DIR__ . '/../../tools/rbac.php';
         $identity = $this->Aegis_model->identity;
-        $roles = ['super_admin' => 'Super administrator', 'sports_admin' => 'Sports administrator', 'sports_viewer' => 'Sports viewer'];
-        $ids = []; foreach ($roles as $code => $name) $ids[$code] = $identity->ensureRole($code, $name);
-        $permissions = ['system.super_admin' => 'Full platform administration', 'sports.view' => 'View sports intelligence', 'sports.manage' => 'Manage sports providers and configuration', 'sports.approve' => 'Approve sports tickets', 'sports.settle' => 'Override sports settlements'];
-        foreach ($permissions as $code => $name) {
-            $pid = $identity->ensurePermission($code, $name);
-            $identity->grantRolePermission($ids['super_admin'], $pid);
-            if (in_array($code, ['sports.view'], true)) $identity->grantRolePermission($ids['sports_viewer'], $pid);
-            if (in_array($code, ['sports.view', 'sports.manage', 'sports.approve', 'sports.settle'], true)) $identity->grantRolePermission($ids['sports_admin'], $pid);
-        }
+        aegis_seed_rbac(
+            fn(string $code, string $name): int => $identity->ensureRole($code, $name),
+            fn(string $code, string $name): int => $identity->ensurePermission($code, $name),
+            fn(int $roleId, int $permissionId): bool => (bool) $identity->grantRolePermission($roleId, $permissionId)
+        );
+    }
+
+    /**
+     * Scheduled operations worker — safe to run every minute from cron:
+     *   * * * * * php /path/to/index.php tools cron >> /var/log/aegis-cron.log 2>&1
+     * Portfolio risk scan (with broker READY/DOWN transition detection and
+     * operator notifications) plus stale-proposal expiry (spec §5).
+     */
+    public function cron()
+    {
+        $scan = $this->platform->monitor->scan();
+        $expired = $this->platform->execution->expireStaleProposals();
+        $summary = [
+            'ranAt' => gmdate('c'),
+            'accountsScanned' => $scan['accountsScanned'] ?? 0,
+            'riskAlerts' => count($scan['alerts'] ?? []),
+            'proposalsExpired' => count($expired),
+            'expiredIds' => $expired,
+        ];
+        $this->Aegis_model->audit->emit('CRON_RUN', sprintf(
+            'Scheduled operations: %d account(s) scanned, %d risk alert(s) active, %d proposal(s) expired',
+            $summary['accountsScanned'], $summary['riskAlerts'], $summary['proposalsExpired']
+        ), $summary, 'system');
+        echo json_encode($summary, JSON_UNESCAPED_SLASHES), "\n";
     }
 
     public function tests()

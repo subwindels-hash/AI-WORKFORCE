@@ -28,6 +28,9 @@ class Api_system extends Api_controller
         ['name' => 'Trade Execution Supervisor (15-step pipeline)', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'Kill switch → mode → strategy → broker → session → freshness → duplicates → symbol permissions → margin → risk engine → automation limits → approval → route → confirm → audit → portfolio update; durable auditable proposals'],
         ['name' => 'Portfolio Risk Monitor', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'Continuous scan: HIGH_EXPOSURE, EXCESSIVE_LEVERAGE, CORRELATED_POSITIONS (static disclosed groups), MAX_DRAWDOWN_WARNING, DAILY_LOSS_WARNING, BROKER_DISCONNECTED — transition-audited'],
         ['name' => 'Strategy live-approval gate', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'APPROVED requires the PAPER_TRADING stage plus ≥10 closed paper trades with PF>1 and positive expectancy'],
+        ['name' => 'Operator RBAC on the trading API', 'category' => 'module', 'status' => 'TESTED', 'detail' => 'trading.view / trading.control / trading.execute permissions (seeded via tools/rbac.php) + CSRF on mutating endpoints; decisions record the deciding operator'],
+        ['name' => 'Operator notifications', 'category' => 'module', 'status' => 'TESTED', 'detail' => 'Risk transitions, approval requests, execution outcomes, broker disconnects, kill switch — unread-deduped, console + /api/notifications'],
+        ['name' => 'Scheduled operations worker (cron)', 'category' => 'module', 'status' => 'TESTED', 'detail' => 'php index.php tools cron — portfolio scan, broker READY/DOWN transitions, proposal expiry (spec §5), CRON_RUN audit summary'],
         ['name' => 'Kill switch', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'Ships ACTIVE in DB state; blocks all order placement (paper included)'],
         // platform
         ['name' => 'MySQL / MariaDB persistence', 'category' => 'module', 'status' => 'IMPLEMENTED', 'detail' => 'Canonical schema + mysqli config (application/database/schema.mysql.sql); the offline sandbox verifies the identical app+SQL through pdo_sqlite'],
@@ -51,7 +54,7 @@ class Api_system extends Api_controller
         $this->json([
             'platform' => 'AEGIS Trading Intelligence (CodeIgniter 3 / PHP MVC edition)',
             'phase' => 5,
-            'version' => '0.4.0',
+            'version' => '0.5.0',
             'stack' => 'CodeIgniter ' . CI_VERSION . ' / PHP ' . PHP_VERSION . ' / ' . $this->db->platform(),
             'tradingMode' => $state['tradingMode'],
             'implementedTradingModes' => ['ANALYSIS_ONLY', 'PAPER_TRADING', 'HUMAN_APPROVAL', 'SEMI_AUTONOMOUS', 'FULLY_AUTOMATED'],
@@ -112,6 +115,7 @@ class Api_system extends Api_controller
 
     public function update_risk_limits()
     {
+        if (!$this->requirePermission('trading.control')) return;
         $body = $this->jsonBody();
         $allowed = ['riskPerTradePct', 'maxRiskPerTradePct', 'minRiskReward', 'maxPositionNotionalUsd', 'maxLeverage',
             'maxOpenPositions', 'maxDailyLossPct', 'maxWeeklyLossPct', 'maxDrawdownPct', 'maxSymbolExposurePct',
@@ -123,6 +127,7 @@ class Api_system extends Api_controller
 
     public function kill_switch()
     {
+        if (!$this->requirePermission('trading.control')) return;
         $body = $this->jsonBody();
         if (!isset($body['active']) || !is_bool($body['active'])) {
             return $this->jsonError('body must be {active: boolean, reason?: string}');
@@ -133,6 +138,7 @@ class Api_system extends Api_controller
 
     public function synthetic_paper()
     {
+        if (!$this->requirePermission('trading.control')) return;
         $body = $this->jsonBody();
         if (!isset($body['allow']) || !is_bool($body['allow'])) {
             return $this->jsonError('body must be {allow: boolean}');
@@ -159,6 +165,7 @@ class Api_system extends Api_controller
     /** All proposals (optionally ?status=PENDING_APPROVAL), newest first. */
     public function execution_approvals()
     {
+        if (!$this->requirePermission('trading.view', false)) return;
         $status = $this->input->get('status', true) ?: null;
         $this->json(['proposals' => $this->platform->execution->proposals($status)]);
     }
@@ -166,22 +173,28 @@ class Api_system extends Api_controller
     /** POST /api/trading/propose — run the pipeline and persist the proposal. */
     public function execution_propose()
     {
-        try { $this->json(['proposal' => $this->platform->execution->propose($this->jsonBody(), 'user')]); }
+        $user = $this->requirePermission('trading.execute');
+        if (!$user) return;
+        try { $this->json(['proposal' => $this->platform->execution->propose($this->jsonBody(), $user['email'] ?? 'user')]); }
         catch (\Throwable $e) { $this->jsonError($e->getMessage(), 400); }
     }
 
     /** POST /api/trading/execute — SEMI_AUTONOMOUS / FULLY_AUTOMATED entry. */
     public function execution_execute()
     {
+        $user = $this->requirePermission('trading.execute');
+        if (!$user) return;
         try { $this->json($this->platform->execution->executeAutomated($this->jsonBody())); }
         catch (\Throwable $e) { $this->jsonError($e->getMessage(), 400); }
     }
 
     public function execution_decide(string $id)
     {
+        $user = $this->requirePermission('trading.execute');
+        if (!$user) return;
         $body = $this->jsonBody();
         if (!isset($body['approve']) || !is_bool($body['approve'])) return $this->jsonError('body must include approve: boolean');
-        try { $this->json(['proposal' => $this->platform->execution->decide($id, $body['approve'], 'user', $body['reason'] ?? null)]); }
+        try { $this->json(['proposal' => $this->platform->execution->decide($id, $body['approve'], $user['email'] ?? 'user', $body['reason'] ?? null)]); }
         catch (\InvalidArgumentException $e) { $this->jsonError($e->getMessage(), 404); }
         catch (\Throwable $e) { $this->jsonError($e->getMessage(), 409); }
     }
@@ -193,14 +206,43 @@ class Api_system extends Api_controller
      */
     public function execution_route(string $id)
     {
-        try { $this->json($this->platform->execution->route($id, 'user')); }
+        $user = $this->requirePermission('trading.execute');
+        if (!$user) return;
+        try { $this->json($this->platform->execution->route($id, $user['email'] ?? 'user')); }
         catch (\InvalidArgumentException $e) { $this->jsonError($e->getMessage(), 404); }
         catch (\Throwable $e) { $this->jsonError($e->getMessage(), 409); }
     }
 
     public function execution_recent()
     {
+        if (!$this->requirePermission('trading.view', false)) return;
         $this->json(['executions' => $this->platform->execution->executions()]);
+    }
+
+    // ------------------------------------------------------- notifications
+
+    /** Operator inbox: broadcast (user_id NULL) + the signed-in operator's own. */
+    public function notifications()
+    {
+        $user = $this->requirePermission('system.authenticated', false);
+        if (!$user) return;
+        $unreadOnly = $this->input->get('unread') === '1';
+        $this->json($this->platform->notifications->inbox((int) $user['id'], $unreadOnly, 50));
+    }
+
+    public function notification_read(string $id)
+    {
+        $user = $this->requirePermission('system.authenticated');
+        if (!$user) return;
+        $ok = $this->platform->notifications->markRead($id, (int) $user['id']);
+        $ok ? $this->json(['ok' => true]) : $this->jsonError('notification not found or already read', 404);
+    }
+
+    public function notification_read_all()
+    {
+        $user = $this->requirePermission('system.authenticated');
+        if (!$user) return;
+        $this->json(['markedRead' => $this->platform->notifications->markAllRead((int) $user['id'])]);
     }
 
     /** Automation envelope for SEMI_AUTONOMOUS / FULLY_AUTOMATED modes. */
@@ -211,6 +253,7 @@ class Api_system extends Api_controller
 
     public function update_automation_limits()
     {
+        if (!$this->requirePermission('trading.control')) return;
         try { $this->json(['limits' => $this->platform->updateAutomationLimits($this->jsonBody())]); }
         catch (\InvalidArgumentException $e) { $this->jsonError($e->getMessage()); }
         catch (\Throwable $e) { $this->jsonError($e->getMessage(), 409); }
@@ -219,11 +262,13 @@ class Api_system extends Api_controller
     /** Continuous portfolio risk monitoring (spec §14). */
     public function portfolio_scan()
     {
+        if (!$this->requirePermission('trading.view', false)) return;
         $this->json($this->platform->monitor->scan());
     }
 
     public function trading_mode()
     {
+        if (!$this->requirePermission('trading.control')) return;
         $body = $this->jsonBody();
         $mode = $body['mode'] ?? '';
         $result = $this->platform->setTradingMode($mode);

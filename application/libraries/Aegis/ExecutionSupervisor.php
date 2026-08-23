@@ -3,6 +3,7 @@ namespace Aegis;
 
 use Aegis\Brokers\BrokerManager;
 use Aegis\Brokers\TradingConnector;
+use Aegis\Notifications\Notifier;
 use Aegis\Persistence\AuditRepository;
 use Aegis\Persistence\PlatformStateRepository;
 use Aegis\Persistence\ProposalRepository;
@@ -40,8 +41,14 @@ class ExecutionSupervisor
         private StrategyRegistry $strategies,
         /** @var callable(): int */
         private $clock = null,
+        private ?Notifier $notifier = null,
     ) {
         $this->clock = $clock ?? static fn(): int => time();
+    }
+
+    private function notify(string $type, string $severity, string $title, array $detail = [], ?string $dedupeKey = null): void
+    {
+        $this->notifier?->notify($type, $severity, $title, $detail, $dedupeKey);
     }
 
     // ------------------------------------------------------------ pipeline
@@ -248,6 +255,9 @@ class ExecutionSupervisor
 
         $result = ['id' => $id, 'status' => $status, 'reason' => $needsHuman ? 'pipeline passed — awaiting human approval' : 'pipeline passed — cleared for automated routing', 'checks' => $checks, 'intent' => $safe, 'connector' => $connector->id(), 'riskDecision' => $decision, 'quote' => $this->publicQuote($quote), 'account' => $this->publicAccount($account)];
         $this->audit->emit($needsHuman ? 'EXECUTION_APPROVAL_REQUESTED' : 'EXECUTION_CLEARED_AUTOMATED', $needsHuman ? "Proposal {$id} awaits human approval" : "Proposal {$id} cleared for automated routing ({$mode})", ['id' => $id, 'symbol' => $intent['symbol'], 'side' => $intent['side']], $actor);
+        if ($needsHuman) {
+            $this->notify('TRADE_APPROVAL_REQUESTED', 'warning', "Approval required: {$intent['symbol']} {$intent['side']}", ['proposalId' => $id, 'symbol' => $intent['symbol'], 'side' => $intent['side'], 'volume' => $intent['volume']], "proposal:{$id}");
+        }
         if ($persist) $this->save($result, $actor, $decision);
         return $result;
     }
@@ -287,6 +297,7 @@ class ExecutionSupervisor
             $execution = $this->recordExecution($proposal, $connector->id(), null, $automated, 'FAILED', ['error' => $e->getMessage()]);
             $this->setStatus($proposal, 'FAILED', "broker rejected: {$e->getMessage()}", $actor);
             $this->audit->emit('EXECUTION_FAILED', "Broker rejected proposal {$id}: {$e->getMessage()}", ['proposalId' => $id], $actor);
+            $this->notify('EXECUTION_FAILED', 'critical', "Broker rejected proposal for {$order['symbol']}", ['proposalId' => $id, 'error' => $e->getMessage()], "proposal:{$id}:failed");
             return ['status' => 'FAILED', 'reason' => $e->getMessage(), 'execution' => $execution, 'brokerOrderCreated' => false];
         }
 
@@ -298,6 +309,7 @@ class ExecutionSupervisor
         }
         $execution = $this->recordExecution($proposal, $connector->id(), (string) $placed['ticket'], $automated, 'EXECUTED', $placed);
         $this->audit->emit('ORDER_FILLED', sprintf('Broker filled %s %.2f %s @ %s (ticket %s)', $order['side'], $order['volume'], $order['symbol'], number_format($placed['price'], 5), $placed['ticket']), ['proposalId' => $id, 'ticket' => $placed['ticket']], $actor);
+        $this->notify('ORDER_FILLED', 'info', sprintf('Filled %s %.2f %s @ %s', $order['side'], $order['volume'], $order['symbol'], number_format($placed['price'], 5)), ['proposalId' => $id, 'ticket' => $placed['ticket']], "proposal:{$id}:filled");
 
         // 15 — portfolio update (post-trade snapshot on the execution record)
         try {
@@ -343,6 +355,30 @@ class ExecutionSupervisor
         $this->proposals->saveProposal($proposal);
         $this->audit->emit($approve ? 'EXECUTION_APPROVAL_GRANTED' : 'EXECUTION_APPROVAL_REJECTED', $approve ? "Proposal {$id} approved for routing" : "Proposal {$id} rejected", ['id' => $id, 'reason' => $reason], $actor);
         return $proposal;
+    }
+
+    /**
+     * Spec §5 invalidation: an undecided proposal does not live forever.
+     * PENDING_APPROVAL proposals older than proposalExpiryMinutes (platform
+     * state, default 240) are expired and audited. Returns the expired ids.
+     * @return array<int, string>
+     */
+    public function expireStaleProposals(?int $maxAgeSeconds = null): array
+    {
+        $state = $this->stateRepo->load();
+        $maxAge = $maxAgeSeconds ?? ((int) ($state['proposalExpiryMinutes'] ?? 240)) * 60;
+        $cutoff = gmdate('c', ($this->clock)() - $maxAge);
+        $expired = [];
+        foreach ($this->proposals->listProposals('PENDING_APPROVAL', 200) as $p) {
+            if ((string) $p['created_at'] >= $cutoff) continue;
+            $p['status'] = 'EXPIRED';
+            $p['checks'][] = ['check' => 'outcome', 'ok' => false, 'detail' => sprintf('expired after %d minutes without a human decision', (int) ($maxAge / 60))];
+            $this->proposals->saveProposal($p);
+            $this->audit->emit('EXECUTION_PROPOSAL_EXPIRED', sprintf('Proposal %s expired without a decision (%s %s)', $p['id'], $p['symbol'], $p['side']), ['proposalId' => $p['id']], 'system');
+            $this->notify('PROPOSAL_EXPIRED', 'warning', "Approval request expired: {$p['symbol']} {$p['side']}", ['proposalId' => $p['id']], "proposal:{$p['id']}:expired");
+            $expired[] = $p['id'];
+        }
+        return $expired;
     }
 
     // ------------------------------------------------------------- queries
@@ -411,6 +447,7 @@ class ExecutionSupervisor
     {
         $result = ['status' => 'ROUTING_BLOCKED', 'reason' => $reason, 'proposalId' => $proposal['id'], 'brokerOrderCreated' => false];
         $this->audit->emit('EXECUTION_ROUTING_BLOCKED', $reason, $result, 'system');
+        $this->notify('ROUTING_BLOCKED', 'warning', "Routing blocked: {$reason}", $result, 'routing-blocked:' . gmdate('Ymd'));
         return $result;
     }
 

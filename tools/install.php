@@ -46,6 +46,8 @@ if ($driver === 'pdo_sqlite') {
     $sql = implode("\n", array_map(fn($file) => file_get_contents($file), $schemaFiles));
 }
 
+require_once __DIR__ . '/rbac.php';
+
 $statements = array_filter(array_map('trim', preg_split('/;\s*[\r\n]+/', $sql)));
 foreach ($statements as $stmt) {
     // Strip comment LINES (a leading comment block glues to the first statement).
@@ -58,6 +60,7 @@ foreach ($statements as $stmt) {
 
 $expected = ['platform_state', 'strategies', 'backtests', 'analysis_runs', 'journal_entries',
     'paper_accounts', 'paper_orders', 'paper_positions', 'paper_trades', 'paper_deployments', 'audit_logs',
+    'trade_proposals', 'trade_executions', 'notifications', 'ci_sessions',
     'users', 'roles', 'permissions', 'user_roles', 'role_permissions', 'auth_events',
     'sports_data_sources', 'sports_matches', 'sports_odds', 'sports_sync_runs', 'sports_model_versions',
     'sports_predictions', 'sports_tickets', 'sports_results'];
@@ -76,4 +79,19 @@ if ($missing) {
     return;
 }
 echo 'OK — ' . count($expected) . " tables verified.\n";
+// RBAC defaults (idempotent; unique keys make INSERT IGNORE safe on MySQL and SQLite).
+$insertIgnore = $driver === 'pdo_sqlite' ? 'INSERT OR IGNORE INTO' : 'INSERT IGNORE INTO'; // both engines honor unique keys
+aegis_seed_rbac(
+    function (string $code, string $name) use ($pdo, $insertIgnore): int {
+        $pdo->prepare("{$insertIgnore} roles (code, name) VALUES (?, ?)")->execute([$code, $name]);
+        return (int) $pdo->query('SELECT id FROM roles WHERE code = ' . $pdo->quote($code))->fetchColumn();
+    },
+    function (string $code, string $name) use ($pdo, $insertIgnore): int {
+        $pdo->prepare("{$insertIgnore} permissions (code, name) VALUES (?, ?)")->execute([$code, $name]);
+        return (int) $pdo->query('SELECT id FROM permissions WHERE code = ' . $pdo->quote($code))->fetchColumn();
+    },
+    function (int $roleId, int $permissionId) use ($pdo, $insertIgnore): void {
+        $pdo->prepare("{$insertIgnore} role_permissions (role_id, permission_id) VALUES (?, ?)")->execute([$roleId, $permissionId]);
+    }
+);
 echo "INSTALL-RESULT: 0\n";

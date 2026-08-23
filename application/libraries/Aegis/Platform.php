@@ -35,6 +35,7 @@ class Platform
     public readonly TradingIntelligenceEngine $engine;
     public readonly PaperTradingEngine $paper;
     public readonly \Aegis\Portfolio\PortfolioRiskMonitor $monitor;
+    public readonly \Aegis\Notifications\Notifier $notifications;
     public readonly \Aegis_model $model;
 
     public function __construct(\Aegis_model $model, bool $disableRealProviders = false)
@@ -69,12 +70,15 @@ class Platform
             $this->providers, $this->risk, $this->strategies
         );
 
+        $this->notifications = new \Aegis\Notifications\Notifier($model->notifications);
         $this->execution = new ExecutionSupervisor(
             $model->audit, $model->state, $model->proposals,
-            $this->risk, $this->brokers, $this->strategies
+            $this->risk, $this->brokers, $this->strategies,
+            null, $this->notifications
         );
         $this->monitor = new \Aegis\Portfolio\PortfolioRiskMonitor(
-            $model->paper, $this->paper, $this->risk, $this->brokers, $model->audit, $model->state
+            $model->paper, $this->paper, $this->risk, $this->brokers, $model->audit, $model->state,
+            $this->notifications
         );
     }
 
@@ -177,6 +181,9 @@ class Platform
         $state['killSwitch'] = ['active' => $active, 'activatedAt' => gmdate('c'), 'reason' => $reason ?? ($active ? 'engaged' : 'released')];
         $this->model->state->save($state);
         $this->model->audit->emit($active ? 'KILL_SWITCH_ACTIVATED' : 'KILL_SWITCH_DEACTIVATED', 'Kill switch ' . ($active ? 'ACTIVATED' : 'deactivated') . ($reason ? ": {$reason}" : ''), ['reason' => $reason], 'user');
+        if ($active) {
+            $this->notifications->notify('KILL_SWITCH', 'critical', 'KILL SWITCH ACTIVATED — all order placement blocked', ['reason' => $reason], 'kill-switch:active');
+        }
         return $state['killSwitch'];
     }
 

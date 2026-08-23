@@ -21,3 +21,20 @@ final class Aegis_PlatformStateHelper
         return self::$state;
     }
 }
+
+/** View-safe unread-notification count (broadcast + signed-in operator). */
+final class Aegis_NotificationsHelper
+{
+    public static function unreadCount(): int
+    {
+        $ci = get_instance();
+        if (!isset($ci->platform) || !isset($ci->platform->notifications)) return 0;
+        try {
+            $user = $ci->session->userdata('identity');
+            $userId = is_array($user) && !empty($user['id']) ? (int) $user['id'] : null;
+            return (int) $ci->platform->notifications->inbox($userId, true, 1)['unread'];
+        } catch (Throwable $e) {
+            return 0;
+        }
+    }
+}

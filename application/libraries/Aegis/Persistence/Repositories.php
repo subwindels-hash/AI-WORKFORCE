@@ -101,6 +101,20 @@ interface IdentityRepository
     public function recordAuthEvent(int $userId, string $type, array $detail = []): void;
 }
 
+/** Operator notifications: risk alerts, approval requests, execution outcomes. */
+interface NotificationRepository
+{
+    /** Saves and RETURNS the record with its generated id. */
+    public function save(array $notification): array;
+    /** Broadcast (user_id NULL) + the user's own, newest first. */
+    public function list(?int $userId = null, bool $unreadOnly = false, int $limit = 50): array;
+    public function markRead(string $id, ?int $userId = null): bool;
+    public function markAllRead(?int $userId = null): int;
+    public function unreadCount(?int $userId = null): int;
+    /** True when an UNREAD notification with this dedupe key already exists. */
+    public function hasUnreadDedupe(string $dedupeKey): bool;
+}
+
 interface PaperRepository
 {
     /** Saves and RETURNS the record with its generated id. */

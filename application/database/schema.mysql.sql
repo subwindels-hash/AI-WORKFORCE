@@ -218,6 +218,30 @@ CREATE TABLE IF NOT EXISTS trade_executions (
   KEY idx_executions_proposal (proposal_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Sessions (CI3 'database' session driver; used by the offline dev runtime
+-- where per-request instances cannot share file sessions reliably).
+CREATE TABLE IF NOT EXISTS ci_sessions (
+  id         VARCHAR(128) NOT NULL PRIMARY KEY,
+  ip_address VARCHAR(45) NOT NULL,
+  timestamp  INT NOT NULL DEFAULT 0,
+  data       MEDIUMTEXT NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Operator notifications (spec §16/§18): risk alerts, approval requests,
+-- execution outcomes. user_id NULL = broadcast to every operator.
+CREATE TABLE IF NOT EXISTS notifications (
+  id          VARCHAR(36) PRIMARY KEY,
+  user_id     INT NULL,
+  type        VARCHAR(40) NOT NULL,
+  severity    VARCHAR(10) NOT NULL DEFAULT 'info',
+  title       VARCHAR(200) NOT NULL,
+  detail      LONGTEXT NOT NULL,
+  dedupe_key  VARCHAR(120) NULL,
+  read_at     VARCHAR(32) NULL,
+  created_at  VARCHAR(32) NOT NULL,
+  KEY idx_notifications_unread (user_id, read_at, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 
 -- Lead Discovery module (organization-scoped permanent PostgreSQL-compatible design).
 CREATE TABLE IF NOT EXISTS leads (id VARCHAR(36) PRIMARY KEY, organization_id VARCHAR(80) NOT NULL, source VARCHAR(40) NOT NULL, source_id VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, category VARCHAR(255), address TEXT, city VARCHAR(120), region VARCHAR(120), country VARCHAR(120), phone VARCHAR(80), website TEXT, latitude DECIMAL(10,7), longitude DECIMAL(10,7), status VARCHAR(20) NOT NULL DEFAULT 'new', owner_id INT NULL, metadata LONGTEXT NOT NULL, created_at VARCHAR(32) NOT NULL, updated_at VARCHAR(32) NOT NULL, UNIQUE KEY uq_lead_source (organization_id,source,source_id), KEY idx_leads_org_status(organization_id,status), KEY idx_leads_owner(organization_id,owner_id), KEY idx_leads_created(organization_id,created_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

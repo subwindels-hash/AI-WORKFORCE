@@ -24,6 +24,7 @@ class Aegis_model extends CI_Model
     public object $state;
     public object $paper;
     public object $proposals;
+    public object $notifications;
 
     public function __construct()
     {
@@ -389,6 +390,70 @@ class Aegis_model extends CI_Model
                 if ($accountId !== null) $this->db->where('account_id', $accountId);
                 if ($active !== null) $this->db->where('active', $active ? 1 : 0);
                 return $this->db->order_by('id', 'ASC')->get('paper_deployments')->result_array();
+            }
+        };
+
+        $this->notifications = new class($db) implements Aegis\Persistence\NotificationRepository {
+            public function __construct(private object $db) {}
+
+            public function save(array $n): array {
+                if (empty($n['id'])) $n['id'] = bin2hex(random_bytes(16));
+                $row = [
+                    'id' => $n['id'], 'user_id' => $n['userId'] ?? null, 'type' => (string) $n['type'],
+                    'severity' => in_array($n['severity'] ?? 'info', ['info', 'warning', 'critical'], true) ? $n['severity'] : 'info',
+                    'title' => mb_substr((string) $n['title'], 0, 200),
+                    'detail' => json_encode($n['detail'] ?? []),
+                    'dedupe_key' => $n['dedupeKey'] ?? null,
+                    'read_at' => null, 'created_at' => $n['createdAt'] ?? gmdate('c'),
+                ];
+                $this->db->insert('notifications', $row);
+                $n['id'] = $row['id'];
+                return $n;
+            }
+
+            public function list(?int $userId = null, bool $unreadOnly = false, int $limit = 50): array {
+                if ($userId === null) {
+                    // broadcast only (no authenticated operator)
+                    $this->db->where('user_id', null);
+                } else {
+                    $this->db->group_start()->where('user_id', null)->or_where('user_id', $userId)->group_end();
+                }
+                if ($unreadOnly) $this->db->where('read_at', null);
+                $rows = $this->db->order_by('created_at', 'DESC')->limit(max(1, min(200, $limit)))->get('notifications')->result_array();
+                $out = [];
+                foreach ($rows as $r) {
+                    $r['detail'] = json_decode($r['detail'], true) ?: [];
+                    $out[] = $r;
+                }
+                return $out;
+            }
+
+            public function markRead(string $id, ?int $userId = null): bool {
+                $this->db->where('id', $id)->where('read_at', null);
+                if ($userId === null) $this->db->where('user_id', null);
+                else $this->db->group_start()->where('user_id', null)->or_where('user_id', $userId)->group_end();
+                $this->db->set('read_at', gmdate('c'))->update('notifications');
+                return $this->db->affected_rows() > 0;
+            }
+
+            public function markAllRead(?int $userId = null): int {
+                $this->db->where('read_at', null);
+                if ($userId === null) $this->db->where('user_id', null);
+                else $this->db->group_start()->where('user_id', null)->or_where('user_id', $userId)->group_end();
+                $this->db->set('read_at', gmdate('c'))->update('notifications');
+                return $this->db->affected_rows();
+            }
+
+            public function unreadCount(?int $userId = null): int {
+                $this->db->where('read_at', null);
+                if ($userId === null) $this->db->where('user_id', null);
+                else $this->db->group_start()->where('user_id', null)->or_where('user_id', $userId)->group_end();
+                return (int) $this->db->count_all_results('notifications');
+            }
+
+            public function hasUnreadDedupe(string $dedupeKey): bool {
+                return $this->db->from('notifications')
+                    ->where('dedupe_key', $dedupeKey)->where('read_at', null)->count_all_results() > 0;
             }
         };
 

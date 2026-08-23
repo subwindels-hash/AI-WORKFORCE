@@ -1,3 +1,5 @@
+CREATE TABLE IF NOT EXISTS ci_sessions (id TEXT PRIMARY KEY, ip_address TEXT NOT NULL, timestamp INTEGER NOT NULL DEFAULT 0, data BLOB NOT NULL);
+
 -- AEGIS — SQLite schema for the offline dev runtime (pdo_sqlite).
 -- The canonical production schema is schema.mysql.sql; both are installed
 -- by tools/install.php which picks by driver. Column sets are identical.
@@ -204,3 +206,9 @@ CREATE TABLE IF NOT EXISTS trade_executions (
  automated INTEGER NOT NULL DEFAULT 0, submitted_at TEXT NOT NULL, status TEXT NOT NULL, result TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_executions_proposal ON trade_executions(proposal_id);
+
+CREATE TABLE IF NOT EXISTS notifications (
+ id TEXT PRIMARY KEY, user_id INTEGER NULL, type TEXT NOT NULL, severity TEXT NOT NULL DEFAULT 'info',
+ title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '{}', dedupe_key TEXT NULL, read_at TEXT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id, read_at, created_at);

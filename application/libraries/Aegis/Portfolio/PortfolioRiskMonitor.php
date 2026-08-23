@@ -2,6 +2,7 @@
 namespace Aegis\Portfolio;
 
 use Aegis\Brokers\BrokerManager;
+use Aegis\Notifications\Notifier;
 use Aegis\Paper\PaperTradingEngine;
 use Aegis\Persistence\AuditRepository;
 use Aegis\Persistence\PaperRepository;
@@ -39,6 +40,7 @@ class PortfolioRiskMonitor
         private BrokerManager $brokers,
         private AuditRepository $audit,
         private PlatformStateRepository $stateRepo,
+        private ?Notifier $notifier = null,
     ) {}
 
     /** Run a scan; returns the full report and audits alert transitions. */
@@ -132,15 +134,22 @@ class PortfolioRiskMonitor
         }
     }
 
-    /** BROKER_DISCONNECTED on READY→DOWN transitions (DISABLED never counted). */
+    /** BROKER_DISCONNECTED / BROKER_CONNECTED on state transitions (DISABLED never counted). */
     private function brokerAlerts(array &$alerts): void
     {
         $state = $this->stateRepo->load();
         $previous = $state['portfolioRisk']['brokerStates'] ?? [];
         foreach ($this->brokers->allStatus() as $id => $status) {
             $current = (string) $status['state'];
-            if (isset($previous[$id]) && $previous[$id] === 'READY' && $current === 'DOWN') {
+            $was = isset($previous[$id]) ? (string) $previous[$id] : null;
+            if ($was === 'READY' && $current === 'DOWN') {
                 $alerts[] = self::alert('BROKER_DISCONNECTED', 'critical', 'broker:' . $id, "connector {$id} was READY and is now DOWN");
+                $this->audit->emit('BROKER_DISCONNECTED', "Connector {$id} was READY and is now DOWN", ['broker' => $id, 'from' => 'READY', 'to' => 'DOWN']);
+                $this->notifier?->notify('BROKER_DISCONNECTED', 'critical', "Broker disconnected: {$id}", ['broker' => $id], "broker:{$id}:disconnected");
+            }
+            if ($was === 'DOWN' && $current === 'READY') {
+                $this->audit->emit('BROKER_CONNECTED', "Connector {$id} reconnected (DOWN -> READY)", ['broker' => $id, 'from' => 'DOWN', 'to' => 'READY']);
+                $this->notifier?->notify('BROKER_CONNECTED', 'info', "Broker reconnected: {$id}", ['broker' => $id], "broker:{$id}:connected");
             }
         }
     }
@@ -155,6 +164,7 @@ class PortfolioRiskMonitor
         foreach ($alerts as $a) {
             if (!isset($prev[$a['key']])) {
                 $this->audit->emit('PORTFOLIO_RISK_ALERT', "{$a['code']} ({$a['severity']}) — {$a['detail']}", $a);
+                $this->notifier?->notify('PORTFOLIO_RISK', $a['severity'], "{$a['code']}: " . explode(':', $a['scope'])[0] . " risk alert", $a, $a['key']);
             }
         }
         foreach (array_keys($prev) as $key) {

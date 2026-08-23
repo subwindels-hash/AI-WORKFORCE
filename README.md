@@ -41,9 +41,12 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **Python MT5 bridge service** (`python-services/mt5-bridge`, FastAPI + MetaTrader5, demo-only default) | **IMPLEMENTED** (contract unit-tested; requires deployment on a Windows MT5 host) |
 | **Portfolio Risk Monitor**: HIGH_EXPOSURE, EXCESSIVE_LEVERAGE, CORRELATED_POSITIONS, MAX_DRAWDOWN_WARNING, DAILY_LOSS_WARNING, BROKER_DISCONNECTED | **TESTED** |
 | Kill switch, audit trail, ANALYSIS_ONLY default | **TESTED** |
+| **RBAC on the trading API**: trading.view / trading.control / trading.execute (+ CSRF); approval decisions record the deciding operator | **TESTED** |
+| **Notifications**: risk alerts, approval requests, execution outcomes, broker disconnects, kill switch — deduped until acknowledged | **TESTED** |
+| **Scheduled operations worker** (`php index.php tools cron`): portfolio scan, broker transitions, proposal expiry | **TESTED** |
 | MT4 / crypto-exchange / stock-broker connectors | **PLANNED** (added one at a time after MT5 is verified) |
 
-**126 automated tests** run through the real CodeIgniter stack
+**140 automated tests** run through the real CodeIgniter stack
 (`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
 sandbox — see below), plus 9 contract tests for the Python bridge
 (`python-services/mt5-bridge/.venv/bin/python -m pytest test_bridge.py`).
@@ -221,8 +224,28 @@ approved symbols) → 11 human approval (HUMAN_APPROVAL mode) → 12 place order
   requires the PAPER_TRADING stage plus ≥10 closed paper trades with
   profit factor > 1 and positive expectancy.
 
+### Operator access control, notifications, scheduled operations
+
+- **RBAC** (seeded by the installer, shared matrix in `tools/rbac.php`):
+  `trading.view` (read status/proposals/executions), `trading.control` (kill
+  switch, mode, risk/automation limits), `trading.execute` (propose/decide/
+  route). Mutating trading endpoints require session auth + `X-CSRF-Token`.
+  The operator console stays server-rendered; API integrations authenticate
+  via `POST /api/auth/login`.
+- **Notifications** (`notifications` table + `/api/notifications` + the
+  Alerts page): portfolio risk transitions, `TRADE_APPROVAL_REQUESTED`,
+  `ORDER_FILLED`, `EXECUTION_FAILED`, `ROUTING_BLOCKED`, `BROKER_DISCONNECTED`
+  / `BROKER_CONNECTED`, kill-switch activation, `PROPOSAL_EXPIRED`. Unread
+  dedupe: one badge per active issue until acknowledged.
+- **Cron worker** — run every minute:
+  `* * * * * php /path/index.php tools cron`
+  Executes the portfolio risk scan (with broker transition detection), expires
+  undecided proposals after `proposalExpiryMinutes` (default 240, spec §5
+  invalidation) and audits a `CRON_RUN` summary.
+
 ## API surface
 
+`/api/auth/{login,me,logout}` · `/api/notifications[/read-all|/:id/read]`
 `/api/system/{status,features}` · `/api/events` · `/api/trading/{kill-switch,mode,synthetic-paper}`
 `/api/trading/limits[/update]` · `/api/trading/propose` · `/api/trading/execute` · `/api/trading/:id/{approve,route}`
 `/api/execution/{preflight,proposals,executions}` · `/api/portfolio/risk-scan` · `/api/brokers` · `/api/brokers/mt5/{account,quote}`
@@ -251,11 +274,12 @@ approved symbols) → 11 human approval (HUMAN_APPROVAL mode) → 12 place order
   with a **demo** MT5 account, verify the PHP↔bridge path end-to-end, and
   only then review `AEGIS_MT5_LIVE_ALLOWED` (default stays off). Crypto
   exchanges are added **one at a time** after MT5 is verified.
-- **Phase 5 (done for the core)** — supervisor pipeline, human approval,
+- **Phase 5 (core + hardening done)** — supervisor pipeline, human approval,
   automation modes, kill switch, duplicate protection, broker health
-  monitoring and portfolio risk monitoring are implemented and tested.
-  Next: scheduled (cron) portfolio scans + broker health polling,
-  notifications, and multi-user RBAC on the execution endpoints.
+  monitoring, portfolio risk monitoring, RBAC on the trading API,
+  notifications and the scheduled-operations worker are implemented and
+  tested. Next: a clearly-labeled SIMULATED bridge toggle for the offline
+  demo (real routing still requires a deployed bridge).
 - **Phase 6** — fundamentals agent boundary is implemented and explicitly
   abstains until a licensed, attributable feed is configured. Next: add
   licensed fundamentals, sentiment, on-chain, and options providers one at a

@@ -39,6 +39,37 @@ async function createPhp() {
 }
 
 /** Verify toolchain + install/upgrade the SQLite schema at boot. */
+/**
+ * DEV BRIDGE ONLY: the demo sqlite database is gitignored and may be reset at
+ * any time, so ensure a clearly-labeled demo operator exists for RBAC demos.
+ * Production NEVER auto-creates accounts — admins come from
+ * `php index.php tools bootstrap_admin` with real credentials.
+ */
+async function bootstrapDemoOperator() {
+  const php = await createPhp();
+  try {
+    await php.run({
+      code: `<?php
+chdir('/home/user/Africa-Mobility');
+putenv('AEGIS_DB_DRIVER=pdo_sqlite');
+putenv('AEGIS_SQLITE_PATH=/home/user/Africa-Mobility/application/data/aegis.sqlite');
+putenv('AEGIS_BOOTSTRAP_ADMIN_EMAIL=demo-operator@aegis.local');
+putenv('AEGIS_BOOTSTRAP_ADMIN_PASSWORD=demo-only-long-password-123456');
+putenv('AEGIS_BOOTSTRAP_ADMIN_NAME=Demo Operator (dev bridge)');
+define('STDIN', fopen('php://stdin', 'r'));
+define('STDOUT', fopen('php://stdout', 'w'));
+define('STDERR', fopen('php://stderr', 'w'));
+$_SERVER['argv'] = ['index.php', 'tools', 'bootstrap_admin'];
+$_SERVER['argc'] = 3;
+$_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+require '/home/user/Africa-Mobility/index.php';
+`,
+    });
+  } catch (e) {
+    console.error('[aegis] demo operator bootstrap failed:', e?.message ?? e);
+  }
+}
+
 async function installSchema() {
   const php = await createPhp();
   const root = APP_ROOT.replaceAll("'", "\\'");
@@ -46,6 +77,7 @@ async function installSchema() {
     code: `<?php
 chdir('${root}');
 putenv('AEGIS_DB_DRIVER=pdo_sqlite');
+putenv('AEGIS_SESSION_DRIVER=database'); // per-request instances share the DB, not the FS session files
 putenv('AEGIS_SQLITE_PATH=${root}/application/data/aegis.sqlite');
 define('AEGIS_NO_EXIT', true);
 require '${root}/tools/install.php';
@@ -94,6 +126,9 @@ const server = http.createServer(async (req, res) => {
         ...req.headers,
         host: req.headers.host ?? `127.0.0.1:${PORT}`,
         'x-aegis-orig-uri': req.url ?? '/',
+        // php-wasm's request handler blanks the CGI HTTP_COOKIE value, so the
+        // dev bridge carries the raw Cookie header here; index.php restores it.
+        'x-aegis-cookie': req.headers.cookie ?? '',
       },
       body: body.length ? body : undefined,
     });
@@ -112,6 +147,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 await installSchema();
+await bootstrapDemoOperator();
 server.listen(PORT, HOST, () => {
   console.log(`[aegis] CodeIgniter 3 app serving on http://${HOST}:${PORT} (WASM PHP ${PHP_VERSION}, sqlite dev driver)`);
 });
