@@ -19,6 +19,7 @@ class Aegis_model extends CI_Model
     public object $journal;
     public object $audit;
     public object $identity;
+    public object $sports;
     public object $analysis;
     public object $state;
     public object $paper;
@@ -144,6 +145,31 @@ class Aegis_model extends CI_Model
                 }
                 return $rows;
             }
+        };
+
+        $this->sports = new class($db) implements Aegis\Persistence\SportsRepository {
+            public function __construct(private object $db) {}
+            public function ensureProvider(string $code, string $name): array {
+                $row = $this->db->get_where('sports_data_sources', ['provider_code' => $code], 1)->row_array();
+                if ($row) return $row;
+                $now = gmdate('c'); $this->db->insert('sports_data_sources', ['provider_code' => $code, 'display_name' => $name, 'enabled' => 0, 'created_at' => $now, 'updated_at' => $now]);
+                return $this->db->get_where('sports_data_sources', ['id' => $this->db->insert_id()], 1)->row_array();
+            }
+            public function saveHealth(int $providerId, array $h): void {
+                $this->db->insert('sports_provider_health', ['provider_id' => $providerId, 'status' => $h['status'], 'response_ms' => $h['responseMs'] ?? null, 'error_rate' => $h['errorRate'] ?? null, 'rate_limit_remaining' => $h['rateLimitRemaining'] ?? null, 'last_success_at' => $h['lastSuccessAt'] ?? null, 'last_failure_at' => $h['lastFailureAt'] ?? null, 'last_fixture_sync_at' => $h['lastFixtureSyncAt'] ?? null, 'last_odds_sync_at' => $h['lastOddsSyncAt'] ?? null, 'last_result_sync_at' => $h['lastResultSyncAt'] ?? null, 'data_freshness_seconds' => $h['dataFreshnessSeconds'] ?? null, 'records_received' => $h['recordsReceived'] ?? 0, 'invalid_records' => $h['invalidRecords'] ?? 0, 'missing_fields' => json_encode($h['missingFields'] ?? []), 'observed_at' => gmdate('c')]);
+            }
+            public function saveMatch(int $providerId, array $m): array {
+                $row = $this->db->get_where('sports_matches', ['provider_id' => $providerId, 'external_id' => $m['externalId']], 1)->row_array();
+                $data = ['sport' => $m['sport'], 'competition' => $m['competition'], 'home_team' => $m['homeTeam'], 'away_team' => $m['awayTeam'], 'kickoff_at' => $m['kickoff'], 'status' => $m['status'], 'source_timestamp' => $m['sourceTimestamp'], 'payload' => json_encode($m), 'updated_at' => gmdate('c')];
+                if ($row) { $this->db->where('id', $row['id'])->update('sports_matches', $data); return array_merge($row, $data); }
+                $this->db->insert('sports_matches', array_merge(['provider_id' => $providerId, 'external_id' => $m['externalId'], 'created_at' => gmdate('c')], $data)); return array_merge($data, ['id' => (int)$this->db->insert_id(), 'provider_id' => $providerId, 'external_id' => $m['externalId']]);
+            }
+            public function saveQuality(int $matchId, array $a): void { $this->db->insert('sports_data_quality_assessments', ['match_id' => $matchId, 'score' => $a['score'], 'band' => $a['band'], 'freshness_score' => $a['freshnessScore'], 'provider_reliability_score' => $a['providerReliabilityScore'], 'eligible_prediction' => $a['eligibleForPrediction'] ? 1 : 0, 'eligible_ticket' => $a['eligibleForTicket'] ? 1 : 0, 'missing_fields' => json_encode($a['missing']), 'checks_payload' => json_encode($a['checks']), 'assessed_at' => gmdate('c')]); }
+            public function startSync(array $run): ?array {
+                if ($this->db->get_where('sports_sync_runs', ['execution_key' => $run['executionKey']], 1)->row_array()) return null;
+                $this->db->insert('sports_sync_runs', ['id' => $run['id'], 'provider_id' => $run['providerId'] ?? null, 'job_type' => $run['jobType'], 'status' => 'RUNNING', 'started_at' => gmdate('c'), 'execution_key' => $run['executionKey']]); return $run;
+            }
+            public function finishSync(string $id, array $result): void { $this->db->where('id', $id)->update('sports_sync_runs', ['status' => $result['status'], 'ended_at' => gmdate('c'), 'records_processed' => $result['processed'] ?? 0, 'records_created' => $result['created'] ?? 0, 'records_updated' => $result['updated'] ?? 0, 'errors' => json_encode($result['errors'] ?? [])]); }
         };
 
         $this->identity = new class($db) implements Aegis\Persistence\IdentityRepository {

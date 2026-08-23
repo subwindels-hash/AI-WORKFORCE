@@ -59,6 +59,18 @@ interface PlatformStateRepository
 }
 
 /** Identity and access-control persistence. Password hashes only; never raw secrets. */
+interface SportsRepository
+{
+    public function ensureProvider(string $code, string $name): array;
+    public function saveHealth(int $providerId, array $health): void;
+    /** Returns saved canonical match, inserting/updating by provider + external ID. */
+    public function saveMatch(int $providerId, array $match): array;
+    public function saveQuality(int $matchId, array $assessment): void;
+    /** Starts once per idempotency key, or returns null if already processed. */
+    public function startSync(array $run): ?array;
+    public function finishSync(string $id, array $result): void;
+}
+
 interface IdentityRepository
 {
     public function findUserByEmail(string $email): ?array;

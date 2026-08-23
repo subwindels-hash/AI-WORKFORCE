@@ -30,7 +30,8 @@ class Tools extends MY_Controller
             fwrite(STDERR, "schema not found: {$schemaFile}\n");
             exit(1);
         }
-        $schemaFiles = [$schemaFile, APPPATH . 'database/sports_identity.' . ($driver === 'sqlite' ? 'sqlite' : 'mysql') . '.sql'];
+        $variant = $driver === 'sqlite' ? 'sqlite' : 'mysql';
+        $schemaFiles = [$schemaFile, APPPATH . 'database/sports_identity.' . $variant . '.sql', APPPATH . 'database/sports.' . $variant . '.sql'];
         foreach ($schemaFiles as $file) {
             if (!is_file($file)) continue;
             $sql = file_get_contents($file);
