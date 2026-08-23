@@ -1,200 +1,187 @@
 # AEGIS — Standalone AI Trading Intelligence Platform
 
-A modular trading infrastructure that analyzes markets with a multi-agent AI stack, runs versioned
-strategies through an evidence-gated pipeline, and generates structured, risk-reviewed trade
-proposals. **This is not a chatbot giving trading advice** — it is a pipeline with hard separation
-of concerns:
+**CodeIgniter 3.1.13 · PHP 8.x · MySQL/MariaDB · Traditional MVC**
+
+A modular trading infrastructure that analyzes markets with a multi-agent AI
+stack, runs versioned strategies through an evidence-gated pipeline, and
+**simulates execution with full risk governance (Phase 3: Paper Trading)**.
+
+> **Core principle:** AI can analyze, recommend, and automate within approved
+> rules, but it must never bypass market-data validation, risk controls,
+> execution governance, broker safeguards, or the kill switch.
 
 ```text
 MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INTELLIGENCE / CONSENSUS
       →  STRATEGY ENGINE (backtested, validated, risk-reviewed)  →  RISK ENGINE
-      →  EXECUTION SUPERVISOR (Phase 5)  →  BROKER CONNECTORS (Phase 4)
+      →  PAPER TRADING ENGINE (Phase 3)  →  [EXECUTION SUPERVISOR — Phase 5]  →  [BROKERS — Phase 4]
       →  PORTFOLIO + PERFORMANCE MONITORING
 ```
 
-> **Core principle:** AI can analyze, recommend, and automate within approved rules, but it must
-> never bypass market-data validation, risk controls, execution governance, broker safeguards, or
-> the kill switch.
-
 ---
 
-## Current state: Phases 1–2 complete (ANALYSIS_ONLY + Strategy Lab)
-
-Phase 1 (analysis vertical slice) and Phase 2 (strategy framework, backtesting, trade journal)
-are built, tested end-to-end and running. **No orders can be placed by any component.** The
-status of every integration is reported honestly at `GET /api/system/features` and rendered in
-the dashboard ("Integration Status" panel). Summary:
+## Current state: Phases 1–3 complete
 
 | Area | Status |
 |---|---|
+| CodeIgniter 3.1.13 MVC (controllers / models / views / libraries) | **TESTED** |
+| **MySQL / MariaDB** persistence — canonical schema + mysqli config (`application/database/schema.mysql.sql`) | **IMPLEMENTED** |
 | Market-data abstraction (health checks, retry, timeout, circuit breaker, cache, fallback, provenance) | **TESTED** |
-| Binance public market data (crypto) | **IMPLEMENTED** (reports DOWN + falls back when the host has no egress) |
-| Frankfurter / ECB reference rates (forex, daily) | **IMPLEMENTED** (daily-only, honest about coverage) |
-| Synthetic demo provider | **TESTED** — always labeled `SIMULATION / SYNTHETIC DATA`, never silent |
-| Multi-agent analysis stack (technical, market-structure, forex, crypto, sentiment, consensus) | **TESTED** |
-| Regime detection + Trade Setup Generator (zone entries, ATR/structure stops, R-ladders) | **TESTED** |
-| Risk Engine (independent veto: per-trade + portfolio limits, sizing math, kill-switch participation) | **TESTED** |
-| Event & audit trail (append-only JSONL + in-memory ring) | **TESTED** |
-| **Strategy Engine + versioning** (4 built-ins: trend / mean-reversion / breakout / momentum; gated lifecycle `DRAFT → BACKTESTED → VALIDATED → RISK_REVIEWED → PAPER_TRADING → APPROVED`) | **TESTED** |
-| **Backtesting Engine** (next-bar-open fills, fee/spread/slippage cost model, pessimistic stop-first rule, look-ahead guard, R-based sizing) | **TESTED** |
-| **Performance metrics** (return, win rate, profit factor, expectancy, Sharpe, Sortino, drawdown, streaks, exposure) | **TESTED** |
-| **Trade journal + analytics** (per-trade journal incl. confidence; groupings by strategy/market/symbol + confidence calibration) | **TESTED** |
-| Grid / DCA strategies, AI-generated strategies | **PLANNED** (AI strategies are lifecycle-blocked from auto-advancement by design) |
-| PostgreSQL persistence (`db/schema.sql` defined) / Redis | **PLANNED** — the tested runtime uses the JSON-file store behind the same `DataStore` contract |
-| Paper trading, brokers (MT5 first), execution supervisor | **PLANNED** (Phases 3–5) |
-| REST API (Fastify) + Next.js dashboard (Intelligence · Strategy Lab · Journal & Analytics) | **TESTED / running** |
+| Binance + Frankfurter/ECB real providers; labeled synthetic demo provider | **TESTED** |
+| Multi-agent analysis (technical, market-structure, forex, crypto, sentiment, consensus) | **TESTED** |
+| Regime detection + trade setup generator + Risk Engine (independent veto) | **TESTED** |
+| Strategy framework: 4 built-ins, evidence-gated lifecycle through PAPER_TRADING | **TESTED** |
+| Backtester: next-bar fills, cost model, pessimistic stop rule, look-ahead guard | **TESTED** |
+| **Paper Trading Engine (Phase 3): accounts, orders, fills, positions, ticks, strategy deployments** | **TESTED** |
+| Trade journal + analytics + confidence calibration | **TESTED** |
+| ANALYSIS_ONLY + PAPER_TRADING modes, kill switch, audit trail | **TESTED** |
+| Brokers (MT5 first), execution supervisor, live trading | **PLANNED** (Phases 4–5) |
 
-**168 automated tests** (`packages/core`: 137, `apps/api`: 31) cover the indicator math, provider
-fallback/circuit-breakers, agent honesty rules, the full analysis pipeline, risk-engine veto
-paths, strategy signals, backtest fill/cost/anti-look-ahead mechanics, metrics fixtures,
-lifecycle gates, journal analytics and the REST API.
+**57 automated tests** run through the real CodeIgniter stack
+(`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
+sandbox — see below).
 
 ---
 
-## Repository layout
+## Production deployment (the normal path)
 
-```text
-packages/core        Domain library (no framework deps):
-  src/types.ts         single source of truth for all contracts
-  src/marketdata/      provider interface, manager (cache/retry/breaker/fallback), providers
-  src/indicators/      technical-analysis engine (pure functions)
-  src/agents/          technical, market-structure, forex, crypto, sentiment, intelligence
-  src/analysis/        regime detection, setup generator
-  src/strategies/      strategy contract, look-ahead-guarded SeriesView, 4 built-ins, registry
-  src/backtesting/     event-driven simulator + metrics
-  src/journal/         journal analytics + confidence calibration
-  src/store/           DataStore contract, in-memory + JSON-file stores
-  src/risk/            RiskEngine (independent veto authority)
-  src/engine/          TradingIntelligenceEngine (the orchestrating pipeline)
-  src/events/          event bus + append-only audit sink
-  src/status/          integration honesty matrix (single source for /api/system/features)
-apps/api             Fastify REST API (zod-validated routes; core + phase-2 route modules)
-apps/dashboard       Next.js 14 + Tailwind command center (SVG charting, no chart lib)
-db/schema.sql        PostgreSQL DDL for the production deployment (status: PLANNED)
-data/                runtime store + audit log (gitignored)
-```
-
-## Quickstart
+Requirements: PHP 7.4–8.3 with `mysqli` + `mbstring`, MySQL 5.7+/MariaDB 10.3+,
+any web server (Apache/nginx + php-fpm).
 
 ```bash
-npm install
-npm run build        # builds core + api
-npm test             # 168 tests: core engines + API integration
-npm run dev:api      # API on :4000  (ANALYSIS_ONLY, kill switch ON by default)
-npm run dev:dashboard # dashboard on :3000 (proxies /api → :4000)
+# 1. Create the database + user, then:
+export AEGIS_DB_HOST=127.0.0.1 AEGIS_DB_USER=aegis AEGIS_DB_PASS=... AEGIS_DB_NAME=aegis_trading
+php tools/install.php          # creates all tables (application/database/schema.mysql.sql)
+
+# 2. Point the vhost at the repo root (index.php is the front controller),
+#    set ENVIRONMENT=production, done:
+php index.php tools tests      # verify the full stack against your MariaDB
 ```
 
-Docker Compose files are included for deployment convenience (see note in `docker-compose.yml`).
+Configuration is environment-driven (`application/config/database.php`):
+`AEGIS_DB_DRIVER` (default `mysqli`), `AEGIS_DB_HOST/USER/PASS/NAME`.
 
-## The analysis pipeline (`POST /api/analysis/run`)
+## Offline dev / demo runtime (this repository's live preview)
 
-1. **Market data** — `ProviderManager` resolves candles through the provider chain
-   (priority order, health/circuit-breaker gated, cached, retried) with full provenance.
-   *Synthetic data is never silent* — it appears as a `SIMULATION / SYNTHETIC DATA` banner in the
-   UI and forces a Risk-Engine veto.
-2. **Normalization/validation** — sort, de-duplicate, envelope-repair, gap-check.
-3. **Agents** — structured JSON with directional votes, weights, data quality and explicit
-   `dataLimitations`; agents without data abstain. Agents hold no broker references (Rule 1).
-4. **Consensus** — weighted net score, agreement, confluence, confidence, conflicts, and a
-   `BULLISH / BEARISH / NEUTRAL / NO_TRADE` bias.
-5. **Regime detection** with evidence, volatility percentile and ADX.
-6. **Scenarios** and a structured **trade setup** (zone entry, ATR-padded invalidation stop,
-   R-ladder targets, expiry, invalidation reasons).
-7. **Risk Engine** — mandatory pass-through with veto power (Rule 6).
+The development sandbox has **no package mirrors and no MySQL server
+egress** — it cannot run native PHP or MariaDB. The demo therefore runs the
+**same CodeIgniter application** unmodified inside a WebAssembly PHP runtime
+(`php-wasm` 8.2, host filesystem mounted) using CodeIgniter's built-in
+`pdo_sqlite` driver with a schema that mirrors the MySQL DDL:
 
-## The strategy pipeline (`POST /api/backtesting/run`)
+```bash
+cd runtime && npm install
+AEGIS_ALLOW_SYNTHETIC_PAPER=1 node server.mjs   # CI3 app on :8080
+node run-tests.mjs                              # full test suite
+```
 
-Strategies are versioned and pass through an **evidence-gated lifecycle**:
+This is a **dev bridge only** — `runtime/` is not part of the production
+stack. Every honesty rule still applies: synthetic market prices are labeled
+`SIMULATION` everywhere, and the `allowSyntheticPaperData` switch (which the
+demo sets) is a persisted, audited platform-state flag that production leaves
+off — with it off, the Risk Engine vetoes any synthetic-data trade.
+
+---
+
+## Repository layout (traditional CI3 MVC)
 
 ```text
-DRAFT → BACKTESTED → VALIDATED → RISK_REVIEWED → PAPER_TRADING (Phase 3) → APPROVED (Phase 5)
+index.php                       CI3 front controller (+ dev-bridge URI adapter)
+system/                         CodeIgniter 3.1.13 core (unmodified)
+application/
+  config/                       config.php, database.php (mysqli/pdo_sqlite), routes.php
+  controllers/                  Welcome (dashboard), Strategy_lab, Paper, Journal,
+                                Api_system, Api_analysis, Api_marketdata, Api_strategies,
+                                Api_paper, Api_journal, Tools (CLI: install/tests)
+  models/Aegis_model.php        THE only place SQL lives — repository interfaces
+                                implemented over CI3's query builder (mysqli/sqlite)
+  libraries/Aegis/              domain layer (no framework dependency):
+    Indicators, MathUtils, CandleNormalizer, Timeframes
+    ProviderManager + Providers/ (Binance, Frankfurter, Synthetic)
+    Agents/ (Technical, MarketStructure, Forex, Crypto, Sentiment, Intelligence)
+    Analysis (regime + setup generator), RiskEngine
+    Strategies/ (SeriesView w/ look-ahead guard, 4 built-ins, StrategyRegistry)
+    Backtest/ (Backtester + Metrics), Journal/Analytics
+    Paper/PaperTradingEngine    Phase 3: accounts/orders/fills/ticks/deployments
+    Platform                    service container wired from the model layer
+  views/                        server-rendered dashboard (layout, welcome, strategy,
+                                paper, journal) + SVG candlestick chart
+  database/                     schema.mysql.sql (canonical) + schema.sqlite.sql (dev)
+  helpers/aegis_helper.php      view-safe platform-state access
+tests/                          framework.php + cases/*.php (57 tests)
+tools/install.php               schema installer (mysqli or sqlite by driver)
+runtime/                        offline WASM-PHP bridge (dev only, not production)
+assets/css/aegis.css            dashboard styles (no CDN dependency)
 ```
 
-- `BACKTESTED` requires a completed backtest of that exact version.
-- `VALIDATED` requires statistical evidence (sample size ≥ 10, profit factor > 1, drawdown
-  ceiling, positive expectancy; over-fitting sentinels produce warnings).
-- `RISK_REVIEWED` requires the risk review to pass — and **AI-generated strategies are blocked
-  here without manual human sign-off** (spec: never auto-deploy AI strategies).
-- `PAPER_TRADING`/`APPROVED` are refused honestly until Phases 3/5 ship.
+## Phase 3 — Paper Trading (how it works)
 
-The backtester is deliberately conservative:
+Every paper order passes the **full governance chain before simulation**:
 
-- **No look-ahead** — strategies receive a `SeriesView` that throws on any future-bar access;
-  the run fails loudly rather than continuing with biased results.
-- **Realistic fills** — signals on closed bars fill at the *next bar's open*, adjusted for
-  half-spread + adverse slippage; commissions are charged per side on notional.
-- **Pessimistic ambiguity** — when a bar touches both stop and target, the stop fills first.
-- **Full cost accounting** — every trade reports commission, spread and slippage components;
-  net P&L reconciles exactly with the equity curve (unit-tested).
-- **Provenance** — the run records its data source; synthetic runs are labeled as simulation.
+```text
+kill switch → trading mode (PAPER_TRADING required) → duplicate check →
+mandatory stop-loss → sizing (risk% × equity ÷ stop distance, notional-capped) →
+Risk Engine (exposure, drawdown, daily/weekly loss) → fill
+```
 
-Every simulated trade lands in the **trade journal** with fees, slippage, reason, and the
-strategy's signal confidence — which powers the analytics: win rate / profit factor /
-expectancy by strategy, market, symbol, and **AI-confidence bucket**
-(`GET /api/analytics/confidence-calibration`) — the direct answer to "do high-confidence
-decisions actually perform better?", with an honest sample-size guard.
+- **Market orders** fill instantly at the quoted price (spread + slippage +
+  commission per side). **Limit orders** queue until a tick crosses them.
+- **Ticks** (`POST /api/accounts/:id/tick`): fill pending limits, evaluate
+  SL/TP on the latest candle with the **pessimistic stop-first rule**, and
+  run **deployed strategies** on the latest closed bar — each signal is a
+  fresh risk-checked paper order.
+- **Strategy deployment** to a paper account is the `PAPER_TRADING`
+  lifecycle stage (requires `RISK_REVIEWED`; AI-source strategies blocked
+  without human sign-off).
+- Closed positions land in the **journal** (source=paper) with fees, reason
+  and decision confidence — feeding the confidence-calibration analytics.
+- All events audited: `ORDER_SUBMITTED`, `ORDER_FILLED`, `POSITION_OPENED`,
+  `POSITION_CLOSED`, `STOP_LOSS_TRIGGERED`, `KILL_SWITCH_*`, …
+- Paper trading is **simulation**: no order ever leaves the process; broker
+  connectors arrive in Phase 4.
+
+### Quick demo flow (also in the Paper Trading console UI)
+
+```bash
+curl -X POST :8080/api/trading/mode -d '{"mode":"PAPER_TRADING"}' -H 'Content-Type: application/json'
+curl -X POST :8080/api/trading/kill-switch -d '{"active":false}' -H 'Content-Type: application/json'
+curl -X POST :8080/api/accounts/create -d '{"name":"Demo","startingBalance":25000}' -H 'Content-Type: application/json'
+# -> account id 1
+curl -X POST :8080/api/backtesting/run -d '{"strategyId":"trend-following","symbol":"BTCUSDT","marketClass":"crypto","timeframe":"1h","limit":1500}' -H 'Content-Type: application/json'
+# lifecycle: BACKTESTED -> VALIDATED -> RISK_REVIEWED (POST /api/strategies/trend-following/status)
+curl -X POST :8080/api/accounts/1/order -d '{"symbol":"BTCUSDT","side":"BUY","stopLoss":<2%below>,"reason":"...","confidence":0.72}' -H 'Content-Type: application/json'
+curl -X POST :8080/api/accounts/1/deploy -d '{"strategyId":"trend-following","symbol":"ETHUSDT","timeframe":"1h","marketClass":"crypto"}' -H 'Content-Type: application/json'
+curl -X POST :8080/api/accounts/1/tick
+```
 
 ## API surface
 
-```text
-GET  /api/system/status          platform state, kill switch, provider health, cache stats
-GET  /api/system/features        integration honesty matrix
-GET  /api/events                 audit trail
-GET  /api/market-data/{providers,candles,quote}
-POST /api/analysis/run           full AnalysisRun (agents → consensus → setup → risk)
-GET  /api/analysis/history · /api/analysis/:id
-GET  /api/agents · POST /api/agents/consensus
-GET  /api/risk/limits · POST /api/risk/limits
-POST /api/trading/kill-switch · POST /api/trading/mode (only ANALYSIS_ONLY implemented → 409 otherwise)
-GET  /api/strategies · GET /api/strategies/:id · POST /api/strategies/:id/status
-POST /api/backtesting/run · GET /api/backtesting/results · GET /api/backtesting/results/:id
-GET  /api/journal · POST /api/journal (manual entries, validated)
-GET  /api/analytics/summary?groupBy=strategy|market|symbol|source|confidence
-GET  /api/analytics/confidence-calibration
-```
+`/api/system/{status,features}` · `/api/events` · `/api/trading/{kill-switch,mode,synthetic-paper}`
+`/api/market-data/{candles,quote,providers}` · `/api/analysis/{run,history}` · `/api/agents/consensus`
+`/api/strategies[/:id[/status]]` · `/api/backtesting/{run,results[/:id]}`
+`/api/accounts[/create|/:id|/:id/order|/:id/positions|/:id/positions/:pid/close|/:id/tick|/:id/deploy|/:id/deployments]`
+`/api/journal[/manual]` · `/api/analytics/{summary,confidence-calibration}` · `/api/risk/limits[/update]`
 
-## Critical rules enforcement
+## Critical rules enforcement (unchanged from the platform spec)
 
-| Rule | Where it is enforced |
+| Rule | Enforcement |
 |---|---|
-| 1. Agents never call brokers | Agents receive only an `AnalysisContext`; no broker type exists yet; the engine routes proposals to `RiskEngine`, never to a broker |
-| 2. Never silently use fake data | `provenance.synthetic` flows through analysis, backtests and journal; UI shows mandatory banners; Risk Engine vetoes synthetic setups |
-| 3. No integration claimed unless tested | `src/status/integrations.ts` is the single source; UI renders it verbatim |
-| 4. Live trading disabled by default | Boot state: `ANALYSIS_ONLY` + kill switch ACTIVE; unimplemented modes return honest 409s |
-| 5. Every trade auditable | Append-only event bus + JSONL sink; strategies/backtests/journal carry ids and full provenance |
-| 6. Risk Engine veto power | `RiskEngine.evaluate` is the only path from setup → approval |
-| 7. Kill switch blocks orders | Participates in every risk evaluation; vetoes all proposals while active |
-| §12 strategy pipeline | Lifecycle gates: backtesting → validation → risk review → paper → approval; AI strategies blocked from auto-advancement |
-
-## Safety defaults (`packages/core/src/config/defaults.ts` — all configurable)
-
-```text
-Risk per trade            1%   (hard cap 2%)
-Min risk/reward           1.5        Stop loss        mandatory
-Max leverage              5×         Max notional     $50,000
-Max symbol risk           5% of equity (capital-at-risk basis)
-Max portfolio risk        15% of equity
-Max daily loss            3%   Max weekly loss 6%   Max drawdown 10%
-Synthetic data            blocked from trade approval
-Stale data                blocked
-Kill switch               ships ACTIVE
-```
+| Agents never call brokers | Agents see only `AnalysisContext`; the paper engine routes every order through the Risk Engine; no broker code exists yet |
+| Never silently use fake data | `provenance.synthetic` flows end-to-end; paper fills on synthetic prices require the explicit, audited `allowSyntheticPaperData` dev flag |
+| No integration claimed unless tested | `GET /api/system/features` renders the same matrix |
+| Live trading disabled by default | Boot state: `ANALYSIS_ONLY` + kill switch ACTIVE; only `ANALYSIS_ONLY` and `PAPER_TRADING` are implemented |
+| Every trade auditable | `audit_logs` table + UI trail; every order/position/journal row is linked |
+| Risk Engine veto power | `RiskEngine::evaluate()` sits in every order path |
+| Kill switch blocks orders | Checked first in `submitOrder()` and in every Risk Engine context |
 
 ## Roadmap
 
-- **Phase 3** — paper trading: simulated accounts/orders/fills against live prices, portfolio &
-  P&L tracking, `PAPER_TRADING` lifecycle stage unlocked.
-- **Phase 4** — broker integration, **MT5 first** (Python bridge), then crypto exchanges one at
-  a time. Connectors are only marked SUPPORTED once implemented and tested.
-- **Phase 5** — Trade Execution Supervisor (15-step pipeline), human approval, semi-autonomous
-  and fully-automated modes with all safety gates, duplicate protection, continuous portfolio
-  risk monitoring.
-- **Phase 6** — fundamentals, news/social sentiment, on-chain intelligence, options intelligence
-  (Greeks/IV/max-pain only with real chain data), multi-agent debate, strategy & portfolio
-  optimization.
+- **Phase 4** — broker connectors, **MT5 first** (Python bridge), then crypto
+  exchanges one at a time; MySQL persistent store is already in place.
+- **Phase 5** — Trade Execution Supervisor (15-step pipeline), human
+  approval, semi/fully-automated modes.
+- **Phase 6** — fundamentals, sentiment, on-chain, options intelligence.
 
 ## Disclaimer
 
-Analysis-only software for research and education. Nothing here is investment advice. The demo
-synthetic provider exists so the platform can run offline; synthetic analyses and backtests are
-simulations, not market performance.
+Analysis + simulation software for research and education. Nothing here is
+investment advice. Synthetic demo data is always labeled as simulation.

@@ -13,3 +13,6 @@ npm-debug.log*
 .DS_Store
 **/data/*.jsonl
 **/data/*.json
+application/data/*.sqlite
+application/data/*.sqlite-journal
+application/logs/*.log

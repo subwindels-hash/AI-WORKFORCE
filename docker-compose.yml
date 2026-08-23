@@ -1,39 +1,45 @@
-# AEGIS — Phase 1 stack.
+# AEGIS — production stack (CodeIgniter 3 + MySQL/MariaDB)
 #
-# NOTE (honesty per project rules): these compose files are provided for
-# deployment convenience but were NOT exercised in the development sandbox
-# (no Docker available there). Validate on your host before production use.
-# PostgreSQL and Redis are intentionally absent: Phase 1 runs on an in-memory
-# store + JSONL audit file. They join the stack in Phase 2+ (strategies,
-# backtests, persistent audit).
+# NOTE (honesty per project rules): this compose file targets the documented
+# production stack (PHP-FPM + MySQL). It was NOT exercised in the development
+# sandbox (no Docker there); the identical application IS tested there via
+# WASM PHP + pdo_sqlite (runtime/). Validate on your host before use.
 
 services:
-  api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-    ports:
-      - "4000:4000"
+  db:
+    image: mariadb:11
     environment:
-      - LOG_LEVEL=info
-      # BINANCE_API_BASE / FRANKFURTER_API_BASE can be overridden here.
+      MARIADB_ROOT_PASSWORD: ${AEGIS_DB_PASS:-aegis}
+      MARIADB_DATABASE: aegis_trading
+      MARIADB_USER: aegis
+      MARIADB_PASSWORD: ${AEGIS_DB_PASS:-aegis}
     volumes:
-      - aegis-data:/app/apps/api/data
-    restart: unless-stopped
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      retries: 20
 
-  dashboard:
-    build:
-      context: .
-      dockerfile: apps/dashboard/Dockerfile
-      args:
-        - API_PROXY_TARGET=http://api:4000
-    ports:
-      - "3000:3000"
+  app:
+    image: php:8.2-apache
+    working_dir: /var/www/html
     environment:
-      - API_PROXY_TARGET=http://api:4000
+      AEGIS_DB_HOST: db
+      AEGIS_DB_USER: aegis
+      AEGIS_DB_PASS: ${AEGIS_DB_PASS:-aegis}
+      AEGIS_DB_NAME: aegis_trading
+    volumes:
+      - .:/var/www/html
+    ports:
+      - "8080:80"
     depends_on:
-      - api
-    restart: unless-stopped
+      db:
+        condition: service_healthy
+    command: >
+      bash -c "
+        docker-php-ext-install mysqli >/dev/null &&
+        a2enmod rewrite &&
+        apache2-foreground"
 
 volumes:
-  aegis-data:
+  db-data:
