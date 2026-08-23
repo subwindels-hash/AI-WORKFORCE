@@ -39,6 +39,9 @@ test('execution approvals persist a decision but remain explicitly not routed', 
     assert_equals('APPROVED_NOT_ROUTED', $decision['status']);
     assert_equals('reviewer', $decision['decisionBy']);
     assert_equals('APPROVED_NOT_ROUTED', $supervisor->approvals($store->load())[0]['status']);
+    $route = $supervisor->route($request['id'], $store->load());
+    assert_equals('ROUTING_DISABLED', $route['status']);
+    assert_false($route['brokerOrderCreated']);
 });
 
 test('execution supervisor passes only to approval required and never executes', function () {

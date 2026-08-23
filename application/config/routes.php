@@ -77,4 +77,5 @@ $route['api/execution/preflight'] = 'api_system/execution_preflight';
 $route['api/execution/approvals'] = 'api_system/execution_approvals';
 $route['api/execution/approvals/request'] = 'api_system/execution_request_approval';
 $route['api/execution/approvals/(:any)/decide'] = 'api_system/execution_decide/$1';
+$route['api/execution/approvals/(:any)/route'] = 'api_system/execution_route/$1';
 $route['api/trading/synthetic-paper'] = 'api_system/synthetic_paper';

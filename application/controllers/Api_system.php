@@ -168,6 +168,13 @@ class Api_system extends Api_controller
         catch (\Throwable $e) { $this->jsonError($e->getMessage(), 409); }
     }
 
+    /** Final Phase 5 boundary: always reports routing disabled, never sends an order. */
+    public function execution_route(string $id)
+    {
+        try { $this->json($this->platform->execution->route($id, $this->platform->state())); }
+        catch (\InvalidArgumentException $e) { $this->jsonError($e->getMessage(), 404); }
+    }
+
     public function trading_mode()
     {
         $body = $this->jsonBody();

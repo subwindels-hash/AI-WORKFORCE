@@ -31,6 +31,30 @@ class ExecutionSupervisor
 
     public function approvals(array $state): array { return array_reverse($state['executionApprovals'] ?? []); }
 
+    /**
+     * Final routing boundary. This deliberately stops before every broker
+     * connector until a dedicated, independently enabled routing adapter is
+     * introduced. Keeping the blocked transition auditable avoids treating an
+     * approval as proof that an order was sent.
+     */
+    public function route(string $id, array $state): array
+    {
+        $request = null;
+        foreach ($state['executionApprovals'] ?? [] as $item) if (($item['id'] ?? '') === $id) { $request = $item; break; }
+        if ($request === null) throw new \InvalidArgumentException('approval request not found');
+        if (($state['killSwitch']['active'] ?? true) === true) return $this->routeBlocked($id, 'kill switch is active');
+        if (($state['tradingMode'] ?? '') !== 'HUMAN_APPROVAL') return $this->routeBlocked($id, 'HUMAN_APPROVAL mode is required');
+        if ($request['status'] !== 'APPROVED_NOT_ROUTED') return $this->routeBlocked($id, 'approval is not approved for routing');
+        return $this->routeBlocked($id, 'routing adapter is disabled; no broker order was created');
+    }
+
+    private function routeBlocked(string $id, string $reason): array
+    {
+        $result = ['id' => $id, 'status' => 'ROUTING_DISABLED', 'reason' => $reason, 'brokerOrderCreated' => false];
+        $this->audit->emit('EXECUTION_ROUTING_BLOCKED', $reason, $result, 'system');
+        return $result;
+    }
+
     public function decide(string $id, bool $approve, string $actor = 'user', ?string $reason = null): array
     {
         if ($this->stateRepo === null) throw new \RuntimeException('approval persistence unavailable');
