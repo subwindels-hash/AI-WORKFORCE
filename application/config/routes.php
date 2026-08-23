@@ -28,6 +28,7 @@ $route['paper/(:num)/deployments/(:num)/toggle'] = 'paper/toggle/$1/$2';
 
 // ---- JSON API (spec §17 subset for Phases 1–3) ---------------------------
 $route['api/system/status'] = 'api_system/status';
+$route['api/sports/status'] = 'api_sports/status';
 $route['api/system/features'] = 'api_system/features';
 $route['api/brokers'] = 'api_system/brokers';
 $route['api/brokers/mt5/account'] = 'api_system/mt5_account';
