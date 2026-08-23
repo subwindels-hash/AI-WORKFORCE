@@ -10,6 +10,9 @@
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 
+<?php if (!empty($routable) && !empty($simBridge)): ?>
+  <div class="notice warnbox"><b>SIMULATED BRIDGE ACTIVE</b> — routing will reach the in-process demo mock and fills are <b>SIMULATION</b>. No real broker, no real order.</div>
+<?php endif; ?>
 <?php if (!empty($status['killSwitch']['active'])): ?>
   <div class="notice err"><b>Kill switch ACTIVE</b> — every proposal is rejected at step 1 and no order can be routed.</div>
 <?php endif; ?>
@@ -28,14 +31,14 @@
         <select name="type"><option>MARKET</option><option>LIMIT</option></select>
         <input name="volume" value="1000" placeholder="volume (units/lots)" required>
         <input name="price" placeholder="price (LIMIT only)">
-        <input name="stopLoss" value="1.0750" placeholder="stop loss (mandatory)" required>
-        <input name="takeProfit" value="1.0900" placeholder="take profit">
+        <input name="stopLoss" value="<?= e(number_format($quoteDefaults['sl'] ?? 1.0750, 5, '.', '')) ?>" placeholder="stop loss (mandatory)" required>
+        <input name="takeProfit" value="<?= e(number_format($quoteDefaults['tp'] ?? 1.0900, 5, '.', '')) ?>" placeholder="take profit">
         <input name="strategyId" placeholder="strategy id (optional)" list="approved-strategies" style="grid-column:span 2">
         <datalist id="approved-strategies"><?php foreach ($strategies as $s): ?><option value="<?= e($s['strategy_id']) ?>"><?= e($s['lifecycle']) ?></option><?php endforeach; ?></datalist>
         <input name="reason" placeholder="reason" style="grid-column:span 2">
         <button class="btn primary" type="submit" style="grid-column:span 4">Run pipeline &amp; create proposal</button>
       </form>
-      <p class="dim" style="margin-top:8px">Strategies must be APPROVED before they can execute; discretionary intents are HUMAN_APPROVAL only.</p>
+      <p class="dim" style="margin-top:8px">Strategies must be APPROVED before they can execute; discretionary intents are HUMAN_APPROVAL only.<?= $quoteDefaults ? ' Form defaults derive from the live EURUSD quote (mid ' . e(number_format($quoteDefaults['mid'], 5)) . ').' : '' ?></p>
     </div>
   </div>
 
@@ -70,8 +73,8 @@
       <select name="marketClass"><?php foreach (['forex', 'crypto'] as $c): ?><option><?= $c ?></option><?php endforeach; ?></select>
       <select name="side"><option>BUY</option><option>SELL</option></select>
       <input name="volume" value="1000" required>
-      <input name="stopLoss" value="1.0750" required>
-      <input name="takeProfit" value="1.0900">
+      <input name="stopLoss" value="<?= e(number_format($quoteDefaults['sl'] ?? 1.0750, 5, '.', '')) ?>" required>
+      <input name="takeProfit" value="<?= e(number_format($quoteDefaults['tp'] ?? 1.0900, 5, '.', '')) ?>">
       <input name="strategyId" placeholder="APPROVED strategy id (mandatory)" list="approved-strategies" style="grid-column:span 4">
       <button class="btn primary" type="submit" style="grid-column:span 2">Execute inside limits</button>
     </form>

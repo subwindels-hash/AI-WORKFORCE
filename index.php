@@ -83,6 +83,14 @@ if (!empty($_SERVER['HTTP_X_AEGIS_ORIG_URI'])) {
     if (getenv('AEGIS_SESSION_DRIVER') === false) {
         putenv('AEGIS_SESSION_DRIVER=database');
     }
+    // SIMULATED MT5 bridge (offline demo only): translate the demo marker
+    // file into AEGIS_MT5_* env for this request. Never active in production
+    // (this whole block only runs behind the dev bridge header), never
+    // overrides an explicitly configured real bridge, and is locked to
+    // loopback with live trading impossible.
+    require_once __DIR__ . '/application/libraries/Aegis/Brokers/DemoBridgeConfig.php';
+    \Aegis\Brokers\DemoBridgeConfig::applyEnv(__DIR__ . '/application/data/mt5-demo.json');
+
     // php-wasm's handler blanks CGI HTTP_COOKIE — restore the raw Cookie
     // header the bridge forwards and rebuild $_COOKIE before CI3 boots.
     $bridgeCookie = $_SERVER['HTTP_X_AEGIS_COOKIE'] ?? '';

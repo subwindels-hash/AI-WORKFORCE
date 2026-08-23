@@ -24,6 +24,7 @@ $route['execution/limits'] = 'execution/limits';
 $route['execution/(:any)/decide'] = 'execution/decide/$1';
 $route['execution/(:any)/route'] = 'execution/route/$1';
 $route['brokers'] = 'brokers';
+$route['brokers/sim-toggle'] = 'brokers/sim_toggle';
 $route['risk'] = 'risk_center';
 $route['risk/scan'] = 'risk_center/scan';
 $route['risk/limits'] = 'risk_center/limits';

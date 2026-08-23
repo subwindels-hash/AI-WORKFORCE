@@ -147,6 +147,230 @@ const server = http.createServer(async (req, res) => {
 });
 
 await installSchema();
+startSimBridgeMonitor();
+
+/* -------------------------------------------------------------------------
+ * SIMULATED MT5 BRIDGE — offline demo only (never part of production).
+ *
+ * The demo cannot reach a real MetaTrader terminal, so when an operator
+ * enables "Simulated MT5 bridge" in Broker Center, this in-process mock
+ * speaks the EXACT documented bridge contract (python-services/mt5-bridge)
+ * with in-memory state on 127.0.0.1. Every surface labels it SIMULATION:
+ *   - /health reports { simulated: true }
+ *   - the PHP connector surfaces that flag in its status
+ *   - Broker Center / Execution Center show a SIMULATION banner
+ * It is enabled by a marker file (application/data/mt5-demo.json) that the
+ * front controller translates into AEGIS_MT5_* env vars — and only inside
+ * this dev bridge (X-Aegis-Orig-Uri context). Production never reads it.
+ * ------------------------------------------------------------------------ */
+const SIM_PORT = Number(process.env.AEGIS_SIM_BRIDGE_PORT ?? 8790);
+const SIM_MARKER = path.join(APP_ROOT, 'application/data/mt5-demo.json');
+let simServer = null;
+let sim = null;
+
+const SIM_SYMBOLS = {
+  EURUSD: { base: 1.0842, spread: 0.00014, volume: 1 },
+  GBPUSD: { base: 1.2703, spread: 0.00018, volume: 1 },
+  USDJPY: { base: 149.32, spread: 0.02, volume: 1 },
+  XAUUSD: { base: 2385.5, spread: 0.36, volume: 1 },
+  BTCUSD: { base: 64210, spread: 14, volume: 1 },
+};
+
+function simFreshState() {
+  return { nextTicket: 7001, balance: 10000, positions: [], pending: [], history: [] };
+}
+
+function simMid(symbol) {
+  const cfg = SIM_SYMBOLS[symbol];
+  const t = Date.now() / 1000;
+  const drift = Math.sin(t / 97 + symbol.length * 1.7) * 0.004; // ±0.4% slow wave
+  return cfg.base * (1 + drift);
+}
+
+function simQuote(symbol) {
+  const half = SIM_SYMBOLS[symbol].spread / 2;
+  const mid = simMid(symbol);
+  return { bid: mid - half, ask: mid + half, mid };
+}
+
+function readMarker() {
+  try {
+    const m = JSON.parse(fs.readFileSync(SIM_MARKER, 'utf8'));
+    return m && m.enabled === true && typeof m.token === 'string' && m.token.length >= 16 ? m : null;
+  } catch {
+    return null;
+  }
+}
+
+function startSimBridgeMonitor() {
+  setInterval(() => {
+    const active = readMarker() !== null;
+    if (active && !simServer) {
+      sim = simFreshState();
+      simServer = http.createServer(simHandler);
+      simServer.listen(SIM_PORT, '127.0.0.1', () =>
+        console.log(`[aegis] SIMULATED MT5 bridge (demo) listening on 127.0.0.1:${SIM_PORT}`)
+      );
+    } else if (!active && simServer) {
+      simServer.close();
+      simServer = null;
+      sim = null;
+      console.log('[aegis] simulated MT5 bridge stopped');
+    }
+  }, 1000).unref();
+}
+
+function simJson(res, status, payload) {
+  res.writeHead(status, { 'content-type': 'application/json' });
+  res.end(JSON.stringify(payload));
+}
+
+async function simHandler(req, res) {
+  const url = new URL(req.url, `http://127.0.0.1:${SIM_PORT}`);
+  const marker = readMarker();
+  if (!marker) return simJson(res, 503, { ok: false, error: 'simulated bridge disabled' });
+  const auth = req.headers.authorization ?? '';
+  const authed = req.method === 'GET' && url.pathname === '/health' || auth === `Bearer ${marker.token}`;
+  if (!authed) return simJson(res, 401, { ok: false, error: 'invalid bridge token' });
+
+  const seg = url.pathname.split('/').filter(Boolean); // ['v1', ...]
+  const send = (data) => simJson(res, 200, { ok: true, data });
+  const fail = (code, error) => simJson(res, code, { ok: false, error });
+  const nowIso = () => new Date().toISOString();
+
+  if (url.pathname === '/health') {
+    // Health is the ONE unwrapped endpoint in the bridge contract.
+    return simJson(res, 200, { ok: true, version: 'sim-1.0.0', tradingEnabled: true, accountType: 'demo', simulated: true });
+  }
+  if (seg[0] !== 'v1') return fail(404, 'not found');
+
+  if (req.method === 'GET' && seg[1] === 'account') {
+    const unrealized = sim.positions.reduce((acc, p) => acc + simPositionPnl(p), 0);
+    const margin = sim.positions.reduce((acc, p) => acc + p.volume * p.entry * 0.033, 0);
+    const equity = sim.balance + unrealized;
+    return send({
+      accountId: 'SIM-7001', currency: 'USD', balance: round2(sim.balance), equity: round2(equity),
+      margin: round2(margin), freeMargin: round2(equity - margin), leverage: 30, timestamp: nowIso(),
+    });
+  }
+  if (req.method === 'GET' && seg[1] === 'quotes') {
+    const symbol = decodeURIComponent(seg[2] ?? '').toUpperCase();
+    if (!SIM_SYMBOLS[symbol]) return fail(404, `symbol ${symbol} not available`);
+    const q = simQuote(symbol);
+    return send({ symbol, bid: q.bid, ask: q.ask, timestamp: nowIso() });
+  }
+  if (req.method === 'GET' && seg[1] === 'candles') {
+    const symbol = decodeURIComponent(seg[2] ?? '').toUpperCase();
+    if (!SIM_SYMBOLS[symbol]) return fail(404, `symbol ${symbol} not available`);
+    const limit = Math.min(1000, Math.max(10, Number(url.searchParams.get('limit') ?? 200)));
+    const candles = [];
+    const step = 3600;
+    const nowHour = Math.floor(Date.now() / 1000 / step) * step;
+    for (let i = limit - 1; i >= 0; i--) {
+      const t = nowHour - i * step;
+      const mid = SIM_SYMBOLS[symbol].base * (1 + Math.sin(t / 9000 + symbol.length) * 0.01);
+      const range = mid * 0.002;
+      candles.push({
+        t: new Date(t * 1000).toISOString(), o: mid, h: mid + range, l: mid - range,
+        c: mid + Math.sin(t / 3000) * range / 2, v: 80 + Math.round(40 * Math.abs(Math.sin(t / 5000))),
+      });
+    }
+    return send(candles);
+  }
+  if (req.method === 'GET' && seg[1] === 'positions') {
+    return send(sim.positions.map((p) => ({
+      ticket: p.ticket, symbol: p.symbol, side: p.side === 'BUY' ? 'LONG' : 'SHORT',
+      volume: p.volume, entry: p.entry, stopLoss: p.stopLoss, takeProfit: p.takeProfit,
+      profit: round2(simPositionPnl(p)), openedAt: p.openedAt,
+    })));
+  }
+  if (req.method === 'GET' && seg[1] === 'orders') {
+    return send(sim.pending.map((o) => ({
+      ticket: o.ticket, symbol: o.symbol, side: o.side, type: 'LIMIT', volume: o.volume,
+      price: o.price, stopLoss: o.stopLoss, takeProfit: o.takeProfit, placedAt: o.placedAt,
+    })));
+  }
+  if (req.method === 'GET' && seg[1] === 'history') {
+    return send(sim.history.slice(0, Math.max(1, Math.min(500, Number(url.searchParams.get('limit') ?? 100)))));
+  }
+
+  // ---- trading endpoints ----
+  if (req.method === 'POST' && seg[1] === 'orders' && seg.length === 2) {
+    const body = await readBody(req).then(JSON.parse).catch(() => null);
+    if (!body || !['BUY', 'SELL'].includes(body.action) || !['MARKET', 'LIMIT'].includes(body.type)) {
+      return fail(400, 'invalid order body');
+    }
+    const symbol = String(body.symbol ?? '').toUpperCase();
+    if (!SIM_SYMBOLS[symbol]) return fail(400, `symbol ${symbol} is not available`);
+    if (!(body.volume > 0)) return fail(400, 'volume must be positive');
+    const q = simQuote(symbol);
+    const ticket = sim.nextTicket++;
+    if (body.type === 'LIMIT') {
+      if (!(body.price > 0)) return fail(400, 'LIMIT orders require a positive price');
+      sim.pending.push({
+        ticket, symbol, side: body.action, volume: body.volume, price: body.price,
+        stopLoss: body.stopLoss ?? null, takeProfit: body.takeProfit ?? null, placedAt: nowIso(),
+      });
+      return send({ ticket, price: body.price, placedAt: nowIso() });
+    }
+    const fill = body.action === 'BUY' ? q.ask : q.bid;
+    sim.positions.push({
+      ticket, symbol, side: body.action, volume: body.volume, entry: fill,
+      stopLoss: body.stopLoss ?? null, takeProfit: body.takeProfit ?? null, openedAt: nowIso(),
+    });
+    return send({ ticket, price: fill, placedAt: nowIso() });
+  }
+  if (req.method === 'POST' && seg[1] === 'orders' && seg[3] === 'modify') {
+    const ticket = Number(seg[2]);
+    const body = await readBody(req).then(JSON.parse).catch(() => ({}));
+    const target = sim.positions.find((p) => p.ticket === ticket) ?? sim.pending.find((p) => p.ticket === ticket);
+    if (!target) return fail(404, `ticket ${ticket} not found`);
+    if (body.stopLoss !== undefined) target.stopLoss = body.stopLoss;
+    if (body.takeProfit !== undefined) target.takeProfit = body.takeProfit;
+    return send({ ticket });
+  }
+  if (req.method === 'POST' && seg[1] === 'orders' && seg[3] === 'cancel') {
+    const ticket = Number(seg[2]);
+    const idx = sim.pending.findIndex((p) => p.ticket === ticket);
+    if (idx === -1) return fail(404, `pending order ${ticket} not found`);
+    sim.pending.splice(idx, 1);
+    return send({ ticket });
+  }
+  if (req.method === 'POST' && seg[1] === 'positions' && seg[3] === 'close') {
+    const ticket = Number(seg[2]);
+    const idx = sim.positions.findIndex((p) => p.ticket === ticket);
+    if (idx === -1) return fail(404, `position ${ticket} not found`);
+    const p = sim.positions.splice(idx, 1)[0];
+    const q = simQuote(p.symbol);
+    const exit = p.side === 'BUY' ? q.bid : q.ask;
+    const pnl = simPositionPnl(p, exit);
+    sim.balance += pnl;
+    sim.history.unshift({
+      ticket: p.ticket, symbol: p.symbol, side: p.side === 'BUY' ? 'LONG' : 'SHORT',
+      volume: p.volume, entry: p.entry, exit, profit: round2(pnl), openedAt: p.openedAt, closedAt: nowIso(),
+    });
+    return send({ ticket, price: exit, profit: round2(pnl) });
+  }
+  return fail(404, 'not found');
+}
+
+function simPositionPnl(p, forcedExit) {
+  const q = simQuote(p.symbol);
+  const exit = forcedExit ?? (p.side === 'BUY' ? q.mid - SIM_SYMBOLS[p.symbol].spread / 2 : q.mid + SIM_SYMBOLS[p.symbol].spread / 2);
+  return (p.side === 'BUY' ? exit - p.entry : p.entry - exit) * p.volume;
+}
+
+function round2(v) { return Math.round(v * 100) / 100; }
+
+function readBody(req) {
+  return new Promise((resolve) => {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => resolve(Buffer.concat(chunks).toString() || '{}'));
+    req.on('error', () => resolve('{}'));
+  });
+}
+
 await bootstrapDemoOperator();
 server.listen(PORT, HOST, () => {
   console.log(`[aegis] CodeIgniter 3 app serving on http://${HOST}:${PORT} (WASM PHP ${PHP_VERSION}, sqlite dev driver)`);

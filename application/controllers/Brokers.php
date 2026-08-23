@@ -21,12 +21,31 @@ class Brokers extends MY_Controller
         ['id' => 'oanda', 'name' => 'OANDA', 'status' => 'PLANNED', 'detail' => '—'],
     ];
 
+    /** Toggle the SIMULATED MT5 bridge (offline demo only; writes the marker
+     *  file the dev runtime + front controller translate into env). */
+    public function sim_toggle()
+    {
+        $markerPath = APPPATH . 'data/mt5-demo.json';
+        $enable = $this->input->post('enable') === '1';
+        if ($enable) {
+            \Aegis\Brokers\DemoBridgeConfig::enable($markerPath, (int) (getenv('AEGIS_SIM_BRIDGE_PORT') ?: 8790));
+            $this->platform->model->audit->emit('BROKER_SIMULATION_ENABLED', 'SIMULATED MT5 bridge enabled (offline demo) — in-process mock, never a real broker', [], 'user');
+            $this->flash('notice', 'SIMULATED MT5 bridge enabled — it speaks the documented bridge contract with in-memory state. Everything it fills is SIMULATION. A real deployment still requires python-services/mt5-bridge on a MetaTrader host.');
+        } else {
+            \Aegis\Brokers\DemoBridgeConfig::disable($markerPath);
+            $this->platform->model->audit->emit('BROKER_SIMULATION_DISABLED', 'SIMULATED MT5 bridge disabled', [], 'user');
+            $this->flash('notice', 'SIMULATED MT5 bridge disabled — routing is blocked again.');
+        }
+        redirect('/brokers');
+    }
+
     public function index()
     {
         $data = $this->base('Broker Center');
         $data['connectors'] = $this->platform->brokers->allStatus();
         $data['planned'] = self::PLANNED;
         $data['routable'] = $this->platform->brokers->tradingConnector() !== null;
+        $data['sim'] = \Aegis\Brokers\DemoBridgeConfig::describe(APPPATH . 'data/mt5-demo.json');
         $data['account'] = null;
         $data['quote'] = null;
         $data['quoteSymbol'] = strtoupper((string) $this->input->get('symbol'));

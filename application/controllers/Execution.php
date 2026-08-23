@@ -17,6 +17,22 @@ class Execution extends MY_Controller
         $data['gateFully'] = $this->platform->automationModeGate('FULLY_AUTOMATED');
         $data['strategies'] = array_filter($this->platform->model->strategies->all(), fn($s) => $s['lifecycle'] === 'APPROVED');
         $data['automatedToday'] = $this->platform->model->proposals->countAutomatedExecutionsToday();
+        $data['routable'] = $this->platform->brokers->tradingConnector() !== null;
+        $mt5 = $this->platform->brokers->get('mt5-bridge');
+        $data['simBridge'] = $mt5 instanceof \Aegis\Brokers\Mt5BridgeConnector
+            && (($mt5->status()['simulated'] ?? false) === true);
+        // Live quote-aware form defaults (SL −0.4% / TP +1.2% keeps R/R ≥ 3
+        // across the demo price wave) — only when a connector is reachable.
+        $data['quoteDefaults'] = null;
+        if ($data['routable']) {
+            try {
+                $mid = (($connector = $this->platform->brokers->tradingConnector()) ? $connector->quote('EURUSD') : null);
+                if ($mid !== null) {
+                    $ref = ($mid['bid'] + $mid['ask']) / 2;
+                    $data['quoteDefaults'] = ['mid' => $ref, 'sl' => $ref * 0.996, 'tp' => $ref * 1.012];
+                }
+            } catch (Throwable $e) { /* defaults stay null */ }
+        }
         $this->load->view('layout/header', $data);
         $this->load->view('execution/index', $data);
         $this->load->view('layout/footer');

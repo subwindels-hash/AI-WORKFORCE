@@ -46,7 +46,7 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **Scheduled operations worker** (`php index.php tools cron`): portfolio scan, broker transitions, proposal expiry | **TESTED** |
 | MT4 / crypto-exchange / stock-broker connectors | **PLANNED** (added one at a time after MT5 is verified) |
 
-**140 automated tests** run through the real CodeIgniter stack
+**146 automated tests** run through the real CodeIgniter stack
 (`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
 sandbox — see below), plus 9 contract tests for the Python bridge
 (`python-services/mt5-bridge/.venv/bin/python -m pytest test_bridge.py`).
@@ -243,6 +243,28 @@ approved symbols) → 11 human approval (HUMAN_APPROVAL mode) → 12 place order
   undecided proposals after `proposalExpiryMinutes` (default 240, spec §5
   invalidation) and audits a `CRON_RUN` summary.
 
+### Simulated MT5 bridge (offline demo only)
+
+The sandbox has no MetaTrader terminal, and the platform refuses to pretend
+otherwise: with no bridge deployed, routing is audited as `ROUTING_BLOCKED`.
+To **demo** the full chain, Broker Center has a *Simulated MT5 bridge* toggle:
+
+- The dev runtime runs an in-process mock on `127.0.0.1:8790` that speaks the
+  **exact documented bridge contract** (health, quotes, candles, positions,
+  pending orders, history, place/modify/cancel/close) with in-memory state.
+- It is activated by a marker file (`application/data/mt5-demo.json`) that
+  only the dev bridge's front controller honors — production never reads it,
+  it never overrides an explicitly configured real bridge, it is locked to
+  loopback, and `AEGIS_MT5_LIVE_ALLOWED` stays 0.
+- `/health` reports `simulated: true`; the connector surfaces the flag, and
+  the Broker/Execution consoles show a **SIMULATION** banner. Every fill is a
+  simulation — no real broker, no real order.
+- All connector gates still apply (demo account, trading flags), so the demo
+  exercises the genuine 15-step pipeline: propose → PENDING_APPROVAL (with
+  operator notification) → approve → route → simulated fill → audit +
+  post-trade portfolio snapshot. SEMI_AUTONOMOUS still refuses without an
+  APPROVED (paper-proven) strategy — by design.
+
 ## API surface
 
 `/api/auth/{login,me,logout}` · `/api/notifications[/read-all|/:id/read]`
@@ -278,8 +300,10 @@ approved symbols) → 11 human approval (HUMAN_APPROVAL mode) → 12 place order
   automation modes, kill switch, duplicate protection, broker health
   monitoring, portfolio risk monitoring, RBAC on the trading API,
   notifications and the scheduled-operations worker are implemented and
-  tested. Next: a clearly-labeled SIMULATED bridge toggle for the offline
-  demo (real routing still requires a deployed bridge).
+  tested, and the offline demo can run the full chain through the clearly
+  labeled SIMULATED bridge (real routing still requires a deployed bridge).
+  Next: verify MT5 against a real demo terminal, then crypto exchanges one at
+  a time.
 - **Phase 6** — fundamentals agent boundary is implemented and explicitly
   abstains until a licensed, attributable feed is configured. Next: add
   licensed fundamentals, sentiment, on-chain, and options providers one at a

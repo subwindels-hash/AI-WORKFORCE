@@ -12,8 +12,23 @@
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 
 <div class="notice <?= $routable ? 'ok' : 'warnbox' ?>">
-  <?php if ($routable): ?><b>Order routing ACTIVE</b> — a connector is READY with verified order submission. The Execution Supervisor may route approved proposals.
+  <?php if ($routable && !empty($connectors['mt5-bridge']['simulated'])): ?>
+    <b>Order routing ACTIVE — SIMULATED BRIDGE.</b> The connector is READY against the in-process mock (demo marker file). The Execution Supervisor can route approved proposals and receive <b>simulated</b> fills. <b>No real broker is involved and no real order exists.</b>
+  <?php elseif ($routable): ?><b>Order routing ACTIVE</b> — a connector is READY with verified order submission. The Execution Supervisor may route approved proposals.
   <?php else: ?><b>Order routing DISABLED</b> — no connector is READY with verified order submission. Proposals can be evaluated and approved, but routing is audited as ROUTING_BLOCKED and no order is created.<?php endif; ?>
+</div>
+
+<div class="panel" style="margin-top:14px">
+  <h3>Simulated MT5 bridge <span class="badge b-amber">DEMO · SIMULATION</span></h3>
+  <div class="body" style="padding-top:12px">
+    <?php if (!empty($sim['enabled'])): ?>
+      <div class="notice warnbox" style="margin-bottom:10px"><b>SIMULATION RUNNING</b> on 127.0.0.1:<?= e((string) $sim['port']) ?> — an in-process mock that speaks the documented bridge contract (health, quotes, candles, positions, orders, place/modify/cancel/close) with in-memory state. The PHP connector applies its normal gates (demo account, trading flags). <b>This is not a MetaTrader terminal and cannot reach one.</b></div>
+      <form method="post" action="/brokers/sim-toggle"><input type="hidden" name="enable" value="0"><button class="btn danger">Stop simulated bridge</button></form>
+    <?php else: ?>
+      <p class="dim">This sandbox has no MetaTrader terminal and no bridge deployed, so routing is honestly blocked. To <i>demo</i> the full propose → approve → route → fill chain, start the in-process <b>simulated</b> bridge below — every fill is clearly labeled SIMULATION.</p>
+      <form method="post" action="/brokers/sim-toggle"><input type="hidden" name="enable" value="1"><button class="btn primary">Start simulated bridge (demo)</button></form>
+    <?php endif; ?>
+  </div>
 </div>
 
 <div class="grid">

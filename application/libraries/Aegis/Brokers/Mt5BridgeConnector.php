@@ -75,10 +75,13 @@ class Mt5BridgeConnector implements TradingConnector
         if (!is_array($health) || ($health['ok'] ?? false) !== true) {
             return $this->statusPayload('DOWN', 'Bridge health check failed.');
         }
-        return $this->statusPayload('READY', 'Bridge reachable.', [
+        return $this->statusPayload('READY', ($health['simulated'] ?? false) === true
+            ? 'Bridge reachable — SIMULATED bridge (demo).'
+            : 'Bridge reachable.', [
             'bridgeVersion' => isset($health['version']) ? (string) $health['version'] : null,
             'bridgeTradingEnabled' => ($health['tradingEnabled'] ?? false) === true,
             'accountType' => isset($health['accountType']) ? (string) $health['accountType'] : 'unknown',
+            'simulated' => ($health['simulated'] ?? false) === true,
             'orderSubmissionEffective' => $this->orderSubmissionEffective($health),
         ]);
     }

@@ -354,7 +354,7 @@ class ExecutionSupervisor
         $proposal['updated_at'] = gmdate('c');
         $this->proposals->saveProposal($proposal);
         $this->audit->emit($approve ? 'EXECUTION_APPROVAL_GRANTED' : 'EXECUTION_APPROVAL_REJECTED', $approve ? "Proposal {$id} approved for routing" : "Proposal {$id} rejected", ['id' => $id, 'reason' => $reason], $actor);
-        return $proposal;
+        return $this->proposals->findProposal($id) ?? $proposal;
     }
 
     /**
