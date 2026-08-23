@@ -87,3 +87,25 @@ $route['api/execution/approvals/request'] = 'api_system/execution_request_approv
 $route['api/execution/approvals/(:any)/decide'] = 'api_system/execution_decide/$1';
 $route['api/execution/approvals/(:any)/route'] = 'api_system/execution_route/$1';
 $route['api/trading/synthetic-paper'] = 'api_system/synthetic_paper';
+
+// ---- Standalone Lead Discovery & Sales Intelligence ----------------------
+$route['leads'] = 'leads/index';
+$route['lead-pipeline'] = 'leads/pipeline';
+$route['api/v1/lead-discovery/search'] = 'api_lead_discovery/search';
+$route['api/v1/lead-discovery/leads'] = 'api_lead_discovery/leads';
+$route['api/v1/lead-discovery/leads/(:any)'] = 'api_lead_discovery/leads/$1';
+$route['api/v1/lead-discovery/leads/(:any)/status'] = 'api_lead_discovery/status/$1';
+$route['api/v1/lead-discovery/leads/(:any)/owner'] = 'api_lead_discovery/owner/$1';
+$route['api/v1/lead-discovery/leads/(:any)/notes'] = 'api_lead_discovery/notes/$1';
+$route['api/v1/lead-discovery/collections'] = 'api_lead_discovery/collections';
+$route['api/v1/lead-discovery/collections/(:any)'] = 'api_lead_discovery/collections/$1';
+$route['api/v1/lead-discovery/collections/(:any)/leads'] = 'api_lead_discovery/collection_leads/$1';
+$route['api/v1/lead-discovery/collections/(:any)/leads/(:any)'] = 'api_lead_discovery/collection_leads/$1/$2';
+$route['api/v1/lead-discovery/coverage'] = 'api_lead_discovery/coverage';
+$route['api/v1/lead-discovery/duplicates'] = 'api_lead_discovery/duplicates';
+$route['api/v1/lead-discovery/duplicates/resolve'] = 'api_lead_discovery/duplicates/true';
+$route['api/v1/lead-discovery/history'] = 'api_lead_discovery/history';
+$route['api/v1/lead-discovery/summary'] = 'api_lead_discovery/summary';
+$route['api/v1/lead-discovery/export'] = 'api_lead_discovery/export';
+$route['api/v1/lead-discovery/export/preview'] = 'api_lead_discovery/export';
+$route['api/v1/lead-discovery/export/csv'] = 'api_lead_discovery/export/csv';
