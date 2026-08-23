@@ -172,6 +172,12 @@ class Aegis_model extends CI_Model
                 $this->db->insert('sports_sync_runs', ['id' => $run['id'], 'provider_id' => $run['providerId'] ?? null, 'job_type' => $run['jobType'], 'status' => 'RUNNING', 'started_at' => gmdate('c'), 'execution_key' => $run['executionKey']]); return $run;
             }
             public function finishSync(string $id, array $result): void { $this->db->where('id', $id)->update('sports_sync_runs', ['status' => $result['status'], 'ended_at' => gmdate('c'), 'records_processed' => $result['processed'] ?? 0, 'records_created' => $result['created'] ?? 0, 'records_updated' => $result['updated'] ?? 0, 'errors' => json_encode($result['errors'] ?? [])]); }
+            public function ensureModelVersion(array $m): int { $row = $this->db->get_where('sports_model_versions', ['model_name' => $m['modelName'], 'model_version' => $m['modelVersion']], 1)->row_array(); if ($row) return (int)$row['id']; $this->db->insert('sports_model_versions', ['model_name' => $m['modelName'], 'model_version' => $m['modelVersion'], 'feature_version' => $m['featureVersion'], 'calibration_version' => $m['calibrationVersion'] ?? null, 'status' => $m['status'] ?? 'APPROVED', 'created_at' => gmdate('c')]); return (int)$this->db->insert_id(); }
+            public function savePrediction(array $p): void { $this->db->insert('sports_predictions', $p); }
+            public function saveTicket(array $t): void { $this->db->insert('sports_tickets', $t); }
+            public function saveTicketSelection(array $s): void { $this->db->insert('sports_ticket_selections', $s); }
+            public function findTicket(string $id): ?array { return $this->db->get_where('sports_tickets', ['id' => $id], 1)->row_array() ?: null; }
+            public function updateTicket(string $id, array $patch): void { $this->db->where('id', $id)->update('sports_tickets', $patch); }
         };
 
         $this->identity = new class($db) implements Aegis\Persistence\IdentityRepository {

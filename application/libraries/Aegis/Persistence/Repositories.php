@@ -71,6 +71,12 @@ interface SportsRepository
     /** Starts once per idempotency key, or returns null if already processed. */
     public function startSync(array $run): ?array;
     public function finishSync(string $id, array $result): void;
+    public function ensureModelVersion(array $model): int;
+    public function savePrediction(array $prediction): void;
+    public function saveTicket(array $ticket): void;
+    public function saveTicketSelection(array $selection): void;
+    public function findTicket(string $id): ?array;
+    public function updateTicket(string $id, array $patch): void;
 }
 
 interface IdentityRepository

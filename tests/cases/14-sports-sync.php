@@ -16,6 +16,12 @@ function fx_sports_sync(): array {
         public function saveQuality(int $matchId, array $assessment): void { $this->quality[] = $assessment; }
         public function startSync(array $run): ?array { if (isset($this->keys[$run['executionKey']])) return null; $this->keys[$run['executionKey']] = true; return $run; }
         public function finishSync(string $id, array $result): void { $this->finished[] = $result; }
+        public function ensureModelVersion(array $model): int { return 1; }
+        public function savePrediction(array $prediction): void {}
+        public function saveTicket(array $ticket): void {}
+        public function saveTicketSelection(array $selection): void {}
+        public function findTicket(string $id): ?array { return null; }
+        public function updateTicket(string $id, array $patch): void {}
     };
     $audit = new class implements AuditRepository { public array $events = []; public function emit(string $type, string $summary, array $detail = [], string $actor = 'system'): void { $this->events[] = $type; } public function recent(int $limit = 100): array { return []; } };
     return [new SportsSyncService($repo, $audit, new DataQualityEngine()), $repo, $audit];

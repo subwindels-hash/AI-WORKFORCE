@@ -18,6 +18,7 @@ class SportsIntelligence
     public readonly RiskEngine $risk;
     public readonly CorrelationEngine $correlation;
     public readonly TicketOptimizer $tickets;
+    public readonly DecisionRecorder $decisions;
     public readonly SportsSyncService $sync;
     public function __construct(SportsRepository $repository, AuditRepository $audit)
     {
@@ -31,6 +32,7 @@ class SportsIntelligence
         $this->risk = new RiskEngine();
         $this->correlation = new CorrelationEngine();
         $this->tickets = new TicketOptimizer($this->correlation);
+        $this->decisions = new DecisionRecorder($repository, $audit);
         $this->sync = new SportsSyncService($repository, $audit, $this->quality);
     }
     public function status(): array
