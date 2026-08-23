@@ -6,6 +6,7 @@ import { leadRoutes } from "./routes/leads.js";
 import { discoveryRoutes } from "./routes/discovery.js";
 import { pipelineRoutes } from "./routes/pipeline.js";
 import { intelligenceRoutes } from "./routes/intelligence.js";
+import { authRoutes } from "./routes/auth.js";
 
 export async function buildApp(options: { db: Database; jwtSecret: string; redis: RedisClient }) {
   const app = Fastify({ logger: true });
@@ -20,6 +21,7 @@ export async function buildApp(options: { db: Database; jwtSecret: string; redis
     const status = typeof known.statusCode === "number" ? known.statusCode : 500;
     reply.code(status).send({ error: status >= 500 ? "internal server error" : typeof known.message === "string" ? known.message : "request failed" });
   });
+  await app.register(authRoutes, { prefix: "/api/v1/auth" });
   await app.register(leadRoutes, { prefix: "/api/v1/lead-discovery" });
   await app.register(discoveryRoutes, { prefix: "/api/v1/lead-discovery" });
   await app.register(pipelineRoutes, { prefix: "/api/v1/lead-discovery" });
