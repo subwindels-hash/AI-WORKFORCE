@@ -109,6 +109,7 @@ $route['api/v1/lead-discovery/duplicates'] = 'api_lead_discovery/duplicates';
 $route['api/v1/lead-discovery/duplicates/resolve'] = 'api_lead_discovery/duplicates/true';
 $route['api/v1/lead-discovery/history'] = 'api_lead_discovery/history';
 $route['api/v1/lead-discovery/summary'] = 'api_lead_discovery/summary';
+$route['api/v1/lead-discovery/pipeline'] = 'api_lead_discovery/pipeline';
 $route['api/v1/lead-discovery/export'] = 'api_lead_discovery/export';
 $route['api/v1/lead-discovery/export/preview'] = 'api_lead_discovery/export';
 $route['api/v1/lead-discovery/export/csv'] = 'api_lead_discovery/export/csv';
