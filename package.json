@@ -1,0 +1,21 @@
+{
+  "name": "aegis-trading-intelligence",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AEGIS — Standalone AI Trading Intelligence platform. Phase 1: ANALYSIS_ONLY vertical slice (market data -> agents -> intelligence -> risk).",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w packages/core && npm run build -w apps/api",
+    "test": "npm run build -w packages/core && npm run test -w packages/core && npm run test -w apps/api",
+    "typecheck": "tsc --noEmit -p packages/core && tsc --noEmit -p apps/api",
+    "dev:api": "npm run dev -w apps/api",
+    "dev:dashboard": "npm run dev -w apps/dashboard"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

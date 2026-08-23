@@ -1,0 +1,39 @@
+# AEGIS — Phase 1 stack.
+#
+# NOTE (honesty per project rules): these compose files are provided for
+# deployment convenience but were NOT exercised in the development sandbox
+# (no Docker available there). Validate on your host before production use.
+# PostgreSQL and Redis are intentionally absent: Phase 1 runs on an in-memory
+# store + JSONL audit file. They join the stack in Phase 2+ (strategies,
+# backtests, persistent audit).
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - "4000:4000"
+    environment:
+      - LOG_LEVEL=info
+      # BINANCE_API_BASE / FRANKFURTER_API_BASE can be overridden here.
+    volumes:
+      - aegis-data:/app/apps/api/data
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+      args:
+        - API_PROXY_TARGET=http://api:4000
+    ports:
+      - "3000:3000"
+    environment:
+      - API_PROXY_TARGET=http://api:4000
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  aegis-data:
