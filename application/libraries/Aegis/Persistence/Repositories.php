@@ -75,6 +75,9 @@ interface SportsRepository
     public function savePrediction(array $prediction): void;
     public function saveTicket(array $ticket): void;
     public function saveTicketSelection(array $selection): void;
+    /** @return array<int,array<string,mixed>> */
+    public function ticketSelections(string $ticketId): array;
+    public function updateTicketSelection(int $id, array $patch): void;
     public function findTicket(string $id): ?array;
     public function updateTicket(string $id, array $patch): void;
 }

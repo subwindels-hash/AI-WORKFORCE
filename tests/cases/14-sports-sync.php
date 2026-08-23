@@ -20,6 +20,8 @@ function fx_sports_sync(): array {
         public function savePrediction(array $prediction): void {}
         public function saveTicket(array $ticket): void {}
         public function saveTicketSelection(array $selection): void {}
+        public function ticketSelections(string $ticketId): array { return []; }
+        public function updateTicketSelection(int $id, array $patch): void {}
         public function findTicket(string $id): ?array { return null; }
         public function updateTicket(string $id, array $patch): void {}
     };

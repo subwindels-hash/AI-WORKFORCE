@@ -176,6 +176,8 @@ class Aegis_model extends CI_Model
             public function savePrediction(array $p): void { $this->db->insert('sports_predictions', $p); }
             public function saveTicket(array $t): void { $this->db->insert('sports_tickets', $t); }
             public function saveTicketSelection(array $s): void { $this->db->insert('sports_ticket_selections', $s); }
+            public function ticketSelections(string $ticketId): array { return $this->db->get_where('sports_ticket_selections', ['ticket_id' => $ticketId])->result_array(); }
+            public function updateTicketSelection(int $id, array $patch): void { $this->db->where('id', $id)->update('sports_ticket_selections', $patch); }
             public function findTicket(string $id): ?array { return $this->db->get_where('sports_tickets', ['id' => $id], 1)->row_array() ?: null; }
             public function updateTicket(string $id, array $patch): void { $this->db->where('id', $id)->update('sports_tickets', $patch); }
         };
