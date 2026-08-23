@@ -2,16 +2,20 @@
 namespace Aegis\Sports;
 
 use Aegis\Sports\Providers\SportsProviderManager;
+use Aegis\Persistence\AuditRepository;
+use Aegis\Persistence\SportsRepository;
 
 /** Phase 2 sports service container. Starts with no provider rather than demo/fabricated fixtures. */
 class SportsIntelligence
 {
     public readonly SportsProviderManager $providers;
     public readonly DataQualityEngine $quality;
-    public function __construct()
+    public readonly SportsSyncService $sync;
+    public function __construct(SportsRepository $repository, AuditRepository $audit)
     {
         $this->providers = new SportsProviderManager();
         $this->quality = new DataQualityEngine();
+        $this->sync = new SportsSyncService($repository, $audit, $this->quality);
     }
     public function status(): array
     {

@@ -54,7 +54,7 @@ class Platform
 
         $this->risk = new RiskEngine();
         $this->execution = new ExecutionSupervisor($model->audit, $model->state);
-        $this->sports = new \Aegis\Sports\SportsIntelligence();
+        $this->sports = new \Aegis\Sports\SportsIntelligence($model->sports, $model->audit);
         $this->identity = new Identity($model->identity);
         $this->strategies = new StrategyRegistry($model->strategies, $model->audit);
         $this->strategies->seedBuiltins();
