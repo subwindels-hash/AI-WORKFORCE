@@ -24,7 +24,8 @@ class Api_system extends Api_controller
         ['name' => 'Strategy Engine + lifecycle', 'category' => 'engine', 'status' => 'TESTED', 'detail' => '4 built-ins, evidence-gated lifecycle through PAPER_TRADING (Phase 3)'],
         ['name' => 'Backtesting Engine', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'Next-bar-open fills, cost model, pessimistic stop rule, look-ahead guard'],
         ['name' => 'Paper Trading Engine', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'Phase 3: simulated accounts/orders/fills with full governance chain, strategy deployments, journaling'],
-        ['name' => 'Trade Execution Supervisor', 'category' => 'engine', 'status' => 'PLANNED', 'detail' => 'Phase 5 — 15-step pipeline'],
+        ['name' => 'Trade Execution Supervisor preflight', 'category' => 'engine', 'status' => 'IMPLEMENTED', 'detail' => 'Phase 5 foundation: kill-switch, HUMAN_APPROVAL mode, mandatory-stop and intent validation; never routes an order'],
+        ['name' => 'Broker order routing / approvals persistence', 'category' => 'engine', 'status' => 'PLANNED', 'detail' => 'Next Phase 5 increment — must remain behind the supervisor'],
         ['name' => 'Kill switch', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'Ships ACTIVE in DB state; blocks all order placement (paper included)'],
         // platform
         ['name' => 'MySQL / MariaDB persistence', 'category' => 'module', 'status' => 'IMPLEMENTED', 'detail' => 'Canonical schema + mysqli config (application/database/schema.mysql.sql); the offline sandbox verifies the identical app+SQL through pdo_sqlite'],
@@ -48,7 +49,7 @@ class Api_system extends Api_controller
             'version' => '0.3.0',
             'stack' => 'CodeIgniter ' . CI_VERSION . ' / PHP ' . PHP_VERSION . ' / ' . $this->db->platform(),
             'tradingMode' => $state['tradingMode'],
-            'implementedTradingModes' => ['ANALYSIS_ONLY', 'PAPER_TRADING'],
+            'implementedTradingModes' => ['ANALYSIS_ONLY', 'PAPER_TRADING', 'HUMAN_APPROVAL'],
             'supportedTradingModes' => ['ANALYSIS_ONLY', 'PAPER_TRADING', 'HUMAN_APPROVAL', 'SEMI_AUTONOMOUS', 'FULLY_AUTOMATED'],
             'killSwitch' => $state['killSwitch'],
             'providers' => $this->platform->providers->getAllHealth(),
@@ -138,6 +139,12 @@ class Api_system extends Api_controller
             'Paper-trading synthetic prices ' . ($body['allow'] ? 'ALLOWED (dev)' : 'BLOCKED'),
             ['allow' => $body['allow']], 'user');
         $this->json(['allowSyntheticPaperData' => $body['allow']]);
+    }
+
+    /** Phase 5 gate only: evaluates an intent, never routes to a broker. */
+    public function execution_preflight()
+    {
+        $this->json($this->platform->execution->preflight($this->jsonBody(), $this->platform->state()));
     }
 
     public function trading_mode()

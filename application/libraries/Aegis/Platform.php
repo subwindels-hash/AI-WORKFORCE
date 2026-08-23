@@ -27,6 +27,7 @@ class Platform
 {
     public readonly ProviderManager $providers;
     public readonly BrokerManager $brokers;
+    public readonly ExecutionSupervisor $execution;
     public readonly RiskEngine $risk;
     public readonly StrategyRegistry $strategies;
     public readonly TradingIntelligenceEngine $engine;
@@ -50,6 +51,7 @@ class Platform
         });
 
         $this->risk = new RiskEngine();
+        $this->execution = new ExecutionSupervisor($model->audit);
         $this->strategies = new StrategyRegistry($model->strategies, $model->audit);
         $this->strategies->seedBuiltins();
 
@@ -84,9 +86,9 @@ class Platform
 
     public function setTradingMode(string $mode): array
     {
-        $implemented = ['ANALYSIS_ONLY', 'PAPER_TRADING'];
+        $implemented = ['ANALYSIS_ONLY', 'PAPER_TRADING', 'HUMAN_APPROVAL'];
         if (!in_array($mode, $implemented, true)) {
-            return ['ok' => false, 'message' => "Mode {$mode} is not implemented yet. Implemented: " . implode(', ', $implemented) . '. Execution modes arrive in Phase 5; brokers in Phase 4.'];
+            return ['ok' => false, 'message' => "Mode {$mode} is not implemented yet. Implemented: " . implode(', ', $implemented) . '. Semi- and fully-autonomous execution remain unavailable.'];
         }
         $state = $this->model->state->load();
         $prev = $state['tradingMode'];

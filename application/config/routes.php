@@ -73,4 +73,5 @@ $route['api/risk/limits'] = 'api_system/risk_limits';
 $route['api/risk/limits/update'] = 'api_system/update_risk_limits';
 $route['api/trading/kill-switch'] = 'api_system/kill_switch';
 $route['api/trading/mode'] = 'api_system/trading_mode';
+$route['api/execution/preflight'] = 'api_system/execution_preflight';
 $route['api/trading/synthetic-paper'] = 'api_system/synthetic_paper';
