@@ -17,6 +17,7 @@ class ScriptedStrategy implements TradingStrategy
     public function marketClasses(): array { return ['crypto']; }
     public function timeframes(): array { return ['1h']; }
     public function params(): array { return []; }
+    public function paramGrid(): array { return []; }
     public function supportsShorts(): bool { return true; }
     public function evaluate(array $ctx): array {
         $this->seen[] = $ctx['view']->index;
@@ -127,6 +128,7 @@ test('backtest: look-ahead access kills the run', function () {
         public function marketClasses(): array { return ['crypto']; }
         public function timeframes(): array { return ['1h']; }
         public function params(): array { return []; }
+    public function paramGrid(): array { return []; }
         public function supportsShorts(): bool { return false; }
         public function evaluate(array $ctx): array {
             $ctx['view']->close($ctx['view']->index + 1);

@@ -81,6 +81,25 @@ class StrategyRegistry
     }
 
     /**
+     * Register an optimized variant (new version, source 'ai'). The variant
+     * starts at DRAFT and is subject to the full lifecycle — the AI-source
+     * rule additionally blocks paper/live advancement without human sign-off.
+     */
+    public function registerVariant(\Aegis\Strategies\TradingStrategy $strategy, array $record): array
+    {
+        $key = $strategy->id() . '@' . $strategy->version();
+        if (isset($this->implementations[$key]) || $this->repo->find($strategy->id(), $strategy->version())) {
+            throw new \RuntimeException("variant {$key} already exists");
+        }
+        $this->implementations[$key] = $strategy;
+        $this->repo->save($record);
+        $this->audit->emit('STRATEGY_VARIANT_REGISTERED', sprintf('Optimized variant %s registered (source ai, DRAFT, human sign-off required)', $key), [
+            'strategyId' => $strategy->id(), 'version' => $strategy->version(), 'params' => $strategy->params(),
+        ]);
+        return $record;
+    }
+
+    /**
      * Record lookup for the execution supervisor: exact version, or the most
      * recently updated record for the id when no version is given.
      */

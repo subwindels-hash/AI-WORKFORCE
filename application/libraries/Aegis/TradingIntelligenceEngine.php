@@ -113,6 +113,25 @@ class TradingIntelligenceEngine
             ]);
         }
 
+        // Phase 6: adversarial review. The debate verdict can only REDUCE a
+        // bias or drop the setup — it can never manufacture conviction.
+        $debate = \Aegis\Agents\AgentDebate::run($reports, $consensus, $regime, $setup, $series['provenance'], $this->risk->getLimits());
+        if ($debate['verdict']['bias'] === 'NO_TRADE') {
+            $consensus['bias'] = 'NO_TRADE';
+            $consensus['recommendation'] = 'NO_TRADE';
+            $consensus['confidence'] = $debate['verdict']['confidence'];
+            $setup = null;
+            $riskDecision = null;
+        } elseif ($debate['verdict']['bias'] === 'NEUTRAL' && in_array($consensus['bias'], ['BULLISH', 'BEARISH'], true)) {
+            $consensus['bias'] = 'NEUTRAL';
+            $consensus['recommendation'] = 'HOLD';
+            $consensus['confidence'] = $debate['verdict']['confidence'];
+            $setup = null;
+            $riskDecision = null;
+        } else {
+            $consensus['confidence'] = $debate['verdict']['confidence'];
+        }
+
         $run = [
             'id' => Backtest\Backtester::uuid(),
             'request' => ['symbol' => $symbol, 'marketClass' => $marketClass, 'timeframe' => $timeframe],
@@ -123,6 +142,7 @@ class TradingIntelligenceEngine
             'confluence' => $consensus['confluenceScore'], 'recommendation' => $consensus['recommendation'],
             'reasoning' => $consensus['reasoning'],
             'conflicts' => $consensus['consensus']['conflicts'], 'consensus' => $consensus['consensus'],
+            'debate' => $debate,
             'signals' => $technicalReport['signals'] ?? [],
             'scenarios' => $scenarios, 'tradeSetup' => $setup, 'riskDecision' => $riskDecision,
             'agents' => $reports, 'provenance' => $series['provenance'], 'validation' => $series['validation'],

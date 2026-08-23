@@ -111,6 +111,21 @@
             </div>
           <?php endforeach; ?>
           <div class="dim" style="font-size:11px">net score <?= e(number_format($run['consensus']['netScore'], 2)) ?> · voting: <?= e(implode(', ', $run['consensus']['votingAgents'])) ?> · abstaining: <?= e(implode(', ', $run['consensus']['abstainingAgents']) ?: 'none') ?></div>
+          <?php if (!empty($run['debate'])): $dv = $run['debate']['verdict']; ?>
+            <div class="notice <?= $dv['bias'] === 'NO_TRADE' ? 'err' : ($dv['confidenceAdjustment'] < 0 ? 'warnbox' : 'ok') ?>" style="margin:10px 0 0">
+              <b>Agent debate verdict: <?= e($dv['bias']) ?></b><?php if ($dv['confidenceAdjustment'] < 0): ?> (confidence <?= e($dv['confidenceAdjustment']) ?>)<?php endif; ?>
+              — <?= e(implode('; ', $dv['reasoning'])) ?>
+              <details style="margin-top:6px"><summary style="cursor:pointer;font-size:11px">debate transcript</summary>
+                <?php foreach ($run['debate']['rounds'] as $round): ?>
+                  <div style="font-size:11px;margin-top:4px"><b><?= e(str_replace('-', ' ', $round['role'])) ?></b>
+                    <?php foreach (($round['statements'] ?? $round['objections'] ?? []) as $item): ?>
+                      <div class="dim">• <?= e($item['claim'] ?? ($item['grounds'] ?? '')) ?><?= isset($item['evidence']) ? ' <span class="mono">[' . e($item['evidence']) . ']</span>' : '' ?><?= isset($item['severity']) ? ' <span class="badge b-gray">' . e($item['severity']) . '</span>' : '' ?></div>
+                    <?php endforeach; ?>
+                  </div>
+                <?php endforeach; ?>
+              </details>
+            </div>
+          <?php endif; ?>
           <?php if ($run['conflicts']): ?>
             <div class="notice warnbox" style="margin:10px 0 0">
               <b>Signal conflicts:</b>

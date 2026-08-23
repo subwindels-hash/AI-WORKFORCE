@@ -20,6 +20,8 @@ interface TradingStrategy
     public function timeframes(): array;
     /** @return array<string, mixed> */
     public function params(): array;
+    /** Bounded parameter search space for the strategy optimizer (small by design). */
+    public function paramGrid(): array;
     public function supportsShorts(): bool;
     /** @return array{action:string,reason:string,confidence:float,stopLoss?:float,takeProfit?:float} */
     public function evaluate(array $ctx): array;
@@ -49,6 +51,7 @@ class TrendFollowingStrategy implements TradingStrategy
     public function marketClasses(): array { return ['forex', 'crypto', 'stock', 'etf', 'commodity', 'futures', 'indices']; }
     public function timeframes(): array { return ['5m', '15m', '1h', '4h', '1d']; }
     public function params(): array { return $this->p; }
+    public function paramGrid(): array { return ['fast' => [10, 20], 'slow' => [40, 50, 60], 'adxMin' => [20, 25], 'stopAtr' => [2], 'targetR' => [2, 3]]; }
     public function supportsShorts(): bool { return true; }
 
     public function evaluate(array $ctx): array
@@ -109,6 +112,7 @@ class MeanReversionStrategy implements TradingStrategy
     public function marketClasses(): array { return ['forex', 'crypto', 'stock', 'etf', 'commodity', 'futures', 'indices']; }
     public function timeframes(): array { return ['5m', '15m', '1h', '4h', '1d']; }
     public function params(): array { return $this->p; }
+    public function paramGrid(): array { return ['rsiLow' => [25, 30], 'rsiHigh' => [70, 75], 'adxMax' => [25, 30], 'stopAtr' => [2.5]]; }
     public function supportsShorts(): bool { return true; }
 
     public function evaluate(array $ctx): array
@@ -167,6 +171,7 @@ class BreakoutStrategy implements TradingStrategy
     public function marketClasses(): array { return ['forex', 'crypto', 'stock', 'etf', 'commodity', 'futures', 'indices']; }
     public function timeframes(): array { return ['5m', '15m', '1h', '4h', '1d']; }
     public function params(): array { return $this->p; }
+    public function paramGrid(): array { return ['lookback' => [24, 48, 72], 'volMult' => [1.2, 1.5, 2.0], 'stopAtr' => [1.5], 'targetR' => [2, 2.5]]; }
     public function supportsShorts(): bool { return true; }
 
     public function evaluate(array $ctx): array
@@ -222,6 +227,7 @@ class MomentumStrategy implements TradingStrategy
     public function marketClasses(): array { return ['forex', 'crypto', 'stock', 'etf', 'commodity', 'futures', 'indices']; }
     public function timeframes(): array { return ['5m', '15m', '1h', '4h', '1d']; }
     public function params(): array { return $this->p; }
+    public function paramGrid(): array { return ['rocPeriod' => [10, 20], 'rocMinPct' => [1.0, 1.5], 'stopAtr' => [2], 'targetR' => [2, 3]]; }
     public function supportsShorts(): bool { return true; }
 
     public function evaluate(array $ctx): array
@@ -268,4 +274,45 @@ class MomentumStrategy implements TradingStrategy
         }
         return hold();
     }
+}
+
+
+/** Parameter-aware factory for the builtin strategies (used by the optimizer). */
+function builtinStrategyFactory(string $id): ?callable
+{
+    $classes = [
+        'trend-following' => TrendFollowingStrategy::class,
+        'mean-reversion' => MeanReversionStrategy::class,
+        'breakout' => BreakoutStrategy::class,
+        'momentum' => MomentumStrategy::class,
+    ];
+    if (!isset($classes[$id])) return null;
+    $class = $classes[$id];
+    return static fn(array $params): TradingStrategy => new $class($params);
+}
+
+/**
+ * A registered variant of an existing strategy under a NEW version with new
+ * params. Delegates evaluation to the inner implementation; the variant is
+ * stored with source 'ai' so the lifecycle gates require human sign-off
+ * before paper/live stages (existing rule, unchanged).
+ */
+class VersionedStrategyDecorator implements TradingStrategy
+{
+    public function __construct(
+        private readonly TradingStrategy $inner,
+        private readonly string $version,
+        private readonly array $params,
+    ) {}
+
+    public function id(): string { return $this->inner->id(); }
+    public function version(): string { return $this->version; }
+    public function name(): string { return $this->inner->name() . " (optimized {$this->version})"; }
+    public function description(): string { return $this->inner->description(); }
+    public function marketClasses(): array { return $this->inner->marketClasses(); }
+    public function timeframes(): array { return $this->inner->timeframes(); }
+    public function params(): array { return $this->params; }
+    public function paramGrid(): array { return $this->inner->paramGrid(); }
+    public function supportsShorts(): bool { return $this->inner->supportsShorts(); }
+    public function evaluate(array $ctx): array { return $this->inner->evaluate($ctx); }
 }

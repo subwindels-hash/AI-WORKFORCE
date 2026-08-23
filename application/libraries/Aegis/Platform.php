@@ -82,6 +82,77 @@ class Platform
         );
     }
 
+    /**
+     * Phase 6: parameter optimization with walk-forward verification
+     * (in-sample 70% / out-of-sample 30%). Optionally registers the winning
+     * parameters as a NEW version with source 'ai' — which then needs the
+     * full lifecycle plus human sign-off like any AI-generated strategy.
+     */
+    public function optimizeStrategy(array $input): array
+    {
+        $id = (string) ($input['strategyId'] ?? '');
+        $factory = \Aegis\Strategies\builtinStrategyFactory($id);
+        if ($factory === null) {
+            throw new \InvalidArgumentException('optimization requires a builtin strategy (trend-following, mean-reversion, breakout, momentum)');
+        }
+        $record = $this->strategies->findRecord($id, $input['strategyVersion'] ?? null);
+        if ($record === null) throw new \InvalidArgumentException("strategy {$id} is not registered");
+        $impl = $this->strategies->implementation($id, $record['version']);
+        if ($impl === null) throw new \InvalidArgumentException("strategy {$id}@{$record['version']} has no executable implementation");
+
+        $symbol = strtoupper((string) ($input['symbol'] ?? 'BTCUSDT'));
+        $marketClass = (string) ($input['marketClass'] ?? $this->paper->inferMarketClass($symbol));
+        $timeframe = (string) ($input['timeframe'] ?? '1h');
+        $limit = max(420, min(2000, (int) ($input['limit'] ?? 800)));
+        $series = $this->providers->getCandleSeries($symbol, $marketClass, $timeframe, $limit);
+
+        $report = \Aegis\Optimization\StrategyOptimizer::optimize(
+            $factory, $impl->params(), $impl->paramGrid(), $series['candles'],
+            array_intersect_key($input, \Aegis\Backtest\Backtester::DEFAULTS)
+        );
+        $report['request'] = ['strategyId' => $id, 'strategyVersion' => $record['version'], 'symbol' => $symbol, 'marketClass' => $marketClass, 'timeframe' => $timeframe, 'limit' => $limit];
+        $report['dataProvenance'] = $series['provenance'];
+
+        if (!empty($input['register']) && $report['recommendation']['adopt']) {
+            $inner = $factory($report['recommendation']['params']);
+            $version = $this->nextVariantVersion($id);
+            $now = gmdate('c');
+            $variant = new \Aegis\Strategies\VersionedStrategyDecorator($inner, $version, $report['recommendation']['params']);
+            $variantRecord = [
+                'strategy_id' => $id, 'version' => $version,
+                'name' => $inner->name() . " (optimized {$version})", 'description' => $inner->description(),
+                'market_classes' => $inner->marketClasses(), 'timeframes' => $inner->timeframes(),
+                'params' => $variant->params(), 'source' => 'ai', 'lifecycle' => 'DRAFT',
+                'created_at' => $now, 'updated_at' => $now,
+                'lifecycle_history' => [['from' => null, 'to' => 'DRAFT', 'at' => $now,
+                    'reason' => "optimizer variant from @{$record['version']}; walk-forward verified (OOS PF " . ($report['recommendation']['params'] !== null ? 'passed' : 'n/a') . ')']],
+            ];
+            $this->strategies->registerVariant($variant, $variantRecord);
+            $report['registeredVariant'] = ['strategyId' => $id, 'version' => $version, 'lifecycle' => 'DRAFT',
+                'note' => 'source ai — the full lifecycle plus human sign-off apply before paper/live'];
+        }
+
+        $this->model->audit->emit('OPTIMIZATION_RUN', sprintf('Optimized %s@%s on %s %s: %d combinations, adopt=%s', $id, $record['version'], $symbol, $timeframe, $report['searchSpace']['combinationsEvaluated'], $report['recommendation']['adopt'] ? 'yes' : 'no'), [
+            'strategyId' => $id, 'symbol' => $symbol, 'timeframe' => $timeframe,
+            'adopt' => $report['recommendation']['adopt'], 'synthetic' => !empty($series['provenance']['synthetic']),
+        ]);
+        return $report;
+    }
+
+    private function nextVariantVersion(string $id): string
+    {
+        $max = [0, 0, 0];
+        foreach ($this->model->strategies->all() as $r) {
+            if ($r['strategy_id'] !== $id) continue;
+            $parts = array_map('intval', explode('.', (string) $r['version']));
+            if (count($parts) !== 3) continue;
+            if ($parts[0] > $max[0] || ($parts[0] === $max[0] && ($parts[1] > $max[1] || ($parts[1] === $max[1] && $parts[2] > $max[2])))) {
+                $max = $parts;
+            }
+        }
+        return sprintf('%d.%d.%d', $max[0], $max[1], $max[2] + 1);
+    }
+
     public function runBacktest(array $input): array
     {
         $impl = $this->strategies->implementation($input['strategyId'], $input['strategyVersion'] ?? '');

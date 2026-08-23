@@ -14,6 +14,8 @@ $route['translate_uri_dashes'] = false;
 // ---- pretty URLs for the MVC pages ---------------------------------------
 $route['strategy'] = 'strategy_lab';
 $route['strategy/backtest'] = 'strategy_lab/run_backtest';
+$route['strategy/optimize'] = 'strategy_lab/optimize';
+$route['api/strategies/(:any)/optimize'] = 'api_strategies/optimize/$1';
 $route['strategy/advance'] = 'strategy_lab/advance';
 $route['kill-switch'] = 'welcome/kill_switch';
 $route['mode'] = 'welcome/mode';

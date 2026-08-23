@@ -46,7 +46,7 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **Scheduled operations worker** (`php index.php tools cron`): portfolio scan, broker transitions, proposal expiry | **TESTED** |
 | MT4 / crypto-exchange / stock-broker connectors | **PLANNED** (added one at a time after MT5 is verified) |
 
-**146 automated tests** run through the real CodeIgniter stack
+**158 automated tests** run through the real CodeIgniter stack
 (`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
 sandbox — see below), plus 9 contract tests for the Python bridge
 (`python-services/mt5-bridge/.venv/bin/python -m pytest test_bridge.py`).
@@ -243,6 +243,27 @@ approved symbols) → 11 human approval (HUMAN_APPROVAL mode) → 12 place order
   undecided proposals after `proposalExpiryMinutes` (default 240, spec §5
   invalidation) and audits a `CRON_RUN` summary.
 
+### Phase 6 intelligence: agent debate + strategy optimizer
+
+- **Multi-agent debate** runs as a deterministic adversarial review in front
+  of every consensus: bull/bear advocates state their strongest evidence
+  (citing the agent + signal each claim came from), a **skeptic** challenges
+  the leading bias (split panel, regime contradiction, stale data, weak
+  conviction), and a **risk critic** challenges the concrete setup
+  (risk/reward, stop width). Verdicts can only **reduce** a bias — NO_TRADE
+  on any sustained critical objection, NEUTRAL on two majors, confidence cuts
+  otherwise — never manufacture conviction. The transcript ships with every
+  analysis run (`debate` field; dashboard renders it).
+- **Strategy optimizer** (`POST /api/strategies/:id/optimize`, Strategy Lab):
+  grid search over the strategy's small declared `paramGrid()` on the first
+  70% of the series, then **out-of-sample verification** on the last 30%.
+  A candidate is recommended only if it survives out-of-sample (PF > 1,
+  positive expectancy, ≥ 5 trades) and beats the baseline there; in-sample
+  wins alone are never adopted, and degradation is reported as explicit
+  overfit warnings. Registering a winner creates a **new version with source
+  `ai`** — DRAFT lifecycle, human sign-off required before paper/live, same
+  as any AI-generated strategy.
+
 ### Simulated MT5 bridge (offline demo only)
 
 The sandbox has no MetaTrader terminal, and the platform refuses to pretend
@@ -304,10 +325,12 @@ To **demo** the full chain, Broker Center has a *Simulated MT5 bridge* toggle:
   labeled SIMULATED bridge (real routing still requires a deployed bridge).
   Next: verify MT5 against a real demo terminal, then crypto exchanges one at
   a time.
-- **Phase 6** — fundamentals agent boundary is implemented and explicitly
-  abstains until a licensed, attributable feed is configured. Next: add
-  licensed fundamentals, sentiment, on-chain, and options providers one at a
-  time with provenance and freshness validation.
+- **Phase 6 (in progress)** — multi-agent debate and the strategy optimizer
+  are implemented and tested. The fundamentals agent boundary is implemented
+  and explicitly abstains until a licensed, attributable feed is configured.
+  Next: add licensed fundamentals, sentiment, on-chain, and options providers
+  one at a time with provenance and freshness validation; portfolio
+  optimization.
 
 ## Disclaimer
 
