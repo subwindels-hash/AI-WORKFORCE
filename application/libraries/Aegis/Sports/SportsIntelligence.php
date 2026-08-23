@@ -22,6 +22,7 @@ class SportsIntelligence
     public readonly TicketGovernance $governance;
     public readonly ResultVerificationEngine $results;
     public readonly TicketSettlementService $settlement;
+    public readonly PersistedResultVerifier $resultVerifier;
     public readonly SportsSyncService $sync;
     public function __construct(SportsRepository $repository, AuditRepository $audit)
     {
@@ -39,6 +40,7 @@ class SportsIntelligence
         $this->governance = new TicketGovernance($repository, $audit);
         $this->results = new ResultVerificationEngine();
         $this->settlement = new TicketSettlementService($repository, $this->results, $audit);
+        $this->resultVerifier = new PersistedResultVerifier($repository, $audit);
         $this->sync = new SportsSyncService($repository, $audit, $this->quality);
     }
     public function status(): array

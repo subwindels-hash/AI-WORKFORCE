@@ -68,6 +68,8 @@ interface SportsRepository
     public function findMatch(int $providerId, string $externalId): ?array;
     public function saveOdds(int $matchId, int $providerId, array $odds): void;
     public function saveResult(int $matchId, int $providerId, array $result): void;
+    public function findResult(int $matchId, int $providerId): ?array;
+    public function verifyResult(int $id): void;
     public function saveQuality(int $matchId, array $assessment): void;
     /** Starts once per idempotency key, or returns null if already processed. */
     public function startSync(array $run): ?array;
