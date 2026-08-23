@@ -4,6 +4,10 @@ use Aegis\Persistence\AuditRepository;
 use Aegis\Persistence\SportsRepository;
 class TicketSettlementService {
  public function __construct(private SportsRepository $repo, private ResultVerificationEngine $verifier, private AuditRepository $audit) {}
+ public function applyStoredResult(string $ticketId,int $matchId,int $providerId): array {
+  $stored=$this->repo->findResult($matchId,$providerId); if(!$stored) throw new \InvalidArgumentException('verified provider result not found');
+  return $this->applyVerifiedResult($ticketId,$matchId,['verified'=>(bool)$stored['verified'],'status'=>$stored['status'],'homeScore'=>$stored['home_score']===null?null:(int)$stored['home_score'],'awayScore'=>$stored['away_score']===null?null:(int)$stored['away_score']]);
+ }
  public function applyVerifiedResult(string $ticketId,int $matchId,array $result): array {
   $verified=$this->verifier->verify($result); if(empty($verified['verified'])) return ['status'=>'PENDING','reason'=>$verified['reason']];
   $ticket=$this->repo->findTicket($ticketId); if(!$ticket) throw new \InvalidArgumentException('ticket not found');

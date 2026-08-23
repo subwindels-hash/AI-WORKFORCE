@@ -20,13 +20,13 @@ class Api_sports extends Api_controller
         catch (\Throwable $e) { $this->jsonError($e->getMessage(), 409); }
     }
 
-    /** Applies a verified provider result. Requires sports.settle; never accepts an unverified result. */
+    /** Settles only from an already verified persisted provider result. */
     public function settle_ticket(string $id)
     {
         if (!$this->requirePermission('sports.settle')) return;
         $body = $this->jsonBody();
-        if (!isset($body['matchId']) || !is_numeric($body['matchId']) || !isset($body['result']) || !is_array($body['result'])) return $this->jsonError('body must include matchId and result');
-        try { $this->json(['settlement' => $this->platform->sports->settlement->applyVerifiedResult($id, (int)$body['matchId'], $body['result'])]); }
+        if (!isset($body['matchId'], $body['providerId']) || !is_numeric($body['matchId']) || !is_numeric($body['providerId'])) return $this->jsonError('body must include numeric matchId and providerId');
+        try { $this->json(['settlement' => $this->platform->sports->settlement->applyStoredResult($id, (int)$body['matchId'], (int)$body['providerId'])]); }
         catch (\InvalidArgumentException $e) { $this->jsonError($e->getMessage(), 404); }
         catch (\Throwable $e) { $this->jsonError($e->getMessage(), 409); }
     }
