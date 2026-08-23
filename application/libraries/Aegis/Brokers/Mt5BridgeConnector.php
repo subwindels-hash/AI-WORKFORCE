@@ -61,7 +61,7 @@ class Mt5BridgeConnector implements BrokerConnector
     /** Read-only account snapshot from an authenticated bridge. */
     public function account(): array
     {
-        return $this->read('/v1/account', 'account');
+        return BrokerDataNormalizer::account($this->read('/v1/account', 'account'), $this->id());
     }
 
     /** Read-only latest quote. The symbol is encoded as a path segment. */
@@ -71,7 +71,7 @@ class Mt5BridgeConnector implements BrokerConnector
         if (!preg_match('/^[A-Z0-9._-]{1,32}$/', $symbol)) {
             throw new \InvalidArgumentException('invalid MT5 symbol');
         }
-        return $this->read('/v1/quotes/' . rawurlencode($symbol), 'quote');
+        return BrokerDataNormalizer::quote($this->read('/v1/quotes/' . rawurlencode($symbol), 'quote'), $this->id());
     }
 
     private function read(string $path, string $kind): array

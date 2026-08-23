@@ -30,7 +30,7 @@ test('MT5 account and quote reads require a token and use read-only bridge paths
     $connector = new Mt5BridgeConnector('https://bridge.example', true,
         function (string $url, string $path, ?string $token) use (&$calls) {
             $calls[] = [$path, $token];
-            if ($path === '/v1/account') return ['data' => ['balance' => 1000.0, 'currency' => 'USD']];
+            if ($path === '/v1/account') return ['data' => ['accountId' => '123', 'balance' => 1000.0, 'equity' => 995.0, 'currency' => 'USD']];
             if ($path === '/v1/quotes/EURUSD') return ['data' => ['symbol' => 'EURUSD', 'bid' => 1.08, 'ask' => 1.081]];
             return ['ok' => true];
         }, 'test-token');
@@ -39,6 +39,15 @@ test('MT5 account and quote reads require a token and use read-only bridge paths
     assert_equals(['/v1/account', 'test-token'], $calls[0]);
     assert_equals(['/v1/quotes/EURUSD', 'test-token'], $calls[1]);
     assert_false($connector->capabilities()['orderSubmission']);
+});
+
+test('broker data contracts normalize account and quote payloads', function () {
+    $account = \Aegis\Brokers\BrokerDataNormalizer::account(['login' => 7, 'currency' => 'usd', 'balance' => 1200, 'equity' => 1190, 'margin' => 100], 'test');
+    assert_equals('USD', $account['currency']);
+    assert_close(1090, $account['freeMargin'], 0.001);
+    $quote = \Aegis\Brokers\BrokerDataNormalizer::quote(['symbol' => 'eurusd', 'bid' => 1.1, 'ask' => 1.1002], 'test');
+    assert_equals('EURUSD', $quote['symbol']);
+    assert_close(0.0002, $quote['spread'], 0.000001);
 });
 
 test('broker manager reports connector health without an execution surface', function () {
