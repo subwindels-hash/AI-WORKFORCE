@@ -1,0 +1,3 @@
+import Link from "next/link";
+const links = [["Overview", "/"], ["Discover", "/leads"], ["Pipeline", "/lead-pipeline"], ["Collections", "/collections"], ["Intelligence", "/intelligence"]] as const;
+export function Navigation() { return <nav className="border-b border-slate-800 bg-slate-950/85 px-6 py-4"><div className="mx-auto flex max-w-7xl items-center justify-between"><Link href="/" className="font-bold tracking-tight text-white">SCOUT <span className="font-normal text-slate-500">/ Lead Intelligence</span></Link><div className="hidden gap-5 text-sm text-slate-400 md:flex">{links.map(([label, href]) => <Link key={href} href={href} className="transition hover:text-cyan-300">{label}</Link>)}</div></div></nav>; }
