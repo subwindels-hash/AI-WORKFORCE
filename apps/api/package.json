@@ -1,0 +1,17 @@
+{
+  "name": "@lead-discovery/api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts"
+  },
+  "dependencies": {
+    "@fastify/jwt": "10.2.2",
+    "fastify": "5.12.1",
+    "pg": "8.15.6",
+    "zod": "3.24.4"
+  },
+  "devDependencies": { "@types/pg": "8.11.13" }
+}

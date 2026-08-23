@@ -1,0 +1,10 @@
+import { buildApp } from "./app.js";
+import { createDatabase } from "./db.js";
+
+const jwtSecret = process.env.LEAD_JWT_SECRET;
+if (!jwtSecret || jwtSecret.length < 32) throw new Error("LEAD_JWT_SECRET must be at least 32 characters");
+const db = createDatabase();
+const app = await buildApp({ db, jwtSecret });
+const shutdown = async () => { await app.close(); await db.end(); };
+process.on("SIGINT", shutdown); process.on("SIGTERM", shutdown);
+await app.listen({ host: process.env.HOST ?? "0.0.0.0", port: Number(process.env.PORT ?? 3001) });
