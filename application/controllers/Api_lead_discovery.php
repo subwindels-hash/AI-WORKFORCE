@@ -1,7 +1,11 @@
 <?php
 defined('BASEPATH') or exit('No direct script access allowed');
+require_once APPPATH . 'libraries/LeadDiscovery/LeadDiscoveryProvider.php';
+require_once APPPATH . 'libraries/LeadDiscovery/ProviderException.php';
+require_once APPPATH . 'libraries/LeadDiscovery/GooglePlacesProvider.php';
+require_once APPPATH . 'libraries/LeadDiscovery/ProviderRegistry.php';
 
-/** Standalone, organization-scoped Lead Discovery API. Google Places is only called when configured. */
+/** Organization-scoped Lead Discovery API with pluggable, normalized providers. */
 class Api_lead_discovery extends Api_controller
 {
     private array $user; private string $org;
@@ -17,6 +21,7 @@ class Api_lead_discovery extends Api_controller
         $this->jsonError('forbidden organization workspace',403); return false;
     }
     public function workspaces(){ if(!$this->guard())return; $rows=$this->db->select('o.id,o.name,m.role')->from('lead_organizations o')->join('lead_organization_members m','m.organization_id=o.id')->where('m.user_id',(int)$this->user['id'])->get()->result_array(); $this->json(['workspaces'=>$rows,'activeOrganizationId'=>$this->org]); }
+    public function providers(){ if(!$this->guard())return; $this->json(['providers'=>(new \LeadDiscovery\ProviderRegistry([new \LeadDiscovery\GooglePlacesProvider()]))->health()]); }
     private function id(): string { return bin2hex(random_bytes(16)); }
     private function now(): string { return gmdate('c'); }
     private function recordActivity(?string $lead, string $type, array $detail=[]): void { $this->db->insert('lead_activities',['id'=>$this->id(),'lead_id'=>$lead,'organization_id'=>$this->org,'actor_id'=>$this->user['id'],'type'=>$type,'detail'=>json_encode($detail),'created_at'=>$this->now()]); }
@@ -26,16 +31,15 @@ class Api_lead_discovery extends Api_controller
     public function search() {
         if(!$this->guard())return; $b=$this->jsonBody(); $q=trim((string)($b['query']??''));
         if(strlen($q)<3 || strlen($q)>300)return $this->jsonError('query must be 3–300 characters');
-        if(($b['provider']??'google_places')!=='google_places')return $this->jsonError('provider is not implemented',422);
-        $started=microtime(true); $key=getenv('GOOGLE_PLACES_API_KEY'); $raw=[]; $error=null;
-        if(!$key) $error='Google Places is disabled: configure GOOGLE_PLACES_API_KEY. No synthetic results were created.';
-        else { $ctx=stream_context_create(['http'=>['method'=>'POST','timeout'=>12,'header'=>"Content-Type: application/json\r\nX-Goog-Api-Key: {$key}\r\nX-Goog-FieldMask: places.id,places.displayName,places.formattedAddress,places.types,places.nationalPhoneNumber,places.websiteUri,places.location\r\n",'content'=>json_encode(['textQuery'=>$q,'maxResultCount'=>min(20,max(1,(int)($b['limit']??20)))])]]); $json=@file_get_contents('https://places.googleapis.com/v1/places:searchText',false,$ctx); $parsed=$json?json_decode($json,true):null; if(!$parsed || isset($parsed['error'])) $error=$parsed['error']['message']??'Google Places request failed or timed out'; else $raw=$parsed['places']??[]; }
+        $started=microtime(true); $providerName=(string)($b['provider']??'google_places'); $error=null; $raw=[]; $providerStatus='DISABLED';
+        try { $registry=new \LeadDiscovery\ProviderRegistry([new \LeadDiscovery\GooglePlacesProvider()]); $provider=$registry->get($providerName); $providerStatus=$provider->healthCheck()['status']; $raw=$provider->searchBusinesses(['query'=>$q,'limit'=>$b['limit']??20]); }
+        catch(\LeadDiscovery\ProviderException $e) { $error=$e->getMessage(); $providerStatus=$e->httpStatus===422?'PLANNED':'DISABLED'; }
         $new=0;$dupes=0;$results=[];
-        foreach($raw as $p){ $sid=(string)($p['id']??''); if(!$sid)continue; $existing=$this->db->get_where('leads',['organization_id'=>$this->org,'source'=>'google_places','source_id'=>$sid],1)->row_array(); $name=(string)($p['displayName']['text']??'Unnamed business'); $types=$p['types']??[]; $record=['organization_id'=>$this->org,'source'=>'google_places','source_id'=>$sid,'name'=>$name,'category'=>implode(', ',array_slice($types,0,3))?:null,'address'=>$p['formattedAddress']??null,'phone'=>$p['nationalPhoneNumber']??null,'website'=>$p['websiteUri']??null,'latitude'=>$p['location']['latitude']??null,'longitude'=>$p['location']['longitude']??null,'metadata'=>json_encode(['provider'=>'Google Places','types'=>$types]),'updated_at'=>$this->now()];
+        foreach($raw as $p){ $sid=(string)$p['sourceId']; $existing=$this->db->get_where('leads',['organization_id'=>$this->org,'source'=>$providerName,'source_id'=>$sid],1)->row_array(); $record=['organization_id'=>$this->org,'source'=>$providerName,'source_id'=>$sid,'name'=>$p['name'],'category'=>$p['category'],'address'=>$p['address'],'phone'=>$p['phone'],'website'=>$p['website'],'latitude'=>$p['latitude'],'longitude'=>$p['longitude'],'metadata'=>json_encode($p['metadata']),'updated_at'=>$this->now()];
           if($existing){$this->db->where('id',$existing['id'])->where('organization_id',$this->org)->update('leads',$record);$record['id']=$existing['id'];$dupes++;$this->recordActivity($existing['id'],'DUPLICATE_DETECTED',['rule'=>'provider_source_id']);} else {$record+=['id'=>$this->id(),'status'=>'new','owner_id'=>null,'created_at'=>$this->now()];$this->db->insert('leads',$record);$new++;$this->recordActivity($record['id'],'LEAD_DISCOVERED',['query'=>$q,'provider'=>'google_places']);} $results[]=$record;
         }
-        $this->db->insert('search_history',['id'=>$this->id(),'organization_id'=>$this->org,'user_id'=>$this->user['id'],'query'=>$q,'provider'=>'google_places','filters'=>json_encode(['limit'=>$b['limit']??20]),'results_returned'=>count($raw),'new_leads_created'=>$new,'duplicates_detected'=>$dupes,'errors'=>$error,'duration_ms'=>(int)((microtime(true)-$started)*1000),'created_at'=>$this->now()]);
-        if($error)return $this->jsonError($error,503,['providerStatus'=>'DISABLED']); $this->json(['provider'=>'google_places','providerStatus'=>'IMPLEMENTED','results'=>$results,'newLeadsCreated'=>$new,'duplicatesDetected'=>$dupes]);
+        $this->db->insert('search_history',['id'=>$this->id(),'organization_id'=>$this->org,'user_id'=>$this->user['id'],'query'=>$q,'provider'=>$providerName,'filters'=>json_encode(['limit'=>$b['limit']??20]),'results_returned'=>count($raw),'new_leads_created'=>$new,'duplicates_detected'=>$dupes,'errors'=>$error,'duration_ms'=>(int)((microtime(true)-$started)*1000),'created_at'=>$this->now()]);
+        if($error)return $this->jsonError($error,503,['providerStatus'=>$providerStatus]); $this->json(['provider'=>$providerName,'providerStatus'=>$providerStatus,'results'=>$results,'newLeadsCreated'=>$new,'duplicatesDetected'=>$dupes]);
     }
     public function leads($id=null){if(!$this->guard())return;if($id){$x=$this->lead($id);return $x?$this->json($x):$this->jsonError('lead not found',404);} $this->db->where('organization_id',$this->org);if($s=$this->input->get('status'))$this->db->where('status',$s);$this->json(['leads'=>$this->db->order_by('updated_at','DESC')->limit(250)->get('leads')->result_array()]);}
     public function collections($id=null){if(!$this->guard())return;$method=$this->input->method(true);if($id&&$method==='PATCH'){$b=$this->jsonBody();$name=trim((string)($b['name']??''));if(!$name)return $this->jsonError('name required');$this->db->where(['id'=>$id,'organization_id'=>$this->org])->update('collections',['name'=>$name,'updated_at'=>$this->now()]);return $this->json(['ok'=>true]);}if($id&&$method==='DELETE'){$this->db->where('collection_id',$id)->delete('collection_leads');$this->db->where(['id'=>$id,'organization_id'=>$this->org])->delete('collections');return $this->json(['ok'=>true]);}if($method==='POST'){$name=trim((string)($this->jsonBody()['name']??''));if(!$name)return $this->jsonError('name required');$x=['id'=>$this->id(),'organization_id'=>$this->org,'name'=>$name,'created_at'=>$this->now(),'updated_at'=>$this->now()];$this->db->insert('collections',$x);return $this->json($x,201);}$this->json(['collections'=>$this->db->where('organization_id',$this->org)->order_by('name')->get('collections')->result_array()]);}
