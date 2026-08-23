@@ -19,7 +19,7 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 
 ---
 
-## Current state: Phases 1–3 complete
+## Current state: Phases 1–3 complete; Phase 4 foundation underway
 
 | Area | Status |
 |---|---|
@@ -34,7 +34,9 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **Paper Trading Engine (Phase 3): accounts, orders, fills, positions, ticks, strategy deployments** | **TESTED** |
 | Trade journal + analytics + confidence calibration | **TESTED** |
 | ANALYSIS_ONLY + PAPER_TRADING modes, kill switch, audit trail | **TESTED** |
-| Brokers (MT5 first), execution supervisor, live trading | **PLANNED** (Phases 4–5) |
+| MT5 bridge health + read-only account/quote contracts | **IMPLEMENTED** (Phase 4 foundation) |
+| Execution supervisor preflight + persistent HUMAN_APPROVAL review workflow | **IMPLEMENTED** (Phase 5 foundation; never routes orders) |
+| Broker order routing and live trading | **PLANNED** (Phase 5) |
 
 **57 automated tests** run through the real CodeIgniter stack
 (`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
@@ -50,7 +52,10 @@ any web server (Apache/nginx + php-fpm).
 ```bash
 # 1. Create the database + user, then:
 export AEGIS_DB_HOST=127.0.0.1 AEGIS_DB_USER=aegis AEGIS_DB_PASS=... AEGIS_DB_NAME=aegis_trading
-php tools/install.php          # creates all tables (application/database/schema.mysql.sql)
+php tools/install.php          # creates all tables and RBAC defaults
+# Create the first operator once; values are environment-only and never committed:
+export AEGIS_BOOTSTRAP_ADMIN_EMAIL=admin@example.com AEGIS_BOOTSTRAP_ADMIN_PASSWORD='use-a-long-unique-password'
+php index.php tools bootstrap_admin
 
 # 2. Point the vhost at the repo root (index.php is the front controller),
 #    set ENVIRONMENT=production, done:
@@ -175,11 +180,18 @@ curl -X POST :8080/api/accounts/1/tick
 
 ## Roadmap
 
-- **Phase 4** — broker connectors, **MT5 first** (Python bridge), then crypto
-  exchanges one at a time; MySQL persistent store is already in place.
+- **Phase 4** — MT5 bridge discovery plus read-only account and quote reads
+  are implemented through a separately deployed Python/MT5 bridge. Configure
+  `AEGIS_MT5_BRIDGE_URL`, `AEGIS_MT5_BRIDGE_TOKEN`, and the explicit
+  `AEGIS_MT5_BRIDGE_ENABLED=1` switch. It has no order-submission capability.
+  Next: normalize broker account/quote contracts, then add crypto exchanges
+  one at a time.
 - **Phase 5** — Trade Execution Supervisor (15-step pipeline), human
-  approval, semi/fully-automated modes.
-- **Phase 6** — fundamentals, sentiment, on-chain, options intelligence.
+  approval, semi/fully-automated modes, and only then broker order routing.
+- **Phase 6** — fundamentals agent boundary is implemented and explicitly
+  abstains until a licensed, attributable feed is configured. Next: add
+  licensed fundamentals, sentiment, on-chain, and options providers one at a
+  time with provenance and freshness validation.
 
 ## Disclaimer
 

@@ -18,13 +18,15 @@ class Api_system extends Api_controller
         ['name' => 'Technical Analysis Agent', 'category' => 'agent', 'status' => 'TESTED', 'detail' => 'Full indicator suite ported with fixture tests'],
         ['name' => 'Market Structure Agent', 'category' => 'agent', 'status' => 'TESTED', 'detail' => 'Swings, close-confirmed BOS/CHoCH, zones, order blocks, FVGs'],
         ['name' => 'Forex / Crypto / Sentiment agents', 'category' => 'agent', 'status' => 'TESTED', 'detail' => 'Honest unavailability for macro/on-chain/sentiment data'],
+        ['name' => 'Fundamentals Intelligence Agent', 'category' => 'agent', 'status' => 'IMPLEMENTED', 'detail' => 'Phase 6 boundary: explicit abstention until an attributable licensed fundamentals feed is configured'],
         ['name' => 'Trading Intelligence consensus', 'category' => 'agent', 'status' => 'TESTED', 'detail' => 'Confluence, confidence, conflicts, NO_TRADE gates'],
         // engines
         ['name' => 'Trading Intelligence Engine + Risk Engine', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'Full pipeline with independent risk veto and kill-switch participation'],
         ['name' => 'Strategy Engine + lifecycle', 'category' => 'engine', 'status' => 'TESTED', 'detail' => '4 built-ins, evidence-gated lifecycle through PAPER_TRADING (Phase 3)'],
         ['name' => 'Backtesting Engine', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'Next-bar-open fills, cost model, pessimistic stop rule, look-ahead guard'],
         ['name' => 'Paper Trading Engine', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'Phase 3: simulated accounts/orders/fills with full governance chain, strategy deployments, journaling'],
-        ['name' => 'Trade Execution Supervisor', 'category' => 'engine', 'status' => 'PLANNED', 'detail' => 'Phase 5 — 15-step pipeline'],
+        ['name' => 'Trade Execution Supervisor preflight', 'category' => 'engine', 'status' => 'IMPLEMENTED', 'detail' => 'Phase 5 foundation: kill-switch, HUMAN_APPROVAL mode, mandatory-stop and intent validation; never routes an order'],
+        ['name' => 'Broker order routing / approvals persistence', 'category' => 'engine', 'status' => 'PLANNED', 'detail' => 'Next Phase 5 increment — must remain behind the supervisor'],
         ['name' => 'Kill switch', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'Ships ACTIVE in DB state; blocks all order placement (paper included)'],
         // platform
         ['name' => 'MySQL / MariaDB persistence', 'category' => 'module', 'status' => 'IMPLEMENTED', 'detail' => 'Canonical schema + mysqli config (application/database/schema.mysql.sql); the offline sandbox verifies the identical app+SQL through pdo_sqlite'],
@@ -34,7 +36,9 @@ class Api_system extends Api_controller
         ['name' => 'PAPER_TRADING mode', 'category' => 'mode', 'status' => 'TESTED', 'detail' => 'Phase 3 — simulated execution with real prices when reachable'],
         ['name' => 'HUMAN_APPROVAL / SEMI_AUTONOMOUS / FULLY_AUTOMATED', 'category' => 'mode', 'status' => 'PLANNED', 'detail' => 'Phase 5, gated on brokers + execution supervisor'],
         // brokers
-        ['name' => 'MT5 / MT4 / crypto exchange / stock broker connectors', 'category' => 'broker', 'status' => 'PLANNED', 'detail' => 'Phase 4 — MT5 first (Python bridge); none implemented, none claimed'],
+        ['name' => 'MT5 bridge connector (health + read-only account/quotes)', 'category' => 'broker', 'status' => 'IMPLEMENTED', 'detail' => 'Phase 4: environment-only authenticated bridge reads; no credentials exposed and no order submission capability'],
+        ['name' => 'MT4 / crypto exchange / stock broker connectors', 'category' => 'broker', 'status' => 'PLANNED', 'detail' => 'Future Phase 4 integrations; none implemented'],
+        ['name' => 'Broker order routing', 'category' => 'broker', 'status' => 'PLANNED', 'detail' => 'Phase 5 only, behind the execution supervisor and explicit approval controls'],
     ];
 
     public function status()
@@ -46,16 +50,50 @@ class Api_system extends Api_controller
             'version' => '0.3.0',
             'stack' => 'CodeIgniter ' . CI_VERSION . ' / PHP ' . PHP_VERSION . ' / ' . $this->db->platform(),
             'tradingMode' => $state['tradingMode'],
-            'implementedTradingModes' => ['ANALYSIS_ONLY', 'PAPER_TRADING'],
+            'implementedTradingModes' => ['ANALYSIS_ONLY', 'PAPER_TRADING', 'HUMAN_APPROVAL'],
             'supportedTradingModes' => ['ANALYSIS_ONLY', 'PAPER_TRADING', 'HUMAN_APPROVAL', 'SEMI_AUTONOMOUS', 'FULLY_AUTOMATED'],
             'killSwitch' => $state['killSwitch'],
             'providers' => $this->platform->providers->getAllHealth(),
+            'brokers' => $this->platform->brokers->allStatus(),
         ]);
     }
 
     public function features()
     {
         $this->json(self::FEATURES);
+    }
+
+    /** Connector health only; this endpoint cannot trigger broker actions. */
+    public function brokers()
+    {
+        $this->json(['brokers' => $this->platform->brokers->allStatus()]);
+    }
+
+    /** Read-only MT5 account view. It can never submit or modify an order. */
+    public function mt5_account()
+    {
+        $connector = $this->platform->brokers->get('mt5-bridge');
+        if (!$connector instanceof \Aegis\Brokers\Mt5BridgeConnector) return $this->jsonError('MT5 connector unavailable', 503);
+        try {
+            $this->json(['account' => $connector->account()]);
+        } catch (\Throwable $e) {
+            $this->jsonError($e->getMessage(), 503);
+        }
+    }
+
+    /** Read-only MT5 quote view. */
+    public function mt5_quote()
+    {
+        $symbol = (string) $this->input->get('symbol', true);
+        $connector = $this->platform->brokers->get('mt5-bridge');
+        if (!$connector instanceof \Aegis\Brokers\Mt5BridgeConnector) return $this->jsonError('MT5 connector unavailable', 503);
+        try {
+            $this->json(['quote' => $connector->quote($symbol)]);
+        } catch (\InvalidArgumentException $e) {
+            $this->jsonError($e->getMessage());
+        } catch (\Throwable $e) {
+            $this->jsonError($e->getMessage(), 503);
+        }
     }
 
     public function events(int $limit = 100)
@@ -102,6 +140,39 @@ class Api_system extends Api_controller
             'Paper-trading synthetic prices ' . ($body['allow'] ? 'ALLOWED (dev)' : 'BLOCKED'),
             ['allow' => $body['allow']], 'user');
         $this->json(['allowSyntheticPaperData' => $body['allow']]);
+    }
+
+    /** Phase 5 gate only: evaluates an intent, never routes to a broker. */
+    public function execution_preflight()
+    {
+        $this->json($this->platform->execution->preflight($this->jsonBody(), $this->platform->state()));
+    }
+
+    public function execution_approvals()
+    {
+        $this->json(['approvals' => $this->platform->execution->approvals($this->platform->state())]);
+    }
+
+    public function execution_request_approval()
+    {
+        try { $this->json(['approval' => $this->platform->execution->requestApproval($this->jsonBody(), $this->platform->state(), 'user')]); }
+        catch (\Throwable $e) { $this->jsonError($e->getMessage(), 409); }
+    }
+
+    public function execution_decide(string $id)
+    {
+        $body = $this->jsonBody();
+        if (!isset($body['approve']) || !is_bool($body['approve'])) return $this->jsonError('body must include approve: boolean');
+        try { $this->json(['approval' => $this->platform->execution->decide($id, $body['approve'], 'user', $body['reason'] ?? null)]); }
+        catch (\InvalidArgumentException $e) { $this->jsonError($e->getMessage(), 404); }
+        catch (\Throwable $e) { $this->jsonError($e->getMessage(), 409); }
+    }
+
+    /** Final Phase 5 boundary: always reports routing disabled, never sends an order. */
+    public function execution_route(string $id)
+    {
+        try { $this->json($this->platform->execution->route($id, $this->platform->state())); }
+        catch (\InvalidArgumentException $e) { $this->jsonError($e->getMessage(), 404); }
     }
 
     public function trading_mode()

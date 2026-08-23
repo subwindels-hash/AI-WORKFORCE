@@ -3,6 +3,7 @@ namespace Aegis;
 
 use Aegis\Agents\CryptoAgent;
 use Aegis\Agents\ForexAgent;
+use Aegis\Agents\FundamentalsAgent;
 use Aegis\Agents\MarketStructureAgent;
 use Aegis\Agents\SentimentAgent;
 use Aegis\Agents\TechnicalAgent;
@@ -24,6 +25,7 @@ class TradingIntelligenceEngine
     private ForexAgent $forex;
     private CryptoAgent $crypto;
     private SentimentAgent $sentiment;
+    private FundamentalsAgent $fundamentals;
     private TradingIntelligenceAgent $intelligence;
 
     public function __construct(
@@ -38,6 +40,7 @@ class TradingIntelligenceEngine
         $this->forex = new ForexAgent();
         $this->crypto = new CryptoAgent();
         $this->sentiment = new SentimentAgent();
+        $this->fundamentals = new FundamentalsAgent();
         $this->intelligence = new TradingIntelligenceAgent();
     }
 
@@ -60,7 +63,7 @@ class TradingIntelligenceEngine
 
         $ctx = ['series' => $series, 'now' => (int)(microtime(true) * 1000), 'referenceSeries' => $referenceSeries];
         $reports = [];
-        foreach ([$this->technical, $this->structure, $this->forex, $this->crypto, $this->sentiment] as $agent) {
+        foreach ([$this->technical, $this->structure, $this->forex, $this->crypto, $this->sentiment, $this->fundamentals] as $agent) {
             if (!$agent->applicable($ctx)) continue;
             try {
                 $reports[] = $agent->analyze($ctx);

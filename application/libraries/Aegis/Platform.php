@@ -2,6 +2,8 @@
 namespace Aegis;
 
 use Aegis\Backtest\Backtester;
+use Aegis\Brokers\BrokerManager;
+use Aegis\Brokers\Mt5BridgeConnector;
 use Aegis\Paper\PaperTradingEngine;
 use Aegis\Persistence\AuditRepository;
 use Aegis\Persistence\AnalysisRepository;
@@ -24,6 +26,10 @@ use Aegis\Strategies\TradingStrategy;
 class Platform
 {
     public readonly ProviderManager $providers;
+    public readonly BrokerManager $brokers;
+    public readonly ExecutionSupervisor $execution;
+    public readonly \Aegis\Sports\SportsIntelligence $sports;
+    public readonly Identity $identity;
     public readonly RiskEngine $risk;
     public readonly StrategyRegistry $strategies;
     public readonly TradingIntelligenceEngine $engine;
@@ -40,11 +46,16 @@ class Platform
             $this->providers->register(new FrankfurterProvider());
         }
         $this->providers->register(new SyntheticProvider()); // ALWAYS last
+        $this->brokers = new BrokerManager();
+        $this->brokers->register(new Mt5BridgeConnector());
         $this->providers->setFallbackHandler(function (array $info) use ($model) {
             $model->audit->emit('PROVIDER_FALLBACK', "{$info['symbol']}: providers [" . implode(', ', $info['failed']) . "] failed — falling back to {$info['used']}", $info);
         });
 
         $this->risk = new RiskEngine();
+        $this->execution = new ExecutionSupervisor($model->audit, $model->state);
+        $this->sports = new \Aegis\Sports\SportsIntelligence($model->sports, $model->audit);
+        $this->identity = new Identity($model->identity);
         $this->strategies = new StrategyRegistry($model->strategies, $model->audit);
         $this->strategies->seedBuiltins();
 
@@ -79,9 +90,9 @@ class Platform
 
     public function setTradingMode(string $mode): array
     {
-        $implemented = ['ANALYSIS_ONLY', 'PAPER_TRADING'];
+        $implemented = ['ANALYSIS_ONLY', 'PAPER_TRADING', 'HUMAN_APPROVAL'];
         if (!in_array($mode, $implemented, true)) {
-            return ['ok' => false, 'message' => "Mode {$mode} is not implemented yet. Implemented: " . implode(', ', $implemented) . '. Execution modes arrive in Phase 5; brokers in Phase 4.'];
+            return ['ok' => false, 'message' => "Mode {$mode} is not implemented yet. Implemented: " . implode(', ', $implemented) . '. Semi- and fully-autonomous execution remain unavailable.'];
         }
         $state = $this->model->state->load();
         $prev = $state['tradingMode'];

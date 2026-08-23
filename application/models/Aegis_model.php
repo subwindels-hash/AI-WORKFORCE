@@ -18,6 +18,8 @@ class Aegis_model extends CI_Model
     public object $backtests;
     public object $journal;
     public object $audit;
+    public object $identity;
+    public object $sports;
     public object $analysis;
     public object $state;
     public object $paper;
@@ -142,6 +144,74 @@ class Aegis_model extends CI_Model
                     $row['detail'] = json_decode($row['detail'] ?: 'null', true);
                 }
                 return $rows;
+            }
+        };
+
+        $this->sports = new class($db) implements Aegis\Persistence\SportsRepository {
+            public function __construct(private object $db) {}
+            public function ensureProvider(string $code, string $name): array {
+                $row = $this->db->get_where('sports_data_sources', ['provider_code' => $code], 1)->row_array();
+                if ($row) return $row;
+                $now = gmdate('c'); $this->db->insert('sports_data_sources', ['provider_code' => $code, 'display_name' => $name, 'enabled' => 0, 'created_at' => $now, 'updated_at' => $now]);
+                return $this->db->get_where('sports_data_sources', ['id' => $this->db->insert_id()], 1)->row_array();
+            }
+            public function saveHealth(int $providerId, array $h): void {
+                $this->db->insert('sports_provider_health', ['provider_id' => $providerId, 'status' => $h['status'], 'response_ms' => $h['responseMs'] ?? null, 'error_rate' => $h['errorRate'] ?? null, 'rate_limit_remaining' => $h['rateLimitRemaining'] ?? null, 'last_success_at' => $h['lastSuccessAt'] ?? null, 'last_failure_at' => $h['lastFailureAt'] ?? null, 'last_fixture_sync_at' => $h['lastFixtureSyncAt'] ?? null, 'last_odds_sync_at' => $h['lastOddsSyncAt'] ?? null, 'last_result_sync_at' => $h['lastResultSyncAt'] ?? null, 'data_freshness_seconds' => $h['dataFreshnessSeconds'] ?? null, 'records_received' => $h['recordsReceived'] ?? 0, 'invalid_records' => $h['invalidRecords'] ?? 0, 'missing_fields' => json_encode($h['missingFields'] ?? []), 'observed_at' => gmdate('c')]);
+            }
+            public function saveMatch(int $providerId, array $m): array {
+                $row = $this->db->get_where('sports_matches', ['provider_id' => $providerId, 'external_id' => $m['externalId']], 1)->row_array();
+                $data = ['sport' => $m['sport'], 'competition' => $m['competition'], 'home_team' => $m['homeTeam'], 'away_team' => $m['awayTeam'], 'kickoff_at' => $m['kickoff'], 'status' => $m['status'], 'source_timestamp' => $m['sourceTimestamp'], 'payload' => json_encode($m), 'updated_at' => gmdate('c')];
+                if ($row) { $this->db->where('id', $row['id'])->update('sports_matches', $data); return array_merge($row, $data); }
+                $this->db->insert('sports_matches', array_merge(['provider_id' => $providerId, 'external_id' => $m['externalId'], 'created_at' => gmdate('c')], $data)); return array_merge($data, ['id' => (int)$this->db->insert_id(), 'provider_id' => $providerId, 'external_id' => $m['externalId']]);
+            }
+            public function findMatch(int $providerId, string $externalId): ?array { return $this->db->get_where('sports_matches', ['provider_id' => $providerId, 'external_id' => $externalId], 1)->row_array() ?: null; }
+            public function saveOdds(int $matchId, int $providerId, array $odds): void { $this->db->insert('sports_odds', ['match_id' => $matchId, 'provider_id' => $providerId, 'market' => $odds['market'], 'selection' => $odds['selection'], 'decimal_odds' => $odds['decimalOdds'], 'observed_at' => $odds['observedAt'], 'payload' => json_encode($odds)]); }
+            public function saveResult(int $matchId, int $providerId, array $r): void { $row=$this->db->get_where('sports_results',['match_id'=>$matchId,'provider_id'=>$providerId],1)->row_array(); $data=['home_score'=>$r['homeScore'],'away_score'=>$r['awayScore'],'status'=>$r['status'],'verified'=>0,'source_timestamp'=>$r['sourceTimestamp'],'verified_at'=>null,'payload'=>json_encode($r['payload'])]; if($row)$this->db->where('id',$row['id'])->update('sports_results',$data); else $this->db->insert('sports_results',array_merge(['match_id'=>$matchId,'provider_id'=>$providerId],$data)); }
+            public function findResult(int $matchId,int $providerId): ?array { return $this->db->get_where('sports_results',['match_id'=>$matchId,'provider_id'=>$providerId],1)->row_array() ?: null; }
+            public function verifyResult(int $id): void { $this->db->where('id',$id)->update('sports_results',['verified'=>1,'verified_at'=>gmdate('c')]); }
+            public function saveQuality(int $matchId, array $a): void { $this->db->insert('sports_data_quality_assessments', ['match_id' => $matchId, 'score' => $a['score'], 'band' => $a['band'], 'freshness_score' => $a['freshnessScore'], 'provider_reliability_score' => $a['providerReliabilityScore'], 'eligible_prediction' => $a['eligibleForPrediction'] ? 1 : 0, 'eligible_ticket' => $a['eligibleForTicket'] ? 1 : 0, 'missing_fields' => json_encode($a['missing']), 'checks_payload' => json_encode($a['checks']), 'assessed_at' => gmdate('c')]); }
+            public function startSync(array $run): ?array {
+                if ($this->db->get_where('sports_sync_runs', ['execution_key' => $run['executionKey']], 1)->row_array()) return null;
+                $this->db->insert('sports_sync_runs', ['id' => $run['id'], 'provider_id' => $run['providerId'] ?? null, 'job_type' => $run['jobType'], 'status' => 'RUNNING', 'started_at' => gmdate('c'), 'execution_key' => $run['executionKey']]); return $run;
+            }
+            public function finishSync(string $id, array $result): void { $this->db->where('id', $id)->update('sports_sync_runs', ['status' => $result['status'], 'ended_at' => gmdate('c'), 'records_processed' => $result['processed'] ?? 0, 'records_created' => $result['created'] ?? 0, 'records_updated' => $result['updated'] ?? 0, 'errors' => json_encode($result['errors'] ?? [])]); }
+            public function ensureModelVersion(array $m): int { $row = $this->db->get_where('sports_model_versions', ['model_name' => $m['modelName'], 'model_version' => $m['modelVersion']], 1)->row_array(); if ($row) return (int)$row['id']; $this->db->insert('sports_model_versions', ['model_name' => $m['modelName'], 'model_version' => $m['modelVersion'], 'feature_version' => $m['featureVersion'], 'calibration_version' => $m['calibrationVersion'] ?? null, 'status' => $m['status'] ?? 'APPROVED', 'created_at' => gmdate('c')]); return (int)$this->db->insert_id(); }
+            public function savePrediction(array $p): void { $this->db->insert('sports_predictions', $p); }
+            public function saveTicket(array $t): void { $this->db->insert('sports_tickets', $t); }
+            public function saveTicketSelection(array $s): void { $this->db->insert('sports_ticket_selections', $s); }
+            public function ticketSelections(string $ticketId): array { return $this->db->get_where('sports_ticket_selections', ['ticket_id' => $ticketId])->result_array(); }
+            public function updateTicketSelection(int $id, array $patch): void { $this->db->where('id', $id)->update('sports_ticket_selections', $patch); }
+            public function findTicket(string $id): ?array { return $this->db->get_where('sports_tickets', ['id' => $id], 1)->row_array() ?: null; }
+            public function listTickets(array $filter = [], int $limit = 500): array { if(!empty($filter['from']))$this->db->where('created_at >=',$filter['from']); if(!empty($filter['to']))$this->db->where('created_at <=',$filter['to']); if(!empty($filter['status']))$this->db->where('settlement_status',$filter['status']); if(!empty($filter['modelVersionId']))$this->db->where('model_version_id',(int)$filter['modelVersionId']); return $this->db->order_by('created_at','DESC')->limit(min(500,max(1,$limit)))->get('sports_tickets')->result_array(); }
+            public function updateTicket(string $id, array $patch): void { $this->db->where('id', $id)->update('sports_tickets', $patch); }
+        };
+
+        $this->identity = new class($db) implements Aegis\Persistence\IdentityRepository {
+            public function __construct(private object $db) {}
+            public function findUserByEmail(string $email): ?array { return $this->db->get_where('users', ['email' => $email], 1)->row_array() ?: null; }
+            public function findUserById(int $id): ?array { return $this->db->get_where('users', ['id' => $id], 1)->row_array() ?: null; }
+            public function createUser(array $user): array {
+                $this->db->insert('users', $user); $user['id'] = (int) $this->db->insert_id(); return $user;
+            }
+            public function ensureRole(string $code, string $name): int { return $this->ensure('roles', $code, $name); }
+            public function ensurePermission(string $code, string $name): int { return $this->ensure('permissions', $code, $name); }
+            private function ensure(string $table, string $code, string $name): int {
+                $row = $this->db->get_where($table, ['code' => $code], 1)->row_array();
+                if ($row) return (int) $row['id'];
+                $this->db->insert($table, ['code' => $code, 'name' => $name]); return (int) $this->db->insert_id();
+            }
+            public function grantRolePermission(int $roleId, int $permissionId): void {
+                if (!$this->db->get_where('role_permissions', ['role_id' => $roleId, 'permission_id' => $permissionId], 1)->row_array()) $this->db->insert('role_permissions', ['role_id' => $roleId, 'permission_id' => $permissionId]);
+            }
+            public function assignRole(int $userId, int $roleId): void {
+                if (!$this->db->get_where('user_roles', ['user_id' => $userId, 'role_id' => $roleId], 1)->row_array()) $this->db->insert('user_roles', ['user_id' => $userId, 'role_id' => $roleId]);
+            }
+            public function permissionsForUser(int $userId): array {
+                $rows = $this->db->select('p.code')->from('permissions p')->join('role_permissions rp', 'rp.permission_id = p.id')->join('user_roles ur', 'ur.role_id = rp.role_id')->where('ur.user_id', $userId)->get()->result_array();
+                return array_values(array_unique(array_map(fn($r) => $r['code'], $rows)));
+            }
+            public function recordAuthEvent(int $userId, string $type, array $detail = []): void {
+                $this->db->insert('auth_events', ['user_id' => $userId, 'type' => $type, 'detail' => json_encode($detail), 'at' => gmdate('c')]);
             }
         };
 

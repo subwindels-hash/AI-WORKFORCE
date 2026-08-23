@@ -58,6 +58,49 @@ interface PlatformStateRepository
     public function save(array $state): void;
 }
 
+/** Identity and access-control persistence. Password hashes only; never raw secrets. */
+interface SportsRepository
+{
+    public function ensureProvider(string $code, string $name): array;
+    public function saveHealth(int $providerId, array $health): void;
+    /** Returns saved canonical match, inserting/updating by provider + external ID. */
+    public function saveMatch(int $providerId, array $match): array;
+    public function findMatch(int $providerId, string $externalId): ?array;
+    public function saveOdds(int $matchId, int $providerId, array $odds): void;
+    public function saveResult(int $matchId, int $providerId, array $result): void;
+    public function findResult(int $matchId, int $providerId): ?array;
+    public function verifyResult(int $id): void;
+    public function saveQuality(int $matchId, array $assessment): void;
+    /** Starts once per idempotency key, or returns null if already processed. */
+    public function startSync(array $run): ?array;
+    public function finishSync(string $id, array $result): void;
+    public function ensureModelVersion(array $model): int;
+    public function savePrediction(array $prediction): void;
+    public function saveTicket(array $ticket): void;
+    public function saveTicketSelection(array $selection): void;
+    /** @return array<int,array<string,mixed>> */
+    public function ticketSelections(string $ticketId): array;
+    public function updateTicketSelection(int $id, array $patch): void;
+    public function findTicket(string $id): ?array;
+    /** @return array<int,array<string,mixed>> */
+    public function listTickets(array $filter = [], int $limit = 500): array;
+    public function updateTicket(string $id, array $patch): void;
+}
+
+interface IdentityRepository
+{
+    public function findUserByEmail(string $email): ?array;
+    public function findUserById(int $id): ?array;
+    public function createUser(array $user): array;
+    public function ensureRole(string $code, string $name): int;
+    public function ensurePermission(string $code, string $name): int;
+    public function grantRolePermission(int $roleId, int $permissionId): void;
+    public function assignRole(int $userId, int $roleId): void;
+    /** @return array<int,string> */
+    public function permissionsForUser(int $userId): array;
+    public function recordAuthEvent(int $userId, string $type, array $detail = []): void;
+}
+
 interface PaperRepository
 {
     /** Saves and RETURNS the record with its generated id. */

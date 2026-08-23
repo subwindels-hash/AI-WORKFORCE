@@ -28,7 +28,18 @@ $route['paper/(:num)/deployments/(:num)/toggle'] = 'paper/toggle/$1/$2';
 
 // ---- JSON API (spec §17 subset for Phases 1–3) ---------------------------
 $route['api/system/status'] = 'api_system/status';
+$route['api/auth/login'] = 'api_auth/login';
+$route['api/auth/logout'] = 'api_auth/logout';
+$route['api/auth/me'] = 'api_auth/me';
+$route['api/sports/status'] = 'api_sports/status';
+$route['api/sports/performance'] = 'api_sports/performance';
+$route['api/sports/tickets/(:any)/decide'] = 'api_sports/decide_ticket/$1';
+$route['api/sports/tickets/(:any)/settle'] = 'api_sports/settle_ticket/$1';
+$route['api/sports/results/verify'] = 'api_sports/verify_result';
 $route['api/system/features'] = 'api_system/features';
+$route['api/brokers'] = 'api_system/brokers';
+$route['api/brokers/mt5/account'] = 'api_system/mt5_account';
+$route['api/brokers/mt5/quote'] = 'api_system/mt5_quote';
 $route['api/events'] = 'api_system/events';
 $route['api/events/(:num)'] = 'api_system/events/$1';
 
@@ -70,4 +81,9 @@ $route['api/risk/limits'] = 'api_system/risk_limits';
 $route['api/risk/limits/update'] = 'api_system/update_risk_limits';
 $route['api/trading/kill-switch'] = 'api_system/kill_switch';
 $route['api/trading/mode'] = 'api_system/trading_mode';
+$route['api/execution/preflight'] = 'api_system/execution_preflight';
+$route['api/execution/approvals'] = 'api_system/execution_approvals';
+$route['api/execution/approvals/request'] = 'api_system/execution_request_approval';
+$route['api/execution/approvals/(:any)/decide'] = 'api_system/execution_decide/$1';
+$route['api/execution/approvals/(:any)/route'] = 'api_system/execution_route/$1';
 $route['api/trading/synthetic-paper'] = 'api_system/synthetic_paper';
