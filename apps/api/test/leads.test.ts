@@ -15,5 +15,7 @@ test("Fastify lead route requires JWT and scopes SQL to token organization", asy
   const token = app.jwt.sign({ sub: userId, organizationId, permissions: ["lead.read"] });
   const response = await app.inject({ method: "GET", url: "/api/v1/lead-discovery/leads?limit=1", headers: { authorization: `Bearer ${token}` } });
   assert.equal(response.statusCode, 200); assert.equal(response.json().leads[0].organizationId, organizationId); assert.equal(seenParams[0], organizationId);
+  const pipeline = await app.inject({ method: "GET", url: "/api/v1/lead-discovery/pipeline", headers: { authorization: `Bearer ${token}` } });
+  assert.equal(pipeline.statusCode, 200); assert.equal(pipeline.json().columns.new[0].organizationId, organizationId); assert.equal(seenParams[0], organizationId);
   await app.close();
 });
