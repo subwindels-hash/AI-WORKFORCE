@@ -3,6 +3,7 @@ import jwt from "@fastify/jwt";
 import type { Database } from "./db.js";
 import { LeadOperationalStore, type RedisClient } from "./redis.js";
 import { leadRoutes } from "./routes/leads.js";
+import { discoveryRoutes } from "./routes/discovery.js";
 
 export async function buildApp(options: { db: Database; jwtSecret: string; redis: RedisClient }) {
   const app = Fastify({ logger: true });
@@ -18,6 +19,7 @@ export async function buildApp(options: { db: Database; jwtSecret: string; redis
     reply.code(status).send({ error: status >= 500 ? "internal server error" : typeof known.message === "string" ? known.message : "request failed" });
   });
   await app.register(leadRoutes, { prefix: "/api/v1/lead-discovery" });
+  await app.register(discoveryRoutes, { prefix: "/api/v1/lead-discovery" });
   return app;
 }
 declare module "fastify" { interface FastifyInstance { operational: LeadOperationalStore } }
