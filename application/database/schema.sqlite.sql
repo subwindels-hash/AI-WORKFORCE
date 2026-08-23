@@ -184,3 +184,8 @@ CREATE TABLE IF NOT EXISTS search_history (id TEXT PRIMARY KEY, organization_id 
 CREATE TABLE IF NOT EXISTS duplicate_candidates (id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, lead_a_id TEXT NOT NULL, lead_b_id TEXT NOT NULL, rule_name TEXT NOT NULL, confidence REAL NOT NULL, status TEXT NOT NULL DEFAULT 'open', created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS duplicate_resolutions (id TEXT PRIMARY KEY, candidate_id TEXT NOT NULL, organization_id TEXT NOT NULL, resolver_id INTEGER NOT NULL, action TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS export_history (id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, user_id INTEGER NOT NULL, format TEXT NOT NULL, filters TEXT NOT NULL, lead_count INTEGER NOT NULL, created_at TEXT NOT NULL);
+
+-- Lead Discovery tenancy: a user may belong to several workspaces; all lead records use one selected membership.
+CREATE TABLE IF NOT EXISTS lead_organizations (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS lead_organization_members (organization_id TEXT NOT NULL, user_id INTEGER NOT NULL, role TEXT NOT NULL DEFAULT 'member', created_at TEXT NOT NULL, PRIMARY KEY(organization_id,user_id));
+CREATE INDEX IF NOT EXISTS idx_lead_org_members_user ON lead_organization_members(user_id);

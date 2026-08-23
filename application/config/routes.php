@@ -91,6 +91,7 @@ $route['api/trading/synthetic-paper'] = 'api_system/synthetic_paper';
 // ---- Standalone Lead Discovery & Sales Intelligence ----------------------
 $route['leads'] = 'leads/index';
 $route['lead-pipeline'] = 'leads/pipeline';
+$route['api/v1/lead-discovery/workspaces'] = 'api_lead_discovery/workspaces';
 $route['api/v1/lead-discovery/search'] = 'api_lead_discovery/search';
 $route['api/v1/lead-discovery/leads'] = 'api_lead_discovery/leads';
 $route['api/v1/lead-discovery/leads/(:any)'] = 'api_lead_discovery/leads/$1';

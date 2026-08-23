@@ -5,7 +5,18 @@ defined('BASEPATH') or exit('No direct script access allowed');
 class Api_lead_discovery extends Api_controller
 {
     private array $user; private string $org;
-    private function guard(): bool { $u=$this->requirePermission('system.authenticated'); if (!$u) return false; $this->user=$u; $this->org='user:' . (int)$u['id']; return true; }
+    /** Resolve the workspace only from the authenticated user's memberships; no client supplied org ID is trusted. */
+    private function guard(): bool {
+        $u=$this->requirePermission('system.authenticated'); if (!$u) return false; $this->user=$u;
+        $requested=(string)($this->input->get_request_header('X-Lead-Organization') ?: '');
+        $memberships=$this->db->where('user_id',(int)$u['id'])->order_by('created_at','ASC')->get('lead_organization_members')->result_array();
+        // First authenticated use receives a private workspace. Teams can later add explicit memberships.
+        if (!$memberships) { $id='org-'.(int)$u['id']; $now=$this->now(); $this->db->replace('lead_organizations',['id'=>$id,'name'=>($u['email'] ?? 'My').' workspace','created_at'=>$now]); $this->db->replace('lead_organization_members',['organization_id'=>$id,'user_id'=>(int)$u['id'],'role'=>'owner','created_at'=>$now]); $memberships=[['organization_id'=>$id,'role'=>'owner']]; }
+        $chosen=$requested ?: $memberships[0]['organization_id'];
+        foreach($memberships as $m) if(hash_equals((string)$m['organization_id'],$chosen)) { $this->org=$chosen; return true; }
+        $this->jsonError('forbidden organization workspace',403); return false;
+    }
+    public function workspaces(){ if(!$this->guard())return; $rows=$this->db->select('o.id,o.name,m.role')->from('lead_organizations o')->join('lead_organization_members m','m.organization_id=o.id')->where('m.user_id',(int)$this->user['id'])->get()->result_array(); $this->json(['workspaces'=>$rows,'activeOrganizationId'=>$this->org]); }
     private function id(): string { return bin2hex(random_bytes(16)); }
     private function now(): string { return gmdate('c'); }
     private function recordActivity(?string $lead, string $type, array $detail=[]): void { $this->db->insert('lead_activities',['id'=>$this->id(),'lead_id'=>$lead,'organization_id'=>$this->org,'actor_id'=>$this->user['id'],'type'=>$type,'detail'=>json_encode($detail),'created_at'=>$this->now()]); }
