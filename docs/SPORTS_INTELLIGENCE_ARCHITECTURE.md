@@ -12,7 +12,7 @@ The target checkout is the AEGIS CodeIgniter 3 application. It has reusable MVC 
 
 1. Foundation, provider contract, normalization and data quality — implemented.
 2. Auth/RBAC/CSRF and sports persistence migrations — implemented (provider, health, canonical fixture, odds, quality assessment, and idempotent sync-run tables).
-3. Idempotent fixture synchronization with provider health records — implemented; odds and result synchronization follow as separate, provider-enabled increments.
+3. Fixture and odds synchronization, odds freshness, and conservative match-intelligence gates — implemented; result synchronization follows as a separate provider-enabled increment.
 4. Match intelligence, versioned features, prediction/calibration/value/risk/correlation and no-predict gates.
 5. Ticket optimization, approval, result verification, settlement and analytics.
 6. Backtesting, model monitoring, dashboards, responsive UI, and production review.

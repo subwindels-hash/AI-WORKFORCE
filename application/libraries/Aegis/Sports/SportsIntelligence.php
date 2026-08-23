@@ -10,11 +10,15 @@ class SportsIntelligence
 {
     public readonly SportsProviderManager $providers;
     public readonly DataQualityEngine $quality;
+    public readonly OddsFreshnessEngine $oddsFreshness;
+    public readonly MatchIntelligenceEngine $matchIntelligence;
     public readonly SportsSyncService $sync;
     public function __construct(SportsRepository $repository, AuditRepository $audit)
     {
         $this->providers = new SportsProviderManager();
         $this->quality = new DataQualityEngine();
+        $this->oddsFreshness = new OddsFreshnessEngine();
+        $this->matchIntelligence = new MatchIntelligenceEngine($this->oddsFreshness);
         $this->sync = new SportsSyncService($repository, $audit, $this->quality);
     }
     public function status(): array
