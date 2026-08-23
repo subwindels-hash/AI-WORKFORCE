@@ -97,6 +97,7 @@ $route['api/v1/lead-discovery/leads/(:any)'] = 'api_lead_discovery/leads/$1';
 $route['api/v1/lead-discovery/leads/(:any)/status'] = 'api_lead_discovery/status/$1';
 $route['api/v1/lead-discovery/leads/(:any)/owner'] = 'api_lead_discovery/owner/$1';
 $route['api/v1/lead-discovery/leads/(:any)/notes'] = 'api_lead_discovery/notes/$1';
+$route['api/v1/lead-discovery/leads/(:any)/activity'] = 'api_lead_discovery/activity/$1';
 $route['api/v1/lead-discovery/collections'] = 'api_lead_discovery/collections';
 $route['api/v1/lead-discovery/collections/(:any)'] = 'api_lead_discovery/collections/$1';
 $route['api/v1/lead-discovery/collections/(:any)/leads'] = 'api_lead_discovery/collection_leads/$1';
