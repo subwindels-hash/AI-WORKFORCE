@@ -58,4 +58,140 @@ class BrokerDataNormalizer
         try { return (new \DateTimeImmutable((string) $value))->setTimezone(new \DateTimeZone('UTC'))->format('c'); }
         catch (\Throwable $e) { throw new \RuntimeException('broker response timestamp is invalid'); }
     }
+
+    // ---------------------------------------------------- trading contracts
+
+    /** @param array<int, array<string, mixed>> $raw */
+    public static function positions(array $raw, string $broker): array
+    {
+        $out = [];
+        foreach ($raw as $row) {
+            if (!is_array($row)) continue;
+            $out[] = [
+                'broker' => $broker,
+                'ticket' => (int) self::number($row, 'ticket'),
+                'symbol' => self::symbol($row),
+                'side' => self::enum($row, 'side', ['LONG', 'SHORT']),
+                'volume' => self::number($row, 'volume'),
+                'entry' => self::number($row, 'entry'),
+                'stopLoss' => self::optionalNumber($row, 'stopLoss'),
+                'takeProfit' => self::optionalNumber($row, 'takeProfit'),
+                'profit' => self::number($row, 'profit', 0.0),
+                'openedAt' => self::timestamp($row['openedAt'] ?? null),
+            ];
+        }
+        return $out;
+    }
+
+    /** @param array<int, array<string, mixed>> $raw */
+    public static function pendingOrders(array $raw, string $broker): array
+    {
+        $out = [];
+        foreach ($raw as $row) {
+            if (!is_array($row)) continue;
+            $out[] = [
+                'broker' => $broker,
+                'ticket' => (int) self::number($row, 'ticket'),
+                'symbol' => self::symbol($row),
+                'side' => self::enum($row, 'side', ['BUY', 'SELL']),
+                'type' => self::enum($row, 'type', ['LIMIT', 'STOP']),
+                'volume' => self::number($row, 'volume'),
+                'price' => self::number($row, 'price'),
+                'stopLoss' => self::optionalNumber($row, 'stopLoss'),
+                'takeProfit' => self::optionalNumber($row, 'takeProfit'),
+                'placedAt' => self::timestamp($row['placedAt'] ?? null),
+            ];
+        }
+        return $out;
+    }
+
+    /** @param array<int, array<string, mixed>> $raw */
+    public static function history(array $raw, string $broker): array
+    {
+        $out = [];
+        foreach ($raw as $row) {
+            if (!is_array($row)) continue;
+            $out[] = [
+                'broker' => $broker,
+                'ticket' => (int) self::number($row, 'ticket'),
+                'symbol' => self::symbol($row),
+                'side' => self::enum($row, 'side', ['LONG', 'SHORT']),
+                'volume' => self::number($row, 'volume'),
+                'entry' => self::number($row, 'entry'),
+                'exit' => self::number($row, 'exit'),
+                'profit' => self::number($row, 'profit', 0.0),
+                'openedAt' => self::timestamp($row['openedAt'] ?? null),
+                'closedAt' => self::timestamp($row['closedAt'] ?? null),
+            ];
+        }
+        return $out;
+    }
+
+    /** @param array<int, array<string, mixed>> $raw normalized OHLCV candles */
+    public static function candles(array $raw, string $broker): array
+    {
+        $out = [];
+        foreach ($raw as $row) {
+            if (!is_array($row)) continue;
+            $open = self::number($row, 'o');
+            $close = self::number($row, 'c');
+            $high = self::number($row, 'h');
+            $low = self::number($row, 'l');
+            if ($high < $low || $high < $open || $high < $close || $low > $open || $low > $close) {
+                throw new \RuntimeException('broker candle OHLC relationship is invalid');
+            }
+            $out[] = [
+                'broker' => $broker,
+                'time' => self::timestamp($row['t'] ?? null),
+                'open' => $open, 'high' => $high, 'low' => $low, 'close' => $close,
+                'volume' => self::number($row, 'v', 0.0),
+            ];
+        }
+        return $out;
+    }
+
+    public static function orderResult(array $raw, string $broker): array
+    {
+        return [
+            'broker' => $broker,
+            'ticket' => (int) self::number($raw, 'ticket'),
+            'price' => self::number($raw, 'price'),
+            'placedAt' => self::timestamp($raw['placedAt'] ?? null),
+        ];
+    }
+
+    public static function ticketResult(array $raw, string $broker): array
+    {
+        return ['broker' => $broker, 'ticket' => (int) self::number($raw, 'ticket'), 'confirmed' => true];
+    }
+
+    public static function closeResult(array $raw, string $broker): array
+    {
+        return [
+            'broker' => $broker,
+            'ticket' => (int) self::number($raw, 'ticket'),
+            'price' => self::number($raw, 'price'),
+            'profit' => self::number($raw, 'profit', 0.0),
+        ];
+    }
+
+    private static function symbol(array $raw): string
+    {
+        $symbol = strtoupper((string) ($raw['symbol'] ?? ''));
+        if (!preg_match('/^[A-Z0-9._-]{1,32}$/', $symbol)) throw new \RuntimeException('broker symbol is invalid');
+        return $symbol;
+    }
+
+    private static function enum(array $raw, string $key, array $allowed): string
+    {
+        $value = strtoupper((string) ($raw[$key] ?? ''));
+        if (!in_array($value, $allowed, true)) throw new \RuntimeException("broker response {$key} is invalid");
+        return $value;
+    }
+
+    private static function optionalNumber(array $raw, string $key): ?float
+    {
+        if (!array_key_exists($key, $raw) || $raw[$key] === null || $raw[$key] === '') return null;
+        return self::number($raw, $key);
+    }
 }

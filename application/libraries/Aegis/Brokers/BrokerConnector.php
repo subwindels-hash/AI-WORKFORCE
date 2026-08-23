@@ -29,6 +29,24 @@ class BrokerManager
         return $this->connectors[$id] ?? null;
     }
 
+    /**
+     * First connector that is BOTH order-capable (TradingConnector) and whose
+     * bridge-verified status actually reports effective order submission.
+     * Returns null when no connector may route orders — the supervisor must
+     * then keep routing disabled.
+     */
+    public function tradingConnector(): ?TradingConnector
+    {
+        foreach ($this->connectors as $connector) {
+            if (!$connector instanceof TradingConnector) continue;
+            $status = $connector->status();
+            if (($status['state'] ?? '') === 'READY' && ($status['orderSubmissionEffective'] ?? false) === true) {
+                return $connector;
+            }
+        }
+        return null;
+    }
+
     public function allStatus(): array
     {
         $out = [];

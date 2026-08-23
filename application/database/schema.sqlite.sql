@@ -189,3 +189,18 @@ CREATE TABLE IF NOT EXISTS export_history (id TEXT PRIMARY KEY, organization_id 
 CREATE TABLE IF NOT EXISTS lead_organizations (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS lead_organization_members (organization_id TEXT NOT NULL, user_id INTEGER NOT NULL, role TEXT NOT NULL DEFAULT 'member', created_at TEXT NOT NULL, PRIMARY KEY(organization_id,user_id));
 CREATE INDEX IF NOT EXISTS idx_lead_org_members_user ON lead_organization_members(user_id);
+
+-- Phase 5 execution governance (mirrors schema.mysql.sql).
+CREATE TABLE IF NOT EXISTS trade_proposals (
+ id TEXT PRIMARY KEY, created_at TEXT NOT NULL, actor TEXT NOT NULL DEFAULT 'user',
+ broker TEXT NOT NULL, symbol TEXT NOT NULL, market_class TEXT NOT NULL, side TEXT NOT NULL,
+ order_type TEXT NOT NULL, volume REAL NOT NULL, price REAL, stop_loss REAL NOT NULL, take_profit REAL,
+ strategy_id TEXT, reason TEXT, status TEXT NOT NULL, intent TEXT NOT NULL, checks TEXT NOT NULL,
+ risk_decision TEXT, decision_by TEXT, decided_at TEXT, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_proposals_status ON trade_proposals(status, created_at);
+CREATE TABLE IF NOT EXISTS trade_executions (
+ id TEXT PRIMARY KEY, proposal_id TEXT NOT NULL, broker TEXT NOT NULL, broker_order_id TEXT,
+ automated INTEGER NOT NULL DEFAULT 0, submitted_at TEXT NOT NULL, status TEXT NOT NULL, result TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_executions_proposal ON trade_executions(proposal_id);

@@ -20,13 +20,16 @@ $ks = $status['killSwitch'] ?? null;
     <div class="mark">Æ</div>
     <div>
       <h1>AEGIS <span style="font-weight:400;color:var(--muted)">· AI Trading Intelligence</span></h1>
-      <div class="sub">CodeIgniter 3 · MySQL/MariaDB · Phase 3: Paper Trading</div>
+      <div class="sub">CodeIgniter 3 · MySQL/MariaDB · Phase 5: Execution Governance</div>
     </div>
   </div>
   <nav class="nav">
     <a href="/" class="<?= ($active ?? '') === 'dashboard' ? 'active' : '' ?>">Dashboard</a>
     <a href="/strategy" class="<?= ($active ?? '') === 'strategy' ? 'active' : '' ?>">Strategy Lab</a>
     <a href="/paper" class="<?= ($active ?? '') === 'paper' ? 'active' : '' ?>">Paper Trading</a>
+    <a href="/execution" class="<?= ($active ?? '') === 'execution' ? 'active' : '' ?>">Execution</a>
+    <a href="/brokers" class="<?= ($active ?? '') === 'brokers' ? 'active' : '' ?>">Brokers</a>
+    <a href="/risk" class="<?= ($active ?? '') === 'risk' ? 'active' : '' ?>">Risk Center</a>
     <a href="/journal" class="<?= ($active ?? '') === 'journal' ? 'active' : '' ?>">Journal &amp; Analytics</a>
   </nav>
   <div class="top-right">

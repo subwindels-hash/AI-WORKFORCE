@@ -3,8 +3,10 @@
 **CodeIgniter 3.1.13 · PHP 8.x · MySQL/MariaDB · Traditional MVC**
 
 A modular trading infrastructure that analyzes markets with a multi-agent AI
-stack, runs versioned strategies through an evidence-gated pipeline, and
-**simulates execution with full risk governance (Phase 3: Paper Trading)**.
+stack, runs versioned strategies through an evidence-gated lifecycle, and
+governs every broker-bound order through the full execution-supervisor
+pipeline (**Phase 4/5: MT5 trading surface + execution governance + portfolio
+risk monitoring**).
 
 > **Core principle:** AI can analyze, recommend, and automate within approved
 > rules, but it must never bypass market-data validation, risk controls,
@@ -12,17 +14,42 @@ stack, runs versioned strategies through an evidence-gated pipeline, and
 
 ```text
 MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INTELLIGENCE / CONSENSUS
-      →  STRATEGY ENGINE (backtested, validated, risk-reviewed)  →  RISK ENGINE
-      →  PAPER TRADING ENGINE (Phase 3)  →  [EXECUTION SUPERVISOR — Phase 5]  →  [BROKERS — Phase 4]
-      →  PORTFOLIO + PERFORMANCE MONITORING
+      →  STRATEGY ENGINE (backtested, validated, risk-reviewed, paper-proven)  →  RISK ENGINE
+      →  PAPER TRADING ENGINE  →  TRADE EXECUTION SUPERVISOR (15 steps, human approval / automation envelope)
+      →  BROKER CONNECTOR (MT5 bridge, demo-gated)  →  PORTFOLIO + PERFORMANCE MONITORING
 ```
 
 ---
 
-## Current state: Phases 1–3 complete; Phase 4 foundation underway
+## Current state: Phases 1–3 complete; Phase 4/5 automation core complete
 
 | Area | Status |
 |---|---|
+| CodeIgniter 3.1.13 MVC (controllers / models / views / libraries) | **TESTED** |
+| **MySQL / MariaDB** persistence — canonical schema + mysqli config (`application/database/schema.mysql.sql`) | **IMPLEMENTED** |
+| Market-data abstraction (health checks, retry, timeout, circuit breaker, cache, fallback, provenance) | **TESTED** |
+| Binance + Frankfurter/ECB real providers; labeled synthetic demo provider | **TESTED** |
+| Multi-agent analysis (technical, market-structure, forex, crypto, sentiment, consensus) | **TESTED** |
+| Regime detection + trade setup generator + Risk Engine (independent veto, actual-volume checks) | **TESTED** |
+| Strategy framework: 4 built-ins, evidence-gated lifecycle; **live APPROVED gate requires ≥10 paper trades with PF>1** | **TESTED** |
+| Backtester: next-bar fills, cost model, pessimistic stop rule, look-ahead guard | **TESTED** |
+| Paper Trading Engine: accounts, orders, fills, positions, ticks, strategy deployments | **TESTED** |
+| Trade journal + analytics + confidence calibration | **TESTED** |
+| **Trade Execution Supervisor — full 15-step pipeline** with durable auditable proposals | **TESTED** |
+| **HUMAN_APPROVAL / SEMI_AUTONOMOUS / FULLY_AUTOMATED modes** (automation envelope: notional, daily cap, risk %, approved symbols) | **TESTED** |
+| **MT5 connector — full trading surface** (account/quote/candles/positions/orders/history + place/modify/cancel/close) | **TESTED** (simulated bridge; not yet verified against a real MetaTrader terminal) |
+| **Python MT5 bridge service** (`python-services/mt5-bridge`, FastAPI + MetaTrader5, demo-only default) | **IMPLEMENTED** (contract unit-tested; requires deployment on a Windows MT5 host) |
+| **Portfolio Risk Monitor**: HIGH_EXPOSURE, EXCESSIVE_LEVERAGE, CORRELATED_POSITIONS, MAX_DRAWDOWN_WARNING, DAILY_LOSS_WARNING, BROKER_DISCONNECTED | **TESTED** |
+| Kill switch, audit trail, ANALYSIS_ONLY default | **TESTED** |
+| MT4 / crypto-exchange / stock-broker connectors | **PLANNED** (added one at a time after MT5 is verified) |
+
+**126 automated tests** run through the real CodeIgniter stack
+(`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
+sandbox — see below), plus 9 contract tests for the Python bridge
+(`python-services/mt5-bridge/.venv/bin/python -m pytest test_bridge.py`).
+
+---
+---|---|
 | CodeIgniter 3.1.13 MVC (controllers / models / views / libraries) | **TESTED** |
 | **MySQL / MariaDB** persistence — canonical schema + mysqli config (`application/database/schema.mysql.sql`) | **IMPLEMENTED** |
 | Market-data abstraction (health checks, retry, timeout, circuit breaker, cache, fallback, provenance) | **TESTED** |
@@ -95,8 +122,10 @@ system/                         CodeIgniter 3.1.13 core (unmodified)
 application/
   config/                       config.php, database.php (mysqli/pdo_sqlite), routes.php
   controllers/                  Welcome (dashboard), Strategy_lab, Paper, Journal,
-                                Api_system, Api_analysis, Api_marketdata, Api_strategies,
-                                Api_paper, Api_journal, Tools (CLI: install/tests)
+                                Execution (supervisor console), Brokers (broker center),
+                                Risk_center (limits + monitor), Api_system, Api_analysis,
+                                Api_marketdata, Api_strategies, Api_paper, Api_journal,
+                                Tools (CLI: install/tests)
   models/Aegis_model.php        THE only place SQL lives — repository interfaces
                                 implemented over CI3's query builder (mysqli/sqlite)
   libraries/Aegis/              domain layer (no framework dependency):
@@ -107,10 +136,15 @@ application/
     Strategies/ (SeriesView w/ look-ahead guard, 4 built-ins, StrategyRegistry)
     Backtest/ (Backtester + Metrics), Journal/Analytics
     Paper/PaperTradingEngine    Phase 3: accounts/orders/fills/ticks/deployments
+    Brokers/ (TradingConnector, Mt5BridgeConnector, BrokerDataNormalizer)
+    ExecutionSupervisor         Phase 5: 15-step pipeline, proposals, routing
+    Portfolio/PortfolioRiskMonitor  continuous portfolio risk alerts
     Platform                    service container wired from the model layer
   views/                        server-rendered dashboard (layout, welcome, strategy,
-                                paper, journal) + SVG candlestick chart
+                                paper, execution, brokers, risk, journal) + SVG chart
   database/                     schema.mysql.sql (canonical) + schema.sqlite.sql (dev)
+python-services/mt5-bridge/     Phase 4 bridge: FastAPI + MetaTrader5 service,
+                                contract-tested with a simulated terminal
   helpers/aegis_helper.php      view-safe platform-state access
 tests/                          framework.php + cases/*.php (57 tests)
 tools/install.php               schema installer (mysqli or sqlite by driver)
@@ -158,9 +192,40 @@ curl -X POST :8080/api/accounts/1/deploy -d '{"strategyId":"trend-following","sy
 curl -X POST :8080/api/accounts/1/tick
 ```
 
+## Phase 4/5 — Execution governance (how it works)
+
+Every broker-bound intent is a **durable, auditable proposal** that runs the
+15-step pipeline inside `TradeExecutionSupervisor`:
+
+```text
+1 kill switch → 2 trading mode → 3 strategy (APPROVED lifecycle required for
+automated intents) → 4 broker connection (bridge-VERIFIED order submission) →
+5 market session → 6 data freshness → 7 duplicate orders → 8 symbol
+permissions → 9 margin estimate → 10 Risk Engine (actual order volume:
+notional / leverage / risk% / RR / exposure / daily+weekly loss / drawdown) →
+automation envelope (SEMI/FULLY: max notional, max daily trades, max risk %,
+approved symbols) → 11 human approval (HUMAN_APPROVAL mode) → 12 place order
+→ 13 confirm execution → 14 audit log → 15 portfolio snapshot
+```
+
+- **Routing only happens through a connector whose bridge-verified status
+  reports effective order submission** — otherwise the attempt is audited as
+  `ROUTING_BLOCKED` and no order exists.
+- The MT5 connector refuses orders unless `AEGIS_MT5_TRADING_ENABLED=1` AND
+  the deployed bridge reports `tradingEnabled=true` AND the account is
+  **demo** (unless `AEGIS_MT5_LIVE_ALLOWED=1`).
+- The **Portfolio Risk Monitor** scans every paper account and connector;
+  only alert *transitions* are audited (no spam). Correlation warnings use
+  static disclosed groups — explicitly labeled heuristic, not statistical.
+- Strategy lifecycle now includes the **live-approval gate**: `APPROVED`
+  requires the PAPER_TRADING stage plus ≥10 closed paper trades with
+  profit factor > 1 and positive expectancy.
+
 ## API surface
 
 `/api/system/{status,features}` · `/api/events` · `/api/trading/{kill-switch,mode,synthetic-paper}`
+`/api/trading/limits[/update]` · `/api/trading/propose` · `/api/trading/execute` · `/api/trading/:id/{approve,route}`
+`/api/execution/{preflight,proposals,executions}` · `/api/portfolio/risk-scan` · `/api/brokers` · `/api/brokers/mt5/{account,quote}`
 `/api/market-data/{candles,quote,providers}` · `/api/analysis/{run,history}` · `/api/agents/consensus`
 `/api/strategies[/:id[/status]]` · `/api/backtesting/{run,results[/:id]}`
 `/api/accounts[/create|/:id|/:id/order|/:id/positions|/:id/positions/:pid/close|/:id/tick|/:id/deploy|/:id/deployments]`
@@ -170,24 +235,27 @@ curl -X POST :8080/api/accounts/1/tick
 
 | Rule | Enforcement |
 |---|---|
-| Agents never call brokers | Agents see only `AnalysisContext`; the paper engine routes every order through the Risk Engine; no broker code exists yet |
+| Agents never call brokers | Agents see only `AnalysisContext`; every order path (paper AND broker) runs through the Risk Engine + Execution Supervisor; only the supervisor holds a TradingConnector |
 | Never silently use fake data | `provenance.synthetic` flows end-to-end; paper fills on synthetic prices require the explicit, audited `allowSyntheticPaperData` dev flag |
-| No integration claimed unless tested | `GET /api/system/features` renders the same matrix |
-| Live trading disabled by default | Boot state: `ANALYSIS_ONLY` + kill switch ACTIVE; only `ANALYSIS_ONLY` and `PAPER_TRADING` are implemented |
+| No integration claimed unless tested | `GET /api/system/features` renders the same matrix; unverified integrations are listed as PLANNED (Broker Center) |
+| Live trading disabled by default | Boot state: `ANALYSIS_ONLY` + kill switch ACTIVE; broker routing needs an explicitly deployed bridge + `AEGIS_MT5_TRADING_ENABLED=1` + demo account; automated modes need a configured automation envelope |
 | Every trade auditable | `audit_logs` table + UI trail; every order/position/journal row is linked |
 | Risk Engine veto power | `RiskEngine::evaluate()` sits in every order path |
-| Kill switch blocks orders | Checked first in `submitOrder()` and in every Risk Engine context |
+| Kill switch blocks orders | Checked first in `submitOrder()`, in the supervisor pipeline (step 1) and re-verified at routing time |
 
 ## Roadmap
 
-- **Phase 4** — MT5 bridge discovery plus read-only account and quote reads
-  are implemented through a separately deployed Python/MT5 bridge. Configure
-  `AEGIS_MT5_BRIDGE_URL`, `AEGIS_MT5_BRIDGE_TOKEN`, and the explicit
-  `AEGIS_MT5_BRIDGE_ENABLED=1` switch. It has no order-submission capability.
-  Next: normalize broker account/quote contracts, then add crypto exchanges
-  one at a time.
-- **Phase 5** — Trade Execution Supervisor (15-step pipeline), human
-  approval, semi/fully-automated modes, and only then broker order routing.
+- **Phase 4 (verification)** — the MT5 surface and the Python bridge are
+  implemented and contract-tested with a simulated terminal. Remaining
+  before any real-money consideration: deploy the bridge on a Windows host
+  with a **demo** MT5 account, verify the PHP↔bridge path end-to-end, and
+  only then review `AEGIS_MT5_LIVE_ALLOWED` (default stays off). Crypto
+  exchanges are added **one at a time** after MT5 is verified.
+- **Phase 5 (done for the core)** — supervisor pipeline, human approval,
+  automation modes, kill switch, duplicate protection, broker health
+  monitoring and portfolio risk monitoring are implemented and tested.
+  Next: scheduled (cron) portfolio scans + broker health polling,
+  notifications, and multi-user RBAC on the execution endpoints.
 - **Phase 6** — fundamentals agent boundary is implemented and explicitly
   abstains until a licensed, attributable feed is configured. Next: add
   licensed fundamentals, sentiment, on-chain, and options providers one at a

@@ -16,7 +16,7 @@
     <?php endif; ?>
     <form method="post" action="/mode" style="display:inline">
       <select name="mode" class="sel">
-        <?php foreach (['ANALYSIS_ONLY', 'PAPER_TRADING'] as $m): ?>
+        <?php foreach (['ANALYSIS_ONLY', 'PAPER_TRADING', 'HUMAN_APPROVAL', 'SEMI_AUTONOMOUS', 'FULLY_AUTOMATED'] as $m): ?>
           <option value="<?= $m ?>" <?= $status['tradingMode'] === $m ? 'selected' : '' ?>><?= $m ?></option>
         <?php endforeach; ?>
       </select>
@@ -26,6 +26,8 @@
 </div>
 
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
+<?php if (!empty($modeError)): ?><div class="notice err"><?= e($modeError) ?></div><?php endif; ?>
+<?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 
 <div class="panel" style="margin-bottom:12px">
   <div class="body" style="padding-top:12px">

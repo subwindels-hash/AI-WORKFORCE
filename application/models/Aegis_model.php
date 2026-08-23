@@ -23,6 +23,7 @@ class Aegis_model extends CI_Model
     public object $analysis;
     public object $state;
     public object $paper;
+    public object $proposals;
 
     public function __construct()
     {
@@ -388,6 +389,97 @@ class Aegis_model extends CI_Model
                 if ($accountId !== null) $this->db->where('account_id', $accountId);
                 if ($active !== null) $this->db->where('active', $active ? 1 : 0);
                 return $this->db->order_by('id', 'ASC')->get('paper_deployments')->result_array();
+            }
+        };
+
+        $this->proposals = new class($db) implements Aegis\Persistence\ProposalRepository {
+            public function __construct(private object $db) {}
+
+            public function saveProposal(array $p): array {
+                // Accepts both the supervisor's camelCase contract and rows
+                // returned by findProposal()/listProposals() (snake_case).
+                $pick = fn(string $camel, string $snake, $default = null) => $p[$camel] ?? $p[$snake] ?? $default;
+                $intent = $pick('intent', 'intent', []);
+                $row = [
+                    'id' => $p['id'], 'created_at' => $pick('createdAt', 'created_at', gmdate('c')),
+                    'actor' => $pick('actor', 'actor', 'user'),
+                    'broker' => $pick('broker', 'broker', 'none'),
+                    'symbol' => $pick('symbol', 'symbol', ''),
+                    'market_class' => $pick('marketClass', 'market_class', ''),
+                    'side' => $pick('side', 'side', ''), 'order_type' => $pick('orderType', 'order_type', 'MARKET'),
+                    'volume' => (float)$pick('volume', 'volume', 0),
+                    'price' => ($px = $pick('price', 'price')) !== null ? (float)$px : null,
+                    'stop_loss' => (float)$pick('stopLoss', 'stop_loss', 0),
+                    'take_profit' => ($tp = $pick('takeProfit', 'take_profit')) !== null ? (float)$tp : null,
+                    'strategy_id' => $pick('strategyId', 'strategy_id'), 'reason' => mb_substr((string)$pick('reason', 'reason', ''), 0, 500),
+                    'status' => $p['status'], 'intent' => json_encode($intent),
+                    'checks' => json_encode($pick('checks', 'checks', [])),
+                    'risk_decision' => ($rd = $pick('riskDecision', 'riskDecision')) !== null ? json_encode($rd) : null,
+                    'decision_by' => $pick('decisionBy', 'decision_by'), 'decided_at' => $pick('decidedAt', 'decided_at'),
+                    'updated_at' => gmdate('c'),
+                ];
+                $exists = $this->db->from('trade_proposals')->where('id', $row['id'])->count_all_results() > 0;
+                if ($exists) { unset($row['created_at'], $row['actor']); $this->db->where('id', $row['id'])->update('trade_proposals', $row); }
+                else $this->db->insert('trade_proposals', $row);
+                return $this->findProposal($p['id']) ?? $p;
+            }
+
+            public function findProposal(string $id): ?array {
+                $r = $this->db->get_where('trade_proposals', ['id' => $id], 1)->row_array();
+                return $r ? self::cast($r) : null;
+            }
+
+            public function listProposals(?string $status = null, int $limit = 100): array {
+                if ($status !== null) $this->db->where('status', $status);
+                $rows = $this->db->order_by('created_at', 'DESC')->limit(max(1, min(500, $limit)))->get('trade_proposals')->result_array();
+                return array_map(self::cast(...), $rows);
+            }
+
+            public function countAutomatedExecutionsToday(): int {
+                return (int) $this->db->from('trade_executions')
+                    ->where('automated', 1)->where('submitted_at >=', gmdate('Y-m-d'))
+                    ->count_all_results();
+            }
+
+            public function saveExecution(array $e): array {
+                $pick = fn(string $camel, string $snake, $default = null) => $e[$camel] ?? $e[$snake] ?? $default;
+                $row = [
+                    'id' => $e['id'], 'proposal_id' => $pick('proposalId', 'proposal_id'), 'broker' => $e['broker'],
+                    'broker_order_id' => $pick('brokerOrderId', 'broker_order_id'), 'automated' => !empty($e['automated']) ? 1 : 0,
+                    'submitted_at' => $pick('submittedAt', 'submitted_at', gmdate('c')), 'status' => $e['status'],
+                    'result' => json_encode($e['result'] ?? []),
+                ];
+                $exists = $this->db->from('trade_executions')->where('id', $row['id'])->count_all_results() > 0;
+                if ($exists) $this->db->where('id', $row['id'])->update('trade_executions', $row);
+                else $this->db->insert('trade_executions', $row);
+                return self::castExecution(array_merge($row, ['result' => $e['result'] ?? []]));
+            }
+
+            public function listExecutions(string $proposalId, int $limit = 10): array {
+                $rows = $this->db->where('proposal_id', $proposalId)->order_by('submitted_at', 'DESC')
+                    ->limit(max(1, min(50, $limit)))->get('trade_executions')->result_array();
+                return array_map(self::castExecution(...), $rows);
+            }
+
+            public function listRecentExecutions(int $limit = 50): array {
+                $rows = $this->db->order_by('submitted_at', 'DESC')->limit(max(1, min(200, $limit)))
+                    ->get('trade_executions')->result_array();
+                return array_map(self::castExecution(...), $rows);
+            }
+
+            private static function cast(array $r): array {
+                foreach (['volume', 'price', 'stop_loss', 'take_profit'] as $k) if ($r[$k] !== null) $r[$k] = (float)$r[$k];
+                $r['intent'] = json_decode($r['intent'], true) ?: [];
+                $r['checks'] = json_decode($r['checks'], true) ?: [];
+                $r['riskDecision'] = $r['risk_decision'] !== null ? (json_decode($r['risk_decision'], true) ?: null) : null;
+                unset($r['risk_decision']);
+                return $r;
+            }
+
+            private static function castExecution(array $r): array {
+                $r['automated'] = (bool)$r['automated'];
+                if (is_string($r['result'])) $r['result'] = json_decode($r['result'], true) ?: [];
+                return $r;
             }
         };
     }

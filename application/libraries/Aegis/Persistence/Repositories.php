@@ -128,3 +128,24 @@ interface PaperRepository
     /** @return array<int, array<string, mixed>> */
     public function listDeployments(?int $accountId = null, ?bool $active = null): array;
 }
+
+/**
+ * Phase 5 execution governance persistence: durable trade proposals with
+ * their full pipeline checks, and the execution record for any proposal that
+ * was actually routed to a broker connector.
+ */
+interface ProposalRepository
+{
+    /** Insert-or-update by id; always returns the stored record. */
+    public function saveProposal(array $proposal): array;
+    /** @return array<string, mixed>|null */
+    public function findProposal(string $id): ?array;
+    /** @return array<int, array<string, mixed>> newest first */
+    public function listProposals(?string $status = null, int $limit = 100): array;
+    /** Automated trades routed today (UTC) — the SEMI_AUTONOMOUS daily cap. */
+    public function countAutomatedExecutionsToday(): int;
+    public function saveExecution(array $execution): array;
+    /** @return array<int, array<string, mixed>> */
+    public function listExecutions(string $proposalId, int $limit = 10): array;
+    public function listRecentExecutions(int $limit = 50): array;
+}
