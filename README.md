@@ -80,26 +80,26 @@ sandbox — see below).
 
 ---
 
-## Production deployment (the normal path)
+## Production deployment (cPanel — no terminal required)
 
-Requirements: PHP 7.4–8.3 with `mysqli` + `mbstring`, MySQL 5.7+/MariaDB 10.3+,
-any web server (Apache/nginx + php-fpm).
+Requirements: PHP 8.1–8.3 with `mysqli` + `mbstring`, MySQL 5.7+/MariaDB 10.3+,
+Apache with `mod_rewrite` and permission for the bundled `.htaccess` rules.
 
-```bash
-# 1. Create the database + user, then:
-export AEGIS_DB_HOST=127.0.0.1 AEGIS_DB_USER=aegis AEGIS_DB_PASS=... AEGIS_DB_NAME=aegis_trading
-php tools/install.php          # creates all tables and RBAC defaults
-# Create the first operator once; values are environment-only and never committed:
-export AEGIS_BOOTSTRAP_ADMIN_EMAIL=admin@example.com AEGIS_BOOTSTRAP_ADMIN_PASSWORD='use-a-long-unique-password'
-php index.php tools bootstrap_admin
+The supported production flow is entirely browser-based:
 
-# 2. Point the vhost at the repo root (index.php is the front controller),
-#    set ENVIRONMENT=production, done:
-php index.php tools tests      # verify the full stack against your MariaDB
-```
+1. Upload and extract `application-deployment.zip` with **cPanel File Manager**.
+2. Create a database/user and grant **ALL PRIVILEGES** in **cPanel → MySQL Databases**.
+3. Import `database/production.sql` in **cPanel → phpMyAdmin**.
+4. Copy `.env.example` to `.env` and edit `CI_ENV`, `VP_BASE_URL`, the `VP_DB_*`
+   values, and preserve the existing `VP_ENCRYPTION_KEY` / `VP_AUTH_SECRET`.
+5. Open the domain. No install, seed, migration, Composer, Node, npm, Docker or
+   CLI admin-creation command is required.
 
-Configuration is environment-driven (`application/config/database.php`):
-`AEGIS_DB_DRIVER` (default `mysqli`), `AEGIS_DB_HOST/USER/PASS/NAME`.
+The complete cPanel guide is [`docs/CPANEL_DEPLOYMENT.md`](docs/CPANEL_DEPLOYMENT.md).
+The SQL import contains all application tables, indexes, foreign keys, defaults,
+RBAC, language/lottery reference data, built-in strategies and the initial
+administrator account. Configuration is read from `.env` by the bundled
+`application/config/env.php` loader.
 
 ## Offline dev / demo runtime (this repository's live preview)
 
