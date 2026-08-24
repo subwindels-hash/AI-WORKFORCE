@@ -108,6 +108,16 @@
     checkSupport();
   });
 
+  // Guard against duplicate delegation listeners: the app-shell re-runs this
+  // inline script on every SPA navigation, and without a guard repeated
+  // visits stack several handlers so one click triggers several TTS/STT calls.
+  if (window.__windels_tt_listeners_bound) {
+    // Script already bound this session; only re-initialize voice state.
+    checkSupport();
+    return;
+  }
+  window.__windels_tt_listeners_bound = true;
+
   document.addEventListener('click', function(ev){
     var btn = ev.target.closest('.tts-play');
     if (!btn || btn.disabled || !provider) return;

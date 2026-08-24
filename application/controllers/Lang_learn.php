@@ -27,6 +27,10 @@ class Lang_learn extends App_Controller
         $data['languages'] = $this->platform->langlearn->languages();
         $data['csrfToken'] = (string) $this->session->userdata('csrf_token');
         $data['locales'] = \Aegis\LangLearn\Translator::LOCALES;
+        // The user's real learning profile(s) so the "Continue studying"
+        // links point somewhere useful instead of a hard-coded profile id.
+        try { $data['myProfiles'] = $this->platform->langlearn->profiles((int) $user['id']); }
+        catch (Throwable $e) { $data['myProfiles'] = []; }
         // Each example pins an explicit source→target pair so learners see
         // both directions working (e.g. Dutch→English and English→Dutch).
         $data['examplePairs'] = [
