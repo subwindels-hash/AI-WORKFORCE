@@ -14,7 +14,9 @@ use Aegis\Persistence\PlatformStateRepository;
 use Aegis\Persistence\StrategyRepository;
 use Aegis\Providers\BinanceProvider;
 use Aegis\Providers\FrankfurterProvider;
+use Aegis\Providers\LicensedAssetMarketDataProvider;
 use Aegis\Providers\SyntheticProvider;
+use Aegis\Lottery\OfficialLotteryProvider;
 use Aegis\Strategies\StrategyRegistry;
 use Aegis\Strategies\TradingStrategy;
 
@@ -52,10 +54,27 @@ class Platform
         if (!$disableRealProviders) {
             $this->providers->register(new BinanceProvider());
             $this->providers->register(new FrankfurterProvider());
+            // These adapters are inert until a licensed feed, explicit
+            // ENABLED flag and symbol allow-list are supplied. Registering
+            // them here makes capability/health state observable without
+            // allowing a missing integration to fabricate data.
+            $this->providers->register(new LicensedAssetMarketDataProvider('stock', 'stock-licensed', 'Licensed stock data', 'AEGIS_STOCK_DATA', null, null, null, null, null, null, 30));
+            $this->providers->register(new LicensedAssetMarketDataProvider('etf', 'etf-licensed', 'Licensed ETF data', 'AEGIS_ETF_DATA', null, null, null, null, null, null, 31));
+            $this->providers->register(new LicensedAssetMarketDataProvider('futures', 'futures-licensed', 'Licensed futures data', 'AEGIS_FUTURES_DATA', null, null, null, null, null, null, 32));
+            $this->providers->register(new LicensedAssetMarketDataProvider('options', 'options-licensed', 'Licensed options data', 'AEGIS_OPTIONS_DATA', null, null, null, null, null, null, 33));
         }
         $this->providers->register(new SyntheticProvider()); // ALWAYS last
         $this->brokers = new BrokerManager();
         $this->brokers->register(new Mt5BridgeConnector());
+        $this->brokers->register(new \Aegis\Brokers\Mt4BridgeConnector());
+        $this->brokers->register(new \Aegis\Brokers\BinanceTradingConnector());
+        $this->brokers->register(new \Aegis\Brokers\BybitTradingConnector());
+        $this->brokers->register(new \Aegis\Brokers\OkxTradingConnector());
+        $this->brokers->register(new \Aegis\Brokers\CoinbaseTradingConnector());
+        $this->brokers->register(new \Aegis\Brokers\KrakenTradingConnector());
+        $this->brokers->register(new \Aegis\Brokers\InteractiveBrokersConnector());
+        $this->brokers->register(new \Aegis\Brokers\AlpacaConnector());
+        $this->brokers->register(new \Aegis\Brokers\OandaConnector());
         $this->providers->setFallbackHandler(function (array $info) use ($model) {
             $model->audit->emit('PROVIDER_FALLBACK', "{$info['symbol']}: providers [" . implode(', ', $info['failed']) . "] failed — falling back to {$info['used']}", $info);
         });
@@ -63,12 +82,13 @@ class Platform
         $this->risk = new RiskEngine();
         $this->notifications = new \Aegis\Notifications\Notifier($model->notifications);
         $this->sports = new \Aegis\Sports\SportsIntelligence($model->sports, $model->audit, $this->notifications);
-        $this->lottery = new \Aegis\Lottery\LotteryIntelligence(
-            $model->lottery, $model->audit,
-            getenv('WINDELS_LOTTERY_SANDBOX') === '1'
+        $officialLottery = new OfficialLotteryProvider();
+        $lotteryProvider = $officialLottery->configured()
+            ? $officialLottery
+            : (getenv('WINDELS_LOTTERY_SANDBOX') === '1'
                 ? new \Aegis\Lottery\SandboxLotteryProvider()
-                : new \Aegis\Lottery\UnavailableLotteryProvider(),
-        );
+                : new \Aegis\Lottery\UnavailableLotteryProvider());
+        $this->lottery = new \Aegis\Lottery\LotteryIntelligence($model->lottery, $model->audit, $lotteryProvider);
         $this->identity = new Identity($model->identity);
         $this->strategies = new StrategyRegistry($model->strategies, $model->audit, $model->journal);
         $this->strategies->seedBuiltins();

@@ -94,7 +94,7 @@
 </div>
 
 <div class="panel" style="margin-top:14px">
-  <h3>Not implemented (PLANNED) — do not treat as working</h3>
+  <h3>Not production-verified (PLANNED) — do not treat as working</h3>
   <div class="body" style="padding-top:12px">
     <table class="tbl mono">
       <thead><tr><th>Connector</th><th>Status</th><th>Notes</th></tr></thead>
