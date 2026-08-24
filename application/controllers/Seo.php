@@ -13,14 +13,14 @@ class Seo extends CI_Controller
     public function robots()
     {
         $seo = $this->settings(); $base = rtrim((string) ($seo['canonical'] ?? ''), '/');
-        $body = "User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /admin\nDisallow: /account\n" . ($base !== '' ? "Sitemap: {$base}/sitemap.xml\n" : '');
+        $body = "User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /admin\nDisallow: /account\nDisallow: /dashboard\nDisallow: /analysis\nDisallow: /app/\n" . ($base !== '' ? "Sitemap: {$base}/sitemap.xml\n" : '');
         $this->output->set_content_type('text/plain')->set_output($body);
     }
 
     public function sitemap()
     {
         $seo = $this->settings(); $base = rtrim((string) ($seo['canonical'] ?? ''), '/');
-        $paths = ['/', '/strategy', '/execution', '/brokers', '/risk', '/paper', '/journal', '/sports', '/sports/tickets', '/leads', '/lead-pipeline', '/app/languages'];
+        $paths = ['/', '/about', '/services', '/how-it-works', '/locations', '/safety', '/faq', '/contact', '/login', '/register'];
         $xml = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">';
         foreach ($paths as $path) $xml .= '<url><loc>' . htmlspecialchars($base . $path, ENT_XML1, 'UTF-8') . '</loc></url>';
         $xml .= '</urlset>';

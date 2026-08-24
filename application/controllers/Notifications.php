@@ -1,5 +1,6 @@
 <?php
 defined('BASEPATH') or exit('No direct script access allowed');
+require_once APPPATH . 'core/App_Controller.php';
 
 /**
  * Operator notifications console (server-rendered). Broadcast notifications
@@ -7,7 +8,7 @@ defined('BASEPATH') or exit('No direct script access allowed');
  * own targeted ones. Risk alerts, approval requests and execution outcomes
  * land here via the Notifier.
  */
-class Notifications extends MY_Controller
+class Notifications extends App_Controller
 {
     public function index()
     {

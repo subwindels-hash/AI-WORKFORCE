@@ -66,14 +66,16 @@ class FrankfurterProvider implements MarketDataProvider
         $start = gmdate('Y-m-d', time() - $days * 86400);
         $url = "{$this->baseUrl}/v1/{$start}..?base={$base}&symbols={$quote}";
         $data = $this->guarded(fn () => $this->http->getJson($url));
-        $rows = $data['rates'][$quote] ?? [];
-        if (!is_array($rows)) {
+        // Frankfurter time series is date-keyed: {"rates":{"2026-08-21":{"USD":1.17}}}
+        $rows = $data['rates'] ?? [];
+        if (!is_array($rows) || $rows === []) {
             throw new \RuntimeException('frankfurter-ecb returned no series');
         }
         ksort($rows);
         $candles = [];
         $prev = null;
-        foreach ($rows as $date => $rate) {
+        foreach ($rows as $date => $row) {
+            $rate = is_array($row) ? ($row[$quote] ?? null) : $row;
             if (!is_numeric($rate)) {
                 continue;
             }
@@ -88,6 +90,9 @@ class FrankfurterProvider implements MarketDataProvider
                 'volume' => 0.0, // reference rates carry no volume — honest
             ];
             $prev = $close;
+        }
+        if ($candles === []) {
+            throw new \RuntimeException('frankfurter-ecb returned no series');
         }
         return array_slice($candles, -$req['limit']);
     }

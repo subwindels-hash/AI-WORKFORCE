@@ -1,7 +1,8 @@
 <?php
 defined('BASEPATH') or exit('No direct script access allowed');
+require_once APPPATH . 'core/App_Controller.php';
 
-class Welcome extends MY_Controller
+class Welcome extends App_Controller
 {
     public function index()
     {
@@ -52,7 +53,7 @@ class Welcome extends MY_Controller
     {
         $active = $this->input->post('active') === '1';
         $this->platform->setKillSwitch($active, $active ? 'engaged from dashboard' : 'released from dashboard');
-        redirect('/');
+        redirect('/analysis');
     }
 
     public function mode()
@@ -60,7 +61,7 @@ class Welcome extends MY_Controller
         $mode = (string)$this->input->post('mode');
         $result = $this->platform->setTradingMode($mode);
         $this->session->set_flashdata($result['ok'] ? 'notice' : 'modeError', $result['message']);
-        redirect('/');
+        redirect('/analysis');
     }
 
     private function statusView(): array

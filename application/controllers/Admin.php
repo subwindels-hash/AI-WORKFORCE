@@ -1,8 +1,9 @@
 <?php
 defined('BASEPATH') or exit('No direct script access allowed');
+require_once APPPATH . 'core/App_Controller.php';
 
 /** Administrator control center: users, roles and platform status. */
-class Admin extends MY_Controller
+class Admin extends App_Controller
 {
     public function index()
     {
@@ -28,7 +29,7 @@ class Admin extends MY_Controller
         $name = trim((string) $this->input->post('display_name'));
         $password = (string) $this->input->post('password');
         $roleCode = trim((string) $this->input->post('role'));
-        $allowed = ['super_admin', 'sports_admin', 'sports_viewer', 'trading_operator', 'trading_viewer', 'lottery_admin', 'lottery_viewer'];
+        $allowed = ['super_admin', 'sports_admin', 'sports_viewer', 'trading_operator', 'trading_viewer', 'lottery_admin', 'lottery_viewer', 'platform_member'];
         if (!filter_var($email, FILTER_VALIDATE_EMAIL) || $name === '' || strlen($name) > 120 || strlen($password) < 14 || !in_array($roleCode, $allowed, true)) {
             $this->flash('error', 'Enter a valid name, email, role and a password of at least 14 characters.'); redirect('/admin'); return;
         }
@@ -54,11 +55,10 @@ class Admin extends MY_Controller
         $this->flash('notice', 'User account ' . ($active ? 'activated.' : 'deactivated.')); redirect('/admin');
     }
 
+    /** Only system.super_admin may enter the control centre. */
     private function requireAdmin(): ?array
     {
-        $user = $this->session->userdata('identity');
-        if (!is_array($user) || !$this->platform->identity->can($user, 'system.super_admin')) { redirect('/admin/login'); return null; }
-        return $user;
+        return $this->requireAdminPage();
     }
 
     private function validCsrf(): bool

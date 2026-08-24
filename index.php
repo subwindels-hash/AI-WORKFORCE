@@ -73,8 +73,14 @@ if (!empty($_SERVER['HTTP_X_AEGIS_ORIG_URI'])) {
     unset($_SERVER['PATH_INFO'], $_SERVER['PATH_TRANSLATED']);
     // The WASM bridge cannot seed process env per request — select the
     // pdo_sqlite dev driver here (production hosts set AEGIS_DB_* env vars).
-    if (getenv('AEGIS_DB_DRIVER') === false) {
-        putenv('AEGIS_DB_DRIVER=pdo_sqlite');
+    // The offline WASM bridge has no MySQL. Force sqlite even if a production
+    // .env sets VP_DB_DRIVER=mysqli (that file is for cPanel, not this preview).
+    putenv('AEGIS_DB_DRIVER=pdo_sqlite');
+    putenv('VP_DB_DRIVER=pdo_sqlite');
+    putenv('VP_BASE_URL=');
+    putenv('AEGIS_BASE_URL=');
+    putenv('VP_COOKIE_SECURE=0');
+    if (getenv('AEGIS_SQLITE_PATH') === false) {
         putenv('AEGIS_SQLITE_PATH=' . __DIR__ . '/application/data/aegis.sqlite');
     }
     // Each request runs in a fresh PHP instance, so CI3 *file* sessions do

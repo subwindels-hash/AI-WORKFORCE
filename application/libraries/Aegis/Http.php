@@ -29,6 +29,19 @@ class Http
         };
     }
 
+    /**
+     * Binance (and similar) error envelopes look like {"code":-1121,"msg":"..."}.
+     * Treating those as candle rows produced two invalid bars and a silent
+     * NO_TRADE / "Agent technical failed" dashboard on production.
+     */
+    public static function isProviderErrorPayload($json): bool
+    {
+        if (!is_array($json) || array_is_list($json)) return false;
+        if (!array_key_exists('code', $json) || !isset($json['msg'])) return false;
+        if (!is_numeric($json['code'])) return false;
+        return (int) $json['code'] !== 200;
+    }
+
     public function getJson(string $url, int $retries = 2, int $timeoutMs = 6000, int $rateLimitCooldownMs = 30000)
     {
         $transport = $this->transport;
@@ -38,9 +51,14 @@ class Http
             if ($body !== null) {
                 $json = json_decode($body, true);
                 if (is_array($json)) {
-                    return $json;
+                    if (self::isProviderErrorPayload($json)) {
+                        $lastError = 'provider error: ' . (string) $json['msg'];
+                    } else {
+                        return $json;
+                    }
+                } else {
+                    $lastError = 'invalid JSON response';
                 }
-                $lastError = 'invalid JSON response';
             } else {
                 $lastError = 'request failed (network/timeout)';
             }

@@ -157,6 +157,10 @@ class ProviderManager
                 if (!is_array($candles) || count($candles) === 0) {
                     throw new \RuntimeException('empty candle response');
                 }
+                $preview = CandleNormalizer::normalize($candles, $timeframe);
+                if (count($preview['candles']) < 30) {
+                    throw new \RuntimeException($provider->name() . ' returned too few valid candles (' . count($preview['candles']) . ')');
+                }
                 $ttl = max(15, Timeframes::ms($timeframe) * 0.25);
                 $this->candleCache[$key] = ['expires' => microtime(true) + $ttl / 1000, 'candles' => $candles, 'provider' => $provider];
                 if (count($failed) > 0 && $this->onFallback) {
