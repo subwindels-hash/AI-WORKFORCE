@@ -313,29 +313,29 @@ class Aegis_model extends CI_Model
         $this->lottery = new class($db) implements Aegis\Persistence\LotteryRepository {
             public function __construct(private object $db) {}
             public function ensureLottery(string $code, string $name, string $rulesVersion): array {
-                $row = $this->db->get_where('lotteries', ['code' => $code], 1)->row_array();
+                $q = $this->db->get_where('lotteries', ['code' => $code], 1); $row = ($q && is_object($q)) ? $q->row_array() : null;
                 if ($row) {
                     if ((string) $row['rules_version'] !== $rulesVersion) {
                         $this->db->where('id', $row['id'])->update('lotteries', ['rules_version' => $rulesVersion, 'updated_at' => gmdate('c')]);
-                        $row = $this->db->get_where('lotteries', ['id' => $row['id']], 1)->row_array();
+                        $q2 = $this->db->get_where('lotteries', ['id' => $row['id']], 1); $row = ($q2 && is_object($q2)) ? $q2->row_array() : $row;
                     }
                     return $row;
                 }
                 $now = gmdate('c');
                 $this->db->insert('lotteries', ['code' => $code, 'name' => $name, 'enabled' => 1, 'rules_version' => $rulesVersion, 'created_at' => $now, 'updated_at' => $now]);
-                return $this->db->get_where('lotteries', ['code' => $code], 1)->row_array();
+                $q3 = $this->db->get_where('lotteries', ['code' => $code], 1); return ($q3 && is_object($q3)) ? $q3->row_array() : ['code' => $code, 'name' => $name, 'enabled' => 1, 'rules_version' => $rulesVersion, 'created_at' => $now, 'updated_at' => $now];
             }
-            public function listLotteries(): array { return $this->db->order_by('id', 'ASC')->get('lotteries')->result_array(); }
-            public function activeRules(string $lotteryCode): ?array { $row = $this->db->where(['lottery_code' => $lotteryCode, 'active' => 1])->order_by('id', 'DESC')->limit(1)->get('lottery_rules')->row_array(); return $row ?: null; }
+            public function listLotteries(): array { $q = $this->db->order_by('id', 'ASC')->get('lotteries'); return ($q && is_object($q)) ? $q->result_array() : []; }
+            public function activeRules(string $lotteryCode): ?array { $q = $this->db->where(['lottery_code' => $lotteryCode, 'active' => 1])->order_by('id', 'DESC')->limit(1)->get('lottery_rules'); $row = ($q && is_object($q)) ? $q->row_array() : null; return $row ?: null; }
             public function saveRules(array $r): int { $this->db->insert('lottery_rules', $r); return (int) $this->db->insert_id(); }
             public function ensureProvider(string $code, string $name): array {
-                $row = $this->db->get_where('lottery_data_sources', ['provider_code' => $code], 1)->row_array();
+                $q = $this->db->get_where('lottery_data_sources', ['provider_code' => $code], 1); $row = ($q && is_object($q)) ? $q->row_array() : null;
                 if ($row) return $row;
                 $now = gmdate('c');
                 $this->db->insert('lottery_data_sources', ['provider_code' => $code, 'display_name' => $name, 'enabled' => 0, 'synthetic' => str_contains($code, 'sandbox') ? 1 : 0, 'created_at' => $now, 'updated_at' => $now]);
-                return $this->db->get_where('lottery_data_sources', ['provider_code' => $code], 1)->row_array();
+                $q2 = $this->db->get_where('lottery_data_sources', ['provider_code' => $code], 1); return ($q2 && is_object($q2)) ? $q2->row_array() : ['provider_code' => $code, 'display_name' => $name, 'enabled' => 0, 'synthetic' => str_contains($code, 'sandbox') ? 1 : 0, 'created_at' => $now, 'updated_at' => $now];
             }
-            public function listProviders(bool $enabledOnly = false): array { if ($enabledOnly) $this->db->where('enabled', 1); return $this->db->order_by('id', 'ASC')->get('lottery_data_sources')->result_array(); }
+            public function listProviders(bool $enabledOnly = false): array { if ($enabledOnly) $this->db->where('enabled', 1); $q = $this->db->order_by('id', 'ASC')->get('lottery_data_sources'); return ($q && is_object($q)) ? $q->result_array() : []; }
             public function saveHealth(int $providerId, array $health): void { $row = array_merge($health, ['provider_id' => $providerId, 'observed_at' => gmdate('c')]); unset($row['id']); $this->db->insert('lottery_provider_health', $row); }
             public function latestHealth(int $providerId): ?array { $row = $this->db->where('provider_id', $providerId)->order_by('observed_at', 'DESC')->limit(1)->get('lottery_provider_health')->row_array(); return $row ?: null; }
             public function listHealth(int $providerId, int $limit = 20): array { return $this->db->where('provider_id', $providerId)->order_by('observed_at', 'DESC')->limit(min(200, max(1, $limit)))->get('lottery_provider_health')->result_array(); }
