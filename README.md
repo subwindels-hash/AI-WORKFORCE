@@ -61,7 +61,7 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **Lottery Intelligence (EuroMillions)**: rule engine, validated idempotent ingestion (verified draws never silently overwritten), frequency/gap/hot-cold/distribution/pair statistics, per-line combination analyzer, 5-mode AI combination generator with lock/exclude + AI decision reports, diversification engine, system builder (C(N,5) combinatorics), user-scoped ticket builder + saved tickets, backtesting (Strategy Lab) with mandatory random baseline + same-period strategy comparison, model versioning, separated performance overview, RBAC (lottery.view/manage), idempotent lottery-cron | **TESTED** (admin controls/UI/security-E2E next; official feeds PLANNED) |
 | MT4 / crypto-exchange / stock-broker connectors | **PLANNED** (added one at a time after MT5 is verified) |
 
-**328 automated tests** run through the real CodeIgniter stack
+**351 automated tests** run through the real CodeIgniter stack
 (`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
 sandbox — see below), plus 9 contract tests for the Python bridge
 (`python-services/mt5-bridge/.venv/bin/python -m pytest test_bridge.py`).
@@ -164,7 +164,7 @@ application/
 python-services/mt5-bridge/     Phase 4 bridge: FastAPI + MetaTrader5 service,
                                 contract-tested with a simulated terminal
   helpers/aegis_helper.php      view-safe platform-state access
-tests/                          framework.php + cases/*.php (62 case files, 328 tests)
+tests/                          framework.php + cases/*.php (63 case files, 351 tests, incl. full UI audit `65-ui-audit.php`)
 tools/install.php               schema installer (mysqli or sqlite by driver)
 runtime/                        offline WASM-PHP bridge (dev only, not production)
 assets/css/aegis.css            dashboard styles (no CDN dependency)

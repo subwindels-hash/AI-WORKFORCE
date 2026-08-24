@@ -21,6 +21,7 @@
       <?php if (!empty($notice)): ?><div class="notice ok auth-notice" role="status"><?= e($notice) ?></div><?php endif; ?>
 
       <form method="post" action="/forgot-password/submit" class="auth-form">
+        <input type="hidden" name="csrf_token" value="<?= e((string) ($csrfToken ?? '')) ?>">
         <label class="auth-field">
           <span>Email address</span>
           <span class="auth-control">

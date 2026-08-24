@@ -328,13 +328,13 @@ class Api_sports extends Api_controller
         $this->decide_calibration($id, 'REJECTED');
     }
 
-    private function decide_calibration(string $id, string $status): void
+    private function decide_calibration(string $id, string $status)
     {
         $user = $this->requirePermission('sports.manage');
         if (!$user) return;
         $cal = $this->Aegis_model->sports->findCalibration((int) $id);
-        if (!$cal) return $this->jsonError('calibration not found', 404);
-        if (($cal['status'] ?? '') !== 'PENDING') return $this->jsonError('calibration already decided', 409);
+        if (!$cal) { $this->jsonError('calibration not found', 404); return; }
+        if (($cal['status'] ?? '') !== 'PENDING') { $this->jsonError('calibration already decided', 409); return; }
         $this->Aegis_model->sports->updateCalibrationStatus((int) $id, $status, (string) $user['id']);
         $this->Aegis_model->audit->emit('SPORTS_CALIBRATION_' . $status, 'Calibration ' . $status . ' by ' . $user['id'], ['calibrationId' => (int) $id, 'intercept' => $cal['intercept'], 'slope' => $cal['slope'], 'samples' => $cal['samples']], (string) $user['id']);
         $this->json(['calibration' => $this->Aegis_model->sports->findCalibration((int) $id)]);

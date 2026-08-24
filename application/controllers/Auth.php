@@ -94,11 +94,16 @@ class Auth extends MY_Controller
         $this->load->view('auth/forgot', [
             'title' => 'Reset password',
             'notice' => $this->consumeFlash('notice'),
+            'csrfToken' => $this->ensureVisitorCsrf(),
         ]);
     }
 
     public function forgot_submit()
     {
+        if (!$this->validAuthCsrf()) {
+            $this->flash('error', 'Your session expired. Please try again.');
+            redirect('/forgot-password'); return;
+        }
         $this->flash('notice', 'Password resets are issued by an administrator. Email support or your platform admin — this form does not invent a reset token.');
         redirect('/forgot-password');
     }
