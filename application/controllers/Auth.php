@@ -71,6 +71,13 @@ class Auth extends MY_Controller
             redirect('/register');
             return;
         }
+        $portal = new \Aegis\AdminPortal($this->Aegis_model);
+        $portal->ensureSchema();
+        if ($portal->setting('registration_enabled', '1') !== '1') {
+            $this->flash('error', 'New account registration is currently closed.');
+            redirect('/register');
+            return;
+        }
         $now = gmdate('c');
         $new = $this->Aegis_model->identity->createUser([
             'username' => $username,
@@ -89,6 +96,10 @@ class Auth extends MY_Controller
         }
         $this->Aegis_model->identity->assignRole((int) $new['id'], $role);
         $this->Aegis_model->audit->emit('USER_REGISTERED', 'A visitor created a platform member account', ['userId' => (int) $new['id'], 'userUid' => (string) ($new['user_uid'] ?? '')], 'visitor');
+        $portal->notifyAdmins('USER_REGISTERED', 'info', 'New user registration: ' . ($new['username'] ?? $email), [
+            'userUid' => (string) ($new['user_uid'] ?? ''),
+            'username' => (string) ($new['username'] ?? ''),
+        ], 'register:' . (string) ($new['user_uid'] ?? $new['id']));
         $user = $this->platform->identity->authenticate($username, $password);
         if (!$user) { $this->flash('error', 'Account created. Sign in to continue.'); redirect('/login'); return; }
         $this->establishSession($user);
@@ -133,17 +144,34 @@ class Auth extends MY_Controller
         $remember = $this->input->post('remember') === '1';
         $attempts = (int) $this->session->userdata('login_attempts');
         $until = (int) $this->session->userdata('login_locked_until');
+        $portal = new \Aegis\AdminPortal($this->Aegis_model);
+        $portal->ensureSchema();
+        $maxAttempts = max(3, min(20, (int) $portal->setting('login_max_attempts', '5')));
+        $lockSeconds = max(60, min(86400, (int) $portal->setting('login_lockout_seconds', '900')));
         if ($until > time()) { $this->flash('error', 'Too many attempts. Try again later.'); $this->redirectLogin($admin); return; }
         if ($identifier === '' || $password === '') { $this->flash('error', 'Enter your username, email or User ID and your password.'); $this->redirectLogin($admin); return; }
+        if ($this->platform->identity->isSuspendedWithPassword($identifier, $password)) {
+            $this->flash('error', 'Your account is currently unavailable. Please contact support.');
+            $this->redirectLogin($admin); return;
+        }
         $user = $this->platform->identity->authenticate($identifier, $password);
-        if (!$user || ($admin && !$this->platform->identity->can($user, 'system.super_admin'))) {
+        if (!$user || ($admin && !$this->platform->identity->canAccessAdmin($user))) {
             $attempts++;
             $this->session->set_userdata('login_attempts', $attempts);
-            if ($attempts >= 5) $this->session->set_userdata('login_locked_until', time() + 900);
+            if ($attempts >= $maxAttempts) {
+                $this->session->set_userdata('login_locked_until', time() + $lockSeconds);
+                $portal->notifyAdmins('SUSPICIOUS_LOGIN', 'warning', 'Login lockout after repeated failed attempts', [
+                    'identifier' => mb_substr($identifier, 0, 80),
+                    'adminForm' => $admin,
+                ], 'lockout:' . md5(strtolower($identifier)));
+            }
             $this->flash('error', $admin ? 'Administrator access was not granted.' : 'Invalid username, email or User ID, or password.');
             $this->redirectLogin($admin); return;
         }
         $this->establishSession($user);
+        if ($admin || $this->canAccessAdmin($user)) {
+            $portal->log($user, 'ADMIN_LOGIN', 'ok', null, [], (string) $this->input->ip_address());
+        }
         // "Remember me" keeps the user signed in on this browser for 30 days
         // via a signed, HttpOnly cookie; the session itself stays short-lived.
         if ($remember) $this->issueRememberCookie((int) $user['id']);

@@ -31,7 +31,7 @@ class Tools extends MY_Controller
             exit(1);
         }
         $variant = $driver === 'sqlite' ? 'sqlite' : 'mysql';
-        $schemaFiles = [$schemaFile, APPPATH . 'database/sports_identity.' . $variant . '.sql', APPPATH . 'database/sports.' . $variant . '.sql', APPPATH . 'database/sports_decisions.' . $variant . '.sql', APPPATH . 'database/sports_results.' . $variant . '.sql', APPPATH . 'database/sports_intelligence.' . $variant . '.sql', APPPATH . 'database/lottery.' . $variant . '.sql'];
+        $schemaFiles = [$schemaFile, APPPATH . 'database/sports_identity.' . $variant . '.sql', APPPATH . 'database/sports.' . $variant . '.sql', APPPATH . 'database/sports_decisions.' . $variant . '.sql', APPPATH . 'database/sports_results.' . $variant . '.sql', APPPATH . 'database/sports_intelligence.' . $variant . '.sql', APPPATH . 'database/lottery.' . $variant . '.sql', APPPATH . 'database/admin_portal.' . $variant . '.sql'];
         foreach ($schemaFiles as $file) {
             if (!is_file($file)) continue;
             $sql = file_get_contents($file);

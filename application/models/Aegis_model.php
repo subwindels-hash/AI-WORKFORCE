@@ -593,6 +593,110 @@ class Aegis_model extends CI_Model
             public function setActive(int $userId, bool $active): void {
                 $this->db->where('id', $userId)->update('users', ['active' => $active ? 1 : 0, 'updated_at' => gmdate('c')]);
             }
+            public function accountCounts(): array {
+                $total = (int) $this->db->count_all('users');
+                $active = (int) $this->db->where('active', 1)->count_all_results('users');
+                return ['total' => $total, 'active' => $active, 'suspended' => max(0, $total - $active)];
+            }
+            public function countCreatedSince(string $iso): int {
+                return (int) $this->db->where('created_at >=', $iso)->count_all_results('users');
+            }
+            public function countLoggedInSince(string $iso): int {
+                return (int) $this->db->where('active', 1)->where('last_login_at >=', $iso)->count_all_results('users');
+            }
+            public function recentRegistrations(int $limit = 8): array {
+                return $this->db->select('id,email,display_name,username,user_uid,profile_image,active,created_at,last_login_at')
+                    ->order_by('created_at', 'DESC')->limit(max(1, min(50, $limit)))->get('users')->result_array();
+            }
+            public function searchUsers(array $filters, string $sort = 'created_at', string $dir = 'DESC', int $page = 1, int $perPage = 20): array {
+                $allowed = ['id', 'user_uid', 'username', 'email', 'active', 'created_at', 'last_login_at'];
+                if (!in_array($sort, $allowed, true)) $sort = 'created_at';
+                $dir = strtoupper($dir) === 'ASC' ? 'ASC' : 'DESC';
+                $this->applyUserFilters($filters);
+                $total = (int) $this->db->count_all_results('users');
+                $this->db->reset_query();
+                $this->applyUserFilters($filters);
+                $page = max(1, $page);
+                $perPage = max(1, min(100, $perPage));
+                $rows = $this->db->select('id,email,display_name,username,user_uid,profile_image,active,created_at,updated_at,last_login_at')
+                    ->order_by($sort, $dir)->limit($perPage, ($page - 1) * $perPage)->get('users')->result_array();
+                foreach ($rows as &$row) {
+                    $row['permissions'] = $this->permissionsForUser((int) $row['id']);
+                    $row['roles'] = $this->rolesForUser((int) $row['id']);
+                }
+                return ['rows' => $rows, 'total' => $total, 'page' => $page, 'pages' => max(1, (int) ceil($total / $perPage)), 'perPage' => $perPage];
+            }
+            private function applyUserFilters(array $filters): void {
+                if (($filters['status'] ?? '') === 'active') $this->db->where('active', 1);
+                if (($filters['status'] ?? '') === 'suspended') $this->db->where('active', 0);
+                $q = trim((string) ($filters['q'] ?? ''));
+                if ($q === '') return;
+                $this->db->group_start();
+                $this->db->like('username', $q);
+                $this->db->or_like('email', $q);
+                $this->db->or_like('display_name', $q);
+                $this->db->or_like('user_uid', $q);
+                $this->db->group_end();
+            }
+            public function rolesForUser(int $userId): array {
+                return $this->db->select('r.id,r.code,r.name')->from('roles r')
+                    ->join('user_roles ur', 'ur.role_id = r.id')->where('ur.user_id', $userId)
+                    ->order_by('r.code', 'ASC')->get()->result_array();
+            }
+            public function listRoles(): array {
+                return $this->db->order_by('name', 'ASC')->get('roles')->result_array();
+            }
+            public function listPermissions(): array {
+                return $this->db->order_by('code', 'ASC')->get('permissions')->result_array();
+            }
+            public function replaceUserRoles(int $userId, array $roleIds): void {
+                $this->db->where('user_id', $userId)->delete('user_roles');
+                foreach ($roleIds as $roleId) {
+                    $roleId = (int) $roleId;
+                    if ($roleId > 0) $this->assignRole($userId, $roleId);
+                }
+            }
+            public function findRoleByCode(string $code): ?array {
+                return $this->db->get_where('roles', ['code' => $code], 1)->row_array() ?: null;
+            }
+            public function listAuthEvents(int $userId, int $limit = 50): array {
+                return $this->db->where('user_id', $userId)->order_by('id', 'DESC')
+                    ->limit(max(1, min(200, $limit)))->get('auth_events')->result_array();
+            }
+            public function listAdminAccounts(): array {
+                $links = $this->db->select('ur.user_id')->from('user_roles ur')
+                    ->join('roles r', 'r.id = ur.role_id')
+                    ->where_in('r.code', ['super_admin', 'admin', 'support_admin'])->get()->result_array();
+                $ids = array_values(array_unique(array_map(fn($r) => (int) $r['user_id'], $links)));
+                if (!$ids) return [];
+                $rows = $this->db->select('id,email,display_name,username,user_uid,profile_image,active,created_at,last_login_at')
+                    ->where_in('id', $ids)->order_by('created_at', 'ASC')->get('users')->result_array();
+                foreach ($rows as &$row) {
+                    $row['permissions'] = $this->permissionsForUser((int) $row['id']);
+                    $row['roles'] = $this->rolesForUser((int) $row['id']);
+                }
+                return $rows;
+            }
+            public function countSuperAdmins(): int {
+                return (int) $this->db->from('users u')->join('user_roles ur', 'ur.user_id = u.id')
+                    ->join('roles r', 'r.id = ur.role_id')->where('r.code', 'super_admin')->where('u.active', 1)
+                    ->count_all_results();
+            }
+            public function userHasRole(int $userId, string $roleCode): bool {
+                $row = $this->db->from('user_roles ur')->join('roles r', 'r.id = ur.role_id')
+                    ->where('ur.user_id', $userId)->where('r.code', $roleCode)->limit(1)->get()->row_array();
+                return (bool) $row;
+            }
+            public function deleteUser(int $userId): bool {
+                $this->db->where('user_id', $userId)->delete('user_roles');
+                $this->db->where('user_id', $userId)->delete('auth_events');
+                try {
+                    $this->db->where('id', $userId)->delete('users');
+                    return $this->db->affected_rows() > 0;
+                } catch (\Throwable $e) {
+                    return false;
+                }
+            }
         };
 
         $this->analysis = new class($db) implements Aegis\Persistence\AnalysisRepository {
