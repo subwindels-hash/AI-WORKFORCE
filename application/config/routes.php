@@ -37,6 +37,7 @@ $route['admin'] = 'admin/index';
 $route['admin/dashboard'] = 'admin/index';
 $route['admin/users/create'] = 'admin/create_user';
 $route['admin/users/(:num)/toggle'] = 'admin/toggle_user/$1';
+$route['admin/test-email'] = 'admin/test_email';
 $route['translate_uri_dashes'] = false;
 
 // ---- pretty URLs for the MVC pages ---------------------------------------
@@ -211,6 +212,8 @@ $route['lead-pipeline'] = 'leads/pipeline';
 // ---- AI Language Learning (/api/v1/language-learning) ----------------------
 $route['api/v1/language-learning/languages'] = 'api_lang_learning/languages';
 $route['api/v1/language-learning/languages/(:any)'] = 'api_lang_learning/show_language/$1';
+$route['api/v1/language-learning/translate'] = 'api_lang_learning/translate';
+$route['api/v1/language-learning/detect'] = 'api_lang_learning/detect';
 $route['api/v1/language-learning/profiles'] = 'api_lang_learning/profiles';
 $route['api/v1/language-learning/profiles/(:num)/assessment/start'] = 'api_lang_learning/start_assessment/$1';
 $route['api/v1/language-learning/profiles/(:num)/path'] = 'api_lang_learning/show_path/$1';
@@ -247,6 +250,7 @@ $route['api/v1/language-learning/modules/(:any)/checkpoint/start'] = 'api_lang_l
 $route['api/v1/language-learning/modules/(:any)/checkpoint/answer'] = 'api_lang_learning/answer_checkpoint/$1';
 // pages
 $route['app/languages'] = 'lang_learn';
+$route['app/languages/teacher'] = 'lang_learn/teacher';
 $route['app/languages/login'] = 'lang_learn/login';
 $route['app/languages/start'] = 'lang_learn/start';
 $route['app/languages/p/(:num)'] = 'lang_learn/profile/$1';

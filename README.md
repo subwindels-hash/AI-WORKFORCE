@@ -1,4 +1,13 @@
+<!-- User-facing product name: WINDELS AI WORKFORCE. "AEGIS" below is the
+     internal codebase/system identifier (class names, env vars, table prefixes)
+     and is intentionally retained for backward compatibility. -->
 # AEGIS — Standalone AI Trading Intelligence Platform
+
+> **Product name:** the user-facing application built on this codebase is
+> branded **WINDELS AI WORKFORCE** (AI language teacher, market analysis,
+> sports/lottery research and lead discovery). The internal system name
+> "AEGIS" is kept for class names, environment variables and database
+> identifiers and should not be renamed in code.
 
 > **Standalone Lead Discovery update:** the independent Scout platform now lives
 > under `apps/api`, `apps/web` and `packages/shared`. It uses Fastify/TypeScript,

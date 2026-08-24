@@ -5,8 +5,8 @@
 </section>
 <section class="band">
   <div class="faq">
-    <details open><summary>How do I get a dashboard?</summary><p>Register or sign in. Members land on /dashboard. Super administrators land on /admin.</p></details>
-    <details><summary>I typed /admin as a normal user</summary><p>You will see Access denied. Only system.super_admin may use the admin control centre.</p></details>
+    <details open><summary>How do I get a dashboard?</summary><p>Register or sign in. Members land on /dashboard. Administrator controls are reached through a private entry point that is never advertised on the public site.</p></details>
+    <details><summary>I tried an admin URL as a normal user</summary><p>You will see Access denied. Only accounts with the super-administrator permission may use the control centre.</p></details>
     <details><summary>I forgot my password</summary><p>This build does not invent email reset tokens. An administrator can create a replacement account or set a new hash.</p></details>
     <details><summary>Why is sports empty?</summary><p>No sports provider is configured. The module refuses to fabricate fixtures, odds or tickets.</p></details>
     <details><summary>Why do some candles say SIM?</summary><p>A real provider failed or does not serve that timeframe. The synthetic generator is labelled and the risk engine can veto it.</p></details>

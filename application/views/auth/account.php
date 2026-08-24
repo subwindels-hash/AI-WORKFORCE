@@ -7,7 +7,7 @@
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 <div class="grid cols-main">
   <section class="panel"><h3>Profile</h3><div class="body">
-    <div class="account-hero"><img src="/assets/images/aegis-mark.png" alt="AEGIS" class="account-mark"><div><h3><?= e((string) ($user['display_name'] ?? 'Platform user')) ?></h3><p class="dim"><?= e((string) ($user['email'] ?? '')) ?></p></div></div>
+    <div class="account-hero"><img src="/assets/images/windels-mark.png" alt="WINDELS AI WORKFORCE" class="account-mark" onerror="this.onerror=null;this.src='/assets/images/aegis-mark.png'"><div><h3><?= e((string) ($user['display_name'] ?? 'Platform user')) ?></h3><p class="dim"><?= e((string) ($user['email'] ?? '')) ?></p></div></div>
     <table class="tbl mono" style="margin-top:16px"><tr><td class="dim">User ID</td><td><?= e((string) $user['id']) ?></td></tr><tr><td class="dim">Status</td><td><span class="badge b-green">ACTIVE</span></td></tr><tr><td class="dim">Last login</td><td><?= e((string) ($user['last_login_at'] ?? 'Not recorded')) ?></td></tr></table>
   </div></section>
   <section class="panel"><h3>Permissions</h3><div class="body"><p class="dim" style="font-size:12px">Your access is determined by assigned RBAC roles. Sensitive actions still require CSRF and the relevant permission.</p><div class="permission-list"><?php foreach (($user['permissions'] ?? []) as $permission): ?><span class="badge b-violet"><?= e((string) $permission) ?></span><?php endforeach; ?></div></div></section>

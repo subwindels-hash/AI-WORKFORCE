@@ -18,6 +18,9 @@ class Admin extends App_Controller
             'languages' => count($this->platform->langlearn->languages()),
             'lotteryDraws' => $this->platform->lottery->drawCount(),
         ];
+        $data['smtp'] = \Aegis\Mailer::configSummary();
+        $data['smtpOk'] = $this->session->flashdata('smtpOk');
+        $data['smtpError'] = $this->session->flashdata('smtpError');
         $this->render('admin/index', $data);
     }
 
@@ -43,8 +46,7 @@ class Admin extends App_Controller
     }
 
     public function toggle_user(int $id)
-    {
-        $actor = $this->requireAdmin(); if (!$actor) return;
+    {        $actor = $this->requireAdmin(); if (!$actor) return;
         if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin'); return; }
         if ((int) $actor['id'] === $id) { $this->flash('error', 'You cannot deactivate your own administrator account.'); redirect('/admin'); return; }
         $target = $this->Aegis_model->identity->findUserById($id);
@@ -53,6 +55,28 @@ class Admin extends App_Controller
         $this->Aegis_model->identity->setActive($id, $active);
         $this->Aegis_model->audit->emit('ADMIN_USER_STATUS_CHANGED', 'Administrator changed user account status', ['userId' => $id, 'active' => $active], (string) $actor['id']);
         $this->flash('notice', 'User account ' . ($active ? 'activated.' : 'deactivated.')); redirect('/admin');
+    }
+
+    /**
+     * Send a real test email through the configured SMTP provider and report
+     * the actual result. Super-admin only, CSRF-guarded. Credentials are never
+     * displayed — only a safe configuration summary and the send outcome.
+     */
+    public function test_email()
+    {
+        $actor = $this->requireAdmin(); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin'); return; }
+        $to = strtolower(trim((string) $this->input->post('to')));
+        $variant = $this->input->post('variant') === 'plain' ? 'plain' : 'html';
+        if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
+            $this->flash('error', 'Enter a valid recipient email address.');
+            redirect('/admin#smtp');
+            return;
+        }
+        $res = \Aegis\Mailer::sendTest($this, $to, $variant);
+        $this->Aegis_model->audit->emit('ADMIN_TEST_EMAIL', 'Administrator sent a test email', ['to' => $to, 'ok' => $res['ok']], (string) $actor['id']);
+        $this->session->set_flashdata($res['ok'] ? 'smtpOk' : 'smtpError', $res['message']);
+        redirect('/admin#smtp');
     }
 
     /** Only system.super_admin may enter the control centre. */

@@ -37,6 +37,40 @@ class Api_lang_learning extends Api_controller
         catch (Throwable $e) { $this->fail($e); }
     }
 
+    // -------------------------------------------------- AI Teacher translate
+
+    /** Detect the source language of arbitrary text. */
+    public function detect()
+    {
+        if (!$this->guard(false)) return;
+        $body = $this->jsonBody();
+        $text = trim((string) ($body['text'] ?? ''));
+        if ($text === '') return $this->jsonError('body must be {text: string}');
+        $this->json(['detection' => $this->platform->translator->detect($text)]);
+    }
+
+    /**
+     * Translate text into a target language (auto-detecting the source when
+     * omitted). Translations come only from an authored phrasebook/dictionary;
+     * unsupported sentences return an honest note instead of fabricating.
+     */
+    public function translate()
+    {
+        $user = $this->guard();
+        if (!$user) return;
+        $body = $this->jsonBody();
+        $text = trim((string) ($body['text'] ?? ''));
+        $target = strtolower(trim((string) ($body['target'] ?? '')));
+        $source = isset($body['source']) ? strtolower(trim((string) $body['source'])) : null;
+        if ($text === '' || $target === '') {
+            return $this->jsonError('body must be {text: string, target: isoCode, source?: isoCode}');
+        }
+        if (mb_strlen($text) > 500) return $this->jsonError('text must be 500 characters or fewer');
+        try {
+            $this->json(['translation' => $this->platform->translator->translate($text, $target, $source)]);
+        } catch (Throwable $e) { $this->fail($e); }
+    }
+
     // ---------------------------------------------------------- profiles
 
     public function profiles()
