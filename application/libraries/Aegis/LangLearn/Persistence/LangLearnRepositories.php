@@ -49,6 +49,18 @@ interface LangLearnRepository
     /** @return array<int, array<string, mixed>> */
     public function listWriting(int $profileId, int $limit = 20): array;
 
+    // Phase 3 (vocabulary)
+    /** Upsert a bank word by (language_code, word); returns the stored row with id. */
+    public function upsertVocabulary(array $word): array;
+    /** @return array<int, array<string, mixed>> */
+    public function listVocabulary(string $languageCode, bool $activeOnly = true): array;
+    public function findVocabulary(int $id): ?array;
+    /** Insert-or-update by (profile_id, vocabulary_id). */
+    public function saveUserVocabulary(array $row): array;
+    public function findUserVocabulary(int $profileId, int $vocabularyId): ?array;
+    /** @return array<int, array<string, mixed>> due first (or all when $dueOnly=false) */
+    public function listUserVocabulary(int $profileId, bool $dueOnly = false, int $limit = 100): array;
+
     /** Upsert keyed on (profile_id, skill, source). */
     public function upsertProgress(array $row): void;
     /** @return array<int, array<string, mixed>> */

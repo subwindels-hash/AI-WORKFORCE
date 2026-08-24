@@ -139,3 +139,34 @@ CREATE TABLE IF NOT EXISTS writing_attempts (
   created_at     VARCHAR(32) NOT NULL,
   KEY idx_writing_profile (profile_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Phase 3 (vocabulary): language word bank + per-user spaced-repetition state.
+CREATE TABLE IF NOT EXISTS vocabulary (
+  id               INT AUTO_INCREMENT PRIMARY KEY,
+  language_code    VARCHAR(8) NOT NULL,
+  word             VARCHAR(120) NOT NULL,
+  translation      VARCHAR(160) NOT NULL,
+  pronunciation    VARCHAR(160) NULL,           -- romanization where confidently known
+  example_sentence VARCHAR(300) NULL,           -- only sentences that contain the word
+  category         VARCHAR(24) NOT NULL,
+  level            VARCHAR(4) NOT NULL,
+  active           TINYINT(1) NOT NULL DEFAULT 1,
+  UNIQUE KEY uq_vocabulary_word (language_code, word)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS user_vocabulary (
+  id               INT AUTO_INCREMENT PRIMARY KEY,
+  profile_id       INT NOT NULL,
+  user_id          INT NOT NULL,
+  vocabulary_id    INT NOT NULL,
+  stage            INT NOT NULL DEFAULT 0,      -- SRS stage 0..5 (learned at >= 4)
+  familiarity      DECIMAL(4,3) NOT NULL DEFAULT 0.000,  -- stage / 5
+  next_review_at   VARCHAR(32) NOT NULL,        -- ISO timestamp; due when <= now
+  review_count     INT NOT NULL DEFAULT 0,
+  lapse_count      INT NOT NULL DEFAULT 0,
+  last_result      VARCHAR(8) NULL,             -- remembered | forgot
+  last_reviewed_at VARCHAR(32) NULL,
+  added_at         VARCHAR(32) NOT NULL,
+  UNIQUE KEY uq_user_vocabulary (profile_id, vocabulary_id),
+  KEY idx_user_vocabulary_due (profile_id, next_review_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

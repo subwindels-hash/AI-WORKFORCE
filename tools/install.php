@@ -65,6 +65,7 @@ $expected = ['platform_state', 'strategies', 'backtests', 'analysis_runs', 'jour
     'trade_proposals', 'trade_executions', 'notifications', 'ci_sessions',
     'languages', 'user_language_profiles', 'language_assessments', 'learning_paths', 'learning_modules',
     'lesson_attempts', 'study_sessions', 'language_progress', 'conversation_sessions', 'writing_attempts',
+    'vocabulary', 'user_vocabulary',
     'users', 'roles', 'permissions', 'user_roles', 'role_permissions', 'auth_events',
     'sports_data_sources', 'sports_matches', 'sports_odds', 'sports_sync_runs', 'sports_model_versions',
     'sports_predictions', 'sports_tickets', 'sports_results'];

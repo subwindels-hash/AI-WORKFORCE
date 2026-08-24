@@ -260,6 +260,58 @@ class Lang_learn extends MY_Controller
         $this->render($data, 'langlearn/history');
     }
 
+    // ================= PHASE 3: VOCABULARY PAGES =================
+
+    public function vocabulary(int $profileId)
+    {
+        $user = $this->requireUser();
+        $data = $this->base('Vocabulary');
+        try { $data['catalog'] = $this->platform->vocabulary->catalog((int) $user['id'], $profileId); }
+        catch (Throwable $e) { $data['catalog'] = []; }
+        try { $data['progress'] = $this->platform->vocabulary->progress((int) $user['id'], $profileId); }
+        catch (Throwable $e) { $data['progress'] = null; }
+        try { $data['dueCount'] = count($this->platform->vocabulary->due((int) $user['id'], $profileId)); }
+        catch (Throwable $e) { $data['dueCount'] = 0; }
+        $data['profileId'] = $profileId;
+        $this->render($data, 'langlearn/vocabulary');
+    }
+
+    public function vocabulary_add(int $profileId)
+    {
+        $user = $this->requireUser();
+        $ids = $this->input->post('vocabularyIds');
+        try {
+            $res = $this->platform->vocabulary->addWords((int) $user['id'], $profileId, is_array($ids) ? $ids : [], $this->input->post('starter') === '1');
+            $this->session->set_flashdata('llNotice', "Added {$res['added']} word(s) — {$res['totalInList']} in your list.");
+        } catch (Throwable $e) {
+            $this->session->set_flashdata('llError', $e->getMessage());
+        }
+        redirect('/app/languages/v/' . $profileId);
+    }
+
+    public function vocab_review(int $profileId, string $mode)
+    {
+        $user = $this->requireUser();
+        $data = $this->base('Review');
+        try { $data['review'] = $this->platform->vocabulary->startReview((int) $user['id'], $profileId, $mode); }
+        catch (Throwable $e) { $data['review'] = ['mode' => $mode, 'cards' => [], 'note' => $e->getMessage()]; }
+        $data['profileId'] = $profileId;
+        $this->render($data, 'langlearn/vocab_review');
+    }
+
+    public function vocab_submit(int $profileId, string $mode)
+    {
+        $user = $this->requireUser();
+        $answers = $this->input->post('answers');
+        try {
+            $res = $this->platform->vocabulary->submitReview((int) $user['id'], $profileId, $mode, is_array($answers) ? $answers : []);
+            $this->session->set_flashdata('llNotice', sprintf('Review done — %d/%d correct. Next review per the spaced schedule.', $res['correct'], $res['total']));
+        } catch (Throwable $e) {
+            $this->session->set_flashdata('llError', $e->getMessage());
+        }
+        redirect('/app/languages/v/' . $profileId);
+    }
+
     // ------------------------------------------------------------ helpers
 
     private function sessionUser(): ?array

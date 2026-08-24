@@ -64,6 +64,7 @@
       <p class="dim" style="font-size:11px">From <?= e($path['path']['from_level']) ?> toward <?= e($path['path']['target_level']) ?> — modules unlock in order; each ends with a real checkpoint quiz drawn from the item bank.</p>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0">
         <a class="btn small" href="/app/languages/conv/<?= (int) $profile['id'] ?>">AI conversation</a>
+        <a class="btn small" href="/app/languages/v/<?= (int) $profile['id'] ?>">Vocabulary</a>
         <a class="btn small" href="/app/languages/w/<?= (int) $profile['id'] ?>">Writing practice</a>
         <a class="btn small" href="/app/languages/g/<?= (int) $profile['id'] ?>">Grammar</a>
         <a class="btn small" href="/app/languages/h/<?= (int) $profile['id'] ?>">History</a>

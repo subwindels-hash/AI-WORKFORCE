@@ -231,6 +231,66 @@ class Api_lang_learning extends Api_controller
         catch (Throwable $e) { $this->fail($e); }
     }
 
+    // ================= PHASE 3: VOCABULARY =================
+
+    public function vocabulary_catalog(int $profileId)
+    {
+        if (!$this->guard(false)) return;
+        $user = $this->session->userdata('identity');
+        try { $this->json(['vocabulary' => $this->platform->vocabulary->catalog((int) $user['id'], $profileId)]); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
+    public function vocabulary_add(int $profileId)
+    {
+        $user = $this->guard();
+        if (!$user) return;
+        $body = $this->jsonBody();
+        $ids = $body['vocabularyIds'] ?? [];
+        try {
+            $this->json($this->platform->vocabulary->addWords((int) $user['id'], $profileId,
+                is_array($ids) ? $ids : [], !empty($body['starter'])), 201);
+        } catch (Throwable $e) { $this->fail($e); }
+    }
+
+    public function vocabulary_due(int $profileId)
+    {
+        if (!$this->guard(false)) return;
+        $user = $this->session->userdata('identity');
+        try { $this->json(['due' => $this->platform->vocabulary->due((int) $user['id'], $profileId)]); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
+    public function vocabulary_review_start(int $profileId)
+    {
+        if (!$this->guard(false)) return;
+        $user = $this->session->userdata('identity');
+        $mode = (string) ($this->input->get('mode') ?: 'quiz');
+        $limit = (int) ($this->input->get('limit') ?: 10);
+        try { $this->json($this->platform->vocabulary->startReview((int) $user['id'], $profileId, $mode, $limit)); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
+    public function vocabulary_review_submit(int $profileId)
+    {
+        $user = $this->guard();
+        if (!$user) return;
+        $body = $this->jsonBody();
+        if (!isset($body['mode'], $body['answers']) || !is_array($body['answers'])) {
+            return $this->jsonError('body must be {mode: quiz|flashcard, answers: {vocabularyId: index|remembered|forgot}}');
+        }
+        try { $this->json($this->platform->vocabulary->submitReview((int) $user['id'], $profileId, (string) $body['mode'], $body['answers']), 201); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
+    public function vocabulary_progress(int $profileId)
+    {
+        if (!$this->guard(false)) return;
+        $user = $this->session->userdata('identity');
+        try { $this->json(['progress' => $this->platform->vocabulary->progress((int) $user['id'], $profileId)]); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
     public function history(int $profileId)
     {
         if (!$this->guard(false)) return;

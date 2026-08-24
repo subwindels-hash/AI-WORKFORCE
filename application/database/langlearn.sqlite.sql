@@ -57,3 +57,16 @@ CREATE TABLE IF NOT EXISTS writing_attempts (
  task_code TEXT NOT NULL, original_text TEXT NOT NULL, feedback TEXT NOT NULL, score_pct REAL, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_writing_profile ON writing_attempts(profile_id, created_at);
+CREATE TABLE IF NOT EXISTS vocabulary (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, language_code TEXT NOT NULL, word TEXT NOT NULL,
+ translation TEXT NOT NULL, pronunciation TEXT, example_sentence TEXT, category TEXT NOT NULL,
+ level TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, UNIQUE(language_code, word)
+);
+CREATE TABLE IF NOT EXISTS user_vocabulary (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, profile_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
+ vocabulary_id INTEGER NOT NULL, stage INTEGER NOT NULL DEFAULT 0, familiarity REAL NOT NULL DEFAULT 0.0,
+ next_review_at TEXT NOT NULL, review_count INTEGER NOT NULL DEFAULT 0, lapse_count INTEGER NOT NULL DEFAULT 0,
+ last_result TEXT, last_reviewed_at TEXT, added_at TEXT NOT NULL,
+ UNIQUE(profile_id, vocabulary_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_vocabulary_due ON user_vocabulary(profile_id, next_review_at);

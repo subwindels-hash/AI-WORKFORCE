@@ -349,7 +349,7 @@ class TeacherService
                 'detail' => $a['detail'],
             ], array_values(array_filter(
                 $this->repo->listAttemptsForProfile((int) $profile['id']),
-                fn($a) => in_array($a['kind'], ['lesson', 'checkpoint', 'conversation', 'assessment'], true)
+                fn($a) => in_array($a['kind'], ['lesson', 'checkpoint', 'conversation', 'assessment', 'vocab_review'], true)
             ))),
             'conversations' => $this->repo->listConversations((int) $profile['id']),
             'writing' => $this->repo->listWriting((int) $profile['id']),

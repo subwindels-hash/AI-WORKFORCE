@@ -46,7 +46,7 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **Scheduled operations worker** (`php index.php tools cron`): portfolio scan, broker transitions, proposal expiry | **TESTED** |
 | MT4 / crypto-exchange / stock-broker connectors | **PLANNED** (added one at a time after MT5 is verified) |
 
-**175 automated tests** run through the real CodeIgniter stack
+**182 automated tests** run through the real CodeIgniter stack
 (`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
 sandbox — see below), plus 9 contract tests for the Python bridge
 (`python-services/mt5-bridge/.venv/bin/python -m pytest test_bridge.py`).
@@ -273,9 +273,20 @@ advance after two misses, guided writing tasks with real element checks
 (original text always stored unchanged next to the feedback), grammar rules
 with on-demand simpler explanations, and full lesson history.
 
-Phases 3–5 (vocabulary SRS, listening/speaking with real providers, adaptive
-recommendations) follow the same honesty architecture: nothing is invented
-when a provider is missing.
+**Phase 3 — Vocabulary (complete)**: a 10-word authored bank per language
+(word, translation, pronunciation only where confidently romanized, example
+sentences only when the sentence genuinely contains the word), a learner word
+list, and a real spaced-repetition schedule — remembered walks 1→3→7→14→30→90
+days by demonstrated stage, forgotten resets to tomorrow with a lapse
+counted. Daily reviews pull the due-today queue; quizzes are deterministic
+multiple-choice graded against the same options shown (start and submit build
+identically), flashcards are self-assessed and labeled as such, and
+vocabulary progress (learned / learning / due / average familiarity /
+mastery) is computed only from stored reviews.
+
+Phases 4–5 (listening/speaking with real providers, weakness detection,
+daily plans) follow the same honesty architecture: nothing is invented when a
+provider is missing.
 
 ### Phase 6 intelligence: agent debate + strategy optimizer
 

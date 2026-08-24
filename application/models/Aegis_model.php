@@ -608,6 +608,51 @@ class Aegis_model extends CI_Model
                 return $rows;
             }
 
+            public function upsertVocabulary(array $w): array {
+                $exists = $this->db->from('vocabulary')->where(['language_code' => $w['language_code'], 'word' => $w['word']])->count_all_results() > 0;
+                if ($exists) {
+                    $this->db->where(['language_code' => $w['language_code'], 'word' => $w['word']])->update('vocabulary', $w);
+                } else {
+                    $this->db->insert('vocabulary', $w);
+                }
+                $row = $this->db->get_where('vocabulary', ['language_code' => $w['language_code'], 'word' => $w['word']], 1)->row_array();
+                if ($row) $row['id'] = (int) $row['id'];
+                return $row ?: $w;
+            }
+            public function listVocabulary(string $languageCode, bool $activeOnly = true): array {
+                if ($activeOnly) $this->db->where('active', 1);
+                $rows = $this->db->where('language_code', $languageCode)->order_by('id', 'ASC')->get('vocabulary')->result_array();
+                foreach ($rows as &$r) $r['id'] = (int) $r['id'];
+                return $rows;
+            }
+            public function findVocabulary(int $id): ?array {
+                $r = $this->db->get_where('vocabulary', ['id' => $id], 1)->row_array();
+                if ($r) $r['id'] = (int) $r['id'];
+                return $r ?: null;
+            }
+            public function saveUserVocabulary(array $u): array {
+                $keys = ['profile_id' => $u['profile_id'], 'vocabulary_id' => $u['vocabulary_id']];
+                $exists = $this->db->from('user_vocabulary')->where($keys)->count_all_results() > 0;
+                if ($exists) { $this->db->where($keys)->update('user_vocabulary', $u); }
+                else { $this->db->insert('user_vocabulary', $u); }
+                return $this->db->get_where('user_vocabulary', $keys, 1)->row_array() ?: $u;
+            }
+            public function findUserVocabulary(int $profileId, int $vocabularyId): ?array {
+                return $this->db->get_where('user_vocabulary', ['profile_id' => $profileId, 'vocabulary_id' => $vocabularyId], 1)->row_array() ?: null;
+            }
+            public function listUserVocabulary(int $profileId, bool $dueOnly = false, int $limit = 100): array {
+                if ($dueOnly) $this->db->where('next_review_at <=', gmdate('c'));
+                $rows = $this->db->where('profile_id', $profileId)->order_by('next_review_at', 'ASC')->limit(max(1, min(200, $limit)))->get('user_vocabulary')->result_array();
+                foreach ($rows as &$r) {
+                    $r['id'] = (int) $r['id'];
+                    $r['stage'] = (int) $r['stage'];
+                    $r['review_count'] = (int) $r['review_count'];
+                    $r['lapse_count'] = (int) $r['lapse_count'];
+                    $r['familiarity'] = (float) $r['familiarity'];
+                }
+                return $rows;
+            }
+
             public function upsertProgress(array $row): void {
                 $keys = ['profile_id' => $row['profile_id'], 'skill' => $row['skill'], 'source' => $row['source']];
                 $exists = $this->db->from('language_progress')->where($keys)->count_all_results() > 0;

@@ -39,6 +39,7 @@ class Platform
     public readonly \Aegis_model $model;
     public \Aegis\LangLearn\LangLearnService $langlearn;
     public \Aegis\LangLearn\TeacherService $langteacher;
+    public \Aegis\LangLearn\VocabularyService $vocabulary;
 
     public function __construct(\Aegis_model $model, bool $disableRealProviders = false)
     {
@@ -75,6 +76,7 @@ class Platform
         $this->notifications = new \Aegis\Notifications\Notifier($model->notifications);
         $this->langlearn = new \Aegis\LangLearn\LangLearnService($model->langlearn);
         $this->langteacher = new \Aegis\LangLearn\TeacherService($model->langlearn, $this->langlearn);
+        $this->vocabulary = new \Aegis\LangLearn\VocabularyService($model->langlearn, $this->langlearn);
         $this->execution = new ExecutionSupervisor(
             $model->audit, $model->state, $model->proposals,
             $this->risk, $this->brokers, $this->strategies,
