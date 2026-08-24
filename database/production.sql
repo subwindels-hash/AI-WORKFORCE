@@ -445,7 +445,7 @@ CREATE TABLE IF NOT EXISTS sports_model_metrics (
 CREATE TABLE IF NOT EXISTS sports_daily_tickets (
   id INT AUTO_INCREMENT PRIMARY KEY,
   date DATE NOT NULL UNIQUE,
-  ticket_id VARCHAR(40) NULL,
+  ticket_id VARCHAR(36) NULL,
   status VARCHAR(32) NOT NULL,
   configuration_version INT NULL,
   candidates_evaluated INT NOT NULL DEFAULT 0,
@@ -894,6 +894,9 @@ ALTER TABLE daily_learning_plans ADD CONSTRAINT fk_daily_plans_language FOREIGN 
 ALTER TABLE ai_learning_recommendations ADD CONSTRAINT fk_learning_recommendations_profile FOREIGN KEY (profile_id) REFERENCES user_language_profiles (id);
 ALTER TABLE ai_learning_recommendations ADD CONSTRAINT fk_learning_recommendations_user FOREIGN KEY (user_id) REFERENCES users (id);
 ALTER TABLE ai_learning_recommendations ADD CONSTRAINT fk_learning_recommendations_language FOREIGN KEY (language_code) REFERENCES languages (code);
+ALTER TABLE sports_daily_tickets ADD CONSTRAINT fk_sports_daily_ticket FOREIGN KEY (ticket_id) REFERENCES sports_tickets (id);
+ALTER TABLE sports_daily_tickets ADD CONSTRAINT fk_sports_daily_config FOREIGN KEY (configuration_version) REFERENCES sports_configurations (version);
+ALTER TABLE sports_daily_tickets ADD CONSTRAINT fk_sports_daily_run FOREIGN KEY (run_id) REFERENCES sports_job_runs (id);
 ALTER TABLE lottery_rules ADD CONSTRAINT fk_lottery_rules_lottery FOREIGN KEY (lottery_code) REFERENCES lotteries (code);
 ALTER TABLE lottery_provider_health ADD CONSTRAINT fk_lottery_health_provider FOREIGN KEY (provider_id) REFERENCES lottery_data_sources (id);
 ALTER TABLE lottery_draws ADD CONSTRAINT fk_lottery_draws_lottery FOREIGN KEY (lottery_code) REFERENCES lotteries (code);
