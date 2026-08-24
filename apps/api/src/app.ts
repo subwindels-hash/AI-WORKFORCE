@@ -16,6 +16,7 @@ import { discoveryRoutes } from "./routes/discovery.js";
 import { pipelineRoutes } from "./routes/pipeline.js";
 import { intelligenceRoutes } from "./routes/intelligence.js";
 import { authRoutes } from "./routes/auth.js";
+import { adminRoutes } from "./routes/admin.js";
 import { parseAllowedOrigins } from "./config.js";
 
 export async function buildApp(options: {
@@ -52,6 +53,7 @@ export async function buildApp(options: {
     reply.code(status).send({ error: status >= 500 ? "internal server error" : typeof known.message === "string" ? known.message : "request failed" });
   });
   await app.register(authRoutes, { prefix: "/api/v1/auth" });
+  await app.register(adminRoutes, { prefix: "/api/v1/admin" });
   await app.register(leadRoutes, { prefix: "/api/v1/lead-discovery" });
   await app.register(discoveryRoutes, { prefix: "/api/v1/lead-discovery" });
   await app.register(pipelineRoutes, { prefix: "/api/v1/lead-discovery" });

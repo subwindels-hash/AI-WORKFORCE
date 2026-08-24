@@ -11,7 +11,8 @@ a:hover { text-decoration: underline; }
 
 .topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: #07090ecc; backdrop-filter: blur(6px); position: sticky; top: 0; z-index: 10; }
 .brand { display: flex; align-items: center; gap: 10px; }
-.brand .mark { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; background: linear-gradient(135deg, #0ea5e9, #6366f1); color: #fff; font-weight: 900; }
+.brand .mark { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; overflow: hidden; background: linear-gradient(135deg, #0ea5e9, #6366f1); color: #fff; font-weight: 900; }
+.brand .mark img { width: 100%; height: 100%; object-fit: cover; }
 .brand h1 { font-size: 15px; margin: 0; color: #fff; letter-spacing: .3px; }
 .brand .sub { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .16em; }
 .nav { display: flex; gap: 2px; margin-left: 18px; }
@@ -19,6 +20,8 @@ a:hover { text-decoration: underline; }
 .nav a.active, .nav a:hover { color: var(--sky); text-decoration: none; }
 .nav a.active { border-bottom-color: var(--sky); }
 .top-right { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.top-user { display: inline-flex; align-items: center; gap: 8px; margin-left: 10px; }
+.top-user .avatar { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; border: 1px solid var(--line2); }
 
 .wrap { max-width: 1480px; margin: 0 auto; padding: 14px 16px 40px; }
 .page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
@@ -84,7 +87,7 @@ input.sel { min-width: 90px; }
 .notice.warnbox { background: #fbbf241a; border-color: #fbbf2455; color: #fcd34d; }
 
 footer.page { margin-top: 26px; text-align: center; font-size: 10px; color: var(--dim); line-height: 1.6; }
-.scroll { overflow-x: auto; }
+.scroll, .table-scroll { overflow-x: auto; }
 details.raw > summary { cursor: pointer; color: var(--sky); font-size: 11px; }
 pre.raw { background: #05070b; border: 1px solid var(--line); border-radius: 8px; padding: 8px; font-size: 10px; overflow: auto; max-height: 320px; color: #94a3b8; }
 
@@ -94,3 +97,39 @@ pre.raw { background: #05070b; border: 1px solid var(--line); border-radius: 8px
 .stages .n.done { background: #0ea5e933; color: var(--sky); }
 .stages li.cur { color: #fff; font-weight: 700; }
 .stages li.pend { color: var(--dim); }
+
+/* Authentication and admin pages */
+.auth-page { min-height: 100vh; background: radial-gradient(circle at 18% 10%, #10294d 0, transparent 38%), var(--bg); }
+.auth-shell { min-height: 100vh; display: grid; place-items: center; grid-template-columns: minmax(0, 520px) minmax(320px, 480px); gap: 18px; max-width: 1050px; margin: 0 auto; padding: 32px 20px; }
+.auth-art { align-self: stretch; display: flex; flex-direction: column; justify-content: center; padding: 44px; border: 1px solid var(--line); border-radius: 18px; background: linear-gradient(145deg, #0a1830, #0b0e15); background-image: linear-gradient(145deg, #0a1830e6, #0b0e15f2), url('/assets/images/ai-agent-avatar.png'); background-size: cover; background-position: center; }
+.auth-logo { width: 74px; height: 74px; border-radius: 20px; object-fit: cover; border: 1px solid #38bdf855; margin-bottom: 28px; }
+.auth-art h1 { max-width: 360px; margin: 8px 0; color: #fff; font-size: 36px; line-height: 1.1; }
+.auth-art p { max-width: 380px; color: #94a3b8; line-height: 1.7; }
+.auth-art-note { margin-top: 28px; display: inline-flex; align-items: center; gap: 8px; color: #94a3b8; font-size: 12px; }
+.auth-card { width: 100%; padding: 34px; border: 1px solid var(--line); border-radius: 18px; background: #0b0e15f5; box-shadow: 0 22px 80px #0008; }
+.auth-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; color: #fff; }
+.auth-brand-mark { width: 38px; height: 38px; border-radius: 10px; object-fit: cover; }
+.auth-brand small { display: block; color: var(--muted); font-size: 10px; margin-top: 1px; }
+.eyebrow { color: var(--sky) !important; font-size: 10px !important; font-weight: 800 !important; text-transform: uppercase; letter-spacing: .18em; }
+.auth-card h2 { margin: 4px 0; color: #fff; font-size: 27px; }
+.auth-form { display: grid; gap: 14px; margin-top: 22px; }
+.auth-form label, .admin-form label { display: grid; gap: 5px; color: var(--text); font-size: 12px; font-weight: 600; }
+.auth-form input, .admin-form input, .admin-form select { width: 100%; border: 1px solid var(--line2); border-radius: 8px; background: var(--panel2); color: #fff; padding: 10px 11px; outline: none; }
+.auth-form input:focus, .admin-form input:focus, .admin-form select:focus { border-color: var(--sky); }
+.auth-submit { width: 100%; padding: 10px 14px; }
+.auth-links { display: flex; justify-content: space-between; gap: 8px; margin-top: 18px; font-size: 12px; }
+.auth-footnote { margin-top: 24px; color: var(--dim); font-size: 10px; line-height: 1.6; }
+.account-hero { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+.account-hero h3 { margin: 0; color: #fff; }
+.account-hero p { margin: 2px 0 0; }
+.account-mark { width: 54px; height: 54px; object-fit: cover; border-radius: 14px; }
+.permission-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+.policy-list { display: grid; gap: 10px; }
+.policy-list div { padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); }
+.policy-list b { display: block; color: #fff; font-size: 12px; }
+.policy-list span { display: block; color: var(--muted); font-size: 11px; }
+.admin-badge { display: flex; align-items: center; gap: 8px; color: var(--amber); font-size: 11px; }
+.admin-badge img { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; border: 1px solid #fbbf2455; }
+.admin-form { display: grid; gap: 10px; margin-top: 14px; }
+@media (max-width: 820px) { .auth-shell { grid-template-columns: 1fr; max-width: 520px; } .auth-art { display: none; } .nav { order: 3; width: 100%; overflow-x: auto; margin-left: 0; } .top-right { display: none; } }
+@media (max-width: 560px) { .auth-card { padding: 24px 20px; } .wrap { padding-left: 10px; padding-right: 10px; } }

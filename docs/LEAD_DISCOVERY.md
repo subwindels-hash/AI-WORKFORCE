@@ -15,8 +15,8 @@ Google Places → validate/normalize → PostgreSQL leads
 
 ### Runtime
 
-- **Web:** Next.js, React, TypeScript and Tailwind at `apps/web`.
-- **API:** Fastify/TypeScript at `apps/api`.
+- **Web:** Next.js, React, TypeScript and Tailwind at `apps/web`. Pages include `/app/leads`, `/app/lead-pipeline`, `/collections`, `/intelligence`, `/account`, `/login`, `/admin/login` and the administrator control center at `/admin`.
+- **API:** Fastify/TypeScript at `apps/api`. The API includes organization-scoped admin user management at `/api/v1/admin/users`.
 - **Permanent data:** PostgreSQL (`DATABASE_URL`).
 - **Operational data:** Redis (`REDIS_URL`) for cache, rate limits, locks and
   queued search jobs. Redis never stores the only copy of a lead.

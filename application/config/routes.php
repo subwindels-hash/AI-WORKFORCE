@@ -9,6 +9,14 @@ defined('BASEPATH') or exit('No direct script access allowed');
 */
 $route['default_controller'] = 'welcome';
 $route['404_override'] = '';
+$route['login'] = 'auth/index';
+$route['admin/login'] = 'auth/admin_login';
+$route['login/submit'] = 'auth/login';
+$route['logout'] = 'auth/logout';
+$route['account'] = 'auth/account';
+$route['admin'] = 'admin/index';
+$route['admin/users/create'] = 'admin/create_user';
+$route['admin/users/(:num)/toggle'] = 'admin/toggle_user/$1';
 $route['translate_uri_dashes'] = false;
 
 // ---- pretty URLs for the MVC pages ---------------------------------------

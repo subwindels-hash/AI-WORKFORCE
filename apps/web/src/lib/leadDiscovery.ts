@@ -55,6 +55,12 @@ export const authApi = {
   login: (email: string, password: string, organizationId?: string) => authRequest("login", { email, password, ...(organizationId ? { organizationId } : {}) }),
   refresh: (refreshToken: string) => authRequest("refresh", { refreshToken }),
   logout: async (refreshToken: string) => { await authRequest("logout", { refreshToken }); },
+  me: async (token: string) => {
+    const response = await fetch(`${authBase()}/auth/me`, { headers: { authorization: `Bearer ${browserToken(token) ?? ""}` } });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(typeof payload.error === "string" ? payload.error : "Session expired");
+    return payload as { user: { id: string; email: string; displayName: string | null; organizationId: string; permissions: string[] } };
+  },
 };
 
 export const leadDiscoveryApi = {

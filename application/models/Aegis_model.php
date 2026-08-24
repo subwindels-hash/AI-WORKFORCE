@@ -532,6 +532,15 @@ class Aegis_model extends CI_Model
             public function recordAuthEvent(int $userId, string $type, array $detail = []): void {
                 $this->db->insert('auth_events', ['user_id' => $userId, 'type' => $type, 'detail' => json_encode($detail), 'at' => gmdate('c')]);
             }
+            /** Browser admin console read/manage helpers (kept in the model so SQL stays out of controllers). */
+            public function listUsers(): array {
+                $rows = $this->db->select('id,email,display_name,active,created_at,updated_at,last_login_at')->order_by('created_at', 'ASC')->get('users')->result_array();
+                foreach ($rows as &$row) $row['permissions'] = $this->permissionsForUser((int) $row['id']);
+                return $rows;
+            }
+            public function setActive(int $userId, bool $active): void {
+                $this->db->where('id', $userId)->update('users', ['active' => $active ? 1 : 0, 'updated_at' => gmdate('c')]);
+            }
         };
 
         $this->analysis = new class($db) implements Aegis\Persistence\AnalysisRepository {
