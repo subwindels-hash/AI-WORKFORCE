@@ -281,7 +281,12 @@ CREATE TABLE IF NOT EXISTS users (
   created_at VARCHAR(32) NOT NULL,
   updated_at VARCHAR(32) NOT NULL,
   last_login_at VARCHAR(32) NULL,
-  INDEX idx_users_active (active)
+  username VARCHAR(64) NULL,
+  user_uid CHAR(6) NULL,
+  profile_image VARCHAR(255) NULL,
+  INDEX idx_users_active (active),
+  UNIQUE KEY uq_users_username (username),
+  UNIQUE KEY uq_users_user_uid (user_uid)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS roles (
   id INT AUTO_INCREMENT PRIMARY KEY, code VARCHAR(64) NOT NULL UNIQUE, name VARCHAR(120) NOT NULL

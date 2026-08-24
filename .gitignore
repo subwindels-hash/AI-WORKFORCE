@@ -22,4 +22,7 @@ __pycache__/
 .pytest_cache/
 runtime/sessions/aegis_session*
 
-assets/uploads/
+assets/uploads/avatars/*
+!assets/uploads/avatars/.gitkeep
+!assets/uploads/avatars/index.html
+!assets/uploads/avatars/.htaccess

@@ -218,14 +218,30 @@ class Auth extends MY_Controller
             $this->flash('error', 'Usernames must be 3–20 characters using letters, numbers or underscores, starting with a letter.');
             redirect('/account'); return;
         }
-        if ($this->Aegis_model->identity->usernameTaken($username, (int) $user['id'])) {
-            $this->flash('error', 'That username is already in use by another account.');
-            redirect('/account'); return;
+        try {
+            \Aegis\IdentitySchema::ensure($this->db);
+            if ($this->Aegis_model->identity->usernameTaken($username, (int) $user['id'])) {
+                $this->flash('error', 'That username is already in use by another account.');
+                redirect('/account'); return;
+            }
+            $originalUid = (string) ($user['user_uid'] ?? '');
+            $this->Aegis_model->identity->updateUser((int) $user['id'], ['username' => $username, 'display_name' => $username]);
+            $fresh = $this->Aegis_model->identity->findUserById((int) $user['id']);
+            if (!$fresh || strtolower((string) ($fresh['username'] ?? '')) !== $username) {
+                log_message('error', 'update_username: persisted username mismatch for user ' . (int) $user['id']);
+                $this->flash('error', 'Your username could not be saved. Please try again.');
+                redirect('/account'); return;
+            }
+            if ($originalUid !== '' && (string) ($fresh['user_uid'] ?? '') !== $originalUid) {
+                log_message('error', 'update_username: User ID changed unexpectedly for user ' . (int) $user['id']);
+            }
+            $this->Aegis_model->audit->emit('USER_UPDATED', 'User changed their username', ['userId' => (int) $user['id']], (string) $user['id']);
+            $this->reestablishIdentity((int) $user['id']);
+            $this->flash('notice', 'Your username has been updated.');
+        } catch (Throwable $e) {
+            log_message('error', 'update_username failed: ' . $e->getMessage());
+            $this->flash('error', 'Your username could not be updated. Please try again.');
         }
-        $this->Aegis_model->identity->updateUser((int) $user['id'], ['username' => $username, 'display_name' => $username]);
-        $this->Aegis_model->audit->emit('USER_UPDATED', 'User changed their username', ['userId' => (int) $user['id']], (string) $user['id']);
-        $this->reestablishIdentity((int) $user['id']);
-        $this->flash('notice', 'Your username has been updated.');
         redirect('/account');
     }
 
@@ -277,21 +293,21 @@ class Auth extends MY_Controller
     public function upload_avatar()
     {
         $user = $this->requireLogin();
-        if (!$this->validAuthCsrf()) { $this->flash('error', 'Your session expired. Please try again.'); redirect('/account'); return; }
-        if (empty($_FILES['avatar']) || ($err = (int) ($_FILES['avatar']['error'] ?? UPLOAD_ERR_NO_FILE)) !== UPLOAD_ERR_OK) {
-            $this->flash('error', $err === UPLOAD_ERR_NO_FILE ? 'Choose an image to upload.' : 'The upload failed. Please try again.');
-            redirect('/account#profile'); return;
-        }
-        $tmp = (string) $_FILES['avatar']['tmp_name'];
-        $size = (int) $_FILES['avatar']['size'];
-        $maxBytes = 2 * 1024 * 1024;
-        if ($size <= 0 || $size > $maxBytes) { $this->flash('error', 'Profile image must be 2 MB or smaller.'); redirect('/account#profile'); return; }
-        // Verify it really is an image (content-based) and read its real type.
-        $info = @getimagesize($tmp);
-        if ($info === false) { $this->flash('error', 'That file is not a valid image.'); redirect('/account#profile'); return; }
-        $allowed = [IMAGETYPE_PNG => 'png', IMAGETYPE_JPEG => 'jpg', IMAGETYPE_GIF => 'gif', IMAGETYPE_WEBP => 'webp'];
-        $ext = $allowed[$info[2]] ?? null;
-        if ($ext === null) { $this->flash('error', 'Only PNG, JPEG, GIF or WebP images are allowed.'); redirect('/account#profile'); return; }
+        if (!$this->validAuthCsrf()) { $this->flash('error', 'Your session expired. Please try again.'); redirect('/account#profile'); return; }
+        try {
+            \Aegis\IdentitySchema::ensure($this->db);
+            $stored = \Aegis\ProfileImage::store(is_array($_FILES['avatar'] ?? null) ? $_FILES['avatar'] : [], (int) $user['id']);
+            if (empty($stored['ok'])) {
+                $this->flash('error', (string) ($stored['error'] ?? 'The profile picture could not be uploaded. Please use a JPG, PNG or WebP image under the allowed file size.'));
+                redirect('/account#profile'); return;
+            }
+            $path = (string) $stored['path'];
+            $this->Aegis_model->identity->updateUser((int) $user['id'], ['profile_image' => $path]);
+            $fresh = $this->Aegis_model->identity->findUserById((int) $user['id']);
+            if (!$fresh || (string) ($fresh['profile_image'] ?? '') !== $path) {
+                \Aegis\ProfileImage::deletePublicPath($path);
+                log_message('error', 'upload_avatar: database path was not saved for user ' . (int) $user['id']);
+                $this->flash('error', 'The profile picture could not b$this->flash('error', 'Only PNG, JPEG, GIF or WebP images are allowed.'); redirect('/account#profile'); return; }
         $uploadDir = FCPATH . 'assets/uploads/avatars';
         if (!is_dir($uploadDir)) @mkdir($uploadDir, 0775, true);
         if (!is_dir($uploadDir) || !is_writable($uploadDir)) { $this->flash('error', 'Profile storage is not available. Contact an administrator.'); redirect('/account#profile'); return; }
@@ -317,10 +333,7 @@ class Auth extends MY_Controller
         if (!$this->validAuthCsrf()) { $this->flash('error', 'Your session expired. Please try again.'); redirect('/account'); return; }
         $previous = (string) ($user['profile_image'] ?? '');
         $this->Aegis_model->identity->updateUser((int) $user['id'], ['profile_image' => null]);
-        if ($previous !== '' && str_starts_with($previous, '/assets/uploads/avatars/')) {
-            $old = FCPATH . ltrim($previous, '/');
-            if (is_file($old)) @unlink($old);
-        }
+        \Aegis\ProfileImage::deletePublicPath($previous);
         $this->reestablishIdentity((int) $user['id']);
         $this->flash('notice', 'Your profile image has been removed.');
         redirect('/account#profile');
@@ -333,7 +346,8 @@ class Auth extends MY_Controller
         if (!$fresh) return;
         $fresh['permissions'] = $this->Aegis_model->identity->permissionsForUser($userId);
         unset($fresh['password_hash']);
-        $this->session->sess_regenerate(true);
+        try { $this->session->sess_regenerate(true); }
+        catch (Throwable $e) { log_message('error', 'session regenerate failed: ' . $e->getMessage()); }
         $this->session->set_userdata(['identity' => $fresh, 'csrf_token' => bin2hex(random_bytes(32))]);
     }
 

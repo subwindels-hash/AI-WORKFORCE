@@ -32,6 +32,7 @@ class Aegis_model extends CI_Model
         parent::__construct();
         $this->load->database();
         $db = $this->db;
+        \Aegis\IdentitySchema::ensure($db);
 
         $this->strategies = new class($db) implements Aegis\Persistence\StrategyRepository {
             public function __construct(private object $db) {}
@@ -508,14 +509,19 @@ class Aegis_model extends CI_Model
 
         $this->identity = new class($db) implements Aegis\Persistence\IdentityRepository {
             public function __construct(private object $db) {}
-            public function findUserByEmail(string $email): ?array { return $this->db->get_where('users', ['email' => $email], 1)->row_array() ?: null; }
-            public function findUserByUsername(string $username): ?array { return $this->db->get_where('users', ['username' => strtolower(trim($username))], 1)->row_array() ?: null; }
+            private function one($q): ?array {
+                if (!$q || !is_object($q) || !method_exists($q, 'row_array')) return null;
+                $row = $q->row_array();
+                return is_array($row) ? $row : null;
+            }
+            public function findUserByEmail(string $email): ?array { return $this->one($this->db->get_where('users', ['email' => $email], 1)); }
+            public function findUserByUsername(string $username): ?array { return $this->one($this->db->get_where('users', ['username' => strtolower(trim($username))], 1)); }
             public function findUserByUid(string $uid): ?array {
                 $uid = preg_replace('/\D/', '', (string) $uid);
                 if (strlen($uid) !== 6) return null;
-                return $this->db->get_where('users', ['user_uid' => $uid], 1)->row_array() ?: null;
+                return $this->one($this->db->get_where('users', ['user_uid' => $uid], 1));
             }
-            public function findUserById(int $id): ?array { return $this->db->get_where('users', ['id' => $id], 1)->row_array() ?: null; }
+            public function findUserById(int $id): ?array { return $this->one($this->db->get_where('users', ['id' => $id], 1)); }
             public function findUserByIdentifier(string $identifier): ?array {
                 $identifier = trim($identifier);
                 if ($identifier === '') return null;
@@ -537,17 +543,25 @@ class Aegis_model extends CI_Model
                 $this->db->insert('users', $user); $user['id'] = (int) $this->db->insert_id(); return $user;
             }
             public function updateUser(int $id, array $patch): void {
-                $this->db->where('id', $id)->update('users', array_merge($patch, ['updated_at' => gmdate('c')]));
+                unset($patch['id'], $patch['user_uid']);
+                $allowed = ['email', 'password_hash', 'display_name', 'active', 'last_login_at', 'username', 'profile_image', 'updated_at'];
+                $clean = [];
+                foreach ($allowed as $key) {
+                    if (array_key_exists($key, $patch)) $clean[$key] = $patch[$key];
+                }
+                if (!$clean) return;
+                $clean['updated_at'] = gmdate('c');
+                $this->db->where('id', $id)->update('users', $clean);
             }
             public function usernameTaken(string $username, ?int $exceptId = null): bool {
                 $this->db->where('username', strtolower(trim($username)));
                 if ($exceptId !== null) $this->db->where('id !=', $exceptId);
-                return (bool) $this->db->limit(1)->get('users')->row_array();
+                return $this->one($this->db->limit(1)->get('users')) !== null;
             }
             public function emailTaken(string $email, ?int $exceptId = null): bool {
                 $this->db->where('email', strtolower(trim($email)));
                 if ($exceptId !== null) $this->db->where('id !=', $exceptId);
-                return (bool) $this->db->limit(1)->get('users')->row_array();
+                return $this->one($this->db->limit(1)->get('users')) !== null;
             }
             public function generateUniqueUsername(string $base): string {
                 $base = strtolower(preg_replace('/[^A-Za-z0-9_]/', '', str_replace(' ', '_', (string) $base)));
@@ -561,7 +575,7 @@ class Aegis_model extends CI_Model
             }
             public function generateUniqueUid(): string {
                 do { $uid = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT); }
-                while ((bool) $this->db->get_where('users', ['user_uid' => $uid], 1)->row_array());
+                while ($this->one($this->db->get_where('users', ['user_uid' => $uid], 1)));
                 return $uid;
             }
             public function ensureRole(string $code, string $name): int { return $this->ensure('roles', $code, $name); }
