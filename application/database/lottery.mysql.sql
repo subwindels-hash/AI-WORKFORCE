@@ -42,9 +42,9 @@ CREATE TABLE IF NOT EXISTS lottery_sync_runs (
  errors TEXT NULL, payload MEDIUMTEXT NULL, execution_key VARCHAR(128) NOT NULL UNIQUE, KEY idx_lottery_sync_runs_job (job_type, started_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS lottery_combinations (
- id BIGINT AUTO_INCREMENT PRIMARY KEY, lottery_code VARCHAR(32) NOT NULL, mode VARCHAR(32) NOT NULL,
+ id BIGINT AUTO_INCREMENT PRIMARY KEY, lottery_code VARCHAR(32) NOT NULL, `mode` VARCHAR(32) NOT NULL,
  model_version VARCHAR(64) NOT NULL, seed VARCHAR(32) NULL, line_count INT NOT NULL DEFAULT 0,
- lines MEDIUMTEXT NOT NULL, constraints MEDIUMTEXT NOT NULL, score_summary MEDIUMTEXT NOT NULL,
+ `lines` MEDIUMTEXT NOT NULL, `constraints` MEDIUMTEXT NOT NULL, score_summary MEDIUMTEXT NOT NULL,
  created_by INT NULL, created_at VARCHAR(32) NOT NULL, KEY idx_lottery_combinations_code (lottery_code, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS lottery_ai_decisions (
