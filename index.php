@@ -71,6 +71,13 @@
 if (!empty($_SERVER['HTTP_X_AEGIS_ORIG_URI'])) {
     $_SERVER['REQUEST_URI'] = $_SERVER['HTTP_X_AEGIS_ORIG_URI'];
     unset($_SERVER['PATH_INFO'], $_SERVER['PATH_TRANSLATED']);
+    // The WASM runtime does not populate REMOTE_ADDR, but the CI3 database
+    // session driver writes it into a NOT NULL column — without this every
+    // session insert fails silently and no session survives a request.
+    // Real web servers always set REMOTE_ADDR, so this is bridge-only.
+    if (empty($_SERVER['REMOTE_ADDR'])) {
+        $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+    }
     // The WASM bridge cannot seed process env per request — select the
     // pdo_sqlite dev driver here (production hosts set AEGIS_DB_* env vars).
     // The offline WASM bridge has no MySQL. Force sqlite even if a production

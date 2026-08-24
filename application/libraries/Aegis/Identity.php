@@ -19,6 +19,22 @@ class Identity
         unset($user['password_hash']);
         return $user;
     }
+    /**
+     * Rehydrate a session identity for a signed remember-me cookie. The
+     * caller must verify the cookie signature first; this only rebuilds the
+     * same identity shape authenticate() returns (fresh permissions, no
+     * password hash) and refuses inactive accounts.
+     */
+    public function rememberUser(int $userId): ?array
+    {
+        $user = $this->users->findUserById($userId);
+        if (!$user || empty($user['active'])) return null;
+        $user['permissions'] = $this->users->permissionsForUser($userId);
+        $this->users->recordAuthEvent($userId, 'REMEMBER_RESTORED');
+        unset($user['password_hash']);
+        return $user;
+    }
+
     public function can(array $user, string $permission): bool
     {
         if ($permission === 'system.authenticated') return !empty($user['id']);

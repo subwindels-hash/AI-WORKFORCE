@@ -9,17 +9,28 @@
   <link rel="stylesheet" href="/assets/css/aegis.css">
 </head>
 <body class="auth-page">
-  <?php $this->load->view('partials/announcement_bar'); ?>
   <main class="auth-shell">
-    <section class="auth-card" style="grid-column:1/-1;max-width:520px;margin:0 auto">
-      <h2>Password reset</h2>
-      <p class="dim">This installation does not invent email reset tokens. Ask an administrator to issue a new password or create a replacement account.</p>
-      <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
+    <section class="auth-card">
+      <div class="auth-brand">
+        <img src="/assets/images/windels-mark.png" alt="" class="auth-brand-mark" onerror="this.onerror=null;this.src='/assets/images/aegis-mark.png'">
+        <span class="auth-brand-text">WINDELS AI Workforce</span>
+      </div>
+      <h1>Password reset</h1>
+      <p class="auth-sub">This installation does not invent email reset tokens. Ask an administrator to issue a new password or create a replacement account.</p>
+
+      <?php if (!empty($notice)): ?><div class="notice ok auth-notice" role="status"><?= e($notice) ?></div><?php endif; ?>
+
       <form method="post" action="/forgot-password/submit" class="auth-form">
-        <label>Email<input type="email" name="email" required></label>
+        <label class="auth-field">
+          <span>Email address</span>
+          <span class="auth-control">
+            <input type="email" name="email" required autocomplete="username" placeholder="you@example.com" inputmode="email">
+          </span>
+        </label>
         <button class="btn primary auth-submit" type="submit">Send request</button>
       </form>
-      <div class="auth-links"><a href="/login">Back to login</a><a href="/contact">Contact</a></div>
+
+      <div class="auth-foot"><a href="/login"><b>Back to sign in</b></a> · <a href="/contact">Contact support</a></div>
     </section>
   </main>
 </body>

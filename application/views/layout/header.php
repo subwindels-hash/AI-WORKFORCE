@@ -67,10 +67,7 @@ $unread = Aegis_NotificationsHelper::unreadCount();
 <div class="app-main">
 <header class="topbar">
   <div class="brand">
-    <div>
-      <h1><?= e($pageTitle) ?></h1>
-      <div class="sub">Signed-in workspace · <?= e($pageTitle === 'Your workspace' ? 'Overview' : 'WINDELS AI WORKFORCE') ?></div>
-    </div>
+    <h1><?= e($pageTitle) ?></h1>
   </div>
   <div class="top-right">
     <span class="statuspill"><?= $ks && !empty($ks['active']) ? '● Kill switch on' : '● Mode ' . e($mode) ?></span>

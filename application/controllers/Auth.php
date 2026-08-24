@@ -29,16 +29,23 @@ class Auth extends MY_Controller
             'title' => 'Create an account',
             'error' => $this->consumeFlash('error'),
             'notice' => $this->consumeFlash('notice'),
+            'csrfToken' => $this->ensureVisitorCsrf(),
         ]);
     }
 
     public function register_submit()
     {
         if ($this->sessionUser()) { redirect('/dashboard'); return; }
+        if (!$this->validAuthCsrf()) {
+            $this->flash('error', 'Your session expired while filling in the form. Please try again.');
+            redirect('/register');
+            return;
+        }
         $email = strtolower(trim((string) $this->input->post('email')));
         $name = trim((string) $this->input->post('display_name'));
         $password = (string) $this->input->post('password');
         $confirm = (string) $this->input->post('password_confirm');
+        $terms = (string) $this->input->post('terms');
         if (!filter_var($email, FILTER_VALIDATE_EMAIL) || $name === '' || strlen($name) > 120) {
             $this->flash('error', 'Enter your name and a valid email address.');
             redirect('/register');
@@ -46,6 +53,11 @@ class Auth extends MY_Controller
         }
         if (strlen($password) < 12 || $password !== $confirm) {
             $this->flash('error', 'Use a password of at least 12 characters and confirm it exactly.');
+            redirect('/register');
+            return;
+        }
+        if ($terms !== '1') {
+            $this->flash('error', 'Please accept the Terms and Privacy Policy to create an account.');
             redirect('/register');
             return;
         }
@@ -102,8 +114,10 @@ class Auth extends MY_Controller
     public function login()
     {
         $admin = $this->input->post('admin') === '1';
+        if (!$this->validAuthCsrf()) { $this->flash('error', 'Your session expired. Please try again.'); $this->redirectLogin($admin); return; }
         $email = strtolower(trim((string) $this->input->post('email')));
         $password = (string) $this->input->post('password');
+        $remember = $this->input->post('remember') === '1';
         $attempts = (int) $this->session->userdata('login_attempts');
         $until = (int) $this->session->userdata('login_locked_until');
         if ($until > time()) { $this->flash('error', 'Too many attempts. Try again later.'); $this->redirectLogin($admin); return; }
@@ -117,6 +131,10 @@ class Auth extends MY_Controller
             $this->redirectLogin($admin); return;
         }
         $this->establishSession($user);
+        // "Remember me" keeps the user signed in on this browser for 30 days
+        // via a signed, HttpOnly cookie; the session itself stays short-lived.
+        if ($remember) $this->issueRememberCookie((int) $user['id']);
+        else $this->clearRememberCookie();
         $next = (string) $this->session->userdata('return_to');
         $this->session->unset_userdata('return_to');
         if ($admin || $this->isAdmin($user)) { redirect('/admin'); return; }
@@ -134,6 +152,7 @@ class Auth extends MY_Controller
             $known = (string) $this->session->userdata('csrf_token');
             if ($token === '' || $known === '' || !hash_equals($known, $token)) { $this->flash('error', 'Invalid security token.'); redirect('/account'); return; }
         }
+        $this->clearRememberCookie();
         $this->session->sess_destroy(); redirect('/login');
     }
 
@@ -155,8 +174,28 @@ class Auth extends MY_Controller
             'title' => $admin ? 'Administrator sign in' : 'User sign in',
             'admin' => $admin,
             'error' => $this->consumeFlash('error'),
-            'csrfToken' => (string) $this->session->userdata('csrf_token'),
+            'notice' => $this->consumeFlash('notice'),
+            'csrfToken' => $this->ensureVisitorCsrf(),
         ]);
+    }
+
+    /** CSRF for signed-out visitors: mint one for the session on first render. */
+    private function ensureVisitorCsrf(): string
+    {
+        $token = (string) $this->session->userdata('csrf_token');
+        if ($token === '') {
+            $token = bin2hex(random_bytes(32));
+            $this->session->set_userdata('csrf_token', $token);
+        }
+        return $token;
+    }
+
+    /** Verify the csrf_token posted by an auth form against the session. */
+    private function validAuthCsrf(): bool
+    {
+        $token = (string) $this->input->post('csrf_token');
+        $known = (string) $this->session->userdata('csrf_token');
+        return $token !== '' && $known !== '' && hash_equals($known, $token);
     }
 
     private function renderPage(string $title, string $active, array $data = []): void

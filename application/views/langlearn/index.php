@@ -9,10 +9,10 @@
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 
-<div class="panel" style="margin-bottom:14px;border-color:#2a3f63;background:linear-gradient(145deg,#0b1c34,#0b1220)">
+<div class="panel" style="margin-bottom:14px">
   <h3>AI Language Teacher</h3>
   <div class="body" style="padding-top:12px">
-    <p style="margin:0">Type a sentence in any language, get an instant translation, listen to the correct pronunciation, then practice speaking — all on one page, without navigating through forms.</p>
+    <p style="margin:0">Choose any two languages, type a sentence, get an instant translation, listen to the correct pronunciation, then practice speaking — all on one page.</p>
     <p style="margin-top:10px"><a class="btn primary" href="/app/languages/teacher">Open the AI Teacher →</a></p>
   </div>
 </div>

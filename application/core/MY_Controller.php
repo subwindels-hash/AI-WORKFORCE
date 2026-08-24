@@ -22,8 +22,69 @@ class MY_Controller extends CI_Controller
     protected function currentUser(): ?array
     {
         $user = $this->session->userdata('identity');
-        return is_array($user) && !empty($user['id']) ? $user : null;
+        if (is_array($user) && !empty($user['id'])) return $user;
+        return $this->restoreFromRememberCookie();
     }
+
+    /**
+     * Remember-me support: when no session identity exists, a valid signed
+     * cookie (issued by Auth::login when "remember me" was checked) restores
+     * the session transparently. The cookie is stateless — userId + expiry +
+     * HMAC signed with the configured encryption key — so it fails closed
+     * when no key is configured, when the signature/expiry is wrong, or when
+     * the account was deactivated.
+     */
+    protected function restoreFromRememberCookie(): ?array
+    {
+        $key = (string) $this->config->item('encryption_key');
+        if ($key === '') return null; // fail closed without a signing key
+        $raw = (string) ($this->input->cookie(self::REMEMBER_COOKIE, true) ?: ($_COOKIE[self::REMEMBER_COOKIE] ?? ''));
+        if ($raw === '' || substr_count($raw, '.') !== 3) return null;
+        [$version, $id, $expires, $sig] = explode('.', $raw, 4);
+        if ($version !== 'v1' || !ctype_digit($id) || !ctype_digit($expires)) return null;
+        if ((int) $expires < time()) return null;
+        $expected = hash_hmac('sha256', "v1.{$id}.{$expires}", $key);
+        if (!hash_equals($expected, $sig)) return null;
+        $user = $this->platform->identity->rememberUser((int) $id);
+        if (!$user) return null;
+        $this->session->set_userdata([
+            'identity' => $user,
+            'csrf_token' => (string) ($this->session->userdata('csrf_token') ?: bin2hex(random_bytes(32))),
+        ]);
+        return $user;
+    }
+
+    /** Issue the signed remember-me cookie (30 days, HttpOnly, SameSite=Lax). */
+    protected function issueRememberCookie(int $userId): void
+    {
+        $key = (string) $this->config->item('encryption_key');
+        if ($key === '') return; // feature disabled without a signing key
+        $expires = time() + 30 * 86400;
+        $sig = hash_hmac('sha256', "v1.{$userId}.{$expires}", $key);
+        setcookie(self::REMEMBER_COOKIE, "v1.{$userId}.{$expires}.{$sig}", [
+            'expires' => $expires,
+            'path' => '/',
+            'domain' => (string) $this->config->item('cookie_domain'),
+            'secure' => (bool) $this->config->item('cookie_secure'),
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
+    }
+
+    /** Clear the remember-me cookie (logout, credential changes). */
+    protected function clearRememberCookie(): void
+    {
+        setcookie(self::REMEMBER_COOKIE, '', [
+            'expires' => time() - 3600,
+            'path' => '/',
+            'domain' => (string) $this->config->item('cookie_domain'),
+            'secure' => (bool) $this->config->item('cookie_secure'),
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
+    }
+
+    public const REMEMBER_COOKIE = 'aegis_remember';
 
     protected function isAdmin(?array $user = null): bool
     {

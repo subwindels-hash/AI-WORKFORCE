@@ -26,13 +26,15 @@ class Lang_learn extends App_Controller
         $data['languages'] = $this->platform->langlearn->languages();
         $data['csrfToken'] = (string) $this->session->userdata('csrf_token');
         $data['locales'] = \Aegis\LangLearn\Translator::LOCALES;
+        // Each example pins an explicit source→target pair so learners see
+        // both directions working (e.g. Dutch→English and English→Dutch).
         $data['examplePairs'] = [
-            ['text' => 'Good morning, how are you?', 'target' => 'fr'],
-            ['text' => 'Hello', 'target' => 'es'],
-            ['text' => 'Thank you very much', 'target' => 'de'],
-            ['text' => 'What is your name?', 'target' => 'it'],
-            ['text' => 'I would like a coffee', 'target' => 'pt'],
-            ['text' => 'See you tomorrow', 'target' => 'nl'],
+            ['text' => 'Good morning, how are you?', 'source' => 'en', 'target' => 'nl'],
+            ['text' => 'Goedemorgen, hoe gaat het?', 'source' => 'nl', 'target' => 'en'],
+            ['text' => 'Hello', 'source' => 'en', 'target' => 'fr'],
+            ['text' => 'Hallo', 'source' => 'de', 'target' => 'en'],
+            ['text' => 'Gracias', 'source' => 'es', 'target' => 'en'],
+            ['text' => 'Thank you very much', 'source' => 'en', 'target' => 'de'],
         ];
         $this->render($data, 'langlearn/teacher');
     }
