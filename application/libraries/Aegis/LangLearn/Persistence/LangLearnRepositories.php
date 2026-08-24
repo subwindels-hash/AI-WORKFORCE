@@ -34,9 +34,20 @@ interface LangLearnRepository
     public function listModules(string $pathId): array;
 
     public function saveAttempt(array $attempt): array;
+    /** @return array<int, array<string, mixed>> newest first */
+    public function listAttemptsForProfile(int $profileId, int $limit = 100): array;
     public function saveSession(array $session): void;
     /** @return array<int, string> distinct UTC study days, newest first */
     public function sessionDays(int $profileId): array;
+
+    // Phase 2 (AI teacher)
+    public function saveConversation(array $session): array;
+    public function findConversation(string $id): ?array;
+    /** @return array<int, array<string, mixed>> */
+    public function listConversations(int $profileId, int $limit = 20): array;
+    public function saveWriting(array $attempt): array;
+    /** @return array<int, array<string, mixed>> */
+    public function listWriting(int $profileId, int $limit = 20): array;
 
     /** Upsert keyed on (profile_id, skill, source). */
     public function upsertProgress(array $row): void;

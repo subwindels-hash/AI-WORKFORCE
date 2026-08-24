@@ -106,3 +106,36 @@ CREATE TABLE IF NOT EXISTS language_progress (
   UNIQUE KEY uq_progress (profile_id, skill, source),
   KEY idx_progress_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Phase 2 (AI Teacher): conversation drill sessions and writing practice.
+-- Conversation turns store the authored scenario state + deterministic
+-- evaluation; writing attempts ALWAYS keep the user's original text next to
+-- the structured feedback (never overwritten).
+CREATE TABLE IF NOT EXISTS conversation_sessions (
+  id             VARCHAR(36) PRIMARY KEY,
+  profile_id     INT NOT NULL,
+  user_id        INT NOT NULL,
+  language_code  VARCHAR(8) NOT NULL,
+  scenario       VARCHAR(40) NOT NULL,
+  mode           VARCHAR(20) NOT NULL DEFAULT 'casual',       -- beginner|intermediate|advanced|travel|restaurant|shopping|...
+  correction     VARCHAR(24) NOT NULL DEFAULT 'important',     -- immediate|after|important|conversation_only
+  status         VARCHAR(12) NOT NULL DEFAULT 'ACTIVE',        -- ACTIVE|COMPLETED|ABANDONED
+  state          LONGTEXT NOT NULL,                            -- scenario script state: turn index, history, evaluation
+  turn_count     INT NOT NULL DEFAULT 0,
+  started_at     VARCHAR(32) NOT NULL,
+  completed_at   VARCHAR(32) NULL,
+  KEY idx_conv_profile (profile_id, started_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS writing_attempts (
+  id             VARCHAR(36) PRIMARY KEY,
+  profile_id     INT NOT NULL,
+  user_id        INT NOT NULL,
+  language_code  VARCHAR(8) NOT NULL,
+  task_code      VARCHAR(40) NOT NULL,
+  original_text  MEDIUMTEXT NOT NULL,                          -- the user's own writing, never modified
+  feedback       LONGTEXT NOT NULL,                            -- structured deterministic feedback
+  score_pct      DECIMAL(5,2) NULL,
+  created_at     VARCHAR(32) NOT NULL,
+  KEY idx_writing_profile (profile_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

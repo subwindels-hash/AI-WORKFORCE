@@ -150,4 +150,93 @@ class Api_lang_learning extends Api_controller
             $this->json(['languageCode' => $profile['language_code'], 'progress' => $this->platform->langlearn->progressFor($profile)]);
         } catch (Throwable $e) { $this->fail($e); }
     }
+    // ================= PHASE 2: AI TEACHER =================
+
+    public function start_lesson(string $moduleId)
+    {
+        $user = $this->guard();
+        if (!$user) return;
+        try { $this->json($this->platform->langteacher->startLesson($moduleId, (int) $user['id']), 201); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
+    public function answer_lesson(string $moduleId)
+    {
+        $user = $this->guard();
+        if (!$user) return;
+        $body = $this->jsonBody();
+        if (!is_array($body['answers'] ?? null)) return $this->jsonError('body must be {answers: {itemId: index}}');
+        try { $this->json($this->platform->langteacher->submitLesson($moduleId, (int) $user['id'], $body['answers'])); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
+    public function conversations(int $profileId)
+    {
+        if (!$this->guard(false)) return;
+        $user = $this->session->userdata('identity');
+        try { $this->json(['scenarios' => $this->platform->langteacher->conversations((int) $user['id'], $profileId)]); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
+    public function start_conversation(int $profileId)
+    {
+        $user = $this->guard();
+        if (!$user) return;
+        $body = $this->jsonBody();
+        try { $this->json($this->platform->langteacher->startConversation((int) $user['id'], $profileId, (string) ($body['scenario'] ?? ''), (string) ($body['correction'] ?? 'important')), 201); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
+    public function conversation_turn(string $sessionId)
+    {
+        $user = $this->guard();
+        if (!$user) return;
+        $body = $this->jsonBody();
+        if (!isset($body['text']) || !is_string($body['text'])) return $this->jsonError('body must be {text: string}');
+        try { $this->json($this->platform->langteacher->conversationTurn($sessionId, (int) $user['id'], $body['text'])); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
+    public function writing_tasks(int $profileId)
+    {
+        if (!$this->guard(false)) return;
+        $user = $this->session->userdata('identity');
+        try { $this->json(['tasks' => $this->platform->langteacher->writingTasks((int) $user['id'], $profileId)]); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
+    public function submit_writing(int $profileId)
+    {
+        $user = $this->guard();
+        if (!$user) return;
+        $body = $this->jsonBody();
+        if (!isset($body['taskCode'], $body['text'])) return $this->jsonError('body must be {taskCode, text}');
+        try { $this->json($this->platform->langteacher->submitWriting((int) $user['id'], $profileId, (string) $body['taskCode'], (string) $body['text']), 201); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
+    public function grammar(int $profileId)
+    {
+        if (!$this->guard(false)) return;
+        $user = $this->session->userdata('identity');
+        try { $this->json(['rules' => $this->platform->langteacher->grammarRules((int) $user['id'], $profileId)]); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
+    public function grammar_simple(int $profileId, string $ruleId)
+    {
+        if (!$this->guard(false)) return;
+        $user = $this->session->userdata('identity');
+        try { $this->json($this->platform->langteacher->explainSimply((int) $user['id'], $profileId, $ruleId)); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
+    public function history(int $profileId)
+    {
+        if (!$this->guard(false)) return;
+        $user = $this->session->userdata('identity');
+        try { $this->json($this->platform->langteacher->history((int) $user['id'], $profileId)); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
 }

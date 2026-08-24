@@ -131,6 +131,135 @@ class Lang_learn extends MY_Controller
         redirect('/app/languages/p/' . ($module['profile_id'] ?? 0));
     }
 
+    // ================= PHASE 2: AI TEACHER PAGES =================
+
+    public function lesson(string $moduleId)
+    {
+        $user = $this->requireUser();
+        $data = $this->base('Lesson');
+        try {
+            $data['lessonView'] = $this->platform->langteacher->startLesson($moduleId, (int) $user['id']);
+            $data['error'] = null;
+        } catch (Throwable $e) {
+            $data['lessonView'] = null;
+            $data['error'] = $e->getMessage();
+        }
+        $this->render($data, 'langlearn/lesson');
+    }
+
+    public function lesson_answer(string $moduleId)
+    {
+        $user = $this->requireUser();
+        $answers = $this->input->post('answers');
+        try {
+            $res = $this->platform->langteacher->submitLesson($moduleId, (int) $user['id'], is_array($answers) ? $answers : []);
+            $this->session->set_flashdata('llNotice', sprintf('Lesson %s — %d%% (%d/%d). %s',
+                $res['passed'] ? 'COMPLETED' : 'not passed yet — review and try again', $res['scorePct'], $res['correct'], $res['total'],
+                $res['passed'] ? 'Next module unlocked.' : ''));
+            $module = $this->platform->model->langlearn->findModule($moduleId);
+            redirect('/app/languages/p/' . ($module['profile_id'] ?? 0));
+        } catch (Throwable $e) {
+            $this->session->set_flashdata('llError', $e->getMessage());
+            redirect('/app/languages');
+        }
+    }
+
+    public function conversation(int $profileId)
+    {
+        $user = $this->requireUser();
+        $data = $this->base('Conversation');
+        try { $data['scenarios'] = $this->platform->langteacher->conversations((int) $user['id'], $profileId); }
+        catch (Throwable $e) { $data['scenarios'] = []; }
+        $data['profileId'] = $profileId;
+        $this->render($data, 'langlearn/conversation');
+    }
+
+    public function conversation_go(int $profileId)
+    {
+        $user = $this->requireUser();
+        try {
+            $res = $this->platform->langteacher->startConversation((int) $user['id'], $profileId, (string) $this->input->post('scenario'), (string) $this->input->post('correction', true) ?: 'important');
+            redirect('/app/languages/c/' . $res['sessionId']);
+        } catch (Throwable $e) {
+            $this->session->set_flashdata('llError', $e->getMessage());
+            redirect('/app/languages/p/' . $profileId);
+        }
+    }
+
+    public function conversation_show(string $id)
+    {
+        $user = $this->requireUser();
+        $data = $this->base('Conversation');
+        $data['view'] = $this->platform->langteacher->conversationStateForPage($id, (int) $user['id']);
+        $this->render($data, 'langlearn/conversation_run');
+    }
+
+    public function conversation_say(string $id)
+    {
+        $user = $this->requireUser();
+        try {
+            $this->platform->langteacher->conversationTurn($id, (int) $user['id'], (string) $this->input->post('text'));
+        } catch (Throwable $e) {
+            $this->session->set_flashdata('llError', $e->getMessage());
+        }
+        redirect('/app/languages/c/' . $id);
+    }
+
+    public function writing(int $profileId)
+    {
+        $user = $this->requireUser();
+        $data = $this->base('Writing practice');
+        try { $data['tasks'] = $this->platform->langteacher->writingTasks((int) $user['id'], $profileId); }
+        catch (Throwable $e) { $data['tasks'] = []; }
+        $data['history'] = $this->platform->langteacher->writingHistory((int) $user['id'], $profileId);
+        $data['profileId'] = $profileId;
+        $this->render($data, 'langlearn/writing');
+    }
+
+    public function writing_submit(int $profileId)
+    {
+        $user = $this->requireUser();
+        try {
+            $res = $this->platform->langteacher->submitWriting((int) $user['id'], $profileId, (string) $this->input->post('taskCode'), (string) $this->input->post('text'));
+            $f = $res['attempt']['feedback'];
+            $this->session->set_flashdata('llNotice', sprintf('Writing checked — %d%% (%s).', $f['scorePct'], implode('; ', array_map(fn($e) => $e['element'] . ': ' . ($e['met'] ? '✓' : '✗'), $f['elements']))));
+        } catch (Throwable $e) {
+            $this->session->set_flashdata('llError', $e->getMessage());
+        }
+        redirect('/app/languages/w/' . $profileId);
+    }
+
+    public function grammar(int $profileId)
+    {
+        $user = $this->requireUser();
+        $data = $this->base('Grammar');
+        try { $data['rules'] = $this->platform->langteacher->grammarRules((int) $user['id'], $profileId); }
+        catch (Throwable $e) { $data['rules'] = []; }
+        $data['profileId'] = $profileId;
+        $this->render($data, 'langlearn/grammar');
+    }
+
+    public function grammar_simple(int $profileId, string $ruleId)
+    {
+        $user = $this->requireUser();
+        try {
+            $s = $this->platform->langteacher->explainSimply((int) $user['id'], $profileId, $ruleId);
+            $this->session->set_flashdata('llNotice', 'Simpler: ' . $s['simple']['rule'] . ' — ' . $s['simple']['correctExample']);
+        } catch (Throwable $e) {
+            $this->session->set_flashdata('llError', $e->getMessage());
+        }
+        redirect('/app/languages/g/' . $profileId);
+    }
+
+    public function history(int $profileId)
+    {
+        $user = $this->requireUser();
+        $data = $this->base('History');
+        try { $data['history'] = $this->platform->langteacher->history((int) $user['id'], $profileId); }
+        catch (Throwable $e) { $data['history'] = ['attempts' => [], 'conversations' => [], 'writing' => []]; }
+        $this->render($data, 'langlearn/history');
+    }
+
     // ------------------------------------------------------------ helpers
 
     private function sessionUser(): ?array

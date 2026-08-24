@@ -45,3 +45,15 @@ CREATE TABLE IF NOT EXISTS language_progress (
  updated_at TEXT NOT NULL, UNIQUE(profile_id, skill, source)
 );
 CREATE INDEX IF NOT EXISTS idx_progress_user ON language_progress(user_id);
+CREATE TABLE IF NOT EXISTS conversation_sessions (
+ id TEXT PRIMARY KEY, profile_id INTEGER NOT NULL, user_id INTEGER NOT NULL, language_code TEXT NOT NULL,
+ scenario TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'casual', correction TEXT NOT NULL DEFAULT 'important',
+ status TEXT NOT NULL DEFAULT 'ACTIVE', state TEXT NOT NULL, turn_count INTEGER NOT NULL DEFAULT 0,
+ started_at TEXT NOT NULL, completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_conv_profile ON conversation_sessions(profile_id, started_at);
+CREATE TABLE IF NOT EXISTS writing_attempts (
+ id TEXT PRIMARY KEY, profile_id INTEGER NOT NULL, user_id INTEGER NOT NULL, language_code TEXT NOT NULL,
+ task_code TEXT NOT NULL, original_text TEXT NOT NULL, feedback TEXT NOT NULL, score_pct REAL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_writing_profile ON writing_attempts(profile_id, created_at);

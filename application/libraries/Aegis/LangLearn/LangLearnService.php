@@ -315,16 +315,22 @@ class LangLearnService
         return $m;
     }
 
+    /** Deterministic quiz draw for a module (focus skill first) — shared by checkpoint and lesson flows. */
+    public function quizFor(array $module): array
+    {
+        $items = ItemBanks::items($module['language_code']);
+        $at = array_values(array_filter($items, fn($i) => $i['level'] === $module['level']));
+        usort($at, fn($x, $y) => ($x['skill'] === $module['focus_skill'] ? -1 : 1) <=> ($y['skill'] === $module['focus_skill'] ? -1 : 1));
+        return array_slice($at, 0, min(4, max(2, count($at))));
+    }
+
     /** Checkpoint quiz drawn from the module's level (focus skill first). */
     public function startCheckpoint(string $moduleId, int $userId): array
     {
         $m = $this->moduleOwned($moduleId, $userId);
         if (in_array($m['status'], ['LOCKED'], true)) throw new \RuntimeException('module is locked — complete the previous module first', 409);
         if ($m['status'] === 'COMPLETED') throw new \RuntimeException('module already completed', 409);
-        $items = ItemBanks::items($m['language_code']);
-        $at = array_values(array_filter($items, fn($i) => $i['level'] === $m['level']));
-        usort($at, fn($x, $y) => ($x['skill'] === $m['focus_skill'] ? -1 : 1) <=> ($y['skill'] === $m['focus_skill'] ? -1 : 1));
-        $quiz = array_slice($at, 0, min(4, max(2, count($at))));
+        $quiz = $this->quizFor($m);
         if (count($quiz) < 2) throw new \RuntimeException('not enough bank items at this level for a checkpoint yet', 409);
         $m['status'] = 'IN_PROGRESS';
         $m['attempts_count'] = (int) $m['attempts_count'] + 1;
@@ -333,13 +339,10 @@ class LangLearnService
     }
 
     /** Grade a checkpoint. ≥75% completes the module and unlocks the next. */
-    public function submitCheckpoint(string $moduleId, int $userId, array $answers): array
+    public function submitCheckpoint(string $moduleId, int $userId, array $answers, string $kind = 'checkpoint'): array
     {
         $m = $this->moduleOwned($moduleId, $userId);
-        $items = ItemBanks::items($m['language_code']);
-        $at = array_values(array_filter($items, fn($i) => $i['level'] === $m['level']));
-        usort($at, fn($x, $y) => ($x['skill'] === $m['focus_skill'] ? -1 : 1) <=> ($y['skill'] === $m['focus_skill'] ? -1 : 1));
-        $quiz = array_slice($at, 0, min(4, max(2, count($at))));
+        $quiz = $this->quizFor($m);
         $outcomes = [];
         $correct = 0;
         foreach ($quiz as $i => $item) {
@@ -364,7 +367,7 @@ class LangLearnService
             }
             $this->refreshPathCompletion($m);
         }
-        $this->recordAttempt((int) $m['profile_id'], $userId, $m['language_code'], $m['id'], 'checkpoint', $score, $passed,
+        $this->recordAttempt((int) $m['profile_id'], $userId, $m['language_code'], $m['id'], $kind, $score, $passed,
             ['outcomes' => $outcomes, 'module' => $m['title']]);
         $this->recordSession((int) $m['profile_id'], $userId, $m['language_code'], 'checkpoint');
         return ['passed' => $passed, 'scorePct' => $score, 'correct' => $correct, 'total' => count($quiz), 'outcomes' => $outcomes,

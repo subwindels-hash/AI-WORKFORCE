@@ -46,7 +46,7 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **Scheduled operations worker** (`php index.php tools cron`): portfolio scan, broker transitions, proposal expiry | **TESTED** |
 | MT4 / crypto-exchange / stock-broker connectors | **PLANNED** (added one at a time after MT5 is verified) |
 
-**167 automated tests** run through the real CodeIgniter stack
+**175 automated tests** run through the real CodeIgniter stack
 (`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
 sandbox — see below), plus 9 contract tests for the Python bridge
 (`python-services/mt5-bridge/.venv/bin/python -m pytest test_bridge.py`).
@@ -265,9 +265,17 @@ approved symbols) → 11 human approval (HUMAN_APPROVAL mode) → 12 place order
 - **Progress** — levels, path completion and study streaks derived only from
   stored activity (assessments, checkpoints, study sessions).
 
-Phases 2–5 (AI lessons/conversation/writing correction, vocabulary SRS,
-listening/speaking with real providers, adaptive recommendations) follow the
-same honesty architecture.
+**Phase 2 — AI Teacher (complete)**: lessons (teach → examples from the
+verified bank → practice → grade → module completion), structured
+conversation drills for every banked language (first-meeting; café where
+confidently authored) with all four correction preferences and assisted
+advance after two misses, guided writing tasks with real element checks
+(original text always stored unchanged next to the feedback), grammar rules
+with on-demand simpler explanations, and full lesson history.
+
+Phases 3–5 (vocabulary SRS, listening/speaking with real providers, adaptive
+recommendations) follow the same honesty architecture: nothing is invented
+when a provider is missing.
 
 ### Phase 6 intelligence: agent debate + strategy optimizer
 

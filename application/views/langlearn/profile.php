@@ -62,6 +62,12 @@
       <form method="post" action="/app/languages/p/<?= (int) $profile['id'] ?>/path/generate"><button class="btn primary">Generate learning path</button></form>
     <?php else: ?>
       <p class="dim" style="font-size:11px">From <?= e($path['path']['from_level']) ?> toward <?= e($path['path']['target_level']) ?> — modules unlock in order; each ends with a real checkpoint quiz drawn from the item bank.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0">
+        <a class="btn small" href="/app/languages/conv/<?= (int) $profile['id'] ?>">AI conversation</a>
+        <a class="btn small" href="/app/languages/w/<?= (int) $profile['id'] ?>">Writing practice</a>
+        <a class="btn small" href="/app/languages/g/<?= (int) $profile['id'] ?>">Grammar</a>
+        <a class="btn small" href="/app/languages/h/<?= (int) $profile['id'] ?>">History</a>
+      </div>
       <table class="tbl" style="margin-top:8px">
         <thead><tr><th>#</th><th>Module</th><th>Focus</th><th>Status</th><th class="num"></th></tr></thead>
         <tbody>
@@ -73,7 +79,8 @@
               <td><span class="badge <?= ['COMPLETED' => 'b-green', 'IN_PROGRESS' => 'b-amber', 'AVAILABLE' => 'b-sky', 'LOCKED' => 'b-gray'][$m['status']] ?>"><?= e($m['status']) ?></span></td>
               <td class="num">
                 <?php if (!in_array($m['status'], ['LOCKED', 'COMPLETED'], true)): ?>
-                  <a class="btn small primary" href="/app/languages/m/<?= e($m['id']) ?>/checkpoint">checkpoint</a>
+                  <a class="btn small primary" href="/app/languages/m/<?= e($m['id']) ?>/lesson">lesson</a>
+                  <a class="btn small" href="/app/languages/m/<?= e($m['id']) ?>/checkpoint">checkpoint</a>
                 <?php endif; ?>
               </td>
             </tr>

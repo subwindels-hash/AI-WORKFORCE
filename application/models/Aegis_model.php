@@ -556,10 +556,56 @@ class Aegis_model extends CI_Model
             public function saveSession(array $s): void {
                 $this->db->insert('study_sessions', $s);
             }
+            public function listAttemptsForProfile(int $profileId, int $limit = 100): array {
+                $rows = $this->db->where('profile_id', $profileId)->order_by('created_at', 'DESC')
+                    ->limit(max(1, min(300, $limit)))->get('lesson_attempts')->result_array();
+                foreach ($rows as &$r) {
+                    $r['detail'] = json_decode((string) $r['detail'], true) ?: [];
+                    if ($r['score_pct'] !== null) $r['score_pct'] = (float) $r['score_pct'];
+                }
+                return $rows;
+            }
             public function sessionDays(int $profileId): array {
                 $rows = $this->db->select('day')->distinct()->where('profile_id', $profileId)
                     ->order_by('day', 'DESC')->limit(400)->get('study_sessions')->result_array();
                 return array_map(fn($r) => (string) $r['day'], $rows);
+            }
+
+            public function saveConversation(array $c): array {
+                $row = $c;
+                $row['state'] = is_array($c['state'] ?? null) ? json_encode($c['state']) : $c['state'];
+                $exists = $this->db->from('conversation_sessions')->where('id', $row['id'])->count_all_results() > 0;
+                if ($exists) { unset($row['started_at']); $this->db->where('id', $row['id'])->update('conversation_sessions', $row); }
+                else $this->db->insert('conversation_sessions', $row);
+                return $this->castConversation($this->db->get_where('conversation_sessions', ['id' => $c['id']], 1)->row_array());
+            }
+            public function findConversation(string $id): ?array {
+                $r = $this->db->get_where('conversation_sessions', ['id' => $id], 1)->row_array();
+                return $r ? $this->castConversation($r) : null;
+            }
+            public function listConversations(int $profileId, int $limit = 20): array {
+                return $this->db->where('profile_id', $profileId)->order_by('started_at', 'DESC')
+                    ->limit(max(1, min(100, $limit)))->get('conversation_sessions')->result_array();
+            }
+            private function castConversation(array $r): array {
+                $r['state'] = json_decode((string) $r['state'], true) ?: [];
+                $r['profile_id'] = (int) $r['profile_id'];
+                $r['user_id'] = (int) $r['user_id'];
+                $r['turn_count'] = (int) $r['turn_count'];
+                return $r;
+            }
+            public function saveWriting(array $w): array {
+                $row = $w;
+                $row['feedback'] = json_encode($w['feedback'] ?? []);
+                $this->db->insert('writing_attempts', $row);
+                $row['feedback'] = $w['feedback'] ?? [];
+                return $row;
+            }
+            public function listWriting(int $profileId, int $limit = 20): array {
+                $rows = $this->db->where('profile_id', $profileId)->order_by('created_at', 'DESC')
+                    ->limit(max(1, min(100, $limit)))->get('writing_attempts')->result_array();
+                foreach ($rows as &$r) $r['feedback'] = json_decode((string) $r['feedback'], true) ?: [];
+                return $rows;
             }
 
             public function upsertProgress(array $row): void {
