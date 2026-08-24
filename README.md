@@ -1,5 +1,10 @@
 # AEGIS — Standalone AI Trading Intelligence Platform
 
+> **Standalone Lead Discovery update:** the independent Scout platform now lives
+> under `apps/api`, `apps/web` and `packages/shared`. It uses Fastify/TypeScript,
+> Next.js/React/Tailwind, PostgreSQL and Redis, and does not depend on the AEGIS
+> trading services. See [`docs/LEAD_DISCOVERY.md`](docs/LEAD_DISCOVERY.md).
+
 **CodeIgniter 3.1.13 · PHP 8.x · MySQL/MariaDB · Traditional MVC**
 
 A modular trading infrastructure that analyzes markets with a multi-agent AI
