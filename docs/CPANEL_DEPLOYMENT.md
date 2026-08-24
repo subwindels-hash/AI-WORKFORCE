@@ -58,6 +58,11 @@ For a move between cPanel accounts, preserve `VP_ENCRYPTION_KEY` and `VP_AUTH_SE
 
 The bundled dotenv loader reads this file at application startup. No hidden generated secrets file is required.
 
+Optional SEO settings (`VP_SITE_NAME`, `VP_SITE_DESCRIPTION`, `VP_SITE_KEYWORDS`,
+`VP_ROBOTS`, `VP_OG_IMAGE`) and the public assistant (`AI_CHAT_*`) are also
+read from `.env`. Leave `AI_CHAT_ENABLED=0` to use the safe built-in product
+Guide; enable it only with a server-side approved AI provider key.
+
 ## 5. Writable directories
 
 Using **File Manager → Change Permissions**, ensure the web-server user can write to these directories. Standard cPanel permissions of `0755` normally work; use `0775` only if the host requires it:

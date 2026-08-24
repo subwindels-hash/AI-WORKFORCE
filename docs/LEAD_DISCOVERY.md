@@ -69,6 +69,7 @@ coalesced with a Redis lock.
 
 Base URL: `/api/v1/lead-discovery`
 
+- `POST /api/v1/chat/respond` (public grounded website assistant)
 - `GET /providers`
 - `POST /search`
 - `GET /leads`, `GET /leads/:id`
@@ -86,6 +87,21 @@ All lead queries include the JWT organization ID. Writes require
 `lead.write`; reads require `lead.read`. The primary uniqueness rule is
 `organization_id + source + source_id`. Website, phone, and name/address
 matches only create review candidates and never merge automatically.
+
+## SEO and website assistant
+
+The Next.js site reads `NEXT_PUBLIC_SITE_NAME`, `NEXT_PUBLIC_SITE_TITLE`,
+`NEXT_PUBLIC_SITE_DESCRIPTION`, `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_SITE_KEYWORDS`,
+`NEXT_PUBLIC_OG_IMAGE` and `NEXT_PUBLIC_ROBOTS` for metadata, canonical URLs,
+Open Graph/Twitter cards, `sitemap.xml`, `robots.txt` and the installable
+manifest. The PHP/cPanel site reads the corresponding `VP_SITE_*`, `VP_OG_IMAGE`
+and `VP_ROBOTS` variables and exposes `/sitemap.xml` and `/robots.txt`.
+
+The assistant is available without login on both websites. It uses the
+publicly documented local guide by default and can call an OpenAI-compatible
+provider only when server-side `AI_CHAT_ENABLED=1`, `AI_CHAT_API_URL`,
+`AI_CHAT_API_KEY` and `AI_CHAT_MODEL` are configured. It never receives private
+lead/account records.
 
 ## Honest status
 

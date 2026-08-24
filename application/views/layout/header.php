@@ -10,13 +10,32 @@ $ks = $status['killSwitch'] ?? null;
 $ci = get_instance();
 $identity = $ci->session->userdata('identity');
 $identity = is_array($identity) ? $identity : null;
+$ci->config->load('seo', true);
+$seo = $ci->config->item('settings', 'seo') ?: [];
+$pageTitle = (string) ($title ?? 'AEGIS');
+$canonical = ($seo['canonical'] ?? '') !== '' ? rtrim((string) $seo['canonical'], '/') . ($_SERVER['REQUEST_URI'] ?? '/') : '';
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title><?= e($title ?? 'AEGIS') ?> — AEGIS Trading Intelligence</title>
+<title><?= e($pageTitle . ($seo['title_suffix'] ?? ' · AEGIS')) ?></title>
+<meta name="description" content="<?= e((string) ($seo['description'] ?? '')) ?>">
+<meta name="keywords" content="<?= e((string) ($seo['keywords'] ?? '')) ?>">
+<meta name="robots" content="<?= e((string) ($seo['robots'] ?? 'index,follow')) ?>">
+<?php if ($canonical !== ''): ?><link rel="canonical" href="<?= e($canonical) ?>">
+<meta property="og:url" content="<?= e($canonical) ?>"><?php endif; ?>
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="<?= e((string) ($seo['site_name'] ?? 'AEGIS')) ?>">
+<meta property="og:title" content="<?= e($pageTitle) ?>">
+<meta property="og:description" content="<?= e((string) ($seo['description'] ?? '')) ?>">
+<meta property="og:image" content="<?= e((string) ($seo['og_image'] ?? '/assets/images/aegis-mark.png')) ?>">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="<?= e($pageTitle) ?>">
+<meta name="twitter:description" content="<?= e((string) ($seo['description'] ?? '')) ?>">
+<meta name="twitter:image" content="<?= e((string) ($seo['og_image'] ?? '/assets/images/aegis-mark.png')) ?>">
+<meta name="theme-color" content="<?= e((string) ($seo['theme_color'] ?? '#07090e')) ?>">
 <link rel="icon" type="image/png" href="/assets/images/aegis-mark.png">
 <link rel="stylesheet" href="/assets/css/aegis.css">
 </head>

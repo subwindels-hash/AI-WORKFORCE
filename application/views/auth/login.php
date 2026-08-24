@@ -3,7 +3,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title><?= e($title) ?> · AEGIS</title>
+  <?php $ci = get_instance(); $ci->config->load('seo', true); $seoAuth = $ci->config->item('settings', 'seo') ?: []; ?>
+  <title><?= e($title . ($seoAuth['title_suffix'] ?? ' · AEGIS')) ?></title>
+  <meta name="description" content="<?= e((string) ($seoAuth['description'] ?? '')) ?>"><meta name="robots" content="noindex,nofollow">
   <link rel="icon" href="/assets/images/aegis-mark.png">
   <link rel="stylesheet" href="/assets/css/aegis.css">
 </head>
@@ -35,5 +37,6 @@
       <p class="auth-footnote">Initial deployments include a documented administrator account. Change its password immediately after the first sign in.</p>
     </section>
   </main>
+  <?php $this->load->view('partials/chat_widget'); ?>
 </body>
 </html>
