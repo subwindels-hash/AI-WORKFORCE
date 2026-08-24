@@ -36,7 +36,8 @@ class Aegis_model extends CI_Model
         $this->strategies = new class($db) implements Aegis\Persistence\StrategyRepository {
             public function __construct(private object $db) {}
             public function find(string $id, string $version): ?array {
-                $row = $this->db->get_where('strategies', ['strategy_id' => $id, 'version' => $version], 1)->row_array();
+                $q = $this->db->get_where('strategies', ['strategy_id' => $id, 'version' => $version], 1);
+                $row = ($q && is_object($q)) ? $q->row_array() : null;
                 return $row ? self::decode($row) : null;
             }
             public function all(): array {

@@ -1,10 +1,11 @@
 <?php
 defined('BASEPATH') or exit('No direct script access allowed');
+require_once APPPATH . 'core/App_Controller.php';
 
 /**
  * Phase 3 — Paper Trading console (traditional MVC pages).
  */
-class Paper extends MY_Controller
+class Paper extends App_Controller
 {
     public function index()
     {

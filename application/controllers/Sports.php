@@ -1,5 +1,6 @@
 <?php
 defined('BASEPATH') or exit('No direct script access allowed');
+require_once APPPATH . 'core/App_Controller.php';
 
 /**
  * Sports Intelligence console (integration plan step 6 — dashboards,
@@ -12,7 +13,7 @@ defined('BASEPATH') or exit('No direct script access allowed');
  * same permission checks the API enforces, and the ticket stays audited with
  * the acting user.
  */
-class Sports extends MY_Controller
+class Sports extends App_Controller
 {
     public function index()
     {

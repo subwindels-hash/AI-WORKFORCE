@@ -7,16 +7,34 @@ defined('BASEPATH') or exit('No direct script access allowed');
 | -------------------------------------------------------------------------
 | Traditional MVC pages (server-rendered views) plus a JSON API layer.
 */
-$route['default_controller'] = 'welcome';
+$route['default_controller'] = 'site';
 $route['404_override'] = '';
+$route['about'] = 'site/about';
+$route['services'] = 'site/services';
+$route['how-it-works'] = 'site/how_it_works';
+$route['locations'] = 'site/locations';
+$route['coverage'] = 'site/locations';
+$route['safety'] = 'site/safety';
+$route['faq'] = 'site/faq';
+$route['help'] = 'site/faq';
+$route['contact'] = 'site/contact';
+$route['contact/submit'] = 'site/contact_submit';
 $route['login'] = 'auth/index';
 $route['admin/login'] = 'auth/admin_login';
 $route['login/submit'] = 'auth/login';
+$route['register'] = 'auth/register';
+$route['register/submit'] = 'auth/register_submit';
+$route['forgot-password'] = 'auth/forgot';
+$route['forgot-password/submit'] = 'auth/forgot_submit';
+$route['access-denied'] = 'auth/denied';
 $route['logout'] = 'auth/logout';
 $route['account'] = 'auth/account';
+$route['dashboard'] = 'workspace/index';
+$route['analysis'] = 'welcome';
 $route['robots.txt'] = 'seo/robots';
 $route['sitemap.xml'] = 'seo/sitemap';
 $route['admin'] = 'admin/index';
+$route['admin/dashboard'] = 'admin/index';
 $route['admin/users/create'] = 'admin/create_user';
 $route['admin/users/(:num)/toggle'] = 'admin/toggle_user/$1';
 $route['translate_uri_dashes'] = false;

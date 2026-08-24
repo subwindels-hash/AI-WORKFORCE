@@ -93,7 +93,8 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname.startsWith('/assets/')) {
     const file = path.join(APP_ROOT, url.pathname);
     if (file.startsWith(APP_ROOT) && fs.existsSync(file) && fs.statSync(file).isFile()) {
-      res.setHeader('content-type', file.endsWith('.css') ? 'text/css' : 'application/octet-stream');
+      const types = { '.css': 'text/css', '.js': 'text/javascript', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.webp': 'image/webp' };
+      res.setHeader('content-type', types[path.extname(file)] || 'application/octet-stream');
       res.end(fs.readFileSync(file));
       return;
     }

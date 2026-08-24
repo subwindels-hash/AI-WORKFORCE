@@ -35,7 +35,7 @@ $biasClass = static function (?string $bias): string {
 
 <div class="panel" style="margin-bottom:12px">
   <div class="body" style="padding-top:12px">
-    <form method="post" class="inline" action="/">
+    <form method="post" class="inline" action="/analysis">
       <label class="fld">Symbol
         <select name="symbol" class="sel">
           <?php foreach ($symbols as $group => $list): ?>
@@ -61,7 +61,7 @@ $biasClass = static function (?string $bias): string {
   <h3>Watchlist consensus · <?= e($timeframe) ?></h3>
   <div class="body" style="display:flex;flex-wrap:wrap;gap:8px">
     <?php foreach ($watch as $w): ?>
-      <form method="post" action="/">
+      <form method="post" action="/analysis">
         <input type="hidden" name="symbol" value="<?= e($w['symbol']) ?>">
         <input type="hidden" name="timeframe" value="<?= e($timeframe) ?>">
         <button class="btn" style="text-align:left;width:150px">

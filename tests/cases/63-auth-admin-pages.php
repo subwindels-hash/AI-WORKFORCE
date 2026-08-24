@@ -18,7 +18,9 @@ test('user and administrator login/account pages are routed and use the secure c
 test('generated brand assets are wired into PHP views', function () {
     assert_true(is_file(FCPATH . 'assets/images/aegis-mark.png'));
     assert_true(is_file(FCPATH . 'assets/images/ai-agent-avatar.png'));
-    assert_contains('/assets/images/aegis-mark.png', file_get_contents(FCPATH . 'application/views/layout/header.php'));
+    $header = file_get_contents(FCPATH . 'application/views/layout/header.php');
+    assert_contains('/assets/images/aegis-mark.png', $header);
+    assert_contains('/dashboard', $header);
     assert_contains('/assets/images/ai-agent-avatar.png', file_get_contents(FCPATH . 'application/views/admin/index.php'));
 });
 

@@ -1,11 +1,12 @@
 <?php
 defined('BASEPATH') or exit('No direct script access allowed');
+require_once APPPATH . 'core/App_Controller.php';
 
 /**
  * Phase 5 — Execution Center: the 15-step Trade Execution Supervisor console.
  * Proposals, human approval, automated-mode limits and routed executions.
  */
-class Execution extends MY_Controller
+class Execution extends App_Controller
 {
     public function index()
     {

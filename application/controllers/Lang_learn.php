@@ -1,11 +1,12 @@
 <?php
 defined('BASEPATH') or exit('No direct script access allowed');
+require_once APPPATH . 'core/App_Controller.php';
 
 /**
  * AI Language Learning console (server-rendered pages, PRG flows).
  * Per-user data: everything requires a signed-in session identity.
  */
-class Lang_learn extends MY_Controller
+class Lang_learn extends App_Controller
 {
     public function index()
     {
@@ -410,7 +411,7 @@ class Lang_learn extends MY_Controller
         $user = $this->sessionUser();
         if (!$user) {
             $this->session->set_flashdata('llError', 'Please sign in first.');
-            redirect('/app/languages');
+            redirect('/login');
             die; // redirect() exits in CI3; kept for static analysis
         }
         return $user;

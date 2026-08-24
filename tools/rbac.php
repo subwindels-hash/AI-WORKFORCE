@@ -17,6 +17,7 @@ if (!defined('AEGIS_RBAC_ROLES')) {
         'trading_viewer' => 'Trading viewer (read-only)',
         'lottery_admin' => 'Lottery administrator',
         'lottery_viewer' => 'Lottery viewer',
+        'platform_member' => 'Platform member',
     ]);
     define('AEGIS_RBAC_PERMISSIONS', [
         'system.super_admin' => 'Full platform administration',
@@ -38,6 +39,7 @@ if (!defined('AEGIS_RBAC_ROLES')) {
         'trading_viewer' => ['trading.view'],
         'lottery_admin' => ['lottery.view', 'lottery.manage'],
         'lottery_viewer' => ['lottery.view'],
+        'platform_member' => ['trading.view', 'sports.view', 'lottery.view'],
     ]);
 }
 

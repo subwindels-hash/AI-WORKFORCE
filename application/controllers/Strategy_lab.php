@@ -1,7 +1,8 @@
 <?php
 defined('BASEPATH') or exit('No direct script access allowed');
+require_once APPPATH . 'core/App_Controller.php';
 
-class Strategy_lab extends MY_Controller
+class Strategy_lab extends App_Controller
 {
     public function index()
     {

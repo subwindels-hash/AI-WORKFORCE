@@ -1,12 +1,13 @@
 <?php
 defined('BASEPATH') or exit('No direct script access allowed');
+require_once APPPATH . 'core/App_Controller.php';
 
 /**
  * Phase 4/5 — Broker Center: connector health, capability status and
  * read-only MT5 account/quote views. No page here can place an order —
  * routing lives exclusively in the Execution Supervisor.
  */
-class Brokers extends MY_Controller
+class Brokers extends App_Controller
 {
     /** Honest capability matrix for connectors whose provider integration is not verified. */
     private const PLANNED = [

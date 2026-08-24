@@ -1,11 +1,12 @@
 <?php
 defined('BASEPATH') or exit('No direct script access allowed');
+require_once APPPATH . 'core/App_Controller.php';
 
 /**
  * Phase 5 — Risk Center: limits, continuous portfolio risk monitoring and the
  * audit trail.
  */
-class Risk_center extends MY_Controller
+class Risk_center extends App_Controller
 {
     public function index()
     {
