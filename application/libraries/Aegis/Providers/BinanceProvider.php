@@ -49,21 +49,9 @@ class BinanceProvider implements MarketDataProvider
         if (!$this->supportsSymbol($symbol)) {
             throw new \RuntimeException("Binance provider does not list {$symbol}");
         }
-        $url = $this->baseUrl . '/api/v3/klines?symbol=' . urlencode($symbol)
+        $path = '/api/v3/klines?symbol=' . urlencode($symbol)
             . '&interval=' . $req['timeframe'] . '&limit=' . min(1000, max(1, $req['limit']));
-        $raw = $this->guarded(fn () => $this->http->getJson($url));
-        $out = [];
-        foreach ($raw as $k) {
-            $out[] = [
-                'timestamp' => (int)$k[0],
-                'open' => (float)$k[1],
-                'high' => (float)$k[2],
-                'low' => (float)$k[3],
-                'close' => (float)$k[4],
-                'volume' => (float)$k[5],
-            ];
-        }
-        return $out;
+        return $this->normalizeKlines($this->fetchJson($path));
     }
 
     public function getQuote(string $symbol): array
@@ -72,21 +60,27 @@ class BinanceProvider implements MarketDataProvider
         if (!$this->supportsSymbol($symbol)) {
             throw new \RuntimeException("Binance provider does not list {$symbol}");
         }
-        $t = $this->guarded(fn () => $this->http->getJson($this->baseUrl . '/api/v3/ticker/bookTicker?symbol=' . urlencode($symbol)));
-        $bid = (float)$t['bidPrice'];
-        $ask = (float)$t['askPrice'];
-        return ['symbol' => $symbol, 'bid' => $bid, 'ask' => $ask, 'last' => ($bid + $ask) / 2, 'timestamp' => (int)(microtime(true) * 1000)];
+        $t = $this->fetchJson('/api/v3/ticker/bookTicker?symbol=' . urlencode($symbol));
+        if (!isset($t['bidPrice'], $t['askPrice']) || !is_numeric($t['bidPrice']) || !is_numeric($t['askPrice'])) {
+            throw new \RuntimeException('binance ticker failed: ' . (string) ($t['msg'] ?? 'missing bid/ask'));
+        }
+        $bid = (float) $t['bidPrice'];
+        $ask = (float) $t['askPrice'];
+        if ($bid <= 0 || $ask <= 0 || $ask < $bid) {
+            throw new \RuntimeException('binance ticker returned invalid prices');
+        }
+        return ['symbol' => $symbol, 'bid' => $bid, 'ask' => $ask, 'last' => ($bid + $ask) / 2, 'timestamp' => (int) (microtime(true) * 1000)];
     }
 
     public function healthCheck(): array
     {
         $started = microtime(true);
         try {
-            $this->guarded(fn () => $this->http->getJson($this->baseUrl . '/api/v3/ping', 1), true);
+            $this->fetchJson('/api/v3/ping');
             $this->lastError = null;
             return [
                 'name' => $this->name(), 'status' => 'UP', 'synthetic' => false,
-                'latencyMs' => (int)((microtime(true) - $started) * 1000), 'checkedAt' => time(),
+                'latencyMs' => (int) ((microtime(true) - $started) * 1000), 'checkedAt' => time(),
                 'circuitState' => $this->breaker->currentState(),
                 'detail' => 'Public market-data REST API (no key required)',
             ];
@@ -94,7 +88,7 @@ class BinanceProvider implements MarketDataProvider
             $this->lastError = $e->getMessage();
             return [
                 'name' => $this->name(), 'status' => 'DOWN', 'synthetic' => false,
-                'latencyMs' => (int)((microtime(true) - $started) * 1000), 'checkedAt' => time(),
+                'latencyMs' => (int) ((microtime(true) - $started) * 1000), 'checkedAt' => time(),
                 'lastError' => $this->lastError,
                 'circuitState' => $this->breaker->currentState(),
                 'detail' => 'Unreachable from this host — manager falls back and flags synthetic use.',
@@ -112,19 +106,59 @@ class BinanceProvider implements MarketDataProvider
         ];
     }
 
-    private function guarded(callable $fn, bool $rethrow = false)
+    /** @return list<string> */
+    private function hosts(): array
+    {
+        $primary = rtrim($this->baseUrl, '/');
+        return array_values(array_unique(array_filter([
+            $primary,
+            'https://data-api.binance.vision',
+            'https://api1.binance.com',
+        ])));
+    }
+
+    private function fetchJson(string $path): array
     {
         if (!$this->breaker->canCall()) {
             throw new \RuntimeException('binance circuit breaker OPEN');
         }
-        try {
-            $out = $fn();
-            $this->breaker->recordSuccess();
-            return $out;
-        } catch (\Throwable $e) {
-            $this->breaker->recordFailure();
-            if ($rethrow) { throw $e; }
-            throw $e;
+        $last = 'binance request failed';
+        foreach ($this->hosts() as $host) {
+            try {
+                $json = $this->http->getJson($host . $path, 1);
+                if (!is_array($json)) throw new \RuntimeException('binance returned a non-object payload');
+                $this->breaker->recordSuccess();
+                return $json;
+            } catch (\Throwable $e) {
+                $last = $e->getMessage();
+            }
         }
+        $this->breaker->recordFailure();
+        throw new \RuntimeException($last);
+    }
+
+    /** @param array<int|string, mixed> $raw */
+    private function normalizeKlines(array $raw): array
+    {
+        if (!array_is_list($raw)) {
+            $msg = is_string($raw['msg'] ?? null) ? (string) $raw['msg'] : 'unexpected klines payload';
+            throw new \RuntimeException('binance klines failed: ' . $msg);
+        }
+        $out = [];
+        foreach ($raw as $k) {
+            if (!is_array($k) || count($k) < 6 || !is_numeric($k[0]) || !is_numeric($k[1]) || !is_numeric($k[2]) || !is_numeric($k[3]) || !is_numeric($k[4]) || !is_numeric($k[5])) {
+                throw new \RuntimeException('binance klines row is invalid');
+            }
+            $out[] = [
+                'timestamp' => (int) $k[0],
+                'open' => (float) $k[1],
+                'high' => (float) $k[2],
+                'low' => (float) $k[3],
+                'close' => (float) $k[4],
+                'volume' => (float) $k[5],
+            ];
+        }
+        if ($out === []) throw new \RuntimeException('binance returned no klines');
+        return $out;
     }
 }

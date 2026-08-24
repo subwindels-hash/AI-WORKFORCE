@@ -1,4 +1,8 @@
-<?php defined('BASEPATH') or exit('No direct script access allowed'); ?>
+<?php defined('BASEPATH') or exit('No direct script access allowed');
+$biasClass = static function (?string $bias): string {
+    return ['BULLISH' => 'b-green', 'BEARISH' => 'b-red', 'NEUTRAL' => 'b-gray', 'NO_TRADE' => 'b-amber'][(string) $bias] ?? 'b-gray';
+};
+?>
 <div class="page-head">
   <div>
     <h2>AI Trading Intelligence</h2>
@@ -62,7 +66,7 @@
         <input type="hidden" name="timeframe" value="<?= e($timeframe) ?>">
         <button class="btn" style="text-align:left;width:150px">
           <b class="mono"><?= e($w['symbol']) ?></b>
-          <span class="badge <?= ['BULLISH' => 'b-green', 'BEARISH' => 'b-red', 'NEUTRAL' => 'b-gray', 'NO_TRADE' => 'b-amber'][$w['bias']] ?? 'b-gray' ?>" style="margin-left:4px"><?= e(substr($w['bias'], 0, 4)) ?></span>
+          <span class="badge <?= $biasClass($w['bias'] ?? '') ?>" style="margin-left:4px"><?= e(substr((string) $w['bias'], 0, 4)) ?></span>
           <?php if ($w['synthetic']): ?><span class="badge b-amber" style="padding:0 4px">SIM</span><?php endif; ?>
           <div class="dim" style="font-size:10px">conf <?= round($w['confidence'] * 100) ?>% · <?= e(strtolower(str_replace('_', ' ', $w['regime']))) ?></div>
         </button>
@@ -234,7 +238,7 @@
               <tr>
                 <td class="mono" style="font-weight:700"><?= e($h['symbol']) ?></td>
                 <td class="dim"><?= e($h['timeframe']) ?></td>
-                <td><span class="badge <?= ['BULLISH' => 'b-green', 'BEARISH' => 'b-red', 'NEUTRAL' => 'b-gray', 'NO_TRADE' => 'b-amber'][$h['bias']] ?? 'b-gray' ?>" style="padding:0 6px"><?= e(substr($h['bias'], 0, 4)) ?></span></td>
+                <td><span class="badge <?= $biasClass($h['bias'] ?? '') ?>" style="padding:0 6px"><?= e(substr((string) $h['bias'], 0, 4)) ?></span></td>
                 <td class="num mono dim"><?= round($h['confidence'] * 100) ?>%</td>
                 <td class="num dim mono"><?= e(substr($h['completed_at'], 11, 8)) ?></td>
               </tr>

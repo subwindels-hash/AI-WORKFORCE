@@ -159,7 +159,10 @@ class CryptoAgent
 
     public function analyze(array $ctx): array
     {
-        $candles = $ctx['series']['candles'];
+        $candles = $ctx['series']['candles'] ?? [];
+        if (!is_array($candles) || $candles === []) {
+            throw new \RuntimeException('insufficient candles for crypto analysis');
+        }
         $closes = array_map(fn($c) => $c['close'], $candles);
         $n = count($closes);
         $price = end($closes);

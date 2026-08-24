@@ -70,6 +70,60 @@ test('circuit breaker opens and half-opens', function () {
     assert_equals('CLOSED', $cb->currentState());
 });
 
+test('http rejects binance-style error envelopes', function () {
+    $http = new \Aegis\Http(fn () => json_encode(['code' => -1003, 'msg' => 'Too many requests']));
+    assert_throws(RuntimeException::class, fn () => $http->getJson('https://example.invalid/x', 0));
+    assert_true(\Aegis\Http::isProviderErrorPayload(['code' => -1121, 'msg' => 'Invalid symbol.']));
+    assert_false(\Aegis\Http::isProviderErrorPayload([[1, '2', '3', '4', '5', '6']]));
+});
+
+test('http accepts list payloads', function () {
+    $http = new \Aegis\Http(fn () => json_encode([[1, '2', '3', '4', '5', '6']]));
+    $json = $http->getJson('https://example.invalid/x', 0);
+    assert_true(is_array($json) && isset($json[0][0]));
+});
+
+test('binance rejects error-object klines instead of inventing candles', function () {
+    $http = new \Aegis\Http(fn () => json_encode(['code' => -1121, 'msg' => 'Invalid symbol.']));
+    $p = new \Aegis\Providers\BinanceProvider('https://binance.test', $http);
+    assert_throws(RuntimeException::class, fn () => $p->getCandles(['symbol' => 'BTCUSDT', 'timeframe' => '1h', 'limit' => 50]));
+});
+
+test('binance rejects zero bid/ask quotes', function () {
+    $http = new \Aegis\Http(fn () => json_encode(['symbol' => 'BTCUSDT', 'bidPrice' => '0', 'askPrice' => '0']));
+    $p = new \Aegis\Providers\BinanceProvider('https://binance.test', $http);
+    assert_throws(RuntimeException::class, fn () => $p->getQuote('BTCUSDT'));
+});
+
+test('provider manager falls back when candles are all invalid', function () {
+    $pm = new ProviderManager();
+    $pm->register(new FakeProvider('poison', 1, [
+        ['timestamp' => 0, 'open' => 0, 'high' => 0, 'low' => 0, 'close' => 0, 'volume' => 0],
+        ['timestamp' => 0, 'open' => 0, 'high' => 0, 'low' => 0, 'close' => 0, 'volume' => 0],
+    ]));
+    $pm->register(new FakeProvider('working', 2, fx_candles(100)));
+    $series = $pm->getCandleSeries('BTCUSDT', 'crypto', '1h', 100);
+    assert_equals('working', $series['provenance']['source']);
+    assert_equals(['poison'], $series['provenance']['fallbackChain']);
+    assert_true(count($series['candles']) >= 30);
+});
+
+test('frankfurter parses date-keyed time series', function () {
+    $payload = [
+        'amount' => 1.0, 'base' => 'EUR',
+        'rates' => [
+            '2026-08-20' => ['USD' => 1.16],
+            '2026-08-21' => ['USD' => 1.17],
+        ],
+    ];
+    $http = new \Aegis\Http(fn () => json_encode($payload));
+    $p = new \Aegis\Providers\FrankfurterProvider('https://frankfurter.test', $http);
+    $candles = $p->getCandles(['symbol' => 'EURUSD', 'timeframe' => '1d', 'limit' => 10]);
+    assert_equals(2, count($candles));
+    assert_equals(1.17, $candles[1]['close']);
+    assert_true($candles[1]['timestamp'] > 0);
+});
+
 test('normalizer sorts, dedupes, drops NaN and counts gaps', function () {
     $raw = [
         ['timestamp' => 3000000, 'open' => 3, 'high' => 3, 'low' => 3, 'close' => 3, 'volume' => 1],

@@ -26,7 +26,10 @@ class MarketStructureAgent
 
     public function analyze(array $ctx): array
     {
-        $candles = $ctx['series']['candles'];
+        $candles = $ctx['series']['candles'] ?? [];
+        if (!is_array($candles) || $candles === []) {
+            throw new \RuntimeException('insufficient candles for market-structure analysis');
+        }
         $k = self::RULES['swingStrength'];
         $swings = Indicators::findSwings($candles, $k);
         $atr14 = Indicators::last(Indicators::atr($candles, 14));

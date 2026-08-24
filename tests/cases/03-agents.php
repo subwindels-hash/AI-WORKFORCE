@@ -20,6 +20,14 @@ test('technical agent returns the full structured report', function () {
 
 function assert_not_null_or($v): void { assert_true($v !== null, 'expected non-null'); }
 
+test('technical agent refuses empty candle series', function () {
+    assert_throws(RuntimeException::class, fn () => (new TechnicalAgent())->analyze(fx_ctx(fx_series([]))));
+});
+
+test('market structure agent refuses empty candle series', function () {
+    assert_throws(RuntimeException::class, fn () => (new MarketStructureAgent())->analyze(fx_ctx(fx_series([]))));
+});
+
 test('market structure: wick beyond a swing NEVER confirms (close rule)', function () {
     $candles = [];
     $rand = \Aegis\MathUtils::seededRandom(3);

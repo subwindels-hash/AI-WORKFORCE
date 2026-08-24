@@ -59,6 +59,7 @@ $canonical = ($seo['canonical'] ?? '') !== '' ? rtrim((string) $seo['canonical']
     <a href="/notifications" class="<?= ($active ?? '') === 'notifications' ? 'active' : '' ?>">Alerts<?php $unread = Aegis_NotificationsHelper::unreadCount(); if ($unread > 0): ?> <span class="badge b-red"><?= (int) $unread ?></span><?php endif; ?></a>
     <a href="/journal" class="<?= ($active ?? '') === 'journal' ? 'active' : '' ?>">Journal &amp; Analytics</a>
     <a href="/sports" class="<?= ($active ?? '') === 'sports' ? 'active' : '' ?>">Sports</a>
+    <a href="/leads" class="<?= ($active ?? '') === 'leads' ? 'active' : '' ?>">Leads</a>
     <a href="/app/languages" class="<?= ($active ?? '') === 'languages' ? 'active' : '' ?>">Languages</a>
     <?php if ($identity): ?><a href="/account" class="<?= ($active ?? '') === 'account' ? 'active' : '' ?>">Account</a><?php endif; ?>
     <?php if ($identity && !empty($identity['permissions']) && in_array('system.super_admin', $identity['permissions'], true)): ?><a href="/admin" class="<?= ($active ?? '') === 'admin' ? 'active' : '' ?>">Admin</a><?php endif; ?>
