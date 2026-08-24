@@ -26,6 +26,7 @@ if ($driver === 'pdo_sqlite') {
         __DIR__ . '/../application/database/sports.sqlite.sql',
         __DIR__ . '/../application/database/sports_decisions.sqlite.sql',
         __DIR__ . '/../application/database/sports_results.sqlite.sql',
+        __DIR__ . '/../application/database/langlearn.sqlite.sql',
     ];
     $sql = implode("\n", array_map(fn($file) => file_get_contents($file), $schemaFiles));
 } else {
@@ -42,6 +43,7 @@ if ($driver === 'pdo_sqlite') {
         __DIR__ . '/../application/database/sports.mysql.sql',
         __DIR__ . '/../application/database/sports_decisions.mysql.sql',
         __DIR__ . '/../application/database/sports_results.mysql.sql',
+        __DIR__ . '/../application/database/langlearn.mysql.sql',
     ];
     $sql = implode("\n", array_map(fn($file) => file_get_contents($file), $schemaFiles));
 }
@@ -61,6 +63,8 @@ foreach ($statements as $stmt) {
 $expected = ['platform_state', 'strategies', 'backtests', 'analysis_runs', 'journal_entries',
     'paper_accounts', 'paper_orders', 'paper_positions', 'paper_trades', 'paper_deployments', 'audit_logs',
     'trade_proposals', 'trade_executions', 'notifications', 'ci_sessions',
+    'languages', 'user_language_profiles', 'language_assessments', 'learning_paths', 'learning_modules',
+    'lesson_attempts', 'study_sessions', 'language_progress',
     'users', 'roles', 'permissions', 'user_roles', 'role_permissions', 'auth_events',
     'sports_data_sources', 'sports_matches', 'sports_odds', 'sports_sync_runs', 'sports_model_versions',
     'sports_predictions', 'sports_tickets', 'sports_results'];

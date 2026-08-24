@@ -37,6 +37,7 @@ class Platform
     public readonly \Aegis\Portfolio\PortfolioRiskMonitor $monitor;
     public readonly \Aegis\Notifications\Notifier $notifications;
     public readonly \Aegis_model $model;
+    public \Aegis\LangLearn\LangLearnService $langlearn;
 
     public function __construct(\Aegis_model $model, bool $disableRealProviders = false)
     {
@@ -71,6 +72,7 @@ class Platform
         );
 
         $this->notifications = new \Aegis\Notifications\Notifier($model->notifications);
+        $this->langlearn = new \Aegis\LangLearn\LangLearnService($model->langlearn);
         $this->execution = new ExecutionSupervisor(
             $model->audit, $model->state, $model->proposals,
             $this->risk, $this->brokers, $this->strategies,

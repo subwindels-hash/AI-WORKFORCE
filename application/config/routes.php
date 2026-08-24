@@ -117,6 +117,31 @@ $route['api/trading/synthetic-paper'] = 'api_system/synthetic_paper';
 // ---- Standalone Lead Discovery & Sales Intelligence ----------------------
 $route['leads'] = 'leads/index';
 $route['lead-pipeline'] = 'leads/pipeline';
+// ---- AI Language Learning (/api/v1/language-learning) ----------------------
+$route['api/v1/language-learning/languages'] = 'api_lang_learning/languages';
+$route['api/v1/language-learning/languages/(:any)'] = 'api_lang_learning/show_language/$1';
+$route['api/v1/language-learning/profiles'] = 'api_lang_learning/profiles';
+$route['api/v1/language-learning/profiles/(:num)/assessment/start'] = 'api_lang_learning/start_assessment/$1';
+$route['api/v1/language-learning/profiles/(:num)/path'] = 'api_lang_learning/show_path/$1';
+$route['api/v1/language-learning/profiles/(:num)/path/generate'] = 'api_lang_learning/generate_path/$1';
+$route['api/v1/language-learning/profiles/(:num)/progress'] = 'api_lang_learning/progress/$1';
+$route['api/v1/language-learning/profiles/(:num)'] = 'api_lang_learning/show_profile/$1';
+$route['api/v1/language-learning/assessment/(:any)'] = 'api_lang_learning/show_assessment/$1';
+$route['api/v1/language-learning/assessment/(:any)/answer'] = 'api_lang_learning/answer_assessment/$1';
+$route['api/v1/language-learning/modules/(:any)/checkpoint/start'] = 'api_lang_learning/start_checkpoint/$1';
+$route['api/v1/language-learning/modules/(:any)/checkpoint/answer'] = 'api_lang_learning/answer_checkpoint/$1';
+// pages
+$route['app/languages'] = 'lang_learn';
+$route['app/languages/login'] = 'lang_learn/login';
+$route['app/languages/start'] = 'lang_learn/start';
+$route['app/languages/p/(:num)'] = 'lang_learn/profile/$1';
+$route['app/languages/p/(:num)/assessment/start'] = 'lang_learn/start_assessment/$1';
+$route['app/languages/p/(:num)/path/generate'] = 'lang_learn/generate_path/$1';
+$route['app/languages/a/(:any)'] = 'lang_learn/assessment/$1';
+$route['app/languages/a/(:any)/answer'] = 'lang_learn/answer/$1';
+$route['app/languages/m/(:any)/checkpoint'] = 'lang_learn/checkpoint/$1';
+$route['app/languages/m/(:any)/checkpoint/answer'] = 'lang_learn/answer_checkpoint/$1';
+
 $route['api/v1/lead-discovery/workspaces'] = 'api_lead_discovery/workspaces';
 $route['api/v1/lead-discovery/providers'] = 'api_lead_discovery/providers';
 $route['api/v1/lead-discovery/search'] = 'api_lead_discovery/search';

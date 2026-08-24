@@ -25,6 +25,7 @@ class Aegis_model extends CI_Model
     public object $paper;
     public object $proposals;
     public object $notifications;
+    public object $langlearn;
 
     public function __construct()
     {
@@ -454,6 +455,121 @@ class Aegis_model extends CI_Model
             public function hasUnreadDedupe(string $dedupeKey): bool {
                 return $this->db->from('notifications')
                     ->where('dedupe_key', $dedupeKey)->where('read_at', null)->count_all_results() > 0;
+            }
+        };
+
+        $this->langlearn = new class($db) implements Aegis\LangLearn\Persistence\LangLearnRepository {
+            public function __construct(private object $db) {}
+
+            public function upsertLanguage(array $row): void {
+                $exists = $this->db->from('languages')->where('code', $row['code'])->count_all_results() > 0;
+                if ($exists) $this->db->where('code', $row['code'])->update('languages', $row);
+                else $this->db->insert('languages', $row);
+            }
+            public function listLanguages(bool $activeOnly = true): array {
+                if ($activeOnly) $this->db->where('active', 1);
+                return $this->db->order_by('name', 'ASC')->get('languages')->result_array();
+            }
+            public function findLanguage(string $code): ?array {
+                return $this->db->get_where('languages', ['code' => $code], 1)->row_array() ?: null;
+            }
+
+            public function saveProfile(array $p): array {
+                if (!empty($p['id'])) $this->db->where('id', $p['id'])->update('user_language_profiles', $p);
+                else { $this->db->insert('user_language_profiles', $p); $p['id'] = (int) $this->db->insert_id(); }
+                return $this->repoFindProfile((int) $p['id']) ?? $p;
+            }
+            public function findProfile(int $id): ?array { return $this->repoFindProfile($id); }
+            private function repoFindProfile(int $id): ?array {
+                $r = $this->db->get_where('user_language_profiles', ['id' => $id], 1)->row_array();
+                if ($r) $r['id'] = (int) $r['id'];
+                return $r ?: null;
+            }
+            public function findProfileByUserLanguage(int $userId, string $code): ?array {
+                $r = $this->db->get_where('user_language_profiles', ['user_id' => $userId, 'language_code' => $code], 1)->row_array();
+                if ($r) $r['id'] = (int) $r['id'];
+                return $r ?: null;
+            }
+            public function listProfilesByUser(int $userId): array {
+                return $this->db->where('user_id', $userId)->order_by('created_at', 'ASC')->get('user_language_profiles')->result_array();
+            }
+
+            public function saveAssessment(array $a): array {
+                $row = $a;
+                $row['state'] = is_array($a['state'] ?? null) ? json_encode($a['state']) : $a['state'];
+                $row['result'] = is_array($a['result'] ?? null) ? json_encode($a['result']) : $a['result'];
+                $exists = $this->db->from('language_assessments')->where('id', $row['id'])->count_all_results() > 0;
+                if ($exists) { unset($row['started_at']); $this->db->where('id', $row['id'])->update('language_assessments', $row); }
+                else $this->db->insert('language_assessments', $row);
+                return $this->castAssessment($this->db->get_where('language_assessments', ['id' => $a['id']], 1)->row_array());
+            }
+            public function findAssessment(string $id): ?array {
+                $r = $this->db->get_where('language_assessments', ['id' => $id], 1)->row_array();
+                return $r ? $this->castAssessment($r) : null;
+            }
+            public function latestCompletedAssessment(int $profileId): ?array {
+                $r = $this->db->where('profile_id', $profileId)->where('status', 'COMPLETED')
+                    ->order_by('completed_at', 'DESC')->limit(1)->get('language_assessments')->row_array();
+                return $r ? $this->castAssessment($r) : null;
+            }
+            private function castAssessment(array $r): array {
+                $r['state'] = json_decode((string) $r['state'], true) ?: [];
+                $r['result'] = $r['result'] !== null ? (json_decode((string) $r['result'], true) ?: null) : null;
+                $r['profile_id'] = (int) $r['profile_id'];
+                $r['user_id'] = (int) $r['user_id'];
+                return $r;
+            }
+
+            public function savePath(array $p): array {
+                $exists = $this->db->from('learning_paths')->where('id', $p['id'])->count_all_results() > 0;
+                if ($exists) $this->db->where('id', $p['id'])->update('learning_paths', $p);
+                else $this->db->insert('learning_paths', $p);
+                return $this->db->get_where('learning_paths', ['id' => $p['id']], 1)->row_array() ?: $p;
+            }
+            public function activePath(int $profileId): ?array {
+                return $this->db->where('profile_id', $profileId)->where('status', 'ACTIVE')
+                    ->order_by('created_at', 'DESC')->limit(1)->get('learning_paths')->row_array() ?: null;
+            }
+
+            public function saveModule(array $m): array {
+                $row = $m;
+                $exists = $this->db->from('learning_modules')->where('id', $row['id'])->count_all_results() > 0;
+                if ($exists) { unset($row['path_id'], $row['profile_id'], $row['sequence']); $this->db->where('id', $row['id'])->update('learning_modules', $row); }
+                else $this->db->insert('learning_modules', $row);
+                return $this->findModule($m['id']) ?? $m;
+            }
+            public function findModule(string $id): ?array {
+                $r = $this->db->get_where('learning_modules', ['id' => $id], 1)->row_array();
+                if ($r) { $r['sequence'] = (int) $r['sequence']; $r['attempts_count'] = (int) $r['attempts_count']; $r['profile_id'] = (int) $r['profile_id']; }
+                return $r ?: null;
+            }
+            public function listModules(string $pathId): array {
+                return $this->db->where('path_id', $pathId)->order_by('sequence', 'ASC')->get('learning_modules')->result_array();
+            }
+
+            public function saveAttempt(array $a): array {
+                $row = $a;
+                $row['detail'] = json_encode($a['detail'] ?? []);
+                $this->db->insert('lesson_attempts', $row);
+                return $row;
+            }
+            public function saveSession(array $s): void {
+                $this->db->insert('study_sessions', $s);
+            }
+            public function sessionDays(int $profileId): array {
+                $rows = $this->db->select('day')->distinct()->where('profile_id', $profileId)
+                    ->order_by('day', 'DESC')->limit(400)->get('study_sessions')->result_array();
+                return array_map(fn($r) => (string) $r['day'], $rows);
+            }
+
+            public function upsertProgress(array $row): void {
+                $keys = ['profile_id' => $row['profile_id'], 'skill' => $row['skill'], 'source' => $row['source']];
+                $exists = $this->db->from('language_progress')->where($keys)->count_all_results() > 0;
+                if ($exists) $this->db->where($keys)->update('language_progress', ['level' => $row['level'], 'value_pct' => $row['value_pct'], 'updated_at' => $row['updated_at']]);
+                else $this->db->insert('language_progress', $row);
+            }
+            public function listProgress(int $profileId): array {
+                return $this->db->where('profile_id', $profileId)->get('language_progress')->result_array();
             }
         };
 

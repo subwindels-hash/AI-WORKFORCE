@@ -46,7 +46,7 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **Scheduled operations worker** (`php index.php tools cron`): portfolio scan, broker transitions, proposal expiry | **TESTED** |
 | MT4 / crypto-exchange / stock-broker connectors | **PLANNED** (added one at a time after MT5 is verified) |
 
-**158 automated tests** run through the real CodeIgniter stack
+**167 automated tests** run through the real CodeIgniter stack
 (`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
 sandbox — see below), plus 9 contract tests for the Python bridge
 (`python-services/mt5-bridge/.venv/bin/python -m pytest test_bridge.py`).
@@ -242,6 +242,32 @@ approved symbols) → 11 human approval (HUMAN_APPROVAL mode) → 12 place order
   Executes the portfolio risk scan (with broker transition detection), expires
   undecided proposals after `proposalExpiryMinutes` (default 240, spec §5
   invalidation) and audits a `CRON_RUN` summary.
+
+### AI Language Learning (Phase 1 complete)
+
+`/app/languages` (console) · `/api/v1/language-learning` (API)
+
+- **Language registry** — 20 languages (Dutch, Spanish, Italian, French,
+  German, English, Portuguese, Arabic, Chinese, Japanese, Korean, Russian,
+  Hindi, Turkish, Swahili, Yoruba, Igbo, Hausa, Afrikaans, Zulu) with native
+  names, script, LTR/RTL and an honest per-language feature table. Nothing
+  hard-codes languages; `LanguageRegistry::register()` extends the catalog.
+- **Profiles** — one per (user, language), fully independent progress; strict
+  ownership isolation on every endpoint.
+- **Adaptive AI level assessment** — staircase difficulty per skill
+  (vocabulary / grammar / reading) over real authored item banks; levels are
+  computed from actual answers, never random, and can never exceed a
+  language's verified bank ceiling (disclosed in the result). Listening,
+  speaking and writing are reported as not assessed in this build — never
+  faked.
+- **Learning paths** — CEFR module chains from the assessed level with real
+  checkpoint quizzes (pass ≥ 75% unlocks the next module).
+- **Progress** — levels, path completion and study streaks derived only from
+  stored activity (assessments, checkpoints, study sessions).
+
+Phases 2–5 (AI lessons/conversation/writing correction, vocabulary SRS,
+listening/speaking with real providers, adaptive recommendations) follow the
+same honesty architecture.
 
 ### Phase 6 intelligence: agent debate + strategy optimizer
 

@@ -32,6 +32,7 @@ $ks = $status['killSwitch'] ?? null;
     <a href="/risk" class="<?= ($active ?? '') === 'risk' ? 'active' : '' ?>">Risk Center</a>
     <a href="/notifications" class="<?= ($active ?? '') === 'notifications' ? 'active' : '' ?>">Alerts<?php $unread = Aegis_NotificationsHelper::unreadCount(); if ($unread > 0): ?> <span class="badge b-red"><?= (int) $unread ?></span><?php endif; ?></a>
     <a href="/journal" class="<?= ($active ?? '') === 'journal' ? 'active' : '' ?>">Journal &amp; Analytics</a>
+    <a href="/app/languages" class="<?= ($active ?? '') === 'languages' ? 'active' : '' ?>">Languages</a>
   </nav>
   <div class="top-right">
     <span class="badge b-violet">MODE: <?= e($mode) ?></span>
