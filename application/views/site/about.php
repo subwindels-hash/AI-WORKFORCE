@@ -6,7 +6,7 @@
 </section>
 <section class="band">
   <div class="split">
-    <img src="/assets/images/about-workspace.png" alt="Operators in a modern workspace">
+    <img src="/assets/images/about-workspace.jpg" alt="Operators in a modern workspace">
     <div>
       <h2>What exists today</h2>
       <p>The repository already contains a multi-agent trading stack, paper trading, an execution supervisor, sports intelligence, a 20-language teacher, lottery research and Scout lead discovery.</p>
