@@ -9,7 +9,7 @@ namespace Aegis;
  */
 final class ChatAssistant
 {
-    private const SYSTEM = 'You are the AEGIS website assistant. Explain only navigation and documented product features: trading intelligence, paper trading, sports intelligence, language learning, EuroMillions research, lead discovery, account access and administrator controls. Never claim access to private records, never invent market, sports, lottery or business data, and say when a real provider or signed-in administrator is required. Keep replies concise and practical.';
+    private const SYSTEM = 'You are the WINDELS AI WORKFORCE website assistant. Explain only navigation and documented product features: the AI language teacher, language learning, trading intelligence, paper trading, sports intelligence, EuroMillions research, lead discovery and account access. Never reveal or link to the administrator login, never claim access to private records, never invent market, sports, lottery or business data, and say when a real provider or signed-in administrator is required. Keep replies concise and practical.';
 
     public function respond(string $message, ?array $user = null): array
     {
@@ -28,12 +28,13 @@ final class ChatAssistant
         $value = strtolower($message);
         if (str_contains($value, 'duplicate')) return 'Open Lead Discovery Intelligence to review duplicate candidates. Provider plus stable source ID is the primary identity rule; secondary signals require a human decision.';
         if (str_contains($value, 'export')) return 'Open Lead Discovery or Intelligence to create a formula-safe CSV/JSON export. Every export is recorded in the audit history.';
-        if (str_contains($value, 'admin') || str_contains($value, 'user')) return 'Use User Sign in for a normal workspace. Administrators can use Administrator Sign in to create accounts, change roles and deactivate access.';
+        if (str_contains($value, 'admin') || str_contains($value, 'administrator')) return 'WINDELS AI WORKFORCE only exposes the normal member sign-in publicly. Administrator controls are kept behind a private entry point and are never linked from the public site.';
+        if (str_contains($value, 'user')) return 'Use the member sign-in to open your workspace. If you do not have an account yet, register on the homepage.';
         if (str_contains($value, 'search') || str_contains($value, 'lead')) return 'Open Lead Discovery to search a city, category or business type. A configured provider is required; empty provider results are never replaced with fake businesses.';
         if (str_contains($value, 'trade') || str_contains($value, 'paper')) return 'Trading defaults to analysis-only with the kill switch active. Paper trading is simulation and every order passes risk controls.';
         if (str_contains($value, 'language')) return 'Open Languages to create a profile, take an evidence-based assessment, study lessons and vocabulary, and review adaptive plans.';
         if (str_contains($value, 'lottery') || str_contains($value, 'euromillions')) return 'EuroMillions outputs describe historical observations only. Official data providers must be configured before official draws are ingested.';
-        return 'I can guide you through Dashboard, Lead Discovery, Pipeline, Sports, Languages, EuroMillions, Trading, Account and Admin. Ask about any area.';
+        return 'I can guide you through the AI Language Teacher, Languages, Dashboard, Lead Discovery, Pipeline, Sports, EuroMillions, Trading and Account. Ask about any area.';
     }
 
     private function providerAnswer(string $message): ?string

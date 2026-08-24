@@ -2,7 +2,7 @@
 <section class="page-hero">
   <p class="kicker">Coverage</p>
   <h1>Where the product actually operates</h1>
-  <p class="lede">Africa Mobility is software. We do not list warehouses, taxi ranks or fuel depots that are not in this codebase.</p>
+  <p class="lede">WINDELS AI WORKFORCE is software. We do not list warehouses, taxi ranks or fuel depots that are not in this codebase.</p>
 </section>
 <section class="band">
   <div class="cards two">

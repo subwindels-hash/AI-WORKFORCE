@@ -3,12 +3,13 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Access denied · Africa Mobility</title>
+  <title>Access denied · WINDELS AI WORKFORCE</title>
   <meta name="robots" content="noindex,nofollow">
-  <link rel="icon" href="/assets/images/aegis-mark.png">
+  <link rel="icon" href="/assets/images/windels-mark.png">
   <link rel="stylesheet" href="/assets/css/aegis.css">
 </head>
 <body class="auth-page">
+  <?php $this->load->view('partials/announcement_bar'); ?>
   <main class="auth-shell">
     <section class="auth-card" style="grid-column:1/-1;max-width:560px;margin:0 auto">
       <p class="eyebrow">Restricted</p>

@@ -18,6 +18,25 @@ class Lang_learn extends App_Controller
         $this->render($data, 'langlearn/index');
     }
 
+    /** AI Teacher — instant translate + listen + speak flow on a single page. */
+    public function teacher()
+    {
+        $user = $this->requireUser();
+        $data = $this->base('AI Language Teacher');
+        $data['languages'] = $this->platform->langlearn->languages();
+        $data['csrfToken'] = (string) $this->session->userdata('csrf_token');
+        $data['locales'] = \Aegis\LangLearn\Translator::LOCALES;
+        $data['examplePairs'] = [
+            ['text' => 'Good morning, how are you?', 'target' => 'fr'],
+            ['text' => 'Hello', 'target' => 'es'],
+            ['text' => 'Thank you very much', 'target' => 'de'],
+            ['text' => 'What is your name?', 'target' => 'it'],
+            ['text' => 'I would like a coffee', 'target' => 'pt'],
+            ['text' => 'See you tomorrow', 'target' => 'nl'],
+        ];
+        $this->render($data, 'langlearn/teacher');
+    }
+
     public function login()
     {
         $email = strtolower(trim((string) $this->input->post('email')));

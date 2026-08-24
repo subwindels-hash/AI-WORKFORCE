@@ -6,7 +6,7 @@ if (!function_exists('e')) {
 $ci = get_instance();
 $ci->config->load('seo', true);
 $seo = $ci->config->item('settings', 'seo') ?: [];
-$pageTitle = (string) ($title ?? 'Africa Mobility');
+$pageTitle = (string) ($title ?? 'WINDELS AI WORKFORCE');
 $user = $user ?? null;
 $active = $active ?? 'home';
 $nav = [
@@ -25,17 +25,25 @@ $nav = [
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title><?= e($pageTitle . ($seo['title_suffix'] ?? ' · Africa Mobility')) ?></title>
+<title><?= e($pageTitle . ($seo['title_suffix'] ?? ' · WINDELS AI WORKFORCE')) ?></title>
 <meta name="description" content="<?= e((string) ($seo['description'] ?? '')) ?>">
 <meta name="robots" content="<?= e((string) ($seo['robots'] ?? 'index,follow')) ?>">
-<link rel="icon" type="image/png" href="/assets/images/aegis-mark.png">
+<meta property="og:title" content="<?= e($pageTitle . ($seo['title_suffix'] ?? ' · WINDELS AI WORKFORCE')) ?>">
+<meta property="og:description" content="<?= e((string) ($seo['description'] ?? '')) ?>">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="<?= e((string) ($seo['site_name'] ?? 'WINDELS AI WORKFORCE')) ?>">
+<meta property="og:image" content="<?= e((string) ($seo['og_image'] ?? '')) ?>">
+<meta name="twitter:card" content="summary">
+<link rel="icon" type="image/png" href="/assets/images/windels-mark.png">
+<link rel="apple-touch-icon" href="/assets/images/windels-mark.png">
 <link rel="stylesheet" href="/assets/css/public.css">
 </head>
 <body class="public">
+<?php $this->load->view('partials/announcement_bar'); ?>
 <header class="pub-nav">
   <a class="pub-brand" href="/">
-    <img src="/assets/images/aegis-mark.png" alt="">
-    <span>Africa Mobility</span>
+    <img src="/assets/images/windels-mark.png" alt="WINDELS AI WORKFORCE logo" onerror="this.onerror=null;this.src='/assets/images/aegis-mark.png'">
+    <span>WINDELS AI WORKFORCE</span>
   </a>
   <button class="pub-toggle" type="button" aria-expanded="false" aria-controls="pub-menu">Menu</button>
   <nav id="pub-menu" class="pub-links">
@@ -45,10 +53,7 @@ $nav = [
   </nav>
   <div class="pub-actions">
     <?php if ($user): ?>
-      <a class="btn ghost" href="/dashboard">Workspace</a>
-      <?php if (!empty($user['permissions']) && in_array('system.super_admin', $user['permissions'], true)): ?>
-        <a class="btn ghost" href="/admin">Admin</a>
-      <?php endif; ?>
+      <a class="btn solid" href="/dashboard">My workspace</a>
     <?php else: ?>
       <a class="btn ghost" href="/login">Login</a>
       <a class="btn solid" href="/register">Get started</a>

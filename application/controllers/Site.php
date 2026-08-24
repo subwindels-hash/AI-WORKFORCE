@@ -33,17 +33,17 @@ class Site extends MY_Controller
 
     private function tryMail(string $name, string $email, string $message): void
     {
-        if ((getenv('VP_SMTP_ENABLED') ?: getenv('SMTP_ENABLED')) !== '1') return;
-        $this->load->library('email');
-        $from = (string) ($this->email->from_email ?? getenv('VP_MAIL_FROM') ?: getenv('MAIL_FROM_ADDRESS') ?: $email);
+        if (!\Aegis\Mailer::enabled()) return;
         $to = (string) (getenv('VP_MAIL_FROM') ?: getenv('MAIL_FROM_ADDRESS') ?: '');
         if ($to === '') return;
-        $this->email->from($from, (string) (getenv('VP_MAIL_FROM_NAME') ?: 'Africa Mobility'));
-        $this->email->to($to);
-        $this->email->reply_to($email, $name);
-        $this->email->subject('Africa Mobility contact form');
-        $this->email->message($name . " <" . $email . ">\n\n" . $message);
-        @$this->email->send();
+        $html = '<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:auto;color:#0f172a">'
+            . '<h2 style="color:#2563eb">New contact message — WINDELS AI WORKFORCE</h2>'
+            . '<p><b>From:</b> ' . htmlspecialchars($name) . ' &lt;' . htmlspecialchars($email) . '&gt;</p>'
+            . '<hr style="border:0;border-top:1px solid #e2e8f0">'
+            . '<p style="white-space:pre-wrap">' . htmlspecialchars($message) . '</p>'
+            . '</div>';
+        $text = "New contact message — WINDELS AI WORKFORCE\n\nFrom: {$name} <{$email}>\n\n{$message}";
+        \Aegis\Mailer::send($this, $to, 'WINDELS AI WORKFORCE contact form', $html, $text, $email, $name);
     }
 
     private function page(string $active, string $title, string $view): void

@@ -2,7 +2,7 @@
 <section class="page-hero">
   <p class="kicker">About us</p>
   <h1>Built as one product, not a pile of screens</h1>
-  <p class="lede">Africa Mobility is the public website for this intelligence platform. The same CodeIgniter application serves visitors, members and administrators — with different layouts and different gates.</p>
+  <p class="lede">WINDELS AI WORKFORCE is the public website for this intelligence platform. The same CodeIgniter application serves visitors, members and administrators — with different layouts and different gates.</p>
 </section>
 <section class="band">
   <div class="split">
@@ -18,6 +18,6 @@
   <div class="cards three">
     <article class="card"><h3>Public visitors</h3><p>Read the company pages, compare services, and create or recover an account. They never see internal sidebars.</p></article>
     <article class="card"><h3>Members</h3><p>After login they land on /dashboard and can open only the modules their roles allow.</p></article>
-    <article class="card"><h3>Administrators</h3><p>Super administrators use /admin for users, readiness and account status. Non-admins are denied.</p></article>
+    <article class="card"><h3>Administrators</h3><p>Super administrators use a private control centre for users, readiness and account status. It is never linked from the public site and non-admins are denied.</p></article>
   </div>
 </section>

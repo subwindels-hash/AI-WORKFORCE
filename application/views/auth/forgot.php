@@ -3,12 +3,13 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Reset password · Africa Mobility</title>
+  <title>Reset password · WINDELS AI WORKFORCE</title>
   <meta name="robots" content="noindex,nofollow">
-  <link rel="icon" href="/assets/images/aegis-mark.png">
+  <link rel="icon" href="/assets/images/windels-mark.png">
   <link rel="stylesheet" href="/assets/css/aegis.css">
 </head>
 <body class="auth-page">
+  <?php $this->load->view('partials/announcement_bar'); ?>
   <main class="auth-shell">
     <section class="auth-card" style="grid-column:1/-1;max-width:520px;margin:0 auto">
       <h2>Password reset</h2>

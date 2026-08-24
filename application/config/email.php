@@ -39,5 +39,5 @@ $config['bcc_batch_mode'] = FALSE;
 $config['bcc_batch_size'] = 200;
 
 $config['from_email'] = (string) (getenv('VP_MAIL_FROM') ?: (getenv('MAIL_FROM') ?: (getenv('MAIL_FROM_ADDRESS') ?: $smtpUser)));
-$config['from_name'] = (string) (getenv('VP_MAIL_FROM_NAME') ?: (getenv('MAIL_FROM_NAME') ?: (getenv('VP_SITE_NAME') ?: 'AEGIS')));
+$config['from_name'] = (string) (getenv('VP_MAIL_FROM_NAME') ?: (getenv('MAIL_FROM_NAME') ?: (getenv('VP_SITE_NAME') ?: 'WINDELS AI WORKFORCE')));
 $config['reply_to'] = (string) (getenv('VP_MAIL_REPLY_TO') ?: (getenv('MAIL_REPLY_TO') ?: $config['from_email']));

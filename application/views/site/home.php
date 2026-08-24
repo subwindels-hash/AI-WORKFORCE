@@ -1,16 +1,16 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed'); ?>
 <section class="hero">
   <div class="hero-copy">
-    <p class="kicker">Africa Mobility</p>
-    <h1>Evidence first. Then you decide.</h1>
-    <p class="lede">A modern workspace that connects people with market analysis, language learning, sports intelligence, lottery research and lead discovery — without inventing data or bypassing risk controls.</p>
+    <p class="kicker">WINDELS AI WORKFORCE</p>
+    <h1>Your AI-powered workforce, grounded in evidence.</h1>
+    <p class="lede">A modern workspace that connects people with an AI language teacher, market analysis, sports intelligence, lottery research and lead discovery — without inventing data or bypassing risk controls.</p>
     <div class="hero-cta">
       <a class="btn solid" href="/register">Get started</a>
       <a class="btn ghost" href="/services">Explore services</a>
     </div>
   </div>
   <div class="hero-visual">
-    <img src="/assets/images/hero-africa-mobility.jpg" alt="A modern African city at golden hour">
+    <img src="/assets/images/hero-windels.jpg" alt="A team collaborating with AI data visualizations" onerror="this.onerror=null;this.src='/assets/images/hero-africa-mobility.jpg'">
   </div>
 </section>
 
@@ -18,7 +18,7 @@
   <div class="section-head">
     <p class="kicker">What we do</p>
     <h2>One platform. Five working modules.</h2>
-    <p>Africa Mobility is the public face of this product. Behind login you use the real tools that already ship in this repository — not a catalogue of imagined transport routes.</p>
+    <p>WINDELS AI WORKFORCE is the public face of this product. Behind login you use the real tools that already ship in this repository — an AI language teacher plus research and analysis modules.</p>
   </div>
   <div class="split">
     <img src="/assets/images/about-workspace.jpg" alt="Team reviewing live workspace data">
@@ -39,7 +39,7 @@
   </div>
   <div class="cards four">
     <article class="card"><h3>Trading intelligence</h3><p>Consensus, regime detection and risk-reviewed proposals. No orders leave this process from the public site.</p><a href="/services">Learn more</a></article>
-    <article class="card"><h3>Language learning</h3><p>Adaptive assessments, lessons and spaced repetition from authored banks — never invented scores.</p><a href="/services">Learn more</a></article>
+    <article class="card"><h3>AI language teacher</h3><p>Instant translation, listening and speaking practice across a 20-language registry — from authored banks, never invented scores.</p><a href="/services">Learn more</a></article>
     <article class="card"><h3>Sports intelligence</h3><p>Daily ticket research from stored fixtures and odds. Disabled until a real provider is configured.</p><a href="/services">Learn more</a></article>
     <article class="card"><h3>Lead discovery</h3><p>Search, deduplicate and export real businesses. Google Places only — no synthetic companies.</p><a href="/services">Learn more</a></article>
   </div>
@@ -66,7 +66,7 @@
   </div>
   <div class="cards three">
     <article class="card"><h3>No silent fake data</h3><p>Synthetic candles, sandbox sports and missing lottery feeds are labelled. The risk engine can veto them.</p></article>
-    <article class="card"><h3>Role-aware access</h3><p>Visitors see this site. Members see the user dashboard. Super administrators see /admin.</p></article>
+    <article class="card"><h3>Role-aware access</h3><p>Visitors see this site. Members see the user dashboard. Privileged controls are kept separate and out of public view.</p></article>
     <article class="card"><h3>Governed execution</h3><p>Broker routing only happens through a verified connector and the 15-step supervisor.</p></article>
   </div>
 </section>
@@ -123,9 +123,9 @@
     <h2>Short answers</h2>
   </div>
   <div class="faq">
-    <details open><summary>Can I open the dashboard without an account?</summary><p>No. <span class="mono">/dashboard</span>, <span class="mono">/admin</span> and the module consoles redirect visitors to login.</p></details>
-    <details><summary>Is this a transport booking company?</summary><p>No. Africa Mobility here is an intelligence platform. We do not invent taxi, freight or ticket-booking networks that are not in the code.</p></details>
-    <details><summary>Who can use the admin area?</summary><p>Only accounts with <span class="mono">system.super_admin</span>. Other signed-in users receive Access denied.</p></details>
+    <details open><summary>Can I open the dashboard without an account?</summary><p>No. <span class="mono">/dashboard</span> and the module consoles redirect visitors to login.</p></details>
+    <details><summary>What is WINDELS AI WORKFORCE?</summary><p>An AI-powered workforce platform. It is not a transport, lottery or crypto product — it is intelligence, language-learning and research software, and it never invents data to look complete.</p></details>
+    <details><summary>Who can use the admin area?</summary><p>Only accounts with the super-administrator permission, reached through a private entry point that is never linked from the public site. Other signed-in users receive Access denied.</p></details>
   </div>
   <p class="center"><a class="btn ghost" href="/faq">All questions</a></p>
 </section>
