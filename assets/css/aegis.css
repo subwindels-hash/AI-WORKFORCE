@@ -95,7 +95,10 @@ h1, h2, h3, h4 { color: #fff; }
 .profile-menu form { margin: 0; }
 
 /* ---------- Status badges (top-right) ---------- */
-.statuspill { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line2); background: var(--panel2); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.statuspill { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; padding: 5px 9px; border-radius: 999px; border: 1px solid var(--line2); background: var(--panel2); color: var(--muted); text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
+.statuspill .pill-dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; flex: none; }
+.statuspill.warn { color: #ffb4a2; border-color: #7f2d2d; background: #2a1518; }
+.statuspill.warn .pill-dot { background: var(--red); }
 
 /* ---------- Content ---------- */
 .wrap { max-width: 1480px; margin: 0 auto; padding: 18px 20px 44px; width: 100%; }

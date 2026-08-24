@@ -76,6 +76,7 @@ $isActive = function(array $keys) use ($active): bool {
   <!-- Required: Settings -->
   <p class="sidebar-label">Account</p>
   <a href="/account" class="<?= $active === 'account' ? 'active' : '' ?>" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg><span>Settings</span></a>
+  <a href="/faq" class="sidebar-sub" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.2 9a2.9 2.9 0 0 1 5.6.9c0 2-2.8 2.4-2.8 4"/><path d="M12 17.5h.01"/></svg><span>Help</span></a>
   <?php if ($isAdmin): ?><a href="/admin" class="<?= $active === 'admin' ? 'active' : '' ?>" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5z"/></svg><span>Admin Control</span></a><?php endif; ?>
 
   <!-- Required: Logout -->
@@ -98,7 +99,8 @@ $isActive = function(array $keys) use ($active): bool {
     </div>
   </div>
   <div class="top-right">
-    <span class="statuspill"><?= $ks && !empty($ks['active']) ? '● Kill switch on' : '● Mode ' . e($mode) ?></span>
+    <?php if ($ks && !empty($ks['active'])): ?><span class="statuspill warn"><i class="pill-dot" aria-hidden="true"></i>Kill switch on</span>
+    <?php else: ?><span class="statuspill"><i class="pill-dot" aria-hidden="true"></i>Mode <?= e($mode) ?></span><?php endif; ?>
     <a class="icon-btn" href="/notifications" title="Notifications" aria-label="Notifications" data-dashboard-link>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg>
       <?php if ($unread > 0): ?><span class="dot"></span><?php endif; ?>
@@ -110,6 +112,7 @@ $isActive = function(array $keys) use ($active): bool {
       </button>
       <div class="profile-menu" id="profile-menu" role="menu">
         <a href="/account" role="menuitem" data-dashboard-link><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg> Account &amp; settings</a>
+        <a href="/account#security" role="menuitem" data-dashboard-link><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg> Security</a>
         <a href="/notifications" role="menuitem" data-dashboard-link><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg> Notifications<?php if ($unread > 0): ?> (<?= (int)$unread ?>)<?php endif; ?></a>
         <?php if ($isAdmin): ?><a href="/admin" role="menuitem" data-dashboard-link><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5z"/></svg> Admin control</a><?php endif; ?>
         <div class="sep"></div>

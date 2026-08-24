@@ -269,10 +269,16 @@
       // Re-initialize UI components
       initUI();
 
-      // Scroll to top of content
+      // Scroll to top of content (or to the target section when the
+      // navigation carries a #fragment, e.g. profile menu → Security)
       const wrap = document.getElementById('page-content');
       if (wrap) wrap.scrollTop = 0;
       window.scrollTo(0, 0);
+      const hash = (path.split('#')[1] || '').trim();
+      if (hash) {
+        const target = document.getElementById(hash);
+        if (target) target.scrollIntoView({ block: 'start', behavior: 'auto' });
+      }
 
       updateButtons();
     } catch (err) {
@@ -297,8 +303,8 @@
       const href = a.getAttribute('href');
       if (!href) return;
       // Simple active logic: exact match or prefix for language etc
-      const cleanPath = path.split('?')[0];
-      const cleanHref = href.split('?')[0];
+      const cleanPath = path.split('?')[0].split('#')[0];
+      const cleanHref = href.split('?')[0].split('#')[0];
       if (cleanPath === cleanHref) {
         a.classList.add('active');
       } else if (cleanHref !== '/dashboard' && cleanPath.startsWith(cleanHref + '/')) {
@@ -316,8 +322,8 @@
       links.forEach(a => {
         const href = a.getAttribute('href');
         if (!href) return;
-        const cleanPath = path.split('?')[0];
-        const cleanHref = href.split('?')[0];
+        const cleanPath = path.split('?')[0].split('#')[0];
+        const cleanHref = href.split('?')[0].split('#')[0];
         if (cleanHref !== '/' && cleanPath.startsWith(cleanHref)) {
           a.classList.add('active');
         }
@@ -415,8 +421,10 @@
         if (href.startsWith('http') && !href.startsWith(window.location.origin)) return;
         // If href is authenticated path, use SPA
         const url = new URL(href, window.location.origin);
-        const path = url.pathname + url.search;
-        if (!isAuthenticatedPath(path)) return; // let browser handle public navigation
+        // Keep the #fragment so the landing page can scroll to the section
+        // (e.g. profile menu → Security). fetch() ignores it for the request.
+        const path = url.pathname + url.search + url.hash;
+        if (!isAuthenticatedPath(path.split('#')[0])) return; // let browser handle public navigation
         ev.preventDefault();
         fetchAndSwap(path, false, true);
       });
