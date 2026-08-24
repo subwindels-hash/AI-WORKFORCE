@@ -1,21 +1,25 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed'); ?>
-<div class="page-head"><div><h2>Listening practice</h2><p>Audio is spoken by YOUR browser's speech synthesis — real playback when a voice for the language exists, an honest notice when it does not. Replay, slow/normal speed, transcript on demand.</p></div></div>
+<div class="page-head"><div><h2>Listening practice — WINDELS AI WORKFORCE</h2><p>Audio is spoken by YOUR browser's speech synthesis via SpeechProvider abstraction — real playback when a voice for the language exists, honest notice when not. Replay, stop, speed control 0.75x/1x/1.25x, correct locale.</p></div></div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
-<div class="notice warnbox" id="tts-support" style="display:none">Your browser has no speech-synthesis voice for this language — playback is unavailable (the exercises and grading still work; nothing is faked).</div>
+<div class="notice warnbox" id="tts-support" style="display:none"></div>
 
 <?php if (empty($listening['available'])): ?>
   <div class="panel"><div class="body"><p class="dim"><?= e($listening['note'] ?? 'Not available yet.') ?></p></div></div>
 <?php else: foreach ($listening['exercises'] as $ex): ?>
   <div class="panel" style="margin-bottom:12px" data-exercise>
-    <h3><?= e($ex['level']) ?> listening · <?= e(str_replace('-', '-', $ex['itemId'])) ?></h3>
+    <h3><?= e($ex['level']) ?> listening · <?= e(str_replace('-', '-', $ex['itemId'])) ?> <span class="badge b-sky"><?= e($langCode ?? 'en') ?> → <?= e(\Aegis\LangLearn\Translator::LOCALES[$langCode ?? 'en'] ?? $langCode) ?></span></h3>
     <div class="body" style="padding-top:12px">
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn small primary tts-play" data-say="<?= e($ex['speakText']) ?>" data-rate="1">▶ play (normal)</button>
-        <button class="btn small tts-play" data-say="<?= e($ex['speakText']) ?>" data-rate="0.7">▶ play (slow)</button>
+      <p style="font-size:15px;font-weight:600"><?= e($ex['transcript']) ?> <button class="btn small" type="button" data-listen="<?= e($ex['speakText']) ?>">🔊 Listen</button></p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+        <button class="btn small primary tts-play" data-say="<?= e($ex['speakText']) ?>" data-rate="1">▶ play (normal 1x)</button>
+        <button class="btn small tts-play" data-say="<?= e($ex['speakText']) ?>" data-rate="0.7">▶ slow 0.75x</button>
+        <button class="btn small tts-play" data-say="<?= e($ex['speakText']) ?>" data-rate="1.25">▶ fast 1.25x</button>
+        <button class="btn small" type="button" id="tts-stop-<?= e($ex['itemId']) ?>">⏹ Stop</button>
         <button class="btn small" type="button" onclick="const d=this.closest('.body').querySelector('.transcript');d.style.display=d.style.display==='none'?'block':'none'">show transcript</button>
       </div>
-      <div class="transcript dim" style="display:none;margin-top:8px"><?= e($ex['transcript']) ?></div>
+      <div class="transcript dim" style="display:none;margin-top:8px"><?= e($ex['transcript']) ?> — <span class="dim">Locale: <?= e(\Aegis\LangLearn\Translator::LOCALES[$langCode ?? 'en'] ?? $langCode) ?></span></div>
+      <div style="margin-top:8px;font-size:11px;color:var(--dim)">Voice: <select class="sel tts-voice" data-locale="<?= e(\Aegis\LangLearn\Translator::LOCALES[$langCode ?? 'en'] ?? $langCode) ?>"><option>Loading voices…</option></select> | Speed: <input type="range" min="0.5" max="1.5" step="0.1" value="1" class="tts-rate" style="width:100px"> <span class="tts-rate-val">1.0×</span></div>
 
       <form method="post" action="/app/languages/l/<?= (int) $profileId ?>/attempt" style="margin-top:12px">
         <input type="hidden" name="itemId" value="<?= e($ex['itemId']) ?>">
@@ -33,7 +37,7 @@
         <input type="hidden" name="itemId" value="<?= e($ex['itemId']) ?>">
         <input type="hidden" name="mode" value="transcription">
         <div class="inline">
-          <input class="sel" type="text" name="transcript" required placeholder="Write what you heard…" autocomplete="off">
+          <input class="sel" type="text" name="transcript" required placeholder="Write what you heard… (word accuracy graded)" autocomplete="off">
           <button class="btn small">check transcription</button>
         </div>
       </form>
@@ -62,42 +66,83 @@
   </div>
 <?php endif; ?>
 
+<script src="/assets/js/speech-provider.js"></script>
 <script>
 (function () {
   var LANG = <?= json_encode($langCode ?? 'en') ?>;
-  function pickVoice() {
-    if (!('speechSynthesis' in window)) return null;
-    var voices = speechSynthesis.getVoices();
-    return voices.find(function (v) { return v.lang && v.lang.toLowerCase().indexOf(LANG) === 0; }) || null;
-  }
-  function supported() { return 'speechSynthesis' in window && pickVoice() !== null; }
-  document.addEventListener('DOMContentLoaded', function () {
-    if ('speechSynthesis' in window && speechSynthesis.getVoices().length === 0) {
-      speechSynthesis.onvoiceschanged = function () { check(); };
+  var LOCALE = <?= json_encode(\Aegis\LangLearn\Translator::LOCALES[$langCode ?? 'en'] ?? 'en-US') ?>;
+  var provider = window.windelsSpeech || (window.SpeechProvider ? new window.SpeechProvider() : null);
+
+  function checkSupport() {
+    if (!provider) return;
+    var health = provider.healthCheck();
+    var note = document.getElementById('tts-support');
+    var voices = provider.getVoicesForLocale(LOCALE);
+    document.querySelectorAll('.tts-play').forEach(function(btn){
+      btn.disabled = !health.tts || voices.length === 0;
+      if (!health.tts) btn.title = 'TTS unavailable';
+      else if (voices.length === 0) btn.title = 'No voice for ' + LOCALE;
+    });
+    if (note) {
+      if (!health.tts) { note.style.display='block'; note.textContent='Text-to-speech not available in this browser.'; }
+      else if (voices.length===0) { note.style.display='block'; note.textContent='No voice installed for ' + LOCALE + ' in this browser — playback unavailable, exercises still work.'; }
+      else note.style.display='none';
     }
-    check();
-    function check() {
-      var has = 'speechSynthesis' in window;
-      var voice = pickVoice();
-      document.querySelectorAll('.tts-play').forEach(function (btn) {
-        btn.disabled = !has || !voice;
-        btn.title = !has ? 'Speech synthesis unavailable in this browser'
-          : (!voice ? 'No voice installed for this language' : '');
-      });
-      var note = document.getElementById('tts-support');
-      if (note && has && !voice) note.style.display = 'block';
+    // Populate voice selectors
+    document.querySelectorAll('.tts-voice').forEach(function(sel){
+      var loc = sel.getAttribute('data-locale') || LOCALE;
+      var vs = provider.getVoicesForLocale(loc);
+      sel.innerHTML='';
+      if (!vs.length) { sel.innerHTML='<option>No voice for '+loc+'</option>'; sel.disabled=true; return; }
+      vs.forEach(function(v,i){ var o=document.createElement('option'); o.value=i; o.textContent=v.name+' ('+v.lang+')'; sel.appendChild(o); });
+      sel._voices = vs;
+      sel.disabled=false;
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', function(){
+    if (provider && provider.synth && provider.getSupportedVoices().length===0) {
+      provider.synth.onvoiceschanged = checkSupport;
+      setTimeout(checkSupport, 800);
+    }
+    checkSupport();
+  });
+
+  document.addEventListener('click', function(ev){
+    var btn = ev.target.closest('.tts-play');
+    if (!btn || btn.disabled || !provider) return;
+    var text = btn.getAttribute('data-say');
+    var rate = parseFloat(btn.getAttribute('data-rate')) || 1;
+    var panel = btn.closest('[data-exercise]');
+    var voiceSel = panel ? panel.querySelector('.tts-voice') : null;
+    var voice = null;
+    if (voiceSel && voiceSel._voices) {
+      var idx = parseInt(voiceSel.value,10);
+      voice = voiceSel._voices[idx] || null;
+    }
+    var rateInput = panel ? panel.querySelector('.tts-rate') : null;
+    if (rateInput) rate = parseFloat(rateInput.value) || rate;
+    provider.textToSpeech(text, { locale: LOCALE, voice: voice, rate: rate });
+  });
+
+  document.addEventListener('click', function(ev){
+    var btn = ev.target.closest('[data-listen]');
+    if (!btn || !provider) return;
+    provider.textToSpeech(btn.getAttribute('data-listen'), { locale: LOCALE, rate: 1 });
+  });
+
+  document.addEventListener('click', function(ev){
+    if (ev.target.id && ev.target.id.startsWith('tts-stop-')) {
+      if (provider) provider.stop();
     }
   });
-  document.addEventListener('click', function (ev) {
-    var btn = ev.target.closest('.tts-play');
-    if (!btn || btn.disabled) return;
-    var voice = pickVoice();
-    var utter = new SpeechSynthesisUtterance(btn.getAttribute('data-say'));
-    utter.lang = voice ? voice.lang : LANG;
-    if (voice) utter.voice = voice;
-    utter.rate = parseFloat(btn.getAttribute('data-rate')) || 1;
-    speechSynthesis.cancel();
-    speechSynthesis.speak(utter);
+
+  document.addEventListener('input', function(ev){
+    if (ev.target.classList.contains('tts-rate')) {
+      var val = parseFloat(ev.target.value) || 1;
+      var label = ev.target.parentElement.querySelector('.tts-rate-val');
+      if (label) label.textContent = val.toFixed(1)+'×';
+    }
   });
 })();
 </script>
