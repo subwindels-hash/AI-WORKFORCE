@@ -63,6 +63,7 @@
     <?php else: ?>
       <p class="dim" style="font-size:11px">From <?= e($path['path']['from_level']) ?> toward <?= e($path['path']['target_level']) ?> — modules unlock in order; each ends with a real checkpoint quiz drawn from the item bank.</p>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0">
+        <a class="btn small primary" href="/app/languages/d/<?= (int) $profile['id'] ?>">Today's plan</a>
         <a class="btn small" href="/app/languages/conv/<?= (int) $profile['id'] ?>">AI conversation</a>
         <a class="btn small" href="/app/languages/l/<?= (int) $profile['id'] ?>">Listening</a>
         <a class="btn small" href="/app/languages/s/<?= (int) $profile['id'] ?>">Speaking</a>

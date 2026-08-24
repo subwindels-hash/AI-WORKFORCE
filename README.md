@@ -46,7 +46,7 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **Scheduled operations worker** (`php index.php tools cron`): portfolio scan, broker transitions, proposal expiry | **TESTED** |
 | MT4 / crypto-exchange / stock-broker connectors | **PLANNED** (added one at a time after MT5 is verified) |
 
-**188 automated tests** run through the real CodeIgniter stack
+**196 automated tests** run through the real CodeIgniter stack
 (`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
 sandbox — see below), plus 9 contract tests for the Python bridge
 (`python-services/mt5-bridge/.venv/bin/python -m pytest test_bridge.py`).
@@ -296,8 +296,17 @@ from the transcript that was actually returned, an empty transcript is
 stored unscored, and **pronunciation/fluency scores are never produced** —
 they require a pronunciation-assessment provider that is not configured.
 
-Phase 5 (weakness detection, personalized daily plans, adaptive
-recommendations) follows the same honesty architecture.
+**Phase 5 — Adaptive AI learning (complete)**: weakness detection reads only
+stored performance — per-skill averages (≥3 attempts), vocabulary words with
+repeated SRS lapses, bank items missed ≥2 times, modules failed repeatedly —
+and every finding cites its evidence; with insufficient activity the answer
+is an explicit "not enough data" instead of invented findings. Daily plans
+are built from real state (vocabulary due today, current path module,
+measured weak areas) and sized to the profile's daily minutes; block
+completion is computed from the same day's actual activity, never assumed.
+Recommendations are generated from the same evidence, and item-level mastery
+(mastered / learning / weak / unseen) is graded from real attempt outcomes.
+All five phases of the language-learning module are now complete.
 
 ### Phase 6 intelligence: agent debate + strategy optimizer
 

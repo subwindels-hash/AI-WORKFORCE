@@ -68,6 +68,13 @@ function assert_contains(string $needle, string $haystack, string $msg = ''): vo
     }
 }
 
+function assert_in_array($needle, array $haystack, string $msg = ''): void
+{
+    if (!in_array($needle, $haystack, true)) {
+        throw new RuntimeException('ASSERT: ' . ($msg ?: 'expected ' . var_export($needle, true) . ' in [' . implode(',', $haystack) . ']'));
+    }
+}
+
 function assert_not_null($value, string $msg = 'expected non-null'): void
 {
     if ($value === null) throw new RuntimeException('ASSERT: ' . $msg);

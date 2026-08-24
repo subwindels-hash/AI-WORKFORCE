@@ -69,6 +69,13 @@ interface LangLearnRepository
     /** @return array<int, array<string, mixed>> */
     public function listSpeakingAttempts(int $profileId, int $limit = 20): array;
 
+    // Phase 5 (adaptive learning)
+    /** Upsert by (profile_id, day); plan may be an array (stored as JSON). */
+    public function saveDailyPlan(array $plan): array;
+    public function findDailyPlan(int $profileId, string $day): ?array;
+    public function saveRecommendation(array $row): array;
+    public function clearRecommendations(int $profileId): void;
+
     /** Upsert keyed on (profile_id, skill, source). */
     public function upsertProgress(array $row): void;
     /** @return array<int, array<string, mixed>> */

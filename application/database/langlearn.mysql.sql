@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS user_language_profiles (
   goal                 VARCHAR(300) NULL,
   explanation_language VARCHAR(8) NOT NULL DEFAULT 'en',
   status               VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
+  daily_minutes        INT NOT NULL DEFAULT 20,
   created_at           VARCHAR(32) NOT NULL,
   updated_at           VARCHAR(32) NOT NULL,
   UNIQUE KEY uq_profile_user_language (user_id, language_code)
@@ -202,4 +203,31 @@ CREATE TABLE IF NOT EXISTS speaking_attempts (
   detail          LONGTEXT NOT NULL,
   created_at      VARCHAR(32) NOT NULL,
   KEY idx_speaking_profile (profile_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Phase 5 (adaptive learning): daily plans + AI recommendations. Every item
+-- is derived from stored activity; evidence is cited; nothing is invented.
+CREATE TABLE IF NOT EXISTS daily_learning_plans (
+  id            VARCHAR(36) PRIMARY KEY,
+  profile_id    INT NOT NULL,
+  user_id       INT NOT NULL,
+  language_code VARCHAR(8) NOT NULL,
+  day           VARCHAR(10) NOT NULL,            -- UTC date
+  plan          LONGTEXT NOT NULL,               -- blocks with evidence + completion
+  est_minutes   INT NOT NULL DEFAULT 0,
+  created_at    VARCHAR(32) NOT NULL,
+  UNIQUE KEY uq_daily_plan (profile_id, day)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ai_learning_recommendations (
+  id            VARCHAR(36) PRIMARY KEY,
+  profile_id    INT NOT NULL,
+  user_id       INT NOT NULL,
+  language_code VARCHAR(8) NOT NULL,
+  kind          VARCHAR(24) NOT NULL,            -- weakness|retention|module|engagement
+  message       VARCHAR(400) NOT NULL,
+  evidence      LONGTEXT NOT NULL,
+  status        VARCHAR(12) NOT NULL DEFAULT 'ACTIVE',
+  created_at    VARCHAR(32) NOT NULL,
+  KEY idx_reco_profile (profile_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

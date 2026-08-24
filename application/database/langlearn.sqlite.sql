@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS languages (
 CREATE TABLE IF NOT EXISTS user_language_profiles (
  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, language_code TEXT NOT NULL,
  level TEXT NOT NULL DEFAULT 'Beginner', goal TEXT, explanation_language TEXT NOT NULL DEFAULT 'en',
- status TEXT NOT NULL DEFAULT 'ACTIVE', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+ status TEXT NOT NULL DEFAULT 'ACTIVE', daily_minutes INTEGER NOT NULL DEFAULT 20, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
  UNIQUE(user_id, language_code)
 );
 CREATE TABLE IF NOT EXISTS language_assessments (
@@ -81,3 +81,14 @@ CREATE TABLE IF NOT EXISTS speaking_attempts (
  provider TEXT NOT NULL DEFAULT 'none', detail TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_speaking_profile ON speaking_attempts(profile_id, created_at);
+CREATE TABLE IF NOT EXISTS daily_learning_plans (
+ id TEXT PRIMARY KEY, profile_id INTEGER NOT NULL, user_id INTEGER NOT NULL, language_code TEXT NOT NULL,
+ day TEXT NOT NULL, plan TEXT NOT NULL, est_minutes INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
+ UNIQUE(profile_id, day)
+);
+CREATE TABLE IF NOT EXISTS ai_learning_recommendations (
+ id TEXT PRIMARY KEY, profile_id INTEGER NOT NULL, user_id INTEGER NOT NULL, language_code TEXT NOT NULL,
+ kind TEXT NOT NULL, message TEXT NOT NULL, evidence TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'ACTIVE',
+ created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reco_profile ON ai_learning_recommendations(profile_id, created_at);

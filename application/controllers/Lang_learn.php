@@ -371,6 +371,32 @@ class Lang_learn extends MY_Controller
         redirect('/app/languages/s/' . $profileId);
     }
 
+    // ================= PHASE 5: ADAPTIVE LEARNING PAGE =================
+
+    public function daily_plan(int $profileId)
+    {
+        $user = $this->requireUser();
+        $data = $this->base('Today\'s plan & AI insights');
+        try { $data['plan'] = $this->platform->adaptive->dailyPlan((int) $user['id'], $profileId); }
+        catch (Throwable $e) { $data['plan'] = null; }
+        try { $data['weaknesses'] = $this->platform->adaptive->weaknesses((int) $user['id'], $profileId); }
+        catch (Throwable $e) { $data['weaknesses'] = ['weaknesses' => [], 'strengths' => [], 'note' => $e->getMessage()]; }
+        try { $data['recommendations'] = $this->platform->adaptive->recommendations((int) $user['id'], $profileId)['recommendations']; }
+        catch (Throwable $e) { $data['recommendations'] = []; }
+        try { $data['mastery'] = $this->platform->adaptive->mastery((int) $user['id'], $profileId); }
+        catch (Throwable $e) { $data['mastery'] = null; }
+        $data['profileId'] = $profileId;
+        $this->render($data, 'langlearn/daily_plan');
+    }
+
+    public function daily_plan_regenerate(int $profileId)
+    {
+        $user = $this->requireUser();
+        try { $this->platform->adaptive->dailyPlan((int) $user['id'], $profileId, regenerate: true); }
+        catch (Throwable $e) { $this->session->set_flashdata('llError', $e->getMessage()); }
+        redirect('/app/languages/d/' . $profileId);
+    }
+
     // ------------------------------------------------------------ helpers
 
     private function sessionUser(): ?array

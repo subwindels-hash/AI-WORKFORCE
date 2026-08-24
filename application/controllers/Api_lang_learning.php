@@ -271,6 +271,42 @@ class Api_lang_learning extends Api_controller
         catch (Throwable $e) { $this->fail($e); }
     }
 
+    // ================= PHASE 5: ADAPTIVE LEARNING =================
+
+    public function adaptive_weaknesses(int $profileId)
+    {
+        if (!$this->guard(false)) return;
+        $user = $this->session->userdata('identity');
+        try { $this->json($this->platform->adaptive->weaknesses((int) $user['id'], $profileId)); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
+    public function adaptive_daily_plan(int $profileId)
+    {
+        $user = $this->guard($this->input->method(true) === 'POST');
+        if (!$user) return;
+        try {
+            $minutes = $this->input->get('minutes') !== null ? (int) $this->input->get('minutes') : null;
+            $this->json($this->platform->adaptive->dailyPlan((int) $user['id'], $profileId, $minutes, regenerate: $this->input->method(true) === 'POST'));
+        } catch (Throwable $e) { $this->fail($e); }
+    }
+
+    public function adaptive_recommendations(int $profileId)
+    {
+        if (!$this->guard(false)) return;
+        $user = $this->session->userdata('identity');
+        try { $this->json($this->platform->adaptive->recommendations((int) $user['id'], $profileId)); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
+    public function adaptive_mastery(int $profileId)
+    {
+        if (!$this->guard(false)) return;
+        $user = $this->session->userdata('identity');
+        try { $this->json($this->platform->adaptive->mastery((int) $user['id'], $profileId)); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
     // ================= PHASE 3: VOCABULARY =================
 
     public function vocabulary_catalog(int $profileId)

@@ -41,6 +41,7 @@ class Platform
     public \Aegis\LangLearn\TeacherService $langteacher;
     public \Aegis\LangLearn\VocabularyService $vocabulary;
     public \Aegis\LangLearn\AudioPracticeService $audiopractice;
+    public \Aegis\LangLearn\AdaptiveLearningService $adaptive;
 
     public function __construct(\Aegis_model $model, bool $disableRealProviders = false)
     {
@@ -79,6 +80,7 @@ class Platform
         $this->langteacher = new \Aegis\LangLearn\TeacherService($model->langlearn, $this->langlearn);
         $this->vocabulary = new \Aegis\LangLearn\VocabularyService($model->langlearn, $this->langlearn);
         $this->audiopractice = new \Aegis\LangLearn\AudioPracticeService($model->langlearn, $this->langlearn);
+        $this->adaptive = new \Aegis\LangLearn\AdaptiveLearningService($model->langlearn, $this->langlearn);
         $this->execution = new ExecutionSupervisor(
             $model->audit, $model->state, $model->proposals,
             $this->risk, $this->brokers, $this->strategies,

@@ -686,6 +686,35 @@ class Aegis_model extends CI_Model
                 return $rows;
             }
 
+            public function saveDailyPlan(array $p): array {
+                $row = $p;
+                $row['plan'] = is_array($p['plan'] ?? null) ? json_encode($p['plan']) : $p['plan'];
+                $keys = ['profile_id' => $p['profile_id'], 'day' => $p['day']];
+                $exists = $this->db->from('daily_learning_plans')->where($keys)->count_all_results() > 0;
+                if ($exists) { $this->db->where($keys)->update('daily_learning_plans', $row); $row['id'] = $this->db->select('id')->where($keys)->get('daily_learning_plans')->row_array()['id'] ?? $row['id']; }
+                else $this->db->insert('daily_learning_plans', $row);
+                return $this->findDailyPlan((int) $p['profile_id'], $p['day']) ?? $row;
+            }
+            public function findDailyPlan(int $profileId, string $day): ?array {
+                $r = $this->db->get_where('daily_learning_plans', ['profile_id' => $profileId, 'day' => $day], 1)->row_array();
+                if ($r) {
+                    $r['plan'] = json_decode((string) $r['plan'], true) ?: [];
+                    $r['profile_id'] = (int) $r['profile_id'];
+                    $r['est_minutes'] = (int) $r['est_minutes'];
+                }
+                return $r ?: null;
+            }
+            public function saveRecommendation(array $r): array {
+                $row = $r;
+                $row['evidence'] = json_encode($r['evidence'] ?? []);
+                $this->db->insert('ai_learning_recommendations', $row);
+                $row['evidence'] = $r['evidence'] ?? [];
+                return $row;
+            }
+            public function clearRecommendations(int $profileId): void {
+                $this->db->where('profile_id', $profileId)->delete('ai_learning_recommendations');
+            }
+
             public function upsertProgress(array $row): void {
                 $keys = ['profile_id' => $row['profile_id'], 'skill' => $row['skill'], 'source' => $row['source']];
                 $exists = $this->db->from('language_progress')->where($keys)->count_all_results() > 0;
