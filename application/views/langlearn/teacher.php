@@ -2,166 +2,308 @@
 /** @var array $languages @var array $locales @var string $csrfToken @var array $examplePairs */
 $langOptions = [];
 foreach ($languages as $l) {
-    $langOptions[$l['code']] = $l['name'] . ' — ' . ($l['native_name'] ?? '');
+    $langOptions[$l['code']] = $l['name'] . ($l['native_name'] ? ' — ' . $l['native_name'] : '');
 }
 ?>
 <style>
-#ai-teacher { max-width: 880px; }
-.tt-layout { display: grid; grid-template-columns: 1fr; gap: 14px; }
-.tt-result { background: linear-gradient(145deg, #0b1c34, #0b1220); border: 1px solid #2a3f63; border-radius: 14px; padding: 18px; }
-.tt-translation { font-size: clamp(20px, 3.4vw, 30px); font-weight: 800; color: #fff; line-height: 1.3; margin: 6px 0 4px; word-break: break-word; }
+/* AI Teacher — two-sided translate / listen / speak workspace.
+   Uses the app design tokens from aegis.css; no gradients, no oversized art. */
+.tt-swapbar { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: end; margin-bottom: 14px; }
+.tt-side { display: grid; gap: 5px; min-width: 0; }
+.tt-side > span { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: var(--dim); font-weight: 700; }
+.tt-side select { width: 100%; }
+.tt-swap { width: 40px; height: 38px; display: grid; place-items: center; border: 1px solid var(--line2); border-radius: var(--radius-sm); background: var(--panel2); color: var(--muted); cursor: pointer; transition: color .15s, border-color .15s, transform .2s; }
+.tt-swap:hover { color: #fff; border-color: var(--brand); }
+.tt-swap:active { transform: rotate(180deg); }
+.tt-swap svg { width: 17px; height: 17px; }
+.tt-panes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+.tt-pane { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel2); padding: 14px; min-width: 0; }
+.tt-pane-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px; margin-bottom: 8px; }
+.tt-pane-label { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.tt-detect-hint { font-size: 11px; color: var(--sky); font-weight: 600; }
+.tt-input { width: 100%; min-height: 96px; resize: vertical; background: #0b1119; color: var(--text); border: 1px solid var(--line2); border-radius: var(--radius-sm); padding: 10px 12px; font: inherit; font-size: 14px; line-height: 1.5; outline: none; }
+.tt-input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+.tt-input.rtl { direction: rtl; text-align: right; }
+.tt-input-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }
+.tt-count { font-size: 11px; color: var(--dim); }
+.tt-translation { font-size: clamp(18px, 2.6vw, 24px); font-weight: 700; color: #fff; line-height: 1.35; margin: 4px 0 2px; word-break: break-word; }
 .tt-translation.rtl { direction: rtl; text-align: right; }
-.tt-original { font-size: 14px; color: var(--muted); margin-top: 10px; word-break: break-word; }
-.tt-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-.tt-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 16px; }
-.tt-voices { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin-top: 12px; font-size: 12px; color: var(--muted); }
+.tt-original { font-size: 12.5px; color: var(--muted); margin-top: 8px; word-break: break-word; }
+.tt-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.tt-placeholder { color: var(--dim); font-size: 13px; padding: 22px 0; text-align: center; }
+.tt-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+.tt-voices { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin-top: 10px; font-size: 12px; color: var(--muted); }
 .tt-voices select, .tt-voices input[type=range] { background: var(--panel2); color: var(--text); border: 1px solid var(--line2); border-radius: 6px; }
 .tt-voices select { padding: 4px 6px; }
 .tt-rate { display: flex; align-items: center; gap: 6px; }
-.tt-practice { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+.tt-examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; align-items: center; }
+.tt-examples > span { font-size: 11px; color: var(--dim); font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+.tt-example { border: 1px solid var(--line2); background: var(--panel2); color: var(--muted); border-radius: 999px; padding: 4px 11px; font-size: 11.5px; cursor: pointer; }
+.tt-example:hover { border-color: var(--brand); color: #fff; text-decoration: none; }
+.tt-practice { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; }
+.tt-practice-head { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
 .tt-fb { margin-top: 12px; padding: 12px; border-radius: 10px; border: 1px solid var(--line2); background: var(--panel2); font-size: 13px; }
 .tt-fb.good { border-color: #34d39955; background: #34d39914; }
 .tt-fb.warn { border-color: #fbbf2455; background: #fbbf2414; }
 .tt-history { display: flex; flex-direction: column; gap: 6px; }
 .tt-history .row { display: flex; justify-content: space-between; gap: 10px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); font-size: 12px; cursor: pointer; }
 .tt-history .row:hover { border-color: var(--sky); }
-.tt-step { display: inline-flex; align-items: center; gap: 6px; color: var(--sky); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .14em; }
-.tt-step .n { width: 20px; height: 20px; border-radius: 50%; background: var(--sky); color: #06111e; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; }
-.tt-langbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
 .tt-loading { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line2); border-top-color: var(--sky); border-radius: 50%; animation: ttspin .7s linear infinite; vertical-align: -2px; }
 @keyframes ttspin { to { transform: rotate(360deg); } }
-@media (max-width: 600px) { .tt-langbar { flex-direction: column; align-items: stretch; } }
+@media (max-width: 860px) { .tt-panes { grid-template-columns: 1fr; } }
+@media (max-width: 600px) { .tt-swapbar { grid-template-columns: 1fr auto 1fr; gap: 6px; } .tt-side select { font-size: 12px; } }
 </style>
 
 <div class="page-head">
   <div>
     <h2>AI Language Teacher</h2>
-    <p>Type a sentence, get an instant translation, listen to the correct pronunciation, then practice speaking — all without leaving the page.</p>
+    <p>Pick a language pair, type a sentence, get an instant translation, listen to the pronunciation, then practice speaking.</p>
   </div>
-  <div class="tt-step"><span class="n">1</span> Choose · <span class="n">2</span> Type · <span class="n">3</span> Translate · <span class="n">4</span> Listen · <span class="n">5</span> Speak</div>
 </div>
 
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 <div class="notice warnbox" id="tts-note" style="display:none"></div>
 
-<div class="tt-layout">
+<section class="panel">
+  <h3>Translate</h3>
+  <div class="body" style="padding-top:14px">
 
-  <!-- Step 1 + 2: choose language + type -->
-  <section class="panel">
-    <h3>What would you like to say?</h3>
-    <div class="body" style="padding-top:14px">
-      <form id="tt-form" class="inline" style="align-items:flex-end">
-        <label class="fld" style="min-width:200px">
-          I want to learn
-          <select id="tt-target" class="sel" name="target">
-            <?php foreach ($langOptions as $code => $label): ?>
-              <option value="<?= e($code) ?>" <?= $code === 'fr' ? 'selected' : '' ?>><?= e($label) ?></option>
-            <?php endforeach; ?>
-          </select>
-        </label>
-        <label class="fld" style="flex:1;min-width:240px">
-          Say it in your own words
-          <input id="tt-input" class="sel" name="text" type="text" maxlength="500" autocomplete="off" placeholder="e.g. Good morning, how are you?" style="min-width:240px;flex:1">
-        </label>
-        <button class="btn primary" type="submit" id="tt-submit">Translate</button>
-      </form>
-      <div style="margin-top:12px;font-size:12px;color:var(--dim)">
-        Try:
-        <?php foreach ($examplePairs as $i => $ex): ?>
-          <a class="tt-example" href="#" data-text="<?= e($ex['text']) ?>" data-target="<?= e($ex['target']) ?>" style="color:var(--sky)"><?= e($ex['text']) ?></a><?= $i < count($examplePairs) - 1 ? ' · ' : '' ?>
-        <?php endforeach; ?>
-      </div>
-    </div>
-  </section>
-
-  <!-- Step 3: translation result -->
-  <div id="tt-empty" class="panel"><div class="body"><p class="dim">Your translation will appear here. The source language is detected automatically — type in any language.</p></div></div>
-
-  <div id="tt-result-card" class="tt-result" hidden>
-    <div class="tt-meta">
-      <span class="badge b-sky" id="tt-source-badge">Detected: —</span>
-      <span class="badge b-violet" id="tt-target-badge">Target: —</span>
-      <span class="badge b-gray" id="tt-method-badge" hidden></span>
-    </div>
-    <div class="tt-translation" id="tt-translation" lang="" dir="ltr"></div>
-    <div class="tt-original" id="tt-original"></div>
-    <div id="tt-note" class="dim" style="margin-top:10px;font-size:12px"></div>
-
-    <!-- Step 4: listen -->
-    <div class="tt-actions" id="tt-listen-row">
-      <button class="btn primary" type="button" id="tt-play">🔊 Listen</button>
-      <button class="btn" type="button" id="tt-stop" disabled>⏹ Stop</button>
-      <button class="btn" type="button" id="tt-replay">↻ Replay</button>
-    </div>
-    <div class="tt-voices">
-      <label style="display:flex;align-items:center;gap:6px">Voice
-        <select id="tt-voice" disabled></select>
+    <!-- Two-sided language selection: any supported language on either side -->
+    <div class="tt-swapbar">
+      <label class="tt-side">
+        <span>Left / source — you type</span>
+        <select id="tt-source" class="sel" aria-label="Source language">
+          <option value="auto">Auto-detect</option>
+          <?php foreach ($langOptions as $code => $label): ?>
+            <option value="<?= e($code) ?>" <?= $code === 'en' ? 'selected' : '' ?>><?= e($label) ?></option>
+          <?php endforeach; ?>
+        </select>
       </label>
-      <label class="tt-rate">Speed
-        <input id="tt-rate" type="range" min="0.5" max="1.5" step="0.1" value="1">
-        <span id="tt-rate-val" style="width:28px">1.0×</span>
+      <button type="button" class="tt-swap" id="tt-swap" title="Swap languages" aria-label="Swap languages">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4 3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 4 4"/><path d="m17 20 4-4-4-4"/><path d="M21 16H8a4 4 0 0 1-4-4"/></svg>
+      </button>
+      <label class="tt-side">
+        <span>Right / target — you learn</span>
+        <select id="tt-target" class="sel" aria-label="Target language">
+          <?php foreach ($langOptions as $code => $label): ?>
+            <option value="<?= e($code) ?>" <?= $code === 'nl' ? 'selected' : '' ?>><?= e($label) ?></option>
+          <?php endforeach; ?>
+        </select>
       </label>
     </div>
 
-    <!-- Step 5 + 6: practice speaking + feedback -->
-    <div class="tt-practice" style="margin-top:16px">
-      <div class="tt-step"><span class="n">5</span> Practice speaking</div>
-      <p class="dim" style="font-size:12px;margin:6px 0 10px">Say the translation aloud. Speech-to-text uses your browser engine (e.g. Chrome) when available. We compare the REAL transcript to the target — word accuracy only. Pronunciation scoring is not available and is never invented.</p>
-      <div class="notice warnbox" id="stt-note" style="display:none"></div>
-      <div class="inline" style="flex-wrap:wrap;align-items:center">
-        <button class="btn primary" type="button" id="tt-mic" disabled>🎤 Speak now</button>
-        <input id="tt-transcript" class="sel" type="text" readonly placeholder="Transcript from your speech engine…" style="min-width:240px;flex:1">
-        <button class="btn" type="button" id="tt-check" disabled>Check</button>
-        <button class="btn" type="button" id="tt-retry" hidden>Try again</button>
+    <form id="tt-form">
+      <div class="tt-panes">
+        <!-- Source pane: clearly indicates the language being typed -->
+        <div class="tt-pane">
+          <div class="tt-pane-head">
+            <span class="tt-pane-label" id="tt-source-label">Type in English</span>
+            <span class="tt-detect-hint" id="tt-detect-hint"></span>
+          </div>
+          <textarea id="tt-input" class="tt-input" name="text" maxlength="500" autocomplete="off" spellcheck="false" placeholder="e.g. Good morning, how are you?"></textarea>
+          <div class="tt-input-row">
+            <span class="tt-count" id="tt-count">0 / 500</span>
+            <button class="btn primary" type="submit" id="tt-submit">Translate</button>
+          </div>
+        </div>
+
+        <!-- Target pane: clearly indicates the target language -->
+        <div class="tt-pane">
+          <div class="tt-pane-head">
+            <span class="tt-pane-label" id="tt-target-label">Translation — Dutch</span>
+            <span class="badge b-gray" id="tt-method-badge" hidden></span>
+          </div>
+          <div id="tt-placeholder" class="tt-placeholder">Your translation will appear here.</div>
+          <div id="tt-result" hidden>
+            <div class="tt-meta">
+              <span class="badge b-sky" id="tt-source-badge">From: —</span>
+              <span class="badge b-violet" id="tt-target-badge">To: —</span>
+            </div>
+            <div class="tt-translation" id="tt-translation" lang="" dir="ltr"></div>
+            <div class="tt-original" id="tt-original"></div>
+            <div id="tt-note" class="dim" style="margin-top:8px;font-size:12px"></div>
+
+            <!-- Listen: voice always follows the RIGHT/TARGET language -->
+            <div class="tt-actions" id="tt-listen-row">
+              <button class="btn primary" type="button" id="tt-play">🔊 Listen</button>
+              <button class="btn" type="button" id="tt-stop" disabled>⏹ Stop</button>
+              <button class="btn" type="button" id="tt-replay">↻ Replay</button>
+            </div>
+            <div class="tt-voices">
+              <label style="display:flex;align-items:center;gap:6px">Voice
+                <select id="tt-voice" disabled></select>
+              </label>
+              <label class="tt-rate">Speed
+                <input id="tt-rate" type="range" min="0.5" max="1.5" step="0.1" value="1">
+                <span id="tt-rate-val" style="width:28px">1.0×</span>
+              </label>
+            </div>
+
+            <!-- Speak: compare the real speech transcript with the target -->
+            <div class="tt-practice">
+              <div class="tt-practice-head">Practice speaking</div>
+              <p class="dim" style="font-size:12px;margin:0 0 10px">Say the translation aloud. Speech-to-text uses your browser engine when available; we compare the real transcript to the target — word accuracy only, never invented pronunciation scores.</p>
+              <div class="notice warnbox" id="stt-note" style="display:none"></div>
+              <div class="inline" style="flex-wrap:wrap;align-items:center">
+                <button class="btn primary" type="button" id="tt-mic" disabled>🎤 Speak now</button>
+                <input id="tt-transcript" class="sel" type="text" readonly placeholder="Transcript from your speech engine…" style="min-width:200px;flex:1">
+                <button class="btn" type="button" id="tt-check" disabled>Check</button>
+                <button class="btn" type="button" id="tt-retry" hidden>Try again</button>
+              </div>
+              <p class="dim" id="tt-mic-status" style="font-size:11px;margin:6px 0 0"></p>
+              <div id="tt-feedback" class="tt-fb" hidden></div>
+            </div>
+          </div>
+        </div>
       </div>
-      <p class="dim" id="tt-mic-status" style="font-size:11px;margin:6px 0 0"></p>
-      <div id="tt-feedback" class="tt-fb" hidden></div>
+    </form>
+
+    <div class="tt-examples">
+      <span>Try</span>
+      <?php foreach ($examplePairs as $ex): ?>
+        <button type="button" class="tt-example"
+                data-text="<?= e($ex['text']) ?>"
+                data-src="<?= e($ex['source'] ?? 'auto') ?>"
+                data-target="<?= e($ex['target']) ?>"><?= e($ex['text']) ?></button>
+      <?php endforeach; ?>
     </div>
   </div>
+</section>
 
-  <!-- Session history (kept on this page only) -->
-  <section class="panel" id="tt-history-panel" hidden>
-    <h3>This session</h3>
-    <div class="body scroll" style="padding-top:12px">
-      <div class="tt-history" id="tt-history"></div>
-      <p class="dim" style="font-size:11px;margin-top:10px">Tap a row to reload it. History stays on this page while you practice.</p>
+<section class="panel" id="tt-history-panel" hidden>
+  <h3>This session</h3>
+  <div class="body scroll" style="padding-top:12px">
+    <div class="tt-history" id="tt-history"></div>
+    <p class="dim" style="font-size:11px;margin-top:10px">Tap a row to reload that pair. History stays on this page while you practice.</p>
+  </div>
+</section>
+
+<section class="panel">
+  <h3>Continue learning</h3>
+  <div class="body" style="padding-top:12px">
+    <p class="dim" style="font-size:12px">The AI Teacher is your instant translator. For structured study, your modules remain available:</p>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+      <a class="btn" href="/app/languages">My languages &amp; catalog</a>
+      <a class="btn" href="/app/languages/l/1">Listening practice</a>
+      <a class="btn" href="/app/languages/s/1">Speaking practice</a>
+      <a class="btn" href="/app/languages/v/1">Vocabulary (SRS)</a>
     </div>
-  </section>
-
-  <section class="panel">
-    <h3>Continue learning</h3>
-    <div class="body" style="padding-top:12px">
-      <p class="dim" style="font-size:12px">The AI Teacher is your instant translator. For structured study, your existing modules remain available:</p>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
-        <a class="btn" href="/app/languages">My languages &amp; catalog</a>
-        <a class="btn" href="/app/languages/l/1">Listening practice</a>
-        <a class="btn" href="/app/languages/s/1">Speaking practice</a>
-        <a class="btn" href="/app/languages/v/1">Vocabulary (SRS)</a>
-      </div>
-    </div>
-  </section>
-
-</div>
+  </div>
+</section>
 
 <script>
 (function () {
   'use strict';
   var CSRF = <?= json_encode((string) ($csrfToken ?? '')) ?>;
-  var LOCALES = <?= json_encode($locales ?? []) ?>;
   var ENDPOINT = '/api/v1/language-learning/translate';
+  var DETECT_ENDPOINT = '/api/v1/language-learning/detect';
+  var LANG_NAMES = <?= json_encode(array_map(
+      fn($l) => $l['name'],
+      array_combine(array_column($languages, 'code'), $languages)
+  )) ?>;
+  var RTL_LANGS = { ar: 1, he: 1, fa: 1, ur: 1 };
+  var STORE_SRC = 'wl_lang_source';
+  var STORE_TARGET = 'wl_lang_target';
 
   var form = document.getElementById('tt-form');
   var input = document.getElementById('tt-input');
+  var sourceSel = document.getElementById('tt-source');
   var targetSel = document.getElementById('tt-target');
+  var swapBtn = document.getElementById('tt-swap');
   var submitBtn = document.getElementById('tt-submit');
-  var emptyCard = document.getElementById('tt-empty');
-  var resultCard = document.getElementById('tt-result-card');
+  var placeholderEl = document.getElementById('tt-placeholder');
+  var resultEl = document.getElementById('tt-result');
+  var sourceLabel = document.getElementById('tt-source-label');
+  var targetLabel = document.getElementById('tt-target-label');
+  var detectHint = document.getElementById('tt-detect-hint');
+  var countEl = document.getElementById('tt-count');
 
-  // translation state
-  var current = null; // {source, sourceName, target, targetName, targetLocale, translation, method, note, original}
+  // Translation state for the active result.
+  var current = null;       // last API translation payload
+  var lastOriginal = '';    // last text the user typed (survives swaps)
+  var lastDetected = '';    // ISO code from the last detection/response
 
-  // ---- TTS plumbing ------------------------------------------------------
+  function langName(code) { return LANG_NAMES[code] || (code === 'auto' ? 'Auto-detect' : String(code).toUpperCase()); }
+
+  // ---- Session memory: selections survive submits and page reloads -------
+  function remember() {
+    try {
+      sessionStorage.setItem(STORE_SRC, sourceSel.value);
+      sessionStorage.setItem(STORE_TARGET, targetSel.value);
+    } catch (e) { /* private mode — selection stays for this page only */ }
+  }
+  function recall() {
+    try {
+      var s = sessionStorage.getItem(STORE_SRC);
+      var t = sessionStorage.getItem(STORE_TARGET);
+      if (s !== null && sourceSel.querySelector('option[value="' + s + '"]')) sourceSel.value = s;
+      if (t !== null && targetSel.querySelector('option[value="' + t + '"]')) targetSel.value = t;
+    } catch (e) { /* ignore */ }
+  }
+
+  // ---- Labels, direction and the "same pair" guard ------------------------
+  function refreshChrome() {
+    var src = sourceSel.value;
+    sourceLabel.textContent = src === 'auto'
+      ? 'Type in any language — auto-detected'
+      : 'Type in ' + langName(src);
+    targetLabel.textContent = 'Translation — ' + langName(targetSel.value);
+    input.classList.toggle('rtl', src !== 'auto' && !!RTL_LANGS[src]);
+    input.dir = src !== 'auto' && RTL_LANGS[src] ? 'rtl' : 'ltr';
+    if (src !== 'auto') detectHint.textContent = '';
+    remember();
+  }
+  sourceSel.addEventListener('change', refreshChrome);
+  targetSel.addEventListener('change', refreshChrome);
+
+  // ---- Swap: exchange both sides immediately; voice follows the target ---
+  swapBtn.addEventListener('click', function () {
+    var oldSrc = sourceSel.value;
+    var newSrc = targetSel.value;
+    // When the left side was auto-detect, adopt the detected language; if we
+    // have no detection yet, fall back to English.
+    var newTgt = oldSrc === 'auto' ? (lastDetected || 'en') : oldSrc;
+    if (newSrc === newTgt) newTgt = newSrc === 'en' ? 'nl' : 'en';
+    sourceSel.value = newSrc;
+    targetSel.value = newTgt;
+    refreshChrome();
+    if (current && current.translation) {
+      // Swap the texts too: the previous translation becomes the new input,
+      // so both languages AND sentences exchange sides, and the output plus
+      // its pronunciation switch to the new target language right away.
+      input.value = current.translation;
+      countEl.textContent = input.value.length + ' / 500';
+      runTranslate(current.translation);
+    } else if (lastOriginal) {
+      runTranslate(lastOriginal);
+    }
+  });
+
+  // ---- Input counter + live auto-detection hint (never overrides picks) --
+  var detectTimer = null;
+  input.addEventListener('input', function () {
+    countEl.textContent = input.value.length + ' / 500';
+    if (sourceSel.value !== 'auto') return;
+    var text = input.value.trim();
+    if (detectTimer) clearTimeout(detectTimer);
+    if (text.length < 3) { detectHint.textContent = ''; return; }
+    detectTimer = setTimeout(function () {
+      fetch(DETECT_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
+        body: JSON.stringify({ text: text })
+      }).then(function (r) { return r.ok ? r.json() : null; }).then(function (body) {
+        if (!body || !body.detection) return;
+        // Only ever shown as a hint while the left side is on Auto-detect.
+        if (sourceSel.value === 'auto' && body.detection.name) {
+          detectHint.textContent = 'Detected: ' + body.detection.name;
+        }
+      }).catch(function () { /* detection is a convenience; ignore failures */ });
+    }, 600);
+  });
+
+  // ---- TTS: always speaks the RIGHT/TARGET language -----------------------
   var synth = ('speechSynthesis' in window);
   var voices = synth ? speechSynthesis.getVoices() : [];
   var ttsNote = document.getElementById('tts-note');
@@ -199,8 +341,7 @@ foreach ($languages as $l) {
   }
 
   function speak(text, locale) {
-    if (!synth) return;
-    if (!text) return;
+    if (!synth || !text) return;
     speechSynthesis.cancel();
     var u = new SpeechSynthesisUtterance(text);
     u.lang = locale || 'en';
@@ -226,7 +367,7 @@ foreach ($languages as $l) {
     [playBtn, stopBtn, replayBtn].forEach(function (b) { b.disabled = true; });
   }
 
-  // ---- STT plumbing ------------------------------------------------------
+  // ---- STT: microphone listens in the TARGET locale -----------------------
   var SR = window.SpeechRecognition || window.webkitSpeechRecognition || null;
   var sttNote = document.getElementById('stt-note');
   var micBtn = document.getElementById('tt-mic');
@@ -290,68 +431,76 @@ foreach ($languages as $l) {
   function normalize(s) { return (s || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim(); }
   function escapeHtml(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
 
-  // ---- Translation flow --------------------------------------------------
+  // ---- Translation flow ---------------------------------------------------
   form.addEventListener('submit', function (ev) {
     ev.preventDefault();
     var text = input.value.trim();
-    if (!text) return;
-    runTranslate(text, targetSel.value);
+    if (!text) { input.focus(); return; }
+    runTranslate(text);
   });
-  document.querySelectorAll('.tt-example').forEach(function (a) {
-    a.addEventListener('click', function (ev) {
-      ev.preventDefault();
-      input.value = a.getAttribute('data-text');
-      targetSel.value = a.getAttribute('data-target');
-      runTranslate(a.getAttribute('data-text'), a.getAttribute('data-target'));
+
+  document.querySelectorAll('.tt-example').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      sourceSel.value = btn.getAttribute('data-src');
+      targetSel.value = btn.getAttribute('data-target');
+      refreshChrome();
+      input.value = btn.getAttribute('data-text');
+      countEl.textContent = input.value.length + ' / 500';
+      runTranslate(input.value);
     });
   });
 
-  function runTranslate(text, target) {
+  function runTranslate(text) {
+    lastOriginal = text;
+    var payload = { text: text, target: targetSel.value };
+    // Send an explicit source only when the user picked one; "Auto-detect"
+    // lets the backend detect — a manual pick is never overridden.
+    if (sourceSel.value !== 'auto') payload.source = sourceSel.value;
     submitBtn.disabled = true;
-    var original = submitBtn.textContent;
     submitBtn.innerHTML = '<span class="tt-loading"></span> Translating…';
     fetch(ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
-      body: JSON.stringify({ text: text, target: target })
+      body: JSON.stringify(payload)
     }).then(function (r) {
       return r.json().then(function (body) { if (!r.ok) throw new Error(body.error || 'Translation failed'); return body; });
     }).then(function (body) {
-      render(body.translation, text, target);
+      render(body.translation, text);
     }).catch(function (err) {
       showError(err.message || 'The translator is unavailable.');
     }).finally(function () {
-      submitBtn.disabled = false; submitBtn.textContent = original;
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Translate';
     });
   }
 
-  function render(t, originalText, targetCode) {
+  function render(t, originalText) {
     if (!t) { showError('The translator returned no result.'); return; }
-    current = t; current.original = originalText;
-    emptyCard.hidden = true;
-    resultCard.hidden = false;
+    current = t;
+    lastDetected = (t.detected && t.detected.code) ? t.detected.code : (t.source || lastDetected);
+    placeholderEl.hidden = true;
+    resultEl.hidden = false;
 
-    var det = t.detected || {};
-    var srcName = (det.name || (t.source ? t.source.toUpperCase() : 'auto'));
-    document.getElementById('tt-source-badge').textContent = 'Detected: ' + srcName + (det.method ? ' · ' + det.method : '');
-    document.getElementById('tt-target-badge').textContent = 'Target: ' + t.targetName;
+    var srcName = langName(t.source) || (t.source ? t.source.toUpperCase() : '—');
+    document.getElementById('tt-source-badge').textContent =
+      'From: ' + srcName + (sourceSel.value === 'auto' ? ' · detected' : '');
+    document.getElementById('tt-target-badge').textContent = 'To: ' + t.targetName;
 
     var methodBadge = document.getElementById('tt-method-badge');
-    if (t.method && t.method !== 'none') { methodBadge.hidden = false; methodBadge.textContent = t.method; } else { methodBadge.hidden = true; }
+    if (t.method && t.method !== 'none' && t.method !== 'same-language') { methodBadge.hidden = false; methodBadge.textContent = t.method; } else { methodBadge.hidden = true; }
 
     var trEl = document.getElementById('tt-translation');
-    var translationText = t.translation || '';
-    trEl.textContent = translationText || '(no fluent translation available)';
-    var dir = (targetCode === 'ar' || targetCode === 'he') ? 'rtl' : 'ltr';
-    trEl.dir = dir; trEl.lang = t.targetLocale || targetCode;
+    trEl.textContent = t.translation || '(no fluent translation available)';
+    var dir = RTL_LANGS[t.target] ? 'rtl' : 'ltr';
+    trEl.dir = dir; trEl.lang = t.targetLocale || t.target;
     trEl.classList.toggle('rtl', dir === 'rtl');
 
-    document.getElementById('tt-original').innerHTML = '<b>You typed:</b> ' + escapeHtml(originalText) + ' &nbsp;·&nbsp; <b>Source:</b> ' + escapeHtml(srcName);
+    document.getElementById('tt-original').innerHTML = '<b>You typed:</b> ' + escapeHtml(originalText);
     document.getElementById('tt-note').textContent = t.note || '';
 
-    // Listen setup
+    // Listen setup — voice list follows the new target language.
     if (synth) {
-      var ok = populateVoices(t.targetLocale || targetCode);
+      var ok = populateVoices(t.targetLocale || t.target);
       if (!ok) {
         ttsNote.style.display = 'block';
         ttsNote.textContent = 'No text-to-speech voice is installed for ' + t.targetName + ' in this browser, so playback is unavailable. The translation and grading still work — nothing is faked.';
@@ -363,11 +512,10 @@ foreach ($languages as $l) {
       stopBtn.disabled = true;
     }
 
-    // Practice setup
+    // Practice reset.
     transcriptInput.value = ''; feedback.hidden = true; retryBtn.hidden = true; micStatus.textContent = '';
     syncMicState();
     pushHistory(t, originalText);
-    resultCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
   function showError(msg) {
@@ -377,21 +525,30 @@ foreach ($languages as $l) {
     ttsNote.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
-  // ---- Session history ---------------------------------------------------
+  // ---- Session history -----------------------------------------------------
   var historyPanel = document.getElementById('tt-history-panel');
   var historyBox = document.getElementById('tt-history');
   function pushHistory(t, originalText) {
     historyPanel.hidden = false;
+    var srcAtSubmit = sourceSel.value;
+    var tgtAtSubmit = targetSel.value;
     var row = document.createElement('div');
     row.className = 'row';
     row.innerHTML = '<span><b>' + escapeHtml(originalText) + '</b> <span class="dim">→ ' + escapeHtml(t.translation || '—') + '</span></span><span class="dim">' + escapeHtml(t.targetName) + '</span>';
     row.addEventListener('click', function () {
-      input.value = originalText; targetSel.value = t.target;
-      render(t, originalText, t.target);
+      sourceSel.value = srcAtSubmit;
+      targetSel.value = tgtAtSubmit;
+      refreshChrome();
+      input.value = originalText;
+      countEl.textContent = originalText.length + ' / 500';
+      render(t, originalText);
     });
     historyBox.prepend(row);
   }
 
+  // ---- Init ----------------------------------------------------------------
+  recall();
+  refreshChrome();
   input.focus();
 })();
 </script>
