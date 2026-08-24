@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS sports_model_metrics (
 CREATE TABLE IF NOT EXISTS sports_daily_tickets (
   id INT AUTO_INCREMENT PRIMARY KEY,
   date DATE NOT NULL UNIQUE,
-  ticket_id VARCHAR(40) NULL,
+  ticket_id VARCHAR(36) NULL,
   status VARCHAR(32) NOT NULL,
   configuration_version INT NULL,
   candidates_evaluated INT NOT NULL DEFAULT 0,

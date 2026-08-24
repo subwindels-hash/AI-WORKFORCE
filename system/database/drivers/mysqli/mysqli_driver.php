@@ -262,6 +262,11 @@ class CI_DB_mysqli_driver extends CI_DB {
 			$database = $this->database;
 		}
 
+		if ($this->conn_id === FALSE)
+		{
+			return FALSE;
+		}
+
 		if ($this->conn_id->select_db($database))
 		{
 			$this->database = $database;
@@ -282,6 +287,10 @@ class CI_DB_mysqli_driver extends CI_DB {
 	 */
 	protected function _db_set_charset($charset)
 	{
+		if ($this->conn_id === FALSE)
+		{
+			return FALSE;
+		}
 		return $this->conn_id->set_charset($charset);
 	}
 
@@ -299,6 +308,11 @@ class CI_DB_mysqli_driver extends CI_DB {
 			return $this->data_cache['version'];
 		}
 
+		if ($this->conn_id === FALSE)
+		{
+			return '0.0.0';
+		}
+
 		return $this->data_cache['version'] = $this->conn_id->server_info;
 	}
 
@@ -312,6 +326,10 @@ class CI_DB_mysqli_driver extends CI_DB {
 	 */
 	protected function _execute($sql)
 	{
+		if ($this->conn_id === FALSE)
+		{
+			return FALSE;
+		}
 		return $this->conn_id->query($this->_prep_query($sql));
 	}
 
@@ -346,6 +364,10 @@ class CI_DB_mysqli_driver extends CI_DB {
 	 */
 	protected function _trans_begin()
 	{
+		if ($this->conn_id === FALSE)
+		{
+			return FALSE;
+		}
 		$this->conn_id->autocommit(FALSE);
 		return is_php('5.5')
 			? $this->conn_id->begin_transaction()
@@ -361,6 +383,10 @@ class CI_DB_mysqli_driver extends CI_DB {
 	 */
 	protected function _trans_commit()
 	{
+		if ($this->conn_id === FALSE)
+		{
+			return FALSE;
+		}
 		if ($this->conn_id->commit())
 		{
 			$this->conn_id->autocommit(TRUE);
@@ -379,6 +405,10 @@ class CI_DB_mysqli_driver extends CI_DB {
 	 */
 	protected function _trans_rollback()
 	{
+		if ($this->conn_id === FALSE)
+		{
+			return FALSE;
+		}
 		if ($this->conn_id->rollback())
 		{
 			$this->conn_id->autocommit(TRUE);
@@ -398,6 +428,10 @@ class CI_DB_mysqli_driver extends CI_DB {
 	 */
 	protected function _escape_str($str)
 	{
+		if ($this->conn_id === FALSE)
+		{
+			return addslashes($str);
+		}
 		return $this->conn_id->real_escape_string($str);
 	}
 
@@ -410,6 +444,10 @@ class CI_DB_mysqli_driver extends CI_DB {
 	 */
 	public function affected_rows()
 	{
+		if ($this->conn_id === FALSE)
+		{
+			return 0;
+		}
 		return $this->conn_id->affected_rows;
 	}
 
@@ -422,6 +460,10 @@ class CI_DB_mysqli_driver extends CI_DB {
 	 */
 	public function insert_id()
 	{
+		if ($this->conn_id === FALSE)
+		{
+			return 0;
+		}
 		return $this->conn_id->insert_id;
 	}
 
@@ -516,6 +558,11 @@ class CI_DB_mysqli_driver extends CI_DB {
 			);
 		}
 
+		if ($this->conn_id === FALSE)
+		{
+			return array('code' => -1, 'message' => 'Database connection failed');
+		}
+
 		return array('code' => $this->conn_id->errno, 'message' => $this->conn_id->error);
 	}
 
@@ -548,6 +595,10 @@ class CI_DB_mysqli_driver extends CI_DB {
 	 */
 	protected function _close()
 	{
+		if ($this->conn_id === FALSE)
+		{
+			return;
+		}
 		$this->conn_id->close();
 	}
 

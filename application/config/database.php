@@ -52,7 +52,7 @@ if ($driver === 'pdo_sqlite') {
         'dbdriver' => 'mysqli',
         'dbprefix' => '',
         'pconnect' => false,
-        'db_debug' => (getenv('AEGIS_DB_DEBUG') === '1'),
+        'db_debug' => false,
         'cache_on' => false,
         'cachedir' => '',
         'char_set' => 'utf8mb4',
