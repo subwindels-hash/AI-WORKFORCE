@@ -2,7 +2,7 @@
 <div class="page-head">
   <div>
     <h2>Strategy Lab</h2>
-    <p>Versioned strategies, evidence-gated lifecycle, realistic backtesting. Deploy to a paper account happens in the Paper Trading console (Phase 3).</p>
+    <p>Versioned strategies, an evidence-gated lifecycle and realistic backtests. Deploy to paper from the Paper Trading console.</p>
   </div>
 </div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>

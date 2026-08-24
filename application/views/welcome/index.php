@@ -5,20 +5,20 @@ $biasClass = static function (?string $bias): string {
 ?>
 <div class="page-head">
   <div>
-    <h2>AI Trading Intelligence</h2>
-    <p>Multi-agent market analysis with consensus, regime detection, structured trade proposals and mandatory risk review. Analysis-only — no orders from this page.</p>
+    <h2>AI Workforce</h2>
+    <p>Run multi-agent market analysis. Agents agree on a bias, the risk engine can veto a setup, and this page never places an order.</p>
   </div>
-  <div>
+  <div class="page-actions">
     <?php if (!empty($status['killSwitch']['active'])): ?>
-      <form method="post" action="/kill-switch" style="display:inline">
+      <form method="post" action="/kill-switch">
         <input type="hidden" name="active" value="0"><button class="btn small danger">Release kill switch</button>
       </form>
     <?php else: ?>
-      <form method="post" action="/kill-switch" style="display:inline">
+      <form method="post" action="/kill-switch">
         <input type="hidden" name="active" value="1"><button class="btn small danger">Activate kill switch</button>
       </form>
     <?php endif; ?>
-    <form method="post" action="/mode" style="display:inline">
+    <form method="post" action="/mode" class="inline">
       <select name="mode" class="sel">
         <?php foreach (['ANALYSIS_ONLY', 'PAPER_TRADING', 'HUMAN_APPROVAL', 'SEMI_AUTONOMOUS', 'FULLY_AUTOMATED'] as $m): ?>
           <option value="<?= $m ?>" <?= $status['tradingMode'] === $m ? 'selected' : '' ?>><?= $m ?></option>
@@ -33,8 +33,9 @@ $biasClass = static function (?string $bias): string {
 <?php if (!empty($modeError)): ?><div class="notice err"><?= e($modeError) ?></div><?php endif; ?>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 
-<div class="panel" style="margin-bottom:12px">
-  <div class="body" style="padding-top:12px">
+<div class="panel" style="margin-bottom:16px">
+  <h3>Start using AI</h3>
+  <div class="body">
     <form method="post" class="inline" action="/analysis">
       <label class="fld">Symbol
         <select name="symbol" class="sel">
@@ -50,14 +51,14 @@ $biasClass = static function (?string $bias): string {
           <?php foreach ($timeframes as $tf): ?><option value="<?= $tf ?>" <?= $timeframe === $tf ? 'selected' : '' ?>><?= $tf ?></option><?php endforeach; ?>
         </select>
       </label>
-      <button class="btn primary" type="submit">▶ Run analysis</button>
-      <span class="dim" style="font-size:11px">~5 agents · consensus · regime · setup · risk veto</span>
+      <button class="btn primary" type="submit">Start using AI</button>
     </form>
+    <p class="dim" style="margin-top:10px;font-size:12.5px">Five agents produce a consensus, a regime read, a setup and a risk decision.</p>
   </div>
 </div>
 
 <?php if (!empty($watch)): ?>
-<div class="panel" style="margin-bottom:12px">
+<div class="panel" style="margin-bottom:16px">
   <h3>Watchlist consensus · <?= e($timeframe) ?></h3>
   <div class="body wl-list">
     <?php foreach ($watch as $w): ?>
@@ -264,7 +265,9 @@ $biasClass = static function (?string $bias): string {
     </div>
   </div>
 <?php else: ?>
-  <div class="panel"><div class="body" style="padding:30px;text-align:center;color:var(--dim)">
-    Select a symbol and run the analysis — agents, consensus, regime, scenarios and a risk-reviewed trade proposal will render here.
-  </div></div>
+  <div class="panel">
+    <div class="empty-state">
+      <p>Choose a symbol above and start using AI. Consensus, regime, signals and a risk-reviewed proposal will appear here.</p>
+    </div>
+  </div>
 <?php endif; ?>

@@ -15,8 +15,8 @@
         <img src="/assets/images/windels-mark.png" alt="" class="auth-brand-mark" onerror="this.onerror=null;this.src='/assets/images/aegis-mark.png'">
         <span class="auth-brand-text">WINDELS AI Workforce</span>
       </div>
-      <h1><?= $admin ? 'Administrator sign in' : 'Welcome back' ?></h1>
-      <p class="auth-sub"><?= $admin ? 'Restricted access for platform administrators.' : 'Sign in to continue to your account.' ?></p>
+      <h1><?= $admin ? 'Administrator sign in' : 'Sign in' ?></h1>
+      <p class="auth-sub"><?= $admin ? 'Restricted access for platform administrators.' : 'Sign in to open your WINDELS workspace.' ?></p>
 
       <?php if (!empty($error)): ?><div class="notice err auth-notice" role="alert"><?= e($error) ?></div><?php endif; ?>
       <?php if (!empty($notice)): ?><div class="notice ok auth-notice" role="status"><?= e($notice) ?></div><?php endif; ?>

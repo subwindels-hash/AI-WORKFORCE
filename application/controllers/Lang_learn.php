@@ -10,7 +10,7 @@ class Lang_learn extends App_Controller
 {
     public function index()
     {
-        $data = $this->base('Languages');
+        $data = $this->base('Language Learning');
         $user = $this->sessionUser();
         $data['user'] = $user;
         $data['languages'] = $this->platform->langlearn->languages();
@@ -190,7 +190,7 @@ class Lang_learn extends App_Controller
     public function conversation(int $profileId)
     {
         $user = $this->requireUser();
-        $data = $this->base('Conversation');
+        $data = $this->base('AI Conversations');
         try { $data['scenarios'] = $this->platform->langteacher->conversations((int) $user['id'], $profileId); }
         catch (Throwable $e) { $data['scenarios'] = []; }
         $data['profileId'] = $profileId;

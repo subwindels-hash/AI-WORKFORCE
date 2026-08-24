@@ -1,8 +1,8 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed'); ?>
 <div class="page-head">
   <div>
-    <h2>Trade Journal &amp; Performance Analytics</h2>
-    <p>Every backtest and paper trade is journaled with fees, reason and confidence — the basis for “do high-confidence decisions actually perform better?”</p>
+    <h2>Analytics</h2>
+    <p>Every backtest and paper trade is journaled with fees, reason and confidence so you can see whether high-confidence decisions actually perform better.</p>
   </div>
   <div class="inline">
     <?php foreach (['strategy' => 'By strategy', 'symbol' => 'By symbol', 'market' => 'By market', 'source' => 'By source', 'confidence' => 'By confidence'] as $k => $label): ?>

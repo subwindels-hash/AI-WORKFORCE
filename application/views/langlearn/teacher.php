@@ -24,7 +24,7 @@ $localeMap = $locales ?? [];
 .tt-swap { width: 40px; height: 38px; display: grid; place-items: center; border: 1px solid var(--line2); border-radius: var(--radius-sm); background: var(--panel2); color: var(--muted); cursor: pointer; transition: color .15s, border-color .15s, transform .2s; }
 .tt-swap:hover { color: #fff; border-color: var(--brand); }
 .tt-swap:active { transform: rotate(180deg); }
-.tt-swap svg { width: 17px; height: 17px; }
+.tt-swap svg { width: 18px; height: 18px; }
 .tt-panes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
 .tt-pane { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel2); padding: 14px; min-width: 0; }
 .tt-pane-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px; margin-bottom: 8px; }
@@ -33,7 +33,7 @@ $localeMap = $locales ?? [];
 .tt-input { width: 100%; min-height: 96px; resize: vertical; background: #0b1119; color: var(--text); border: 1px solid var(--line2); border-radius: var(--radius-sm); padding: 10px 12px; font: inherit; font-size: 14px; line-height: 1.5; outline: none; }
 .tt-input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
 .tt-input.rtl { direction: rtl; text-align: right; }
-.tt-input-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }
+.tt-input-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }
 .tt-count { font-size: 11px; color: var(--dim); }
 .tt-translation { font-size: clamp(18px, 2.6vw, 24px); font-weight: 700; color: #fff; line-height: 1.35; margin: 4px 0 2px; word-break: break-word; }
 .tt-translation.rtl { direction: rtl; text-align: right; }
@@ -70,8 +70,11 @@ $localeMap = $locales ?? [];
 
 <div class="page-head">
   <div>
-    <h2>AI Language Teacher — WINDELS AI WORKFORCE</h2>
-    <p>Automatic language detection, intelligent translation, real TTS voices with correct locales, and target-language protection — your target only changes when you explicitly select it.</p>
+    <h2>AI Language Teacher</h2>
+    <p>Type a sentence, hear the correct pronunciation, and keep your target language until you change it.</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/app/languages">My languages</a>
   </div>
 </div>
 
@@ -79,17 +82,14 @@ $localeMap = $locales ?? [];
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 <div class="notice warnbox" id="tts-note" style="display:none"></div>
 
-<!-- Target Language Banner + Easy Switching -->
 <section class="panel">
-  <h3>Target Language Management</h3>
-  <div class="body" style="padding-top:14px">
+  <h3>Session</h3>
+  <div class="body">
     <div class="tt-header">
       <div class="tt-target-banner" id="target-banner">
-        <span>TARGET LANGUAGE:</span> <b id="target-banner-name">Dutch</b> <span class="badge b-sky" id="target-banner-locale">nl-NL</span>
-        <span class="dim" style="font-size:11px;margin-left:8px">Changes only on explicit selection</span>
+        <span>Target</span> <b id="target-banner-name">Dutch</b> <span class="badge b-sky" id="target-banner-locale">nl-NL</span>
       </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <span class="dim" style="font-size:11px">Quick switch:</span>
+      <div class="page-actions">
         <button class="btn small" type="button" data-quick="nl">Dutch</button>
         <button class="btn small" type="button" data-quick="es">Spanish</button>
         <button class="btn small" type="button" data-quick="it">Italian</button>
@@ -98,38 +98,26 @@ $localeMap = $locales ?? [];
         <button class="btn small" type="button" data-quick="de">German</button>
       </div>
     </div>
-    <p class="dim" style="font-size:11px;margin:0 0 10px">The flow: USER TYPES MESSAGE → DETECT INPUT LANGUAGE → COMPARE WITH TARGET LANGUAGE → SAME? Continue lesson. DIFFERENT? Translate/Explain/Correct → Continue learning. Target does NOT auto-change when you type another language for translation.</p>
-  </div>
-</section>
-
-<!-- Learning Modes -->
-<section class="panel" style="margin-top:14px">
-  <h3>Learning Experience Modes</h3>
-  <div class="body" style="padding-top:14px">
-    <div class="tt-modes" id="mode-selector">
-      <button class="tt-mode active" data-mode="conversation">Conversation Mode</button>
-      <button class="tt-mode" data-mode="translation">Translation Mode</button>
-      <button class="tt-mode" data-mode="learning">Learning Mode</button>
-      <button class="tt-mode" data-mode="correction">Correction Mode</button>
-      <button class="tt-mode" data-mode="vocabulary">Vocabulary Mode</button>
-      <button class="tt-mode" data-mode="grammar">Grammar Mode</button>
+    <div class="tt-modes" id="mode-selector" style="margin:12px 0 0">
+      <button class="tt-mode active" data-mode="conversation">Conversation</button>
+      <button class="tt-mode" data-mode="translation">Translation</button>
+      <button class="tt-mode" data-mode="learning">Learning</button>
+      <button class="tt-mode" data-mode="correction">Correction</button>
+      <button class="tt-mode" data-mode="vocabulary">Vocabulary</button>
+      <button class="tt-mode" data-mode="grammar">Grammar</button>
     </div>
-    <div id="mode-desc" class="tt-explain">Conversation Mode: Type naturally in your target language. AI responds in target, continues lesson. If you type another language, it translates to target + explains.</div>
+    <div id="mode-desc" class="tt-explain">Conversation: type naturally in your target language. If you type another language, you get a translation and an explanation — the target stays put.</div>
+    <div class="tt-lesson" id="lesson-example" style="margin:12px 0 0;padding:12px">
+      <h3 style="margin:0 0 6px;font-size:13px">Try this in <span id="lesson-target">Dutch</span></h3>
+      <p style="margin:0">AI: <b id="lesson-ai">Hallo! Hoe gaat het met je?</b> <button class="btn small" type="button" id="lesson-listen">Listen</button></p>
+      <div class="tt-explain" id="lesson-explain" style="margin-top:8px">Type in English and the teacher will translate into the target language without switching it.</div>
+    </div>
   </div>
 </section>
 
-<!-- AI Teacher Lesson Example -->
-<section class="tt-lesson" id="lesson-example">
-  <h3>Today's Lesson: Basic Conversation — <span id="lesson-target">Dutch</span></h3>
-  <p>AI Teacher: <b id="lesson-ai">Hallo! Hoe gaat het met je?</b> <button class="btn small" type="button" id="lesson-listen">🔊 Listen</button></p>
-  <div class="tt-explain" id="lesson-explain" style="margin-top:10px">
-    <b>Flow:</b> User types English "Hello, how are you?" → System detects English → Dutch translation: <b>Hallo! Hoe gaat het met je?</b> [🔊 Listen] → Explanation: "Hoe gaat het met je?" means "How are you?" — common way to ask. → Continue lesson in Dutch.
-  </div>
-</section>
-
-<section class="panel">
-  <h3>Translate &amp; Learn</h3>
-  <div class="body" style="padding-top:14px">
+<section class="panel" style="margin-top:16px">
+  <h3>Translate &amp; learn</h3>
+  <div class="body">
 
     <!-- Two-sided language selection -->
     <div class="tt-swapbar">
@@ -167,9 +155,7 @@ $localeMap = $locales ?? [];
             <span class="tt-count" id="tt-count">0 / 500</span>
             <button class="btn primary" type="submit" id="tt-submit">Translate &amp; Learn</button>
           </div>
-          <div class="tt-explain" style="margin-top:10px">
-            <b>Auto-detection:</b> System detects your input language, compares with target (<span id="explain-target">Dutch</span>). Same? Continue lesson. Different? Translate + explain, keep target unchanged.
-          </div>
+          <p class="dim" style="margin-top:10px;font-size:12.5px">Detected input is compared with <span id="explain-target">Dutch</span>. A different language is translated — the target does not change.</p>
         </div>
 
         <div class="tt-pane">
@@ -240,23 +226,23 @@ $localeMap = $locales ?? [];
   </div>
 </section>
 
-<section class="panel" id="tt-history-panel" hidden>
-  <h3>This session — translation history</h3>
-  <div class="body scroll" style="padding-top:12px">
+<section class="panel" id="tt-history-panel" hidden style="margin-top:16px">
+  <h3>This session</h3>
+  <div class="body scroll">
     <div class="tt-history" id="tt-history"></div>
-    <p class="dim" style="font-size:11px;margin-top:10px">Tap a row to reload. Target language stays unchanged unless you explicitly select a new one.</p>
+    <p class="dim" style="font-size:12px;margin-top:10px">Tap a row to reload it. The target language stays until you change it.</p>
   </div>
 </section>
 
-<section class="panel">
-  <h3>Continue learning — all modes</h3>
-  <div class="body" style="padding-top:12px">
-    <p class="dim" style="font-size:12px">The AI Teacher is your instant translator with voice. For structured study, your modules remain available. Target language only changes on explicit selection.</p>
-    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
-      <a class="btn" href="/app/languages">My languages &amp; catalog</a>
-      <a class="btn" href="/app/languages/l/1">Listening practice</a>
-      <a class="btn" href="/app/languages/s/1">Speaking practice</a>
-      <a class="btn" href="/app/languages/v/1">Vocabulary (SRS)</a>
+<section class="panel" style="margin-top:16px">
+  <h3>Continue studying</h3>
+  <div class="body">
+    <p class="dim" style="font-size:13.5px;margin-bottom:12px">Structured practice lives on your language profile. The teacher stays available for instant translation and voice.</p>
+    <div class="page-actions">
+      <a class="btn" href="/app/languages">My languages</a>
+      <a class="btn" href="/app/languages/l/1">Listening</a>
+      <a class="btn" href="/app/languages/s/1">Speaking</a>
+      <a class="btn" href="/app/languages/v/1">Vocabulary</a>
       <a class="btn" href="/app/languages/conv/1">Conversation</a>
     </div>
   </div>

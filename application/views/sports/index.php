@@ -16,7 +16,7 @@ $disabled = ($sys['ticketEngine'] ?? '') === 'DISABLED_NO_PROVIDER';
 <div class="page-head">
   <div>
     <h2>Sports Intelligence — daily ticket engine</h2>
-    <p>Everything below is computed from <b>stored</b> provider data only: fixtures, pre-kickoff odds, verified results and settled tickets. No provider configured → the module stays <b>DISABLED_NO_PROVIDER</b> and fabricates nothing.</p>
+    <p>Daily ticket research from stored fixtures, odds and settled results. With no provider the module stays DISABLED_NO_PROVIDER and fabricates nothing.</p>
   </div>
 </div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>

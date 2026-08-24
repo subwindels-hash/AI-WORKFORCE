@@ -15,7 +15,7 @@ class Workspace extends App_Controller
         $profiles = [];
         try { $profiles = $this->platform->langlearn->profiles((int) $user['id']); } catch (Throwable $e) { $profiles = []; }
         $data = [
-            'title' => 'Your workspace',
+            'title' => 'Dashboard',
             'active' => 'home',
             'user' => $user,
             'admin' => $this->isAdmin($user),

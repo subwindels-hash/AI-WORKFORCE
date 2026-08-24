@@ -8,13 +8,12 @@ $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
 <div class="page-head">
   <div>
     <h2>Welcome back, <?= e($first) ?></h2>
-    <p>Everything is one click away in the sidebar — this page is your overview.</p>
+    <p>An overview of your workspace. Open a module from the sidebar when you need the full tool.</p>
   </div>
 </div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 
-<!-- KPI row: every value reflects real records; each card opens its section -->
 <div class="grid four">
   <a class="kp-card" href="/analysis">
     <div class="kp-top"><div class="k">AI workforce runs</div><div class="kp-ic"><?= $ic ?><rect x="4" y="6" width="16" height="13" rx="2"/><path d="M9 12h.01M15 12h.01M9 16h6"/></svg></div></div>
@@ -46,7 +45,7 @@ $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
         <div class="empty-state">
           <?= $ic ?><rect x="4" y="6" width="16" height="13" rx="2"/><path d="M12 2v4"/></svg>
           <p>No analysis runs stored yet.</p>
-          <p style="margin-top:8px"><a class="btn primary" href="/analysis">Run your first analysis</a></p>
+          <p style="margin-top:12px"><a class="btn primary" href="/analysis">Run your first analysis</a></p>
         </div>
       <?php else: ?>
         <table class="tbl">
@@ -71,8 +70,8 @@ $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
     <h3><?= $ic ?><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg> Notifications</h3>
     <div class="body">
       <?php if (!$notes): ?>
-        <div class="empty-state" style="padding:18px">
-          <p style="margin:0">Nothing in your inbox yet.</p>
+        <div class="empty-state" style="padding:20px">
+          <p>Nothing in your inbox yet.</p>
         </div>
       <?php else: ?>
         <div class="feed">

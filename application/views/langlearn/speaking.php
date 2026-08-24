@@ -3,7 +3,7 @@
 $lcodes = ['nl' => 'nl-NL', 'es' => 'es-ES', 'fr' => 'fr-FR', 'de' => 'de-DE', 'it' => 'it-IT', 'pt' => 'pt-PT', 'en' => 'en-GB', 'sw' => 'sw-KE', 'yo' => 'yo-NG', 'ig' => 'ig-NG', 'ha' => 'ha-NG', 'af' => 'af-ZA', 'zu' => 'zu-ZA', 'ar' => 'ar-SA', 'zh' => 'zh-CN', 'ja' => 'ja-JP', 'ko' => 'ko-KR', 'ru' => 'ru-RU', 'hi' => 'hi-IN', 'tr' => 'tr-TR'];
 $locale = $lcodes[$langCode ?? 'en'] ?? 'en-GB';
 ?>
-<div class="page-head"><div><h2>Speaking practice — WINDELS AI WORKFORCE</h2><p>Say the prompt aloud. Uses SpeechProvider abstraction (speechToText) with correct locale <?= e($locale) ?>. Real transcript from browser engine, word accuracy only, never invented pronunciation scores. Listen, replay, stop, speed control supported.</p></div></div>
+<div class="page-head"><div><h2>Speaking practice</h2><p>Say the prompt aloud. The browser captures a real transcript in <?= e($locale) ?>. You get word accuracy only — pronunciation scores are never invented.</p></div></div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 <div class="notice warnbox" id="stt-missing" style="display:none"></div>

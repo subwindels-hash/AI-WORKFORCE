@@ -2,7 +2,7 @@
 <div class="page-head">
   <div>
     <h2><?= e($language['name']) ?> <span class="dim"><?= e($language['native_name']) ?></span></h2>
-    <p><?= e(strtoupper($language['direction'])) ?> · <?= e($language['writing_system']) ?> script · goal: <?= e($profile['goal'] ?: 'not set') ?> · explanations in <?= e(strtoupper($profile['explanation_language'])) ?></p>
+    <p>Progress from real activity only. <?= e(strtoupper($language['direction'])) ?> · <?= e($language['writing_system']) ?> · explanations in <?= e(strtoupper($profile['explanation_language'])) ?>.</p>
   </div>
 </div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>

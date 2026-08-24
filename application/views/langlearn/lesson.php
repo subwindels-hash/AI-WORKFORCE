@@ -3,7 +3,7 @@ $profile = $lessonView['module'] ?? null;
 $langCode = $profile['language_code'] ?? 'en';
 $locale = \Aegis\LangLearn\Translator::LOCALES[$langCode] ?? 'en-GB';
 ?>
-<div class="page-head"><div><h2>AI Lesson — <?= e($langCode) ?> (<?= e($locale) ?>)</h2><p>Explain → examples with 🔊 Listen → practice → feedback. Completing the practice (≥75%) completes the module. Voice uses real TTS with correct locale.</p></div></div>
+<div class="page-head"><div><h2>Lesson</h2><p>Explanation, examples you can listen to, then practice. Completing the practice at 75% or more finishes the module.</p></div></div>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 <?php if (!empty($lessonView)): $L = $lessonView['lesson']; ?>
   <div class="panel">

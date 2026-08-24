@@ -2,7 +2,7 @@
 <section class="page-hero">
   <p class="kicker">About us</p>
   <h1>Built as one product, not a pile of screens</h1>
-  <p class="lede">WINDELS AI WORKFORCE is the public website for this intelligence platform. The same CodeIgniter application serves visitors, members and administrators — with different layouts and different gates.</p>
+  <p class="lede">WINDELS AI WORKFORCE is one application for visitors, members and administrators — with different layouts and different gates.</p>
 </section>
 <section class="band">
   <div class="split">

@@ -1,5 +1,5 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed'); ?>
-<div class="page-head"><div><h2>Today's plan &amp; AI insights</h2><p>The plan is built from your real state (due reviews, path position, measured weak areas) and sized to your daily minutes. Done markers come from today's actual activity — nothing is assumed.</p></div></div>
+<div class="page-head"><div><h2>Today’s plan</h2><p>Built from due reviews, your current module and measured weak areas. Done markers come from today’s activity only.</p></div></div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 

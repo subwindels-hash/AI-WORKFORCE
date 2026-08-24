@@ -1,11 +1,8 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed'); ?>
 <div class="page-head">
   <div>
-    <h2>Broker Center</h2>
-    <p>Phase 4/5: connector health and capability. The MT5 connector routes orders only when
-      <span class="mono">AEGIS_MT5_TRADING_ENABLED=1</span> AND the deployed bridge reports
-      <span class="mono">tradingEnabled=true</span> AND the account is <b>demo</b> (unless live is explicitly allowed).
-      Untested integrations are listed as PLANNED — never as working.</p>
+    <h2>Brokers</h2>
+    <p>Connector health and capability. Untested integrations stay marked planned. MT5 routing needs an enabled bridge, tradingEnabled=true and a demo account unless live is explicitly allowed.</p>
   </div>
 </div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>

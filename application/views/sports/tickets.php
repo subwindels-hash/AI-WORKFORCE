@@ -4,8 +4,8 @@ $perf = $performance ?? [];
 ?>
 <div class="page-head">
   <div>
-    <h2>Sports tickets — console &amp; history</h2>
-    <p>Generated tickets, their approval state and stored settlements. Approve/reject requires <b>sports.approve</b>, settlement requires <b>sports.settle</b>; every action is audited with the acting identity. <b>No external execution exists in this deployment.</b></p>
+    <h2>Sports tickets</h2>
+    <p>Generated tickets, approval state and stored settlements. Approve, reject and settle stay permission-gated. This deployment has no external bookmaker.</p>
   </div>
 </div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>

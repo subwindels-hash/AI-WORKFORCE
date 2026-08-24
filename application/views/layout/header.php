@@ -91,8 +91,8 @@ $isActive = function(array $keys) use ($active): bool {
 <header class="topbar" id="dashboard-header">
   <div class="topbar-left">
     <div class="nav-controls" aria-label="Dashboard navigation history">
-      <button id="dash-back" class="btn small ghost" type="button" aria-label="Go back" disabled title="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg> Back</button>
-      <button id="dash-forward" class="btn small ghost" type="button" aria-label="Go forward" disabled title="Forward">Forward <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg></button>
+      <button id="dash-back" class="btn small ghost" type="button" aria-label="Go back" disabled title="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg> Back</button>
+      <button id="dash-forward" class="btn small ghost" type="button" aria-label="Go forward" disabled title="Forward">Forward <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg></button>
     </div>
     <div class="brand">
       <h1 id="page-title"><?= e($pageTitle) ?></h1>
@@ -111,10 +111,10 @@ $isActive = function(array $keys) use ($active): bool {
         <span class="who"><b><?= e($userName) ?></b><span><?= $isAdmin ? 'Administrator' : 'Member' ?></span></span>
       </button>
       <div class="profile-menu" id="profile-menu" role="menu">
-        <a href="/account" role="menuitem" data-dashboard-link><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg> Account &amp; settings</a>
-        <a href="/account#security" role="menuitem" data-dashboard-link><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg> Security</a>
-        <a href="/notifications" role="menuitem" data-dashboard-link><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg> Notifications<?php if ($unread > 0): ?> (<?= (int)$unread ?>)<?php endif; ?></a>
-        <?php if ($isAdmin): ?><a href="/admin" role="menuitem" data-dashboard-link><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5z"/></svg> Admin control</a><?php endif; ?>
+        <a href="/account" role="menuitem" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg> Account &amp; settings</a>
+        <a href="/account#security" role="menuitem" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg> Security</a>
+        <a href="/notifications" role="menuitem" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg> Notifications<?php if ($unread > 0): ?> (<?= (int)$unread ?>)<?php endif; ?></a>
+        <?php if ($isAdmin): ?><a href="/admin" role="menuitem" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5z"/></svg> Admin control</a><?php endif; ?>
         <div class="sep"></div>
         <?php if ($identity): ?>
           <form method="post" action="/logout">

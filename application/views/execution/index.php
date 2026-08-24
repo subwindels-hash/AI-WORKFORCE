@@ -1,10 +1,8 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed'); ?>
 <div class="page-head">
   <div>
-    <h2>Execution Center — Trade Execution Supervisor</h2>
-    <p>Phase 5: every broker-bound intent runs the 15-step pipeline
-      (kill switch → mode → strategy → broker → session → freshness → duplicates → symbol permissions → margin → risk engine → limits → approval → route → confirm → audit → portfolio update).
-      Only the supervisor routes orders, and only through a connector with <b>verified</b> order submission.</p>
+    <h2>Execution</h2>
+    <p>Every broker-bound intent runs the 15-step supervisor. Only a connector with verified order submission can route an order.</p>
   </div>
 </div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
