@@ -70,3 +70,14 @@ CREATE TABLE IF NOT EXISTS user_vocabulary (
  UNIQUE(profile_id, vocabulary_id)
 );
 CREATE INDEX IF NOT EXISTS idx_user_vocabulary_due ON user_vocabulary(profile_id, next_review_at);
+CREATE TABLE IF NOT EXISTS listening_attempts (
+ id TEXT PRIMARY KEY, profile_id INTEGER NOT NULL, user_id INTEGER NOT NULL, language_code TEXT NOT NULL,
+ exercise_item_id TEXT NOT NULL, mode TEXT NOT NULL, score_pct REAL, passed INTEGER, detail TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_listening_profile ON listening_attempts(profile_id, created_at);
+CREATE TABLE IF NOT EXISTS speaking_attempts (
+ id TEXT PRIMARY KEY, profile_id INTEGER NOT NULL, user_id INTEGER NOT NULL, language_code TEXT NOT NULL,
+ prompt_text TEXT NOT NULL, transcript TEXT, word_accuracy_pct REAL, exact_match INTEGER NOT NULL DEFAULT 0,
+ provider TEXT NOT NULL DEFAULT 'none', detail TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_speaking_profile ON speaking_attempts(profile_id, created_at);

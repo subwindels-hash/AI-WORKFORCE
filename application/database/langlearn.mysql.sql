@@ -170,3 +170,36 @@ CREATE TABLE IF NOT EXISTS user_vocabulary (
   UNIQUE KEY uq_user_vocabulary (profile_id, vocabulary_id),
   KEY idx_user_vocabulary_due (profile_id, next_review_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Phase 4 (listening/speaking): attempts are REAL records — listening graded
+-- against bank answers; speaking graded against the actual transcript the
+-- speech provider returned. Pronunciation/fluency scores are NEVER stored:
+-- they require a pronunciation-assessment provider (not configured).
+CREATE TABLE IF NOT EXISTS listening_attempts (
+  id              VARCHAR(36) PRIMARY KEY,
+  profile_id      INT NOT NULL,
+  user_id         INT NOT NULL,
+  language_code   VARCHAR(8) NOT NULL,
+  exercise_item_id VARCHAR(20) NOT NULL,        -- bank reading item id
+  mode            VARCHAR(14) NOT NULL,          -- comprehension|transcription
+  score_pct       DECIMAL(5,2) NULL,
+  passed          TINYINT(1) NULL,
+  detail          LONGTEXT NOT NULL,             -- question/transcript given vs expected, similarity
+  created_at      VARCHAR(32) NOT NULL,
+  KEY idx_listening_profile (profile_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS speaking_attempts (
+  id              VARCHAR(36) PRIMARY KEY,
+  profile_id      INT NOT NULL,
+  user_id         INT NOT NULL,
+  language_code   VARCHAR(8) NOT NULL,
+  prompt_text     VARCHAR(400) NOT NULL,
+  transcript      TEXT NULL,                     -- exactly what the speech provider returned
+  word_accuracy_pct DECIMAL(5,2) NULL,           -- real: expected words present in transcript
+  exact_match     TINYINT(1) NOT NULL DEFAULT 0,
+  provider        VARCHAR(24) NOT NULL DEFAULT 'none',  -- browser_webspeech|none|…
+  detail          LONGTEXT NOT NULL,
+  created_at      VARCHAR(32) NOT NULL,
+  KEY idx_speaking_profile (profile_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

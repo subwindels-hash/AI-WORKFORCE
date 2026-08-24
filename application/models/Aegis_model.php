@@ -653,6 +653,39 @@ class Aegis_model extends CI_Model
                 return $rows;
             }
 
+            public function saveListeningAttempt(array $a): array {
+                $row = $a;
+                $row['detail'] = json_encode($a['detail'] ?? []);
+                $this->db->insert('listening_attempts', $row);
+                $row['detail'] = $a['detail'] ?? [];
+                return $row;
+            }
+            public function listListeningAttempts(int $profileId, int $limit = 20): array {
+                $rows = $this->db->where('profile_id', $profileId)->order_by('created_at', 'DESC')
+                    ->limit(max(1, min(100, $limit)))->get('listening_attempts')->result_array();
+                foreach ($rows as &$r) {
+                    $r['detail'] = json_decode((string) $r['detail'], true) ?: [];
+                    if ($r['score_pct'] !== null) $r['score_pct'] = (float) $r['score_pct'];
+                }
+                return $rows;
+            }
+            public function saveSpeakingAttempt(array $a): array {
+                $row = $a;
+                $row['detail'] = json_encode($a['detail'] ?? []);
+                $this->db->insert('speaking_attempts', $row);
+                $row['detail'] = $a['detail'] ?? [];
+                return $row;
+            }
+            public function listSpeakingAttempts(int $profileId, int $limit = 20): array {
+                $rows = $this->db->where('profile_id', $profileId)->order_by('created_at', 'DESC')
+                    ->limit(max(1, min(100, $limit)))->get('speaking_attempts')->result_array();
+                foreach ($rows as &$r) {
+                    $r['detail'] = json_decode((string) $r['detail'], true) ?: [];
+                    if ($r['word_accuracy_pct'] !== null) $r['word_accuracy_pct'] = (float) $r['word_accuracy_pct'];
+                }
+                return $rows;
+            }
+
             public function upsertProgress(array $row): void {
                 $keys = ['profile_id' => $row['profile_id'], 'skill' => $row['skill'], 'source' => $row['source']];
                 $exists = $this->db->from('language_progress')->where($keys)->count_all_results() > 0;

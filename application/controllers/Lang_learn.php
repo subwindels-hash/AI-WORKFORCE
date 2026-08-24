@@ -312,6 +312,65 @@ class Lang_learn extends MY_Controller
         redirect('/app/languages/v/' . $profileId);
     }
 
+    // ================= PHASE 4: LISTENING + SPEAKING PAGES =================
+
+    public function listening(int $profileId)
+    {
+        $user = $this->requireUser();
+        $data = $this->base('Listening practice');
+        try { $data['listening'] = $this->platform->audiopractice->listeningExercises((int) $user['id'], $profileId); }
+        catch (Throwable $e) { $data['listening'] = ['available' => false, 'exercises' => [], 'note' => $e->getMessage()]; }
+        try { $data['history'] = $this->platform->audiopractice->listeningHistory((int) $user['id'], $profileId); }
+        catch (Throwable $e) { $data['history'] = []; }
+        $data['profileId'] = $profileId;
+        $data['langCode'] = $this->platform->model->langlearn->findProfile($profileId)['language_code'] ?? 'en';
+        $this->render($data, 'langlearn/listening');
+    }
+
+    public function listening_attempt(int $profileId)
+    {
+        $user = $this->requireUser();
+        $mode = (string) $this->input->post('mode');
+        try {
+            $answer = $mode === 'comprehension' ? (int) $this->input->post('answer') : (string) $this->input->post('transcript');
+            $res = $this->platform->audiopractice->submitListening((int) $user['id'], $profileId, (string) $this->input->post('itemId'), $mode, $answer);
+            $this->session->set_flashdata('llNotice', sprintf('Listening %s — %s%% · %s', $res['passed'] ? 'passed' : 'not passed', $res['scorePct'], $mode === 'comprehension' ? ('correct: ' . $res['detail']['expected']) : ('you wrote: ' . mb_substr((string) $res['detail']['given'], 0, 60))));
+        } catch (Throwable $e) {
+            $this->session->set_flashdata('llError', $e->getMessage());
+        }
+        redirect('/app/languages/l/' . $profileId);
+    }
+
+    public function speaking(int $profileId)
+    {
+        $user = $this->requireUser();
+        $data = $this->base('Speaking practice');
+        try { $data['speaking'] = $this->platform->audiopractice->speakingPrompts((int) $user['id'], $profileId); }
+        catch (Throwable $e) { $data['speaking'] = ['available' => false, 'prompts' => [], 'note' => $e->getMessage()]; }
+        try { $data['history'] = $this->platform->audiopractice->speakingHistory((int) $user['id'], $profileId); }
+        catch (Throwable $e) { $data['history'] = []; }
+        $data['profileId'] = $profileId;
+        $data['langCode'] = $this->platform->model->langlearn->findProfile($profileId)['language_code'] ?? 'en';
+        $this->render($data, 'langlearn/speaking');
+    }
+
+    public function speaking_attempt(int $profileId)
+    {
+        $user = $this->requireUser();
+        $transcript = $this->input->post('transcript');
+        try {
+            $res = $this->platform->audiopractice->submitSpeaking((int) $user['id'], $profileId, (string) $this->input->post('promptId'),
+                ($transcript === null || trim((string) $transcript) === '') ? null : (string) $transcript,
+                (string) ($this->input->post('provider') ?: 'browser_webspeech'));
+            $this->session->set_flashdata($res['scored'] ? 'llNotice' : 'llError',
+                $res['scored'] ? sprintf('Word accuracy %s%%%s — from your real transcript. Pronunciation scores are not available (no provider).', $res['wordAccuracyPct'], $res['exactMatch'] ? ' · exact match' : '')
+                : ($res['note'] ?? 'Attempt recorded without a transcript.'));
+        } catch (Throwable $e) {
+            $this->session->set_flashdata('llError', $e->getMessage());
+        }
+        redirect('/app/languages/s/' . $profileId);
+    }
+
     // ------------------------------------------------------------ helpers
 
     private function sessionUser(): ?array

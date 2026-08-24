@@ -231,6 +231,46 @@ class Api_lang_learning extends Api_controller
         catch (Throwable $e) { $this->fail($e); }
     }
 
+    // ================= PHASE 4: LISTENING + SPEAKING =================
+
+    public function listening_exercises(int $profileId)
+    {
+        if (!$this->guard(false)) return;
+        $user = $this->session->userdata('identity');
+        try { $this->json($this->platform->audiopractice->listeningExercises((int) $user['id'], $profileId, $this->input->get('level'), (int) ($this->input->get('limit') ?: 6))); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
+    public function listening_attempt(int $profileId)
+    {
+        $user = $this->guard();
+        if (!$user) return;
+        $body = $this->jsonBody();
+        if (!isset($body['itemId'], $body['mode'], $body['answer'])) {
+            return $this->jsonError('body must be {itemId, mode: comprehension|transcription, answer}');
+        }
+        try { $this->json($this->platform->audiopractice->submitListening((int) $user['id'], $profileId, (string) $body['itemId'], (string) $body['mode'], $body['answer']), 201); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
+    public function speaking_prompts(int $profileId)
+    {
+        if (!$this->guard(false)) return;
+        $user = $this->session->userdata('identity');
+        try { $this->json($this->platform->audiopractice->speakingPrompts((int) $user['id'], $profileId, $this->input->get('level'), (int) ($this->input->get('limit') ?: 6))); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
+    public function speaking_attempt(int $profileId)
+    {
+        $user = $this->guard();
+        if (!$user) return;
+        $body = $this->jsonBody();
+        if (!isset($body['promptId'])) return $this->jsonError('body must be {promptId, transcript?: string, provider?: string}');
+        try { $this->json($this->platform->audiopractice->submitSpeaking((int) $user['id'], $profileId, (string) $body['promptId'], $body['transcript'] ?? null, (string) ($body['provider'] ?? 'browser_webspeech')), 201); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
     // ================= PHASE 3: VOCABULARY =================
 
     public function vocabulary_catalog(int $profileId)

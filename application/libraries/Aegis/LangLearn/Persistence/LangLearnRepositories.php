@@ -61,6 +61,14 @@ interface LangLearnRepository
     /** @return array<int, array<string, mixed>> due first (or all when $dueOnly=false) */
     public function listUserVocabulary(int $profileId, bool $dueOnly = false, int $limit = 100): array;
 
+    // Phase 4 (listening/speaking)
+    public function saveListeningAttempt(array $attempt): array;
+    /** @return array<int, array<string, mixed>> */
+    public function listListeningAttempts(int $profileId, int $limit = 20): array;
+    public function saveSpeakingAttempt(array $attempt): array;
+    /** @return array<int, array<string, mixed>> */
+    public function listSpeakingAttempts(int $profileId, int $limit = 20): array;
+
     /** Upsert keyed on (profile_id, skill, source). */
     public function upsertProgress(array $row): void;
     /** @return array<int, array<string, mixed>> */

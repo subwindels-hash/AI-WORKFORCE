@@ -46,7 +46,7 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **Scheduled operations worker** (`php index.php tools cron`): portfolio scan, broker transitions, proposal expiry | **TESTED** |
 | MT4 / crypto-exchange / stock-broker connectors | **PLANNED** (added one at a time after MT5 is verified) |
 
-**182 automated tests** run through the real CodeIgniter stack
+**188 automated tests** run through the real CodeIgniter stack
 (`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
 sandbox — see below), plus 9 contract tests for the Python bridge
 (`python-services/mt5-bridge/.venv/bin/python -m pytest test_bridge.py`).
@@ -284,9 +284,20 @@ identically), flashcards are self-assessed and labeled as such, and
 vocabulary progress (learned / learning / due / average familiarity /
 mastery) is computed only from stored reviews.
 
-Phases 4–5 (listening/speaking with real providers, weakness detection,
-daily plans) follow the same honesty architecture: nothing is invented when a
-provider is missing.
+**Phase 4 — Listening + Speaking (complete, honest provider boundaries)**:
+listening exercises are built from the language's real reading bank — the
+browser's speech synthesis speaks the actual sentence (feature-detected; no
+voice → an honest notice, never fake audio) with slow/normal speeds, replay
+and show/hide transcript; attempts are graded server-side (comprehension
+against the bank answer, transcription by diacritic-tolerant word accuracy).
+Speaking practice prompts real sentences and captures the transcript through
+the browser's SpeechRecognition where available; word accuracy is computed
+from the transcript that was actually returned, an empty transcript is
+stored unscored, and **pronunciation/fluency scores are never produced** —
+they require a pronunciation-assessment provider that is not configured.
+
+Phase 5 (weakness detection, personalized daily plans, adaptive
+recommendations) follows the same honesty architecture.
 
 ### Phase 6 intelligence: agent debate + strategy optimizer
 
