@@ -158,6 +158,127 @@ class Aegis_model extends CI_Model
                 $now = gmdate('c'); $this->db->insert('sports_data_sources', ['provider_code' => $code, 'display_name' => $name, 'enabled' => 0, 'created_at' => $now, 'updated_at' => $now]);
                 return $this->db->get_where('sports_data_sources', ['id' => $this->db->insert_id()], 1)->row_array();
             }
+            public function listProviders(bool $enabledOnly = false): array { if ($enabledOnly) $this->db->where('enabled', 1); return $this->db->order_by('id', 'ASC')->get('sports_data_sources')->result_array(); }
+            public function setProviderEnabled(int $id, bool $enabled): void { $this->db->where('id', $id)->update('sports_data_sources', ['enabled' => $enabled ? 1 : 0, 'updated_at' => gmdate('c')]); }
+            public function listHealth(int $providerId, int $limit = 20): array { return $this->db->where('provider_id', $providerId)->order_by('observed_at', 'DESC')->limit(min(200, max(1, $limit)))->get('sports_provider_health')->result_array(); }
+            public function latestHealth(int $providerId): ?array { $row = $this->db->where('provider_id', $providerId)->order_by('observed_at', 'DESC')->limit(1)->get('sports_provider_health')->row_array(); if ($row) $row['missing_fields'] = json_decode((string) ($row['missing_fields'] ?: '[]'), true); return $row ?: null; }
+            public function findMatchById(int $id): ?array { $row = $this->db->get_where('sports_matches', ['id' => $id], 1)->row_array(); if ($row) $row['payload'] = json_decode((string) $row['payload'], true); return $row ?: null; }
+            public function listMatches(array $filter = [], int $limit = 200): array {
+                if (!empty($filter['status'])) $this->db->where('status', $filter['status']);
+                if (!empty($filter['from'])) $this->db->where('kickoff_at >=', $filter['from']);
+                if (!empty($filter['to'])) $this->db->where('kickoff_at <=', $filter['to']);
+                if (!empty($filter['competition'])) $this->db->like('competition', $filter['competition'], 'after');
+                if (!empty($filter['providerId'])) $this->db->where('provider_id', (int) $filter['providerId']);
+                $rows = $this->db->order_by('kickoff_at', 'ASC')->limit(min(1000, max(1, $limit)))->get('sports_matches')->result_array();
+                foreach ($rows as &$row) $row['payload'] = json_decode((string) $row['payload'], true);
+                return $rows;
+            }
+            public function latestOdds(int $matchId, ?string $market = null, ?string $selection = null): ?array {
+                $this->db->where('match_id', $matchId);
+                if ($market !== null) $this->db->where('market', $market);
+                if ($selection !== null) $this->db->where('selection', $selection);
+                $row = $this->db->order_by('observed_at', 'DESC')->limit(1)->get('sports_odds')->row_array();
+                if ($row) $row['payload'] = json_decode((string) $row['payload'], true);
+                return $row ?: null;
+            }
+            public function listOdds(int $matchId, int $limit = 50): array {
+                $rows = $this->db->where('match_id', $matchId)->order_by('observed_at', 'DESC')->limit(min(500, max(1, $limit)))->get('sports_odds')->result_array();
+                foreach ($rows as &$row) $row['payload'] = json_decode((string) $row['payload'], true);
+                return $rows;
+            }
+            public function latestQuality(int $matchId): ?array { $row = $this->db->where('match_id', $matchId)->order_by('assessed_at', 'DESC')->limit(1)->get('sports_data_quality_assessments')->row_array(); if ($row) { $row['missing_fields'] = json_decode((string) $row['missing_fields'], true); $row['checks_payload'] = json_decode((string) $row['checks_payload'], true); } return $row ?: null; }
+            public function saveCalibration(array $c): int { $this->db->insert('sports_calibrations', $c); return (int) $this->db->insert_id(); }
+            public function findCalibration(int $id): ?array { $row = $this->db->get_where('sports_calibrations', ['id' => $id], 1)->row_array(); if ($row) $row['bins'] = json_decode((string) ($row['bins'] ?: '[]'), true); return $row ?: null; }
+            public function listCalibrations(?int $modelVersionId = null, ?string $status = null, int $limit = 50): array { if ($modelVersionId !== null) $this->db->where('model_version_id', $modelVersionId); if ($status !== null) $this->db->where('status', $status); $rows = $this->db->order_by('created_at', 'DESC')->limit(min(200, max(1, $limit)))->get('sports_calibrations')->result_array(); foreach ($rows as &$row) $row['bins'] = json_decode((string) ($row['bins'] ?: '[]'), true); return $rows; }
+            public function activeCalibration(int $modelVersionId): ?array { $row = $this->db->where(['model_version_id' => $modelVersionId, 'status' => 'APPROVED'])->order_by('created_at', 'DESC')->limit(1)->get('sports_calibrations')->row_array(); if ($row) $row['bins'] = json_decode((string) ($row['bins'] ?: '[]'), true); return $row ?: null; }
+            public function updateCalibrationStatus(int $id, string $status, ?string $actor = null): void { $patch = ['status' => $status]; if ($actor !== null) { $patch['approved_by'] = $actor; $patch['approved_at'] = gmdate('c'); } $this->db->where('id', $id)->update('sports_calibrations', $patch); }
+            public function listModelVersions(): array { return $this->db->order_by('id', 'ASC')->get('sports_model_versions')->result_array(); }
+            public function findModelVersion(int $id): ?array { return $this->db->get_where('sports_model_versions', ['id' => $id], 1)->row_array() ?: null; }
+            public function listPredictions(array $filter = [], int $limit = 200): array {
+                if (!empty($filter['matchId'])) $this->db->where('match_id', (int) $filter['matchId']);
+                if (!empty($filter['modelVersionId'])) $this->db->where('model_version_id', (int) $filter['modelVersionId']);
+                if (!empty($filter['decision'])) $this->db->where('decision', $filter['decision']);
+                if (!empty($filter['market'])) $this->db->where('market', $filter['market']);
+                if (!empty($filter['from'])) $this->db->where('created_at >=', $filter['from']);
+                if (!empty($filter['to'])) $this->db->where('created_at <=', $filter['to']);
+                $rows = $this->db->order_by('created_at', 'DESC')->limit(min(2000, max(1, $limit)))->get('sports_predictions')->result_array();
+                foreach ($rows as &$row) { $row['rejection_reasons'] = json_decode((string) ($row['rejection_reasons'] ?: '[]'), true); $row['factors'] = json_decode((string) ($row['factors'] ?: '{}'), true); }
+                return $rows;
+            }
+            public function findPrediction(string $id): ?array { $row = $this->db->get_where('sports_predictions', ['id' => $id], 1)->row_array(); if ($row) { $row['rejection_reasons'] = json_decode((string) ($row['rejection_reasons'] ?: '[]'), true); $row['factors'] = json_decode((string) ($row['factors'] ?: '{}'), true); } return $row ?: null; }
+            public function predictionOutcomes(?int $modelVersionId = null): array {
+                $this->db->select('p.*, m.competition AS league, r.home_score, r.away_score')
+                    ->from('sports_predictions p')
+                    ->join('sports_matches m', 'm.id = p.match_id')
+                    ->join('sports_results r', "r.match_id = p.match_id AND r.verified = 1 AND r.status = 'FINISHED'", 'inner');
+                if ($modelVersionId !== null) $this->db->where('p.model_version_id', $modelVersionId);
+                $rows = $this->db->get()->result_array();
+                $out = [];
+                foreach ($rows as $row) {
+                    $total = (int) $row['home_score'] + (int) $row['away_score'];
+                    // Binary outcome per predicted market; unknown markets are excluded (never guessed).
+                    if ($row['market'] === 'TOTAL_GOALS' && $row['selection'] === 'OVER_1_5') $row['outcome'] = $total > 1 ? 1 : 0;
+                    elseif ($row['market'] === 'TOTAL_GOALS' && $row['selection'] === 'UNDER_1_5') $row['outcome'] = $total <= 1 ? 1 : 0;
+                    else continue;
+                    $out[] = $row;
+                }
+                return $out;
+            }
+            public function activeConfiguration(): ?array { $row = $this->db->order_by('version', 'DESC')->limit(1)->get('sports_configurations')->row_array(); if ($row) { $row['allowed_markets'] = json_decode((string) $row['allowed_markets'], true) ?: []; $row['allowed_leagues'] = json_decode((string) $row['allowed_leagues'], true) ?: []; } return $row ?: null; }
+            public function listConfigurations(int $limit = 20): array { $rows = $this->db->order_by('version', 'DESC')->limit(min(200, max(1, $limit)))->get('sports_configurations')->result_array(); foreach ($rows as &$row) { $row['allowed_markets'] = json_decode((string) $row['allowed_markets'], true) ?: []; $row['allowed_leagues'] = json_decode((string) $row['allowed_leagues'], true) ?: []; } return $rows; }
+            public function saveConfiguration(array $c): int { $this->db->insert('sports_configurations', $c); return (int) $this->db->insert_id(); }
+            public function findConfiguration(int $id): ?array { $row = $this->db->get_where('sports_configurations', ['id' => $id], 1)->row_array(); if ($row) { $row['allowed_markets'] = json_decode((string) $row['allowed_markets'], true) ?: []; $row['allowed_leagues'] = json_decode((string) $row['allowed_leagues'], true) ?: []; } return $row ?: null; }
+            public function findResultByMatch(int $matchId): ?array { $row = $this->db->where('match_id', $matchId)->order_by('verified', 'DESC')->order_by('id', 'DESC')->limit(1)->get('sports_results')->row_array(); if ($row) $row['payload'] = json_decode((string) $row['payload'], true); return $row ?: null; }
+            public function recordTicketOutcome(string $ticketId, float $pnl): void { $this->db->where('id', $ticketId)->update('sports_tickets', ['pnl' => $pnl]); }
+            public function oddsBefore(int $matchId, string $timestamp): ?array {
+                // Timestamps are stored in ISO-8601 ('Y-m-dTH:i:s+00:00'); compare by
+                // epoch, not string, so mixed formats can never misorder.
+                $limit = strtotime($timestamp);
+                if ($limit === false) return null;
+                $rows = $this->db->where('match_id', $matchId)->order_by('observed_at', 'DESC')->limit(500)->get('sports_odds')->result_array();
+                foreach ($rows as $row) {
+                    $at = strtotime((string) $row['observed_at']);
+                    if ($at !== false && $at < $limit) { $row['payload'] = json_decode((string) $row['payload'], true); return $row; }
+                }
+                return null;
+            }
+            public function deleteOldJobRuns(string $cutoff): void { $this->db->where('started_at <', $cutoff)->delete('sports_job_runs'); }
+            public function deleteOldHealth(string $cutoff): void { $this->db->where('observed_at <', $cutoff)->delete('sports_provider_health'); }
+            public function startJobRun(array $run): ?array {
+                if ($this->db->get_where('sports_job_runs', ['execution_key' => $run['executionKey']], 1)->row_array()) return null;
+                $this->db->insert('sports_job_runs', ['id' => $run['id'], 'job_type' => $run['jobType'], 'status' => 'RUNNING', 'started_at' => gmdate('c'), 'execution_key' => $run['executionKey'], 'provider' => $run['provider'] ?? null]); return $run;
+            }
+            public function finishJobRun(string $id, array $result): void { $this->db->where('id', $id)->update('sports_job_runs', ['status' => $result['status'], 'ended_at' => gmdate('c'), 'records_processed' => $result['processed'] ?? 0, 'records_created' => $result['created'] ?? 0, 'records_updated' => $result['updated'] ?? 0, 'errors' => json_encode($result['errors'] ?? [])]); }
+            public function listJobRuns(?string $jobType = null, int $limit = 50): array { if ($jobType !== null) $this->db->where('job_type', $jobType); $rows = $this->db->order_by('started_at', 'DESC')->limit(min(500, max(1, $limit)))->get('sports_job_runs')->result_array(); foreach ($rows as &$row) $row['errors'] = json_decode((string) ($row['errors'] ?: '[]'), true); return $rows; }
+            public function saveBacktest(array $b): void { $this->db->insert('sports_backtests', $b); }
+            public function findBacktest(string $id): ?array { $row = $this->db->get_where('sports_backtests', ['id' => $id], 1)->row_array(); if ($row) { $row['params'] = json_decode((string) $row['params'], true); $row['report'] = json_decode((string) $row['report'], true); } return $row ?: null; }
+            public function listBacktests(int $limit = 20): array { $rows = $this->db->order_by('created_at', 'DESC')->limit(min(200, max(1, $limit)))->get('sports_backtests')->result_array(); foreach ($rows as &$row) { $row['params'] = json_decode((string) $row['params'], true); $row['report'] = json_decode((string) $row['report'], true); } return $rows; }
+            public function saveModelMetrics(array $m): void { $this->db->insert('sports_model_metrics', $m); }
+            public function listModelMetrics(?int $modelVersionId = null, ?int $windowDays = null, ?string $sampleType = null, int $limit = 200): array { if ($modelVersionId !== null) $this->db->where('model_version_id', $modelVersionId); if ($windowDays !== null) $this->db->where('window_days', $windowDays); if ($sampleType !== null) $this->db->where('sample_type', $sampleType); return $this->db->order_by('computed_at', 'DESC')->limit(min(1000, max(1, $limit)))->get('sports_model_metrics')->result_array(); }
+            public function findDailyTicket(string $date): ?array { $row = $this->db->get_where('sports_daily_tickets', ['date' => $date], 1)->row_array(); if ($row) $row['rejection_summary'] = json_decode((string) ($row['rejection_summary'] ?: '{}'), true); return $row ?: null; }
+            public function saveDailyTicket(array $d): void { $row = $this->db->get_where('sports_daily_tickets', ['date' => $d['date']], 1)->row_array(); if ($row) $this->db->where('date', $d['date'])->update('sports_daily_tickets', $d); else $this->db->insert('sports_daily_tickets', $d); }
+            public function updateDailyTicket(string $date, array $patch): void { $this->db->where('date', $date)->update('sports_daily_tickets', array_merge($patch, ['updated_at' => gmdate('c')])); }
+            public function listDailyTickets(int $limit = 60): array { $rows = $this->db->order_by('date', 'DESC')->limit(min(366, max(1, $limit)))->get('sports_daily_tickets')->result_array(); foreach ($rows as &$row) $row['rejection_summary'] = json_decode((string) ($row['rejection_summary'] ?: '{}'), true); return $rows; }
+            public function savePerformanceSnapshot(string $asOf, string $window, array $payload): void {
+                $existing = $this->db->get_where('sports_performance_snapshots', ['as_of' => $asOf, 'window' => $window], 1)->row_array();
+                $data = ['as_of' => $asOf, 'window' => $window, 'payload' => json_encode($payload)];
+                if ($existing) $this->db->where('id', $existing['id'])->update('sports_performance_snapshots', $data); else $this->db->insert('sports_performance_snapshots', $data);
+            }
+            public function performanceSnapshots(string $window, int $limit = 30): array { $rows = $this->db->where('window', $window)->order_by('as_of', 'DESC')->limit(min(366, max(1, $limit)))->get('sports_performance_snapshots')->result_array(); foreach ($rows as &$row) $row['payload'] = json_decode((string) $row['payload'], true); return $rows; }
+            public function settledSelections(array $filter = []): array {
+                $this->db->select('s.*, t.total_odds AS ticket_odds, t.settlement_status AS ticket_status, t.stake AS ticket_stake, m.competition, m.kickoff_at, mv.model_name, mv.model_version')
+                    ->from('sports_ticket_selections s')
+                    ->join('sports_tickets t', 't.id = s.ticket_id', 'inner')
+                    ->join('sports_matches m', 'm.id = s.match_id', 'left')
+                    ->join('sports_model_versions mv', 'mv.id = t.model_version_id', 'left');
+                if (!empty($filter['from'])) $this->db->where('t.created_at >=', $filter['from']);
+                if (!empty($filter['to'])) $this->db->where('t.created_at <=', $filter['to']);
+                if (!empty($filter['market'])) $this->db->where('s.market', $filter['market']);
+                if (!empty($filter['modelVersionId'])) $this->db->where('t.model_version_id', (int) $filter['modelVersionId']);
+                $rows = $this->db->get()->result_array();
+                foreach ($rows as &$row) if (!in_array($row['status'] ?? '', ['WON', 'LOST', 'VOID', 'CANCELLED'], true)) $row['_settled'] = 0; else $row['_settled'] = 1;
+                return $rows;
+            }
             public function saveHealth(int $providerId, array $h): void {
                 $this->db->insert('sports_provider_health', ['provider_id' => $providerId, 'status' => $h['status'], 'response_ms' => $h['responseMs'] ?? null, 'error_rate' => $h['errorRate'] ?? null, 'rate_limit_remaining' => $h['rateLimitRemaining'] ?? null, 'last_success_at' => $h['lastSuccessAt'] ?? null, 'last_failure_at' => $h['lastFailureAt'] ?? null, 'last_fixture_sync_at' => $h['lastFixtureSyncAt'] ?? null, 'last_odds_sync_at' => $h['lastOddsSyncAt'] ?? null, 'last_result_sync_at' => $h['lastResultSyncAt'] ?? null, 'data_freshness_seconds' => $h['dataFreshnessSeconds'] ?? null, 'records_received' => $h['recordsReceived'] ?? 0, 'invalid_records' => $h['invalidRecords'] ?? 0, 'missing_fields' => json_encode($h['missingFields'] ?? []), 'observed_at' => gmdate('c')]);
             }
@@ -187,6 +308,201 @@ class Aegis_model extends CI_Model
             public function findTicket(string $id): ?array { return $this->db->get_where('sports_tickets', ['id' => $id], 1)->row_array() ?: null; }
             public function listTickets(array $filter = [], int $limit = 500): array { if(!empty($filter['from']))$this->db->where('created_at >=',$filter['from']); if(!empty($filter['to']))$this->db->where('created_at <=',$filter['to']); if(!empty($filter['status']))$this->db->where('settlement_status',$filter['status']); if(!empty($filter['modelVersionId']))$this->db->where('model_version_id',(int)$filter['modelVersionId']); return $this->db->order_by('created_at','DESC')->limit(min(500,max(1,$limit)))->get('sports_tickets')->result_array(); }
             public function updateTicket(string $id, array $patch): void { $this->db->where('id', $id)->update('sports_tickets', $patch); }
+        };
+
+        $this->lottery = new class($db) implements Aegis\Persistence\LotteryRepository {
+            public function __construct(private object $db) {}
+            public function ensureLottery(string $code, string $name, string $rulesVersion): array {
+                $row = $this->db->get_where('lotteries', ['code' => $code], 1)->row_array();
+                if ($row) {
+                    if ((string) $row['rules_version'] !== $rulesVersion) {
+                        $this->db->where('id', $row['id'])->update('lotteries', ['rules_version' => $rulesVersion, 'updated_at' => gmdate('c')]);
+                        $row = $this->db->get_where('lotteries', ['id' => $row['id']], 1)->row_array();
+                    }
+                    return $row;
+                }
+                $now = gmdate('c');
+                $this->db->insert('lotteries', ['code' => $code, 'name' => $name, 'enabled' => 1, 'rules_version' => $rulesVersion, 'created_at' => $now, 'updated_at' => $now]);
+                return $this->db->get_where('lotteries', ['code' => $code], 1)->row_array();
+            }
+            public function listLotteries(): array { return $this->db->order_by('id', 'ASC')->get('lotteries')->result_array(); }
+            public function activeRules(string $lotteryCode): ?array { $row = $this->db->where(['lottery_code' => $lotteryCode, 'active' => 1])->order_by('id', 'DESC')->limit(1)->get('lottery_rules')->row_array(); return $row ?: null; }
+            public function saveRules(array $r): int { $this->db->insert('lottery_rules', $r); return (int) $this->db->insert_id(); }
+            public function ensureProvider(string $code, string $name): array {
+                $row = $this->db->get_where('lottery_data_sources', ['provider_code' => $code], 1)->row_array();
+                if ($row) return $row;
+                $now = gmdate('c');
+                $this->db->insert('lottery_data_sources', ['provider_code' => $code, 'display_name' => $name, 'enabled' => 0, 'synthetic' => str_contains($code, 'sandbox') ? 1 : 0, 'created_at' => $now, 'updated_at' => $now]);
+                return $this->db->get_where('lottery_data_sources', ['provider_code' => $code], 1)->row_array();
+            }
+            public function listProviders(bool $enabledOnly = false): array { if ($enabledOnly) $this->db->where('enabled', 1); return $this->db->order_by('id', 'ASC')->get('lottery_data_sources')->result_array(); }
+            public function saveHealth(int $providerId, array $health): void { $row = array_merge($health, ['provider_id' => $providerId, 'observed_at' => gmdate('c')]); unset($row['id']); $this->db->insert('lottery_provider_health', $row); }
+            public function latestHealth(int $providerId): ?array { $row = $this->db->where('provider_id', $providerId)->order_by('observed_at', 'DESC')->limit(1)->get('lottery_provider_health')->row_array(); return $row ?: null; }
+            public function listHealth(int $providerId, int $limit = 20): array { return $this->db->where('provider_id', $providerId)->order_by('observed_at', 'DESC')->limit(min(200, max(1, $limit)))->get('lottery_provider_health')->result_array(); }
+            public function findDraw(int $id): ?array { $row = $this->db->get_where('lottery_draws', ['id' => $id], 1)->row_array(); if ($row) $row['payload'] = json_decode((string) $row['payload'], true); return $row ?: null; }
+            public function findDrawByExternal(string $lotteryCode, string $externalId): ?array { $row = $this->db->get_where('lottery_draws', ['lottery_code' => $lotteryCode, 'external_id' => $externalId], 1)->row_array(); if ($row) $row['payload'] = json_decode((string) $row['payload'], true); return $row ?: null; }
+            public function listDraws(array $filter = [], int $limit = 100, string $order = 'DESC'): array {
+                if (!empty($filter['lotteryCode'])) $this->db->where('lottery_code', $filter['lotteryCode']);
+                if (!empty($filter['from'])) $this->db->where('draw_date >=', $filter['from']);
+                if (!empty($filter['to'])) $this->db->where('draw_date <=', $filter['to']);
+                if (!empty($filter['verificationStatus'])) $this->db->where('verification_status', $filter['verificationStatus']);
+                $rows = $this->db->order_by('draw_date', $order === 'ASC' ? 'ASC' : 'DESC')->limit(min(100000, max(1, $limit)))->get('lottery_draws')->result_array();
+                foreach ($rows as &$row) $row['payload'] = json_decode((string) $row['payload'], true);
+                return $rows;
+            }
+            public function saveDraw(array $d): array {
+                $existing = $this->db->get_where('lottery_draws', ['lottery_code' => $d['lottery_code'], 'external_id' => $d['external_id']], 1)->row_array();
+                if ($existing) {
+                    $patch = ['jackpot' => $d['jackpot'] ?? null, 'rollover' => !empty($d['rollover']) ? 1 : 0, 'source' => $d['source'], 'source_timestamp' => $d['source_timestamp'], 'retrieved_at' => $d['retrieved_at'], 'verification_status' => $d['verification_status'], 'payload' => $d['payload'], 'updated_at' => gmdate('c')];
+                    $this->db->where('id', $existing['id'])->update('lottery_draws', $patch);
+                    return ['row' => $this->findDraw((int) $existing['id']), 'created' => false];
+                }
+                $this->db->insert('lottery_draws', $d);
+                $id = (int) $this->db->insert_id();
+                return ['row' => $this->findDraw($id), 'created' => true];
+            }
+            public function listDrawNumbers(int $drawId): array { return $this->db->where('draw_id', $drawId)->order_by('kind', 'ASC')->order_by('position', 'ASC')->get('lottery_draw_numbers')->result_array(); }
+            public function saveDrawNumbers(int $drawId, array $numbers): void {
+                $this->db->where('draw_id', $drawId)->delete('lottery_draw_numbers');
+                foreach (['main' => 'MAIN', 'stars' => 'STAR'] as $field => $kind) {
+                    foreach (array_values((array) ($numbers[$field] ?? [])) as $i => $n) {
+                        $this->db->insert('lottery_draw_numbers', ['draw_id' => $drawId, 'kind' => $kind, 'position' => $i, 'number' => (int) $n]);
+                    }
+                }
+            }
+            public function drawsForStats(string $lotteryCode, int $limit = 10000): array {
+                $rows = $this->listDraws(['lotteryCode' => $lotteryCode], $limit, 'ASC');
+                $out = [];
+                foreach ($rows as $r) {
+                    $p = is_array($r['payload']) ? $r['payload'] : [];
+                    if (!is_array($p['main'] ?? null) || !is_array($p['stars'] ?? null)) continue;
+                    $out[] = ['drawDate' => (string) $r['draw_date'], 'main' => array_map('intval', $p['main']), 'stars' => array_map('intval', $p['stars'])];
+                }
+                return $out;
+            }
+            public function countDraws(string $lotteryCode): int { return (int) $this->db->where('lottery_code', $lotteryCode)->count_all_results('lottery_draws'); }
+            public function startJobRun(array $run): ?array {
+                if ($this->db->get_where('lottery_sync_runs', ['execution_key' => $run['executionKey']], 1)->row_array()) return null;
+                $this->db->insert('lottery_sync_runs', ['id' => $run['id'], 'provider_id' => $run['providerId'] ?? null, 'job_type' => $run['jobType'], 'status' => 'RUNNING', 'started_at' => gmdate('c'), 'payload' => $run['payload'] ?? null, 'execution_key' => $run['executionKey']]);
+                return $run;
+            }
+            public function findJobRunByKey(string $key): ?array { return $this->db->get_where('lottery_sync_runs', ['execution_key' => $key], 1)->row_array() ?: null; }
+            public function finishJobRun(string $id, array $result): void { $this->db->where('id', $id)->update('lottery_sync_runs', ['status' => $result['status'], 'ended_at' => gmdate('c'), 'records_processed' => $result['processed'] ?? 0, 'records_created' => $result['created'] ?? 0, 'records_updated' => $result['updated'] ?? 0, 'errors' => json_encode($result['errors'] ?? [])]); }
+            public function listJobRuns(?string $jobType = null, int $limit = 50): array { if ($jobType !== null) $this->db->where('job_type', $jobType); return $this->db->order_by('started_at', 'DESC')->limit(min(500, max(1, $limit)))->get('lottery_sync_runs')->result_array(); }
+            public function deleteOldJobRuns(string $cutoff): void { $this->db->where('started_at <', $cutoff)->delete('lottery_sync_runs'); }
+            public function deleteOldHealth(string $cutoff): void { $this->db->where('observed_at <', $cutoff)->delete('lottery_provider_health'); }
+            public function saveCombination(array $c): array
+            {
+                $this->db->insert('lottery_combinations', $c);
+                return ['row' => $this->findCombination((int) $this->db->insert_id()), 'created' => true];
+            }
+            public function findCombination(int $id): ?array
+            {
+                $row = $this->db->get_where('lottery_combinations', ['id' => $id], 1)->row_array();
+                if (!$row) return null;
+                $row['lines'] = json_decode((string) $row['lines'], true);
+                $row['constraints'] = json_decode((string) $row['constraints'], true);
+                $row['score_summary'] = json_decode((string) $row['score_summary'], true);
+                return $row;
+            }
+            public function listCombinations(int $limit = 50, int $offset = 0): array
+            {
+                $rows = $this->db->order_by('id', 'DESC')->offset(max(0, $offset))->limit(min(200, max(1, $limit)))->get('lottery_combinations')->result_array();
+                return array_map(fn($r) => $this->findCombination((int) $r['id']), $rows);
+            }
+            public function saveAiDecision(array $d): array
+            {
+                $this->db->insert('lottery_ai_decisions', $d);
+                return ['row' => $this->findAiDecision((int) $this->db->insert_id()), 'created' => true];
+            }
+            public function findAiDecision(int $id): ?array
+            {
+                $row = $this->db->get_where('lottery_ai_decisions', ['id' => $id], 1)->row_array();
+                if (!$row) return null;
+                $row['decision'] = json_decode((string) $row['decision'], true);
+                return $row;
+            }
+            public function listAiDecisions(?int $combinationId = null, int $limit = 50): array
+            {
+                if ($combinationId !== null) $this->db->where('combination_id', $combinationId);
+                $rows = $this->db->order_by('id', 'DESC')->limit(min(500, max(1, $limit)))->get('lottery_ai_decisions')->result_array();
+                return array_map(fn($r) => $this->findAiDecision((int) $r['id']), $rows);
+            }
+            public function saveTicket(array $t): array
+            {
+                $this->db->insert('lottery_tickets', $t);
+                $row = $this->db->get_where('lottery_tickets', ['id' => $this->db->insert_id()], 1)->row_array();
+                if ($row) { $row['configuration'] = json_decode((string) $row['configuration'], true); $row['result'] = $row['result'] !== null ? json_decode((string) $row['result'], true) : null; }
+                return ['row' => $row, 'created' => true];
+            }
+            public function findTicket(int $id, ?int $userId = null): ?array
+            {
+                if ($userId !== null) $this->db->where('user_id', $userId);
+                $row = $this->db->where('id', $id)->limit(1)->get('lottery_tickets')->row_array();
+                if (!$row) return null;
+                $row['configuration'] = json_decode((string) $row['configuration'], true);
+                $row['result'] = $row['result'] !== null ? json_decode((string) $row['result'], true) : null;
+                return $row;
+            }
+            public function listTickets(int $userId, int $limit = 50): array
+            {
+                $rows = $this->db->where('user_id', $userId)->order_by('id', 'DESC')->limit(min(500, max(1, $limit)))->get('lottery_tickets')->result_array();
+                return array_map(fn($r) => $this->findTicket((int) $r['id'], $userId), $rows);
+            }
+            public function listAllTickets(int $limit = 200): array
+            {
+                $rows = $this->db->order_by('id', 'DESC')->limit(min(1000, max(1, $limit)))->get('lottery_tickets')->result_array();
+                return array_map(fn($r) => $this->findTicket((int) $r['id']), $rows);
+            }
+            public function updateTicket(int $id, array $patch): void { $this->db->where('id', $id)->update('lottery_tickets', $patch); }
+            public function ticketLines(int $ticketId): array
+            {
+                $rows = $this->db->where('ticket_id', $ticketId)->order_by('position', 'ASC')->get('lottery_ticket_lines')->result_array();
+                foreach ($rows as &$r) { $r['mains'] = json_decode((string) $r['mains'], true); $r['stars'] = json_decode((string) $r['stars'], true); }
+                return $rows;
+            }
+            public function saveTicketLines(int $ticketId, array $lines): void
+            {
+                $this->db->where('ticket_id', $ticketId)->delete('lottery_ticket_lines');
+                foreach ($lines as $i => $line) {
+                    $this->db->insert('lottery_ticket_lines', ['ticket_id' => $ticketId, 'position' => $i, 'mains' => json_encode($line['mains']), 'stars' => json_encode($line['stars']), 'created_at' => gmdate('c')]);
+                }
+            }
+            public function ensureModelVersion(array $m): array
+            {
+                $row = $this->db->get_where('lottery_model_versions', ['model_name' => $m['model_name'], 'model_version' => $m['model_version']], 1)->row_array();
+                if ($row) {
+                    $row['config'] = json_decode((string) $row['config'], true);
+                    return $row;
+                }
+                $this->db->insert('lottery_model_versions', $m);
+                $row = $this->db->get_where('lottery_model_versions', ['id' => $this->db->insert_id()], 1)->row_array();
+                $row['config'] = json_decode((string) $row['config'], true);
+                return $row;
+            }
+            public function listModelVersions(): array
+            {
+                $rows = $this->db->order_by('id', 'ASC')->get('lottery_model_versions')->result_array();
+                foreach ($rows as &$r) { $r['config'] = json_decode((string) $r['config'], true); }
+                return $rows;
+            }
+            public function saveBacktest(array $b): array
+            {
+                $this->db->insert('lottery_backtests', $b);
+                return ['row' => $this->findBacktest((int) $this->db->insert_id()), 'created' => true];
+            }
+            public function findBacktest(int $id): ?array
+            {
+                $row = $this->db->get_where('lottery_backtests', ['id' => $id], 1)->row_array();
+                if (!$row) return null;
+                $row['report'] = json_decode((string) $row['report'], true);
+                return $row;
+            }
+            public function listBacktests(int $limit = 50): array
+            {
+                $rows = $this->db->order_by('id', 'DESC')->limit(min(500, max(1, $limit)))->get('lottery_backtests')->result_array();
+                return array_map(fn($r) => $this->findBacktest((int) $r['id']), $rows);
+            }
         };
 
         $this->identity = new class($db) implements Aegis\Persistence\IdentityRepository {

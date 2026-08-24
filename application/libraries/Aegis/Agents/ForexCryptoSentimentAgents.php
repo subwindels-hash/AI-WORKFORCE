@@ -5,6 +5,9 @@ use Aegis\Agents\AgentHelperTrait;
 use Aegis\Indicators;
 use Aegis\MathUtils;
 use Aegis\Providers\FrankfurterProvider;
+use Aegis\Providers\SentimentFeed;
+use Aegis\Providers\SentimentSnapshotValidator;
+use Aegis\Providers\UnavailableSentimentFeed;
 
 /**
  * Forex Agent — real price-derived work only; macro inputs (rate
@@ -223,9 +226,12 @@ class CryptoAgent
 }
 
 /**
- * Sentiment Agent — Phase 1/2 behavior retained: without real news/social
- * providers it states unavailability and ABSTAINS. Price/volume proxies
- * are explicitly NOT presented as sentiment.
+ * Sentiment Agent — Phase 6 boundary: consumes a licensed, attributable
+ * SentimentFeed and validates every snapshot for provenance and freshness.
+ * Without a configured feed — or when the data is stale, unlicensed or too
+ * thin to be a sentiment view — it ABSTAINS and cannot affect consensus.
+ * Price/volume proxies are explicitly NOT presented as sentiment (they
+ * belong to the Technical Agent).
  */
 class SentimentAgent
 {
@@ -233,25 +239,61 @@ class SentimentAgent
 
     public const ID = 'sentiment';
 
+    public function __construct(
+        private SentimentFeed $feed = new UnavailableSentimentFeed(),
+        private SentimentSnapshotValidator $validator = new SentimentSnapshotValidator(),
+    ) {}
+
     public function applicable(array $ctx): bool { return true; }
 
     public function analyze(array $ctx): array
     {
+        $snapshot = $this->feed->snapshot($ctx['series']['symbol']);
+        $check = $this->validator->validate($snapshot, time());
+        $provenance = [
+            'source' => $check['provenance']['source'] ?? ($snapshot['source'] ?? null),
+            'licensed' => (bool) ($snapshot['licensed'] ?? false),
+            'feed' => $this->feed->id(),
+        ];
+        if (!$check['ok']) {
+            return [
+                'agent' => self::ID, 'title' => 'Sentiment Analysis Agent',
+                'generatedAt' => $ctx['now'], 'dataQuality' => 0.0,
+                'dataLimitations' => [$check['reason']],
+                'warnings' => ['Sentiment unavailable (' . $check['reason'] . ') — consensus is computed without any sentiment input'],
+                'vote' => [
+                    'directionalScore' => 0.0, 'signal' => 'NEUTRAL',
+                    'weight' => self::WEIGHTS['sentiment'], 'votes' => false,
+                    'reason' => $check['reason'] . ' — abstaining',
+                ],
+                'news' => ['available' => false, 'reason' => $check['reason']],
+                'social' => ['available' => false, 'reason' => $check['reason']],
+                'note' => 'Price/volume proxies are handled by the Technical Agent and are deliberately NOT presented as sentiment.',
+                'provenance' => $provenance,
+            ];
+        }
+        $obs = $check['observations'];
+        $news = array_values(array_filter($obs, fn($o) => $o['channel'] === 'news'));
+        $social = array_values(array_filter($obs, fn($o) => $o['channel'] === 'social'));
+        $score = (float) $check['score'];
+        $reasons = sprintf('%d attributable observation(s) within %ds (news %d, social %d), mean score %+.2f',
+            count($obs), $this->validator->maxAgeSeconds(), count($news), count($social), $score);
+        if (!empty($check['rejectedCount'])) {
+            $reasons .= sprintf(' (%d observation(s) excluded as stale or unattributable)', (int) $check['rejectedCount']);
+        }
         return [
-            'agent' => 'sentiment',
-            'title' => 'Sentiment Analysis Agent',
+            'agent' => self::ID, 'title' => 'Sentiment Analysis Agent',
             'generatedAt' => $ctx['now'],
-            'dataQuality' => 0.0,
-            'dataLimitations' => ['No financial-news provider configured', 'No social-sentiment provider configured'],
-            'warnings' => ['Sentiment unavailable — consensus is computed without any sentiment input'],
-            'vote' => [
-                'directionalScore' => 0.0, 'signal' => 'NEUTRAL',
-                'weight' => self::WEIGHTS['sentiment'], 'votes' => false,
-                'reason' => 'No sentiment providers configured — abstaining',
-            ],
-            'news' => ['available' => false, 'reason' => 'No financial-news API configured'],
-            'social' => ['available' => false, 'reason' => 'No social-sentiment API configured'],
-            'note' => 'Price/volume proxies are handled by the Technical Agent and are deliberately NOT presented as sentiment.',
+            // documented bounded quality: floor 0.4 + 0.1 per valid observation
+            // + 0.05 per covered channel, capped at 1.0
+            'dataQuality' => round(min(1.0, 0.4 + 0.1 * count($obs) + 0.05 * count($news) + 0.05 * count($social)), 3),
+            'dataLimitations' => ['Sentiment is a bounded, low-weight input (weight 0.5) — it can never override the risk engine or a NO_TRADE gate'],
+            'warnings' => [],
+            'vote' => $this->makeVote($score, self::WEIGHTS['sentiment'], $reasons),
+            'news' => ['available' => count($news) > 0, 'observations' => array_slice($news, 0, 10)],
+            'social' => ['available' => count($social) > 0, 'observations' => array_slice($social, 0, 10)],
+            'note' => 'Licensed ' . $this->feed->id() . ' feed; every observation carries its own source and timestamp.',
+            'provenance' => array_merge($provenance, ['observedAt' => $check['provenance']['observedAt'], 'observedAtRange' => $check['provenance']['observedAtRange']]),
         ];
     }
 }

@@ -10,6 +10,8 @@ use Aegis\Agents\TechnicalAgent;
 use Aegis\Agents\TradingIntelligenceAgent;
 use Aegis\Persistence\AnalysisRepository;
 use Aegis\Persistence\AuditRepository;
+use Aegis\Providers\SentimentFeed;
+use Aegis\Providers\UnavailableSentimentFeed;
 
 /**
  * TRADING INTELLIGENCE ENGINE — data -> agents -> consensus -> regime ->
@@ -34,12 +36,13 @@ class TradingIntelligenceEngine
         private readonly AnalysisRepository $runs,
         private readonly AuditRepository $audit,
         private readonly array $state, // {tradingMode, killSwitch}
+        ?SentimentFeed $sentimentFeed = null, // Phase 6: licensed sentiment feed (default: honest abstention)
     ) {
         $this->technical = new TechnicalAgent();
         $this->structure = new MarketStructureAgent();
         $this->forex = new ForexAgent();
         $this->crypto = new CryptoAgent();
-        $this->sentiment = new SentimentAgent();
+        $this->sentiment = new SentimentAgent($sentimentFeed ?? new UnavailableSentimentFeed());
         $this->fundamentals = new FundamentalsAgent();
         $this->intelligence = new TradingIntelligenceAgent();
     }

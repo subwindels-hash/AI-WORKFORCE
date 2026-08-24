@@ -62,6 +62,101 @@ interface PlatformStateRepository
 interface SportsRepository
 {
     public function ensureProvider(string $code, string $name): array;
+    /** @return array<int,array<string,mixed>> */
+    public function listProviders(bool $enabledOnly = false): array;
+    public function setProviderEnabled(int $id, bool $enabled): void;
+    /** @return array<int,array<string,mixed>> */
+    public function listHealth(int $providerId, int $limit = 20): array;
+    /** @return array<string,mixed>|null */
+    public function latestHealth(int $providerId): ?array;
+
+    /** @return array<string,mixed>|null */
+    public function findMatchById(int $id): ?array;
+    /** @return array<int,array<string,mixed>> */
+    public function listMatches(array $filter = [], int $limit = 200): array;
+    /** Latest odds row for a match (optionally pinned to market/selection). */
+    /** @return array<string,mixed>|null */
+    public function latestOdds(int $matchId, ?string $market = null, ?string $selection = null): ?array;
+    /** @return array<int,array<string,mixed>> */
+    public function listOdds(int $matchId, int $limit = 50): array;
+    /** @return array<string,mixed>|null */
+    public function latestQuality(int $matchId): ?array;
+
+    public function saveCalibration(array $c): int;
+    /** @return array<string,mixed>|null */
+    public function findCalibration(int $id): ?array;
+    /** @return array<int,array<string,mixed>> */
+    public function listCalibrations(?int $modelVersionId = null, ?string $status = null, int $limit = 50): array;
+    /** Latest APPROVED calibration for a model version, or null. */
+    /** @return array<string,mixed>|null */
+    public function activeCalibration(int $modelVersionId): ?array;
+    public function updateCalibrationStatus(int $id, string $status, ?string $actor = null): void;
+    /** @return array<int,array<string,mixed>> */
+    public function listModelVersions(): array;
+    /** @return array<string,mixed>|null */
+    public function findModelVersion(int $id): ?array;
+
+    /** @return array<int,array<string,mixed>> */
+    public function listPredictions(array $filter = [], int $limit = 200): array;
+    /** @return array<string,mixed>|null */
+    public function findPrediction(string $id): ?array;
+    /**
+     * Predictions whose match has a verified finished result — calibration
+     * training data. Each row carries raw/calibrated probability and the
+     * binary outcome (0|1) for the predicted market/selection.
+     * @return array<int,array<string,mixed>>
+     */
+    public function predictionOutcomes(?int $modelVersionId = null): array;
+
+    /** @return array<string,mixed>|null */
+    public function activeConfiguration(): ?array;
+    /** @return array<int,array<string,mixed>> */
+    public function listConfigurations(int $limit = 20): array;
+    public function saveConfiguration(array $c): int;
+    /** @return array<string,mixed>|null */
+    public function findConfiguration(int $id): ?array;
+
+    /** Latest stored result row for a match (any provider), or null. */
+    /** @return array<string,mixed>|null */
+    public function findResultByMatch(int $matchId): ?array;
+    public function recordTicketOutcome(string $ticketId, float $pnl): void;
+    /** Latest odds row observed BEFORE the given timestamp (point-in-time backtesting). */
+    /** @return array<string,mixed>|null */
+    public function oddsBefore(int $matchId, string $timestamp): ?array;
+    public function deleteOldJobRuns(string $cutoff): void;
+    public function deleteOldHealth(string $cutoff): void;
+
+    /** Starts once per idempotency key, or returns null if already processed. */
+    public function startJobRun(array $run): ?array;
+    public function finishJobRun(string $id, array $result): void;
+    /** @return array<int,array<string,mixed>> */
+    public function listJobRuns(?string $jobType = null, int $limit = 50): array;
+
+    public function saveBacktest(array $b): void;
+    /** @return array<string,mixed>|null */
+    public function findBacktest(string $id): ?array;
+    /** @return array<int,array<string,mixed>> */
+    public function listBacktests(int $limit = 20): array;
+
+    public function saveModelMetrics(array $m): void;
+    /** @return array<int,array<string,mixed>> */
+    public function listModelMetrics(?int $modelVersionId = null, ?int $windowDays = null, ?string $sampleType = null, int $limit = 200): array;
+
+    /** @return array<string,mixed>|null */
+    public function findDailyTicket(string $date): ?array;
+    public function saveDailyTicket(array $d): void;
+    public function updateDailyTicket(string $date, array $patch): void;
+    /** @return array<int,array<string,mixed>> */
+    public function listDailyTickets(int $limit = 60): array;
+
+    public function savePerformanceSnapshot(string $asOf, string $window, array $payload): void;
+    /** @return array<int,array<string,mixed>> */
+    public function performanceSnapshots(string $window, int $limit = 30): array;
+
+    /** Settled selections joined with their match competition, for breakdowns. */
+    /** @return array<int,array<string,mixed>> */
+    public function settledSelections(array $filter = []): array;
+
     public function saveHealth(int $providerId, array $health): void;
     /** Returns saved canonical match, inserting/updating by provider + external ID. */
     public function saveMatch(int $providerId, array $match): array;
@@ -162,4 +257,110 @@ interface ProposalRepository
     /** @return array<int, array<string, mixed>> */
     public function listExecutions(string $proposalId, int $limit = 10): array;
     public function listRecentExecutions(int $limit = 50): array;
+}
+
+/**
+ * WINDELS Lottery Intelligence persistence (spec §7): provider-neutral,
+ * source-attributed draw records. Draws are immutable once VERIFIED —
+ * corrections go through the audited correction path in LotteryIntelligence.
+ */
+interface LotteryRepository
+{
+    public function ensureLottery(string $code, string $name, string $rulesVersion): array;
+    /** @return array<int, array<string, mixed>> */
+    public function listLotteries(): array;
+
+    /** @return array<string, mixed>|null Active stored rules row, or null (code default applies). */
+    public function activeRules(string $lotteryCode): ?array;
+    public function saveRules(array $r): int;
+
+    public function ensureProvider(string $code, string $name): array;
+    /** @return array<int, array<string, mixed>> */
+    public function listProviders(bool $enabledOnly = false): array;
+    public function saveHealth(int $providerId, array $health): void;
+    /** @return array<string, mixed>|null */
+    public function latestHealth(int $providerId): ?array;
+    /** @return array<int, array<string, mixed>> */
+    public function listHealth(int $providerId, int $limit = 20): array;
+
+    /** @return array<string, mixed>|null */
+    public function findDraw(int $id): ?array;
+    /** @return array<string, mixed>|null */
+    public function findDrawByExternal(string $lotteryCode, string $externalId): ?array;
+    /** @return array<int, array<string, mixed>> */
+    public function listDraws(array $filter = [], int $limit = 100, string $order = 'DESC'): array;
+    /**
+     * Insert a draw (numbers rows are written by the caller via
+     * saveDrawNumbers) or update the non-verified row in place.
+     * @return array{row:array<string,mixed>,created:bool}
+     */
+    public function saveDraw(array $d): array;
+    /** @return array<int, array<string, mixed>> position-ordered numbers for a draw */
+    public function listDrawNumbers(int $drawId): array;
+    public function saveDrawNumbers(int $drawId, array $numbers): void;
+    /** Draws as stats input: ['drawDate'=>, 'main'=>int[], 'stars'=>int[]] ASC, decoded. */
+    /** @return array<int, array<string, mixed>> */
+    public function drawsForStats(string $lotteryCode, int $limit = 10000): array;
+    public function countDraws(string $lotteryCode): int;
+
+    /** Starts once per idempotency key, or returns null if already processed. */
+    public function startJobRun(array $run): ?array;
+    public function finishJobRun(string $id, array $result): void;
+    /** @return array<int, array<string, mixed>> */
+    public function listJobRuns(?string $jobType = null, int $limit = 50): array;
+    /** @return array<string, mixed>|null */
+    public function findJobRunByKey(string $key): ?array;
+    public function deleteOldJobRuns(string $cutoff): void;
+    public function deleteOldHealth(string $cutoff): void;
+
+    /** Generated combination lines (spec §14/§16). JSON columns decoded on read. */
+    /** @return array{row:array<string,mixed>,created:bool} */
+    public function saveCombination(array $c): array;
+    /** @return array<string, mixed>|null */
+    public function findCombination(int $id): ?array;
+    /** @return array<int, array<string, mixed>> newest first */
+    public function listCombinations(int $limit = 50, int $offset = 0): array;
+
+    /** AI decision report attached to a generation (spec §26/§33). */
+    /** @return array{row:array<string,mixed>,created:bool} */
+    public function saveAiDecision(array $d): array;
+    /** @return array<string, mixed>|null */
+    public function findAiDecision(int $id): ?array;
+    /** @return array<int, array<string, mixed>> newest first */
+    public function listAiDecisions(?int $combinationId = null, int $limit = 50): array;
+
+    /**
+     * Saved tickets (spec §20/§29). JSON columns decoded on read.
+     * User isolation (spec §38): when $userId is given, only that user's
+     * ticket is returned; null = system/admin scope.
+     */
+    /** @return array{row:array<string,mixed>,created:bool} */
+    public function saveTicket(array $t): array;
+    /** @return array<string, mixed>|null */
+    public function findTicket(int $id, ?int $userId = null): ?array;
+    /** @return array<int, array<string, mixed>> newest first */
+    public function listTickets(int $userId, int $limit = 50): array;
+    /** @return array<int, array<string, mixed>> newest first (admin/system scope) */
+    public function listAllTickets(int $limit = 200): array;
+    public function updateTicket(int $id, array $patch): void;
+    /** @return array<int, array<string, mixed>> position-ordered, decoded */
+    public function ticketLines(int $ticketId): array;
+    public function saveTicketLines(int $ticketId, array $lines): void;
+
+    /**
+     * Model versioning (spec §33): rows are never deleted or replaced —
+     * historical results stay connected to the model that generated them.
+     * @return array<string, mixed> the existing row when (name, version) already exists
+     */
+    public function ensureModelVersion(array $m): array;
+    /** @return array<int, array<string, mixed>> oldest first, config decoded */
+    public function listModelVersions(): array;
+
+    /** Backtest report rows (spec §23–§25); report JSON decoded on read. */
+    /** @return array{row:array<string,mixed>,created:bool} */
+    public function saveBacktest(array $b): array;
+    /** @return array<string, mixed>|null */
+    public function findBacktest(int $id): ?array;
+    /** @return array<int, array<string, mixed>> newest first */
+    public function listBacktests(int $limit = 50): array;
 }

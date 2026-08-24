@@ -15,6 +15,8 @@ if (!defined('AEGIS_RBAC_ROLES')) {
         'sports_viewer' => 'Sports viewer',
         'trading_operator' => 'Trading operator (control + execution)',
         'trading_viewer' => 'Trading viewer (read-only)',
+        'lottery_admin' => 'Lottery administrator',
+        'lottery_viewer' => 'Lottery viewer',
     ]);
     define('AEGIS_RBAC_PERMISSIONS', [
         'system.super_admin' => 'Full platform administration',
@@ -25,6 +27,8 @@ if (!defined('AEGIS_RBAC_ROLES')) {
         'trading.view' => 'View trading status, proposals and executions',
         'trading.control' => 'Kill switch, trading mode, risk and automation limits',
         'trading.execute' => 'Propose, approve and route trades through the Execution Supervisor',
+        'lottery.view' => 'View lottery intelligence (draws, statistics, tickets, performance)',
+        'lottery.manage' => 'Manage lottery providers, data sync and configuration',
     ]);
     define('AEGIS_RBAC_GRANTS', [
         'super_admin' => array_keys(AEGIS_RBAC_PERMISSIONS), // everything
@@ -32,6 +36,8 @@ if (!defined('AEGIS_RBAC_ROLES')) {
         'sports_viewer' => ['sports.view'],
         'trading_operator' => ['trading.view', 'trading.control', 'trading.execute'],
         'trading_viewer' => ['trading.view'],
+        'lottery_admin' => ['lottery.view', 'lottery.manage'],
+        'lottery_viewer' => ['lottery.view'],
     ]);
 }
 

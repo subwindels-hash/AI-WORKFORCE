@@ -18,7 +18,7 @@ class Tools extends MY_Controller
 
     public function index()
     {
-        echo "AEGIS tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n  php index.php tools cron              — scheduled operations: portfolio risk scan, broker transitions, proposal expiry\n";
+        echo "AEGIS tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n  php index.php tools cron              — scheduled operations: portfolio risk scan, broker transitions, proposal expiry\n  php index.php tools sports-cron [job] — sports scheduled jobs (fixtures|odds|results|quality|ticket|settlement|performance|monitoring|cleanup)\n  php index.php tools lottery-cron [job] — lottery scheduled jobs (sync|health|statistics|systems|tickets|backtests|cleanup)\n";
     }
 
     public function install()
@@ -31,7 +31,7 @@ class Tools extends MY_Controller
             exit(1);
         }
         $variant = $driver === 'sqlite' ? 'sqlite' : 'mysql';
-        $schemaFiles = [$schemaFile, APPPATH . 'database/sports_identity.' . $variant . '.sql', APPPATH . 'database/sports.' . $variant . '.sql', APPPATH . 'database/sports_decisions.' . $variant . '.sql', APPPATH . 'database/sports_results.' . $variant . '.sql'];
+        $schemaFiles = [$schemaFile, APPPATH . 'database/sports_identity.' . $variant . '.sql', APPPATH . 'database/sports.' . $variant . '.sql', APPPATH . 'database/sports_decisions.' . $variant . '.sql', APPPATH . 'database/sports_results.' . $variant . '.sql', APPPATH . 'database/sports_intelligence.' . $variant . '.sql', APPPATH . 'database/lottery.' . $variant . '.sql'];
         foreach ($schemaFiles as $file) {
             if (!is_file($file)) continue;
             $sql = file_get_contents($file);
@@ -43,6 +43,22 @@ class Tools extends MY_Controller
                 if ($stmt === '') continue;
                 $this->db->query($stmt);
             }
+        }
+        // Spec §30: index upgrades for pre-existing sports tables (idempotent;
+        // CI query() returns false on duplicate-index errors — ignore safely).
+        require_once FCPATH . 'tools/sports_indexes.php';
+        foreach ([
+            ['idx_sports_odds_provider', 'sports_odds', 'provider_id, observed_at'],
+            ['idx_sports_matches_provider_kickoff', 'sports_matches', 'provider_id, kickoff_at'],
+            ['idx_sports_predictions_market', 'sports_predictions', 'market, created_at'],
+            ['idx_sports_selections_market', 'sports_ticket_selections', 'market, selection'],
+            ['idx_sports_selections_match', 'sports_ticket_selections', 'match_id'],
+            ['idx_sports_predictions_created', 'sports_predictions', 'created_at'],
+            ['idx_sports_health_provider', 'sports_provider_health', 'provider_id, observed_at'],
+        ] as [$name, $table, $cols]) {
+            $this->db->query($variant === 'sqlite'
+                ? "CREATE INDEX IF NOT EXISTS {$name} ON {$table} ({$cols})"
+                : "CREATE INDEX {$name} ON {$table} ({$cols})");
         }
         $this->seedAccessControls();
         echo 'OK — schemas installed and RBAC defaults seeded on driver "' . $driver . "\".\n";
@@ -100,6 +116,50 @@ class Tools extends MY_Controller
             'Scheduled operations: %d account(s) scanned, %d risk alert(s) active, %d proposal(s) expired',
             $summary['accountsScanned'], $summary['riskAlerts'], $summary['proposalsExpired']
         ), $summary, 'system');
+        echo json_encode($summary, JSON_UNESCAPED_SLASHES), "\n";
+    }
+
+    /**
+     * Sports Intelligence scheduled jobs (spec §31) — idempotent, safe to run
+     * from cron every 15 minutes (use the standard "every 15 minutes" cron
+     * expression) e.g.: php /path/to/index.php tools sports-cron
+     * Individual jobs: fixtures | odds | results | quality | ticket |
+     *                  settlement | performance | monitoring | cleanup
+     */
+    public function sports_cron()
+    {
+        $job = trim((string) ($_SERVER['argv'][3] ?? ''));
+        $service = new \Aegis\Sports\SportsCronService($this->Aegis_model->sports, $this->Aegis_model->audit, $this->platform->sports);
+        if ($job !== '') {
+            if (!in_array($job, \Aegis\Sports\SportsCronService::JOBS, true)) {
+                fwrite(STDERR, 'unknown job. Valid: ' . implode(', ', \Aegis\Sports\SportsCronService::JOBS) . "\n");
+                exit(1);
+            }
+            $summary = $service->run($job);
+        } else {
+            $summary = $service->runAll();
+        }
+        echo json_encode($summary, JSON_UNESCAPED_SLASHES), "\n";
+    }
+
+    /**
+     * WINDELS Lottery Intelligence scheduled jobs (spec §40).
+     * php /path/to/index.php tools lottery-cron [job]
+     * Individual jobs: sync | health | statistics | cleanup
+     */
+    public function lottery_cron()
+    {
+        $job = trim((string) ($_SERVER['argv'][3] ?? ''));
+        $service = new \Aegis\Lottery\LotteryCronService($this->Aegis_model->lottery, $this->Aegis_model->audit, $this->platform->lottery);
+        if ($job !== '') {
+            if (!in_array($job, \Aegis\Lottery\LotteryCronService::JOBS, true)) {
+                fwrite(STDERR, 'unknown job. Valid: ' . implode(', ', \Aegis\Lottery\LotteryCronService::JOBS) . "\n");
+                exit(1);
+            }
+            $summary = $service->run($job);
+        } else {
+            $summary = $service->runAll();
+        }
         echo json_encode($summary, JSON_UNESCAPED_SLASHES), "\n";
     }
 

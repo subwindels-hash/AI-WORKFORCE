@@ -6,29 +6,7 @@ use Aegis\Sports\Providers\SportsDataProvider;
 use Aegis\Sports\SportsSyncService;
 
 function fx_sports_sync(): array {
-    $repo = new class implements SportsRepository {
-        public array $keys = []; public array $matches = []; public array $quality = []; public array $finished = [];
-        public function ensureProvider(string $code, string $name): array { return ['id' => 1, 'provider_code' => $code]; }
-        public function saveHealth(int $providerId, array $health): void {}
-        public function saveMatch(int $providerId, array $match): array { $id = count($this->matches) + 1; $this->matches[] = $match; return array_merge($match, ['id' => $id, 'created_at' => 'x', 'updated_at' => 'x']); }
-        public function findMatch(int $providerId, string $externalId): ?array { return ['id' => 1, 'external_id' => $externalId]; }
-        public function saveOdds(int $matchId, int $providerId, array $odds): void {}
-        public function saveResult(int $matchId, int $providerId, array $result): void {}
-        public function findResult(int $matchId, int $providerId): ?array { return null; }
-        public function verifyResult(int $id): void {}
-        public function saveQuality(int $matchId, array $assessment): void { $this->quality[] = $assessment; }
-        public function startSync(array $run): ?array { if (isset($this->keys[$run['executionKey']])) return null; $this->keys[$run['executionKey']] = true; return $run; }
-        public function finishSync(string $id, array $result): void { $this->finished[] = $result; }
-        public function ensureModelVersion(array $model): int { return 1; }
-        public function savePrediction(array $prediction): void {}
-        public function saveTicket(array $ticket): void {}
-        public function saveTicketSelection(array $selection): void {}
-        public function ticketSelections(string $ticketId): array { return []; }
-        public function updateTicketSelection(int $id, array $patch): void {}
-        public function findTicket(string $id): ?array { return null; }
-        public function listTickets(array $filter = [], int $limit = 500): array { return []; }
-        public function updateTicket(string $id, array $patch): void {}
-    };
+    $repo = new SportsRepositoryStub();
     $audit = new class implements AuditRepository { public array $events = []; public function emit(string $type, string $summary, array $detail = [], string $actor = 'system'): void { $this->events[] = $type; } public function recent(int $limit = 100): array { return []; } };
     return [new SportsSyncService($repo, $audit, new DataQualityEngine()), $repo, $audit];
 }
