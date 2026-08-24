@@ -33,6 +33,7 @@
            onerror="this.style.display='none';this.parentElement.classList.add('is-fallback');">
       <span class="aegis-chat-fallback" aria-hidden="true">W</span>
     </span>
+    <span class="aegis-chat-launch-label" aria-hidden="true">Ask WINDELS</span>
   </button>
 </div>
 <script src="/assets/js/aegis-chat.js" defer></script>

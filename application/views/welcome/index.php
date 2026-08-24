@@ -8,35 +8,17 @@ $biasClass = static function (?string $bias): string {
     <h2>AI Workforce</h2>
     <p>Run multi-agent market analysis. Agents agree on a bias, the risk engine can veto a setup, and this page never places an order.</p>
   </div>
-  <div class="page-actions">
-    <?php if (!empty($status['killSwitch']['active'])): ?>
-      <form method="post" action="/kill-switch">
-        <input type="hidden" name="active" value="0"><button class="btn small danger">Release kill switch</button>
-      </form>
-    <?php else: ?>
-      <form method="post" action="/kill-switch">
-        <input type="hidden" name="active" value="1"><button class="btn small danger">Activate kill switch</button>
-      </form>
-    <?php endif; ?>
-    <form method="post" action="/mode" class="inline">
-      <select name="mode" class="sel">
-        <?php foreach (['ANALYSIS_ONLY', 'PAPER_TRADING', 'HUMAN_APPROVAL', 'SEMI_AUTONOMOUS', 'FULLY_AUTOMATED'] as $m): ?>
-          <option value="<?= $m ?>" <?= $status['tradingMode'] === $m ? 'selected' : '' ?>><?= $m ?></option>
-        <?php endforeach; ?>
-      </select>
-      <button class="btn small">Set mode</button>
-    </form>
-  </div>
 </div>
 
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 <?php if (!empty($modeError)): ?><div class="notice err"><?= e($modeError) ?></div><?php endif; ?>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 
-<div class="panel" style="margin-bottom:16px">
-  <h3>Start using AI</h3>
-  <div class="body">
-    <form method="post" class="inline" action="/analysis">
+<div class="feature-start">
+  <div>
+    <h3>Start an analysis</h3>
+    <p>Choose a market and timeframe. Five agents produce a consensus, a regime read, a setup and a risk decision.</p>
+    <form method="post" class="inline" action="/analysis" style="margin-top:12px">
       <label class="fld">Symbol
         <select name="symbol" class="sel">
           <?php foreach ($symbols as $group => $list): ?>
@@ -51,9 +33,28 @@ $biasClass = static function (?string $bias): string {
           <?php foreach ($timeframes as $tf): ?><option value="<?= $tf ?>" <?= $timeframe === $tf ? 'selected' : '' ?>><?= $tf ?></option><?php endforeach; ?>
         </select>
       </label>
-      <button class="btn primary" type="submit">Start using AI</button>
+      <button class="btn primary" type="submit">Run analysis</button>
     </form>
-    <p class="dim" style="margin-top:10px;font-size:12.5px">Five agents produce a consensus, a regime read, a setup and a risk decision.</p>
+  </div>
+  <div class="feature-start-aside">
+    <?php if (!empty($status['killSwitch']['active'])): ?>
+      <span class="statuspill warn"><i class="pill-dot"></i>Kill switch active</span>
+    <?php else: ?>
+      <span class="statuspill"><i class="pill-dot"></i>Mode <?= e($status['tradingMode']) ?></span>
+    <?php endif; ?>
+    <form method="post" action="/mode" class="inline">
+      <select name="mode" class="sel">
+        <?php foreach (['ANALYSIS_ONLY', 'PAPER_TRADING', 'HUMAN_APPROVAL', 'SEMI_AUTONOMOUS', 'FULLY_AUTOMATED'] as $m): ?>
+          <option value="<?= $m ?>" <?= $status['tradingMode'] === $m ? 'selected' : '' ?>><?= $m ?></option>
+        <?php endforeach; ?>
+      </select>
+      <button class="btn small">Set</button>
+    </form>
+    <?php if (!empty($status['killSwitch']['active'])): ?>
+      <form method="post" action="/kill-switch"><input type="hidden" name="active" value="0"><button class="btn small danger">Release kill switch</button></form>
+    <?php else: ?>
+      <form method="post" action="/kill-switch"><input type="hidden" name="active" value="1"><button class="btn small danger">Activate kill switch</button></form>
+    <?php endif; ?>
   </div>
 </div>
 

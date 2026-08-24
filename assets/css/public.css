@@ -181,7 +181,7 @@ img { max-width: 100%; height: auto; display: block; object-fit: cover; object-p
 .quote footer { color: var(--muted); font: 600 12px system-ui, sans-serif; letter-spacing: .04em; text-transform: uppercase; }
 
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; }
-.split img {
+.split img, .split .media img {
   border-radius: 16px;
   width: 100%;
   height: auto;
@@ -190,6 +190,19 @@ img { max-width: 100%; height: auto; display: block; object-fit: cover; object-p
   object-fit: cover;
   object-position: center;
 }
+.product-split { gap: 48px; align-items: center; }
+.product-split .split-copy h3 { font-size: 22px; margin: 0 0 14px; letter-spacing: -.02em; color: var(--navy); }
+.product-split .split-copy { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.product-split .split-copy .checklist li { text-align: left; }
+.product-split .split-copy .hero-cta { margin-top: 16px; }
+.split .media { margin: 0; border-radius: 16px; overflow: hidden; box-shadow: 0 16px 40px #10203322; }
+.feature-cards { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.feature-cards .card { display: flex; flex-direction: column; }
+.feature-cards .card h3 { font-size: 16px; }
+.feature-cards .card p { margin-bottom: 14px; }
+.feature-cards .card a { margin-top: auto; font-weight: 700; }
+@media (max-width: 980px) { .feature-cards { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 560px) { .feature-cards { grid-template-columns: 1fr; } }
 .checklist { margin: 0; padding: 0; list-style: none; }
 .checklist li { padding: 12px 0 12px 28px; position: relative; border-bottom: 1px solid var(--line); color: var(--ink); }
 .checklist li:before {
