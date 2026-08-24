@@ -185,8 +185,21 @@ interface SportsRepository
 interface IdentityRepository
 {
     public function findUserByEmail(string $email): ?array;
+    public function findUserByUsername(string $username): ?array;
+    public function findUserByUid(string $uid): ?array;
     public function findUserById(int $id): ?array;
+    /** Resolve a login identifier that may be an email, a username or a six-digit User ID. */
+    public function findUserByIdentifier(string $identifier): ?array;
     public function createUser(array $user): array;
+    public function updateUser(int $id, array $patch): void;
+    /** True when the username belongs to another account (optionally excluding one id). */
+    public function usernameTaken(string $username, ?int $exceptId = null): bool;
+    /** True when the email belongs to another account (optionally excluding one id). */
+    public function emailTaken(string $email, ?int $exceptId = null): bool;
+    /** Generate a unique, available username derived from a base (e.g. display name / email prefix). */
+    public function generateUniqueUsername(string $base): string;
+    /** Generate a unique six-digit numeric User ID (never exposing the DB primary key). */
+    public function generateUniqueUid(): string;
     public function ensureRole(string $code, string $name): int;
     public function ensurePermission(string $code, string $name): int;
     public function grantRolePermission(int $roleId, int $permissionId): void;

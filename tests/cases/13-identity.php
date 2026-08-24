@@ -8,8 +8,20 @@ function fx_identity(): array {
         public array $user;
         public function __construct() { $this->user = ['id' => 1, 'email' => 'admin@example.test', 'password_hash' => password_hash('safe-password', PASSWORD_DEFAULT), 'active' => 1]; }
         public function findUserByEmail(string $email): ?array { return $email === $this->user['email'] ? $this->user : null; }
+        public function findUserByUsername(string $username): ?array { return $username === ($this->user['username'] ?? 'admin') ? $this->user : null; }
+        public function findUserByUid(string $uid): ?array { return $uid === ($this->user['user_uid'] ?? '000001') ? $this->user : null; }
         public function findUserById(int $id): ?array { return $id === 1 ? $this->user : null; }
+        public function findUserByIdentifier(string $identifier): ?array {
+            return filter_var($identifier, FILTER_VALIDATE_EMAIL)
+                ? $this->findUserByEmail(strtolower($identifier))
+                : (preg_match('/^\d{6}$/', $identifier) ? $this->findUserByUid($identifier) : $this->findUserByUsername($identifier));
+        }
         public function createUser(array $user): array { return $user; }
+        public function updateUser(int $id, array $patch): void {}
+        public function usernameTaken(string $username, ?int $exceptId = null): bool { return false; }
+        public function emailTaken(string $email, ?int $exceptId = null): bool { return false; }
+        public function generateUniqueUsername(string $base): string { return 'user1'; }
+        public function generateUniqueUid(): string { return '100001'; }
         public function ensureRole(string $code, string $name): int { return 1; }
         public function ensurePermission(string $code, string $name): int { return 1; }
         public function grantRolePermission(int $roleId, int $permissionId): void {}

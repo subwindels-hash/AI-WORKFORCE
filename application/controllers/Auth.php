@@ -41,13 +41,13 @@ class Auth extends MY_Controller
             redirect('/register');
             return;
         }
+        $username = strtolower(trim((string) $this->input->post('username')));
         $email = strtolower(trim((string) $this->input->post('email')));
-        $name = trim((string) $this->input->post('display_name'));
         $password = (string) $this->input->post('password');
         $confirm = (string) $this->input->post('password_confirm');
         $terms = (string) $this->input->post('terms');
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || $name === '' || strlen($name) > 120) {
-            $this->flash('error', 'Enter your name and a valid email address.');
+        if (!$this->validUsername($username) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $this->flash('error', 'Enter a valid username (3–20 letters, numbers or underscores) and a valid email address.');
             redirect('/register');
             return;
         }
@@ -66,11 +66,17 @@ class Auth extends MY_Controller
             redirect('/login');
             return;
         }
+        if ($this->Aegis_model->identity->usernameTaken($username)) {
+            $this->flash('error', 'That username is already taken. Try a different one.');
+            redirect('/register');
+            return;
+        }
         $now = gmdate('c');
         $new = $this->Aegis_model->identity->createUser([
+            'username' => $username,
             'email' => $email,
             'password_hash' => password_hash($password, PASSWORD_DEFAULT),
-            'display_name' => $name,
+            'display_name' => $username,
             'active' => 1,
             'created_at' => $now,
             'updated_at' => $now,
@@ -82,8 +88,8 @@ class Auth extends MY_Controller
             $this->Aegis_model->identity->grantRolePermission($role, $pid);
         }
         $this->Aegis_model->identity->assignRole((int) $new['id'], $role);
-        $this->Aegis_model->audit->emit('USER_REGISTERED', 'A visitor created a platform member account', ['userId' => (int) $new['id']], 'visitor');
-        $user = $this->platform->identity->authenticate($email, $password);
+        $this->Aegis_model->audit->emit('USER_REGISTERED', 'A visitor created a platform member account', ['userId' => (int) $new['id'], 'userUid' => (string) ($new['user_uid'] ?? '')], 'visitor');
+        $user = $this->platform->identity->authenticate($username, $password);
         if (!$user) { $this->flash('error', 'Account created. Sign in to continue.'); redirect('/login'); return; }
         $this->establishSession($user);
         redirect('/dashboard');
@@ -120,19 +126,21 @@ class Auth extends MY_Controller
     {
         $admin = $this->input->post('admin') === '1';
         if (!$this->validAuthCsrf()) { $this->flash('error', 'Your session expired. Please try again.'); $this->redirectLogin($admin); return; }
-        $email = strtolower(trim((string) $this->input->post('email')));
+        // Single sign-in identifier — username, email address OR six-digit User ID.
+        $identifier = trim((string) $this->input->post('identifier'));
+        if ($identifier === '') $identifier = trim((string) $this->input->post('email'));
         $password = (string) $this->input->post('password');
         $remember = $this->input->post('remember') === '1';
         $attempts = (int) $this->session->userdata('login_attempts');
         $until = (int) $this->session->userdata('login_locked_until');
         if ($until > time()) { $this->flash('error', 'Too many attempts. Try again later.'); $this->redirectLogin($admin); return; }
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || $password === '') { $this->flash('error', 'Enter a valid email and password.'); $this->redirectLogin($admin); return; }
-        $user = $this->platform->identity->authenticate($email, $password);
+        if ($identifier === '' || $password === '') { $this->flash('error', 'Enter your username, email or User ID and your password.'); $this->redirectLogin($admin); return; }
+        $user = $this->platform->identity->authenticate($identifier, $password);
         if (!$user || ($admin && !$this->platform->identity->can($user, 'system.super_admin'))) {
             $attempts++;
             $this->session->set_userdata('login_attempts', $attempts);
             if ($attempts >= 5) $this->session->set_userdata('login_locked_until', time() + 900);
-            $this->flash('error', $admin ? 'Administrator access was not granted.' : 'Invalid email or password.');
+            $this->flash('error', $admin ? 'Administrator access was not granted.' : 'Invalid username, email or User ID, or password.');
             $this->redirectLogin($admin); return;
         }
         $this->establishSession($user);
@@ -158,13 +166,153 @@ class Auth extends MY_Controller
             if ($token === '' || $known === '' || !hash_equals($known, $token)) { $this->flash('error', 'Invalid security token.'); redirect('/account'); return; }
         }
         $this->clearRememberCookie();
-        $this->session->sess_destroy(); redirect('/login');
+        $this->session->sess_destroy();
+        // Render the goodbye page for both a completed POST logout and a GET.
+        $this->load->view('auth/goodbye', [
+            'title' => 'You\'ve been signed out',
+            'csrfToken' => bin2hex(random_bytes(32)),
+        ]);
     }
 
     public function account()
     {
         $user = $this->requireLogin();
-        $this->renderPage('Account', 'account', ['user' => $user]);
+        $this->renderPage('My Account', 'account', ['user' => $user]);
+    }
+
+    /** Dashboard → My Account → Profile: change the username (their own only). */
+    public function update_username()
+    {
+        $user = $this->requireLogin();
+        if (!$this->validAuthCsrf()) { $this->flash('error', 'Your session expired. Please try again.'); redirect('/account'); return; }
+        $username = strtolower(trim((string) $this->input->post('username')));
+        if (!$this->validUsername($username)) {
+            $this->flash('error', 'Usernames must be 3–20 characters using letters, numbers or underscores, starting with a letter.');
+            redirect('/account'); return;
+        }
+        if ($this->Aegis_model->identity->usernameTaken($username, (int) $user['id'])) {
+            $this->flash('error', 'That username is already in use by another account.');
+            redirect('/account'); return;
+        }
+        $this->Aegis_model->identity->updateUser((int) $user['id'], ['username' => $username, 'display_name' => $username]);
+        $this->Aegis_model->audit->emit('USER_UPDATED', 'User changed their username', ['userId' => (int) $user['id']], (string) $user['id']);
+        $this->reestablishIdentity((int) $user['id']);
+        $this->flash('notice', 'Your username has been updated.');
+        redirect('/account');
+    }
+
+    /** Dashboard → My Account → Profile: change the email (their own only). */
+    public function update_email()
+    {
+        $user = $this->requireLogin();
+        if (!$this->validAuthCsrf()) { $this->flash('error', 'Your session expired. Please try again.'); redirect('/account'); return; }
+        $email = strtolower(trim((string) $this->input->post('email')));
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $this->flash('error', 'Enter a valid email address.');
+            redirect('/account'); return;
+        }
+        if ($this->Aegis_model->identity->emailTaken($email, (int) $user['id'])) {
+            $this->flash('error', 'That email address is already attached to another account.');
+            redirect('/account'); return;
+        }
+        $this->Aegis_model->identity->updateUser((int) $user['id'], ['email' => $email]);
+        $this->Aegis_model->audit->emit('USER_UPDATED', 'User changed their email address', ['userId' => (int) $user['id']], (string) $user['id']);
+        $this->reestablishIdentity((int) $user['id']);
+        $this->flash('notice', 'Your email address has been updated.');
+        redirect('/account');
+    }
+
+    /** Dashboard → My Account → Security: change the password (their own only). */
+    public function change_password()
+    {
+        $user = $this->requireLogin();
+        if (!$this->validAuthCsrf()) { $this->flash('error', 'Your session expired. Please try again.'); redirect('/account'); return; }
+        $current = (string) $this->input->post('current_password');
+        $password = (string) $this->input->post('new_password');
+        $confirm = (string) $this->input->post('new_password_confirm');
+        $stored = $this->Aegis_model->identity->findUserById((int) $user['id']);
+        if (!$stored || !password_verify($current, $stored['password_hash'])) {
+            $this->flash('error', 'Your current password is not correct.');
+            redirect('/account#security'); return;
+        }
+        if (strlen($password) < 12) { $this->flash('error', 'Your new password must be at least 12 characters.'); redirect('/account#security'); return; }
+        if ($password !== $confirm) { $this->flash('error', 'The two new passwords do not match.'); redirect('/account#security'); return; }
+        $this->Aegis_model->identity->updateUser((int) $user['id'], ['password_hash' => password_hash($password, PASSWORD_DEFAULT)]);
+        $this->Aegis_model->audit->emit('PASSWORD_CHANGED', 'User changed their password', ['userId' => (int) $user['id']], (string) $user['id']);
+        // Regenerate the session and CSRF token after a password change.
+        $this->reestablishIdentity((int) $user['id']);
+        $this->flash('notice', 'Your password has been changed.');
+        redirect('/account#security');
+    }
+
+    /** Dashboard → My Account → Profile: upload / replace the profile image. */
+    public function upload_avatar()
+    {
+        $user = $this->requireLogin();
+        if (!$this->validAuthCsrf()) { $this->flash('error', 'Your session expired. Please try again.'); redirect('/account'); return; }
+        if (empty($_FILES['avatar']) || ($err = (int) ($_FILES['avatar']['error'] ?? UPLOAD_ERR_NO_FILE)) !== UPLOAD_ERR_OK) {
+            $this->flash('error', $err === UPLOAD_ERR_NO_FILE ? 'Choose an image to upload.' : 'The upload failed. Please try again.');
+            redirect('/account#profile'); return;
+        }
+        $tmp = (string) $_FILES['avatar']['tmp_name'];
+        $size = (int) $_FILES['avatar']['size'];
+        $maxBytes = 2 * 1024 * 1024;
+        if ($size <= 0 || $size > $maxBytes) { $this->flash('error', 'Profile image must be 2 MB or smaller.'); redirect('/account#profile'); return; }
+        // Verify it really is an image (content-based) and read its real type.
+        $info = @getimagesize($tmp);
+        if ($info === false) { $this->flash('error', 'That file is not a valid image.'); redirect('/account#profile'); return; }
+        $allowed = [IMAGETYPE_PNG => 'png', IMAGETYPE_JPEG => 'jpg', IMAGETYPE_GIF => 'gif', IMAGETYPE_WEBP => 'webp'];
+        $ext = $allowed[$info[2]] ?? null;
+        if ($ext === null) { $this->flash('error', 'Only PNG, JPEG, GIF or WebP images are allowed.'); redirect('/account#profile'); return; }
+        $uploadDir = FCPATH . 'assets/uploads/avatars';
+        if (!is_dir($uploadDir)) @mkdir($uploadDir, 0775, true);
+        if (!is_dir($uploadDir) || !is_writable($uploadDir)) { $this->flash('error', 'Profile storage is not available. Contact an administrator.'); redirect('/account#profile'); return; }
+        $filename = 'u' . (int) $user['id'] . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+        if (!@move_uploaded_file($tmp, $uploadDir . '/' . $filename)) { $this->flash('error', 'Could not save the image.'); redirect('/account#profile'); return; }
+        $path = '/assets/uploads/avatars/' . $filename;
+        // Remove the previous uploaded avatar (never the user's own session image elsewhere).
+        $previous = (string) ($user['profile_image'] ?? '');
+        $this->Aegis_model->identity->updateUser((int) $user['id'], ['profile_image' => $path]);
+        if ($previous !== '' && str_starts_with($previous, '/assets/uploads/avatars/')) {
+            $old = FCPATH . ltrim($previous, '/');
+            if ($old !== $uploadDir . '/' . $filename && is_file($old)) @unlink($old);
+        }
+        $this->reestablishIdentity((int) $user['id']);
+        $this->flash('notice', 'Your profile image has been updated.');
+        redirect('/account#profile');
+    }
+
+    /** Dashboard → My Account → Profile: remove the profile image (reset to default). */
+    public function remove_avatar()
+    {
+        $user = $this->requireLogin();
+        if (!$this->validAuthCsrf()) { $this->flash('error', 'Your session expired. Please try again.'); redirect('/account'); return; }
+        $previous = (string) ($user['profile_image'] ?? '');
+        $this->Aegis_model->identity->updateUser((int) $user['id'], ['profile_image' => null]);
+        if ($previous !== '' && str_starts_with($previous, '/assets/uploads/avatars/')) {
+            $old = FCPATH . ltrim($previous, '/');
+            if (is_file($old)) @unlink($old);
+        }
+        $this->reestablishIdentity((int) $user['id']);
+        $this->flash('notice', 'Your profile image has been removed.');
+        redirect('/account#profile');
+    }
+
+    /** Reload the signed-in user from the DB and refresh the session identity. */
+    private function reestablishIdentity(int $userId): void
+    {
+        $fresh = $this->Aegis_model->identity->findUserById($userId);
+        if (!$fresh) return;
+        $fresh['permissions'] = $this->Aegis_model->identity->permissionsForUser($userId);
+        unset($fresh['password_hash']);
+        $this->session->sess_regenerate(true);
+        $this->session->set_userdata(['identity' => $fresh, 'csrf_token' => bin2hex(random_bytes(32))]);
+    }
+
+    /** Username policy: 3–20 chars, letters/numbers/underscore, must start with a letter. */
+    private function validUsername(string $username): bool
+    {
+        return (bool) preg_match('/^[a-z][a-z0-9_]{2,19}$/', $username);
     }
 
     private function establishSession(array $user): void

@@ -9,6 +9,9 @@ CREATE TABLE IF NOT EXISTS users (
   created_at VARCHAR(32) NOT NULL,
   updated_at VARCHAR(32) NOT NULL,
   last_login_at VARCHAR(32) NULL,
+  username VARCHAR(64) NULL,
+  user_uid CHAR(6) NULL,
+  profile_image VARCHAR(255) NULL,
   INDEX idx_users_active (active)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS roles (

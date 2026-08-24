@@ -93,13 +93,17 @@ test('profile menu exposes working actions (settings, security, notifications, s
     assert_contains('id="security"', $account, 'account page has a #security section');
 });
 
-test('logout is POST + CSRF and destroys the session server-side', function () {
+test('logout is POST + CSRF, destroys the session and shows the goodbye page', function () {
     $auth = file_get_contents(FCPATH . 'application/controllers/Auth.php');
     assert_contains('public function logout()', $auth);
     assert_contains('sess_destroy', $auth);
-    assert_contains('redirect(\'/login\')', $auth);
     // POST-only enforcement via CSRF token check on logout.
     assert_contains('validAuthCsrf', $auth);
+    // The signed-out goodbye page is rendered after the session is destroyed.
+    assert_contains('load->view(\'auth/goodbye\'', $auth);
+    $goodbye = file_get_contents(FCPATH . 'application/views/auth/goodbye.php');
+    assert_contains('You\'ve been signed out', $goodbye);
+    assert_contains('action="/login"', $goodbye);
     $header = file_get_contents(FCPATH . 'application/views/layout/header.php');
     assert_contains('method="post" action="/logout"', $header);
     assert_contains('csrf_token', $header);

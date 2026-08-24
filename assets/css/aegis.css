@@ -784,3 +784,52 @@ pre.raw {
    assets/css/chat-widget.css, loaded by the chat_widget partial itself so
    the widget floats correctly on every page shell — including the public
    site, which never loads this stylesheet. */
+
+/* =========================================================
+   Account & authentication enhancements (WINDELS AI WORKFORCE)
+   Two-column auth, profile avatar, account page sections.
+   ========================================================= */
+
+/* ---- Profile avatar (dashboard header + user menu) ---- */
+.profile .avatar--img { overflow: hidden; background: transparent; }
+.profile .avatar--img img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
+
+/* ---- Two-column auth pages (login / register) ---- */
+.auth-split { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; place-items: center; max-width: 980px; margin: 0 auto; width: 100%; }
+.auth-visual { display: flex; flex-direction: column; gap: 18px; width: 100%; max-width: 460px; }
+.auth-visual-frame { position: relative; border-radius: 18px; overflow: hidden; border: 1px solid var(--line2); box-shadow: 0 20px 60px #00000055; background: var(--panel2); aspect-ratio: 4 / 3; }
+.auth-visual-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.auth-visual-fallback { display: none; width: 100%; height: 100%; place-items: center; color: var(--muted); font-size: 60px; }
+.auth-visual-copy .eyebrow { margin: 0 0 8px; }
+.auth-visual-copy h2 { margin: 0; color: #fff; font-size: 26px; font-weight: 700; letter-spacing: -0.02em; }
+.auth-visual-copy p { margin: 8px 0 0; color: var(--muted); font-size: 14px; line-height: 1.6; max-width: 44ch; }
+
+/* ---- Logout / goodbye page ---- */
+.auth-shell--goodbye { display: grid; place-items: center; padding: 48px 20px; }
+.auth-card--goodbye { max-width: 460px; }
+.goodbye-visual { margin: 0 auto 18px; border-radius: 14px; overflow: hidden; border: 1px solid var(--line2); background: var(--panel2); max-width: 340px; aspect-ratio: 3 / 2; }
+.goodbye-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.goodbye-fallback { display: none; width: 100%; height: 100%; place-items: center; color: var(--muted); font-size: 46px; }
+
+/* ---- Account page ---- */
+.avatar-lg-wrap { flex: none; width: 84px; height: 84px; }
+.avatar-lg { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; border: 2px solid var(--line2); box-shadow: 0 8px 24px #00000044; }
+.avatar-lg--initial { display: grid; place-items: center; font-weight: 800; font-size: 32px; color: #fff; background: linear-gradient(135deg, var(--brand), var(--brand-2)); }
+.avatar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
+.avatar-actions .avatar-file { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.avatar-actions label.btn { position: relative; cursor: pointer; }
+.account-edit { margin-top: 18px; padding: 16px 18px; border: 1px solid var(--line2); border-radius: 12px; background: var(--panel2); }
+.account-edit h4 { margin: 0 0 4px; color: #fff; font-size: 14px; }
+.account-edit .auth-form { margin-top: 10px; gap: 12px; }
+
+/* ---- Responsive: stack the visual above the form on mobile ---- */
+@media (max-width: 860px) {
+  .auth-split { grid-template-columns: 1fr; gap: 22px; padding-top: 24px; }
+  .auth-visual { max-width: 520px; }
+  .auth-visual-frame { aspect-ratio: 16 / 9; }
+  .auth-visual-copy { display: none; }
+}
+@media (max-width: 480px) {
+  .auth-split { gap: 18px; }
+  .auth-visual-frame { aspect-ratio: 16 / 9; }
+}

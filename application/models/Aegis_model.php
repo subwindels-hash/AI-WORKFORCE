@@ -509,9 +509,60 @@ class Aegis_model extends CI_Model
         $this->identity = new class($db) implements Aegis\Persistence\IdentityRepository {
             public function __construct(private object $db) {}
             public function findUserByEmail(string $email): ?array { return $this->db->get_where('users', ['email' => $email], 1)->row_array() ?: null; }
+            public function findUserByUsername(string $username): ?array { return $this->db->get_where('users', ['username' => strtolower(trim($username))], 1)->row_array() ?: null; }
+            public function findUserByUid(string $uid): ?array {
+                $uid = preg_replace('/\D/', '', (string) $uid);
+                if (strlen($uid) !== 6) return null;
+                return $this->db->get_where('users', ['user_uid' => $uid], 1)->row_array() ?: null;
+            }
             public function findUserById(int $id): ?array { return $this->db->get_where('users', ['id' => $id], 1)->row_array() ?: null; }
+            public function findUserByIdentifier(string $identifier): ?array {
+                $identifier = trim($identifier);
+                if ($identifier === '') return null;
+                if (filter_var($identifier, FILTER_VALIDATE_EMAIL)) {
+                    return $this->findUserByEmail(strtolower($identifier));
+                }
+                if (preg_match('/^\d{6}$/', $identifier)) {
+                    return $this->findUserByUid($identifier);
+                }
+                return $this->findUserByUsername($identifier);
+            }
             public function createUser(array $user): array {
+                $user['username'] = strtolower(trim((string) ($user['username'] ?? '')));
+                if ($user['username'] === '') {
+                    $user['username'] = $this->generateUniqueUsername((string) ($user['display_name'] ?? ''));
+                }
+                if (empty($user['user_uid'])) $user['user_uid'] = $this->generateUniqueUid();
+                $user['profile_image'] = $user['profile_image'] ?? null;
                 $this->db->insert('users', $user); $user['id'] = (int) $this->db->insert_id(); return $user;
+            }
+            public function updateUser(int $id, array $patch): void {
+                $this->db->where('id', $id)->update('users', array_merge($patch, ['updated_at' => gmdate('c')]));
+            }
+            public function usernameTaken(string $username, ?int $exceptId = null): bool {
+                $this->db->where('username', strtolower(trim($username)));
+                if ($exceptId !== null) $this->db->where('id !=', $exceptId);
+                return (bool) $this->db->limit(1)->get('users')->row_array();
+            }
+            public function emailTaken(string $email, ?int $exceptId = null): bool {
+                $this->db->where('email', strtolower(trim($email)));
+                if ($exceptId !== null) $this->db->where('id !=', $exceptId);
+                return (bool) $this->db->limit(1)->get('users')->row_array();
+            }
+            public function generateUniqueUsername(string $base): string {
+                $base = strtolower(preg_replace('/[^A-Za-z0-9_]/', '', str_replace(' ', '_', (string) $base)));
+                $base = substr($base, 0, 16);
+                if ($base === '' || !preg_match('/^[a-z]/', $base)) $base = 'u' . $base;
+                $base = str_pad($base, 3, '_');
+                $candidate = substr($base, 0, 18);
+                $n = 1;
+                while ($this->usernameTaken($candidate)) { $candidate = substr($base, 0, max(2, 18 - strlen((string) $n))) . $n; $n++; }
+                return $candidate;
+            }
+            public function generateUniqueUid(): string {
+                do { $uid = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT); }
+                while ((bool) $this->db->get_where('users', ['user_uid' => $uid], 1)->row_array());
+                return $uid;
             }
             public function ensureRole(string $code, string $name): int { return $this->ensure('roles', $code, $name); }
             public function ensurePermission(string $code, string $name): int { return $this->ensure('permissions', $code, $name); }
@@ -535,7 +586,7 @@ class Aegis_model extends CI_Model
             }
             /** Browser admin console read/manage helpers (kept in the model so SQL stays out of controllers). */
             public function listUsers(): array {
-                $rows = $this->db->select('id,email,display_name,active,created_at,updated_at,last_login_at')->order_by('created_at', 'ASC')->get('users')->result_array();
+                $rows = $this->db->select('id,email,display_name,username,user_uid,profile_image,active,created_at,updated_at,last_login_at')->order_by('created_at', 'ASC')->get('users')->result_array();
                 foreach ($rows as &$row) $row['permissions'] = $this->permissionsForUser((int) $row['id']);
                 return $rows;
             }

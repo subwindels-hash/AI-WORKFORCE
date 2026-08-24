@@ -17,6 +17,7 @@ $isAdmin = $identity && in_array('system.super_admin', $identity['permissions'] 
 $active = $active ?? '';
 $userName = (string) ($identity['display_name'] ?? $identity['email'] ?? 'Member');
 $userInitials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $userName), 0, 1) ?: 'W');
+$userProfileImage = (string) ($identity['profile_image'] ?? '');
 $unread = Aegis_NotificationsHelper::unreadCount();
 
 // Helper to check active for multiple keys
@@ -72,9 +73,9 @@ $isActive = function(array $keys) use ($active): bool {
   <a href="/sports" class="<?= $active === 'sports' ? 'active' : '' ?> sidebar-sub" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.5 9h17M3.5 15h17M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg><span>Sports Intel</span></a>
   <a href="/notifications" class="<?= $active === 'notifications' ? 'active' : '' ?> sidebar-sub" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg><span>Alerts</span><?php if ($unread > 0): ?> <span class="badge b-red"><?= (int)$unread ?></span><?php endif; ?></a>
 
-  <!-- Required: Settings -->
+  <!-- Required: Settings / My Account -->
   <p class="sidebar-label">Account</p>
-  <a href="/account" class="<?= $active === 'account' ? 'active' : '' ?>" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg><span>Settings</span></a>
+  <a href="/account" class="<?= $active === 'account' ? 'active' : '' ?>" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg><span>My Account</span></a>
   <a href="/faq" class="sidebar-sub" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.2 9a2.9 2.9 0 0 1 5.6.9c0 2-2.8 2.4-2.8 4"/><path d="M12 17.5h.01"/></svg><span>Help</span></a>
   <?php if ($isAdmin): ?><a href="/admin" class="<?= $active === 'admin' ? 'active' : '' ?>" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5z"/></svg><span>Admin Control</span></a><?php endif; ?>
 
@@ -110,7 +111,11 @@ $isActive = function(array $keys) use ($active): bool {
     </a>
     <div class="profile-wrap">
       <button class="profile" type="button" id="profile-btn" aria-haspopup="true" aria-expanded="false">
-        <span class="avatar"><?= e($userInitials) ?></span>
+        <?php if ($userProfileImage !== ''): ?>
+          <span class="avatar avatar--img"><img src="<?= e($userProfileImage) ?>" alt=""></span>
+        <?php else: ?>
+          <span class="avatar"><?= e($userInitials) ?></span>
+        <?php endif; ?>
         <span class="who"><b><?= e($userName) ?></b><span><?= $isAdmin ? 'Administrator' : 'Member' ?></span></span>
       </button>
       <div class="profile-menu" id="profile-menu" role="menu">
