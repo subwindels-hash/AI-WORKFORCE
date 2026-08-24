@@ -295,6 +295,9 @@ class Lang_learn extends App_Controller
         try { $data['dueCount'] = count($this->platform->vocabulary->due((int) $user['id'], $profileId)); }
         catch (Throwable $e) { $data['dueCount'] = 0; }
         $data['profileId'] = $profileId;
+        $profile = $this->platform->model->langlearn->findProfile($profileId);
+        $data['langCode'] = $profile['language_code'] ?? 'en';
+        $data['locale'] = \Aegis\LangLearn\Translator::LOCALES[$data['langCode']] ?? 'en-GB';
         $this->render($data, 'langlearn/vocabulary');
     }
 

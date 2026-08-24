@@ -54,7 +54,12 @@ test('provider manager routes market-class requests only to matching licensed ad
     fx_scaffold_env('AEGIS_TEST_STOCK_DATA_SYMBOLS', 'AAPL');
     try {
         $stock = new LicensedAssetMarketDataProvider('stock', 'stock-test', 'Test stocks', 'AEGIS_TEST_STOCK_DATA', 'https://feed.example/v1', true, 'token', function (string $url, ?string $token) {
-            return ['data' => ['candles' => [['timestamp' => 1700000000000, 'open' => 100, 'high' => 101, 'low' => 99, 'close' => 100.5, 'volume' => 10]]]];
+            $candles = [];
+            $base = 1700000000000;
+            for ($i = 0; $i < 35; $i++) {
+                $candles[] = ['timestamp' => $base - (35 - $i) * 3600000, 'open' => 100 + $i * 0.1, 'high' => 101 + $i * 0.1, 'low' => 99 + $i * 0.1, 'close' => 100.5 + $i * 0.1, 'volume' => 10 + $i];
+            }
+            return ['data' => ['candles' => $candles]];
         });
         $pm = new ProviderManager();
         $pm->register($stock);

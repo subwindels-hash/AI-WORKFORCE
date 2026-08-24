@@ -41,14 +41,26 @@
   place-items: center;
   width: 34px;
   height: 34px;
+  aspect-ratio: 1 / 1;
   border-radius: 50%;
   overflow: hidden;
   background: linear-gradient(135deg, #2f6bff, #6366f1);
   flex: none;
+  isolation: isolate;
 }
-.aegis-chat-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.aegis-chat-fallback { display: none; color: #fff; font-weight: 800; font-size: 14px; }
+.aegis-chat-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  /* Prevent stretch/crop issues: cover keeps aspect, center keeps focus */
+}
+.aegis-chat-fallback { display: none; color: #fff; font-weight: 800; font-size: 14px; line-height: 1; }
 .aegis-chat-avatar.is-fallback .aegis-chat-fallback { display: block; }
+.aegis-chat-avatar.is-fallback img { display: none; }
 
 /* ---------- Panel ---------- */
 .aegis-chat-panel {
