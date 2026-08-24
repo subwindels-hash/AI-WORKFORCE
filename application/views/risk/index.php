@@ -3,8 +3,7 @@
 <div class="page-head">
   <div>
     <h2>Risk Center</h2>
-    <p>Independent risk limits (the Risk Engine has veto power over every trade — paper, semi- and fully-automated alike)
-      plus continuous portfolio monitoring. Correlation alerts use <b>static disclosed groups</b> (v1 heuristic, not statistical).</p>
+    <p>Independent limits with veto power over every trade, plus portfolio monitoring. Correlation alerts use static disclosed groups — a heuristic, not a statistical model.</p>
   </div>
 </div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>

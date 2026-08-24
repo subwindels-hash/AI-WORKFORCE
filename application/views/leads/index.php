@@ -109,7 +109,7 @@ $pageTitle = $isPipeline ? 'Lead Pipeline' : 'Lead Discovery';
 
 <main class="wrap">
   <h1><?= e($pageTitle) ?></h1>
-  <p class="sub">Discover → normalize → store → organize → qualify. Live provider results only — no synthetic businesses.</p>
+  <p class="sub"><?= $isPipeline ? 'Move stored leads through stages, assign an owner and review live counts.' : 'Search live businesses, store them, then organize collections. No synthetic companies.' ?></p>
 
   <!-- Shown only when the visitor has no platform session -->
   <section id="loginBox" class="card hidden">

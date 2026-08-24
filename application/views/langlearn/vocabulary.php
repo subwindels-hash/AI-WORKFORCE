@@ -1,5 +1,5 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed'); ?>
-<div class="page-head"><div><h2>Vocabulary</h2><p>Word bank with spaced repetition: remember → 1 → 3 → 7 → 14 → 30 → 90 days; forget → back to tomorrow. Progress counts come only from your real reviews.</p></div></div>
+<div class="page-head"><div><h2>Vocabulary</h2><p>Spaced repetition from a real word bank. Remembered words walk 1 → 3 → 7 → 14 → 30 → 90 days. Forgotten words return tomorrow.</p></div></div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 

@@ -1,8 +1,8 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed'); ?>
 <div class="page-head">
   <div>
-    <h2>Paper Trading — simulated accounts</h2>
-    <p>Phase 3: simulated orders and fills against real market prices when providers are reachable (clearly-labeled synthetic prices when not). Every order passes kill switch → trading mode → Risk Engine. <b>No order ever leaves this process.</b></p>
+    <h2>Paper Trading</h2>
+    <p>Simulated accounts and fills. Every order still passes the kill switch, trading mode and Risk Engine. No order leaves this process.</p>
   </div>
 </div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>

@@ -1,5 +1,12 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed'); ?>
-<div class="page-head"><div><p class="eyebrow">Restricted area</p><h2>Administrator control center</h2><p>Manage users and inspect platform readiness. All privileged actions require an authenticated super administrator and CSRF token.</p></div><div class="admin-badge"><img src="/assets/images/ai-agent-avatar.png" alt="AI operations assistant"><span>Admin mode</span></div></div>
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Restricted area</p>
+    <h2>Administrator control center</h2>
+    <p>Manage users and inspect platform readiness. Privileged actions require a super administrator and a CSRF token.</p>
+  </div>
+  <div class="admin-badge"><img src="/assets/images/ai-agent-avatar.png" alt="" width="28" height="28"><span>Admin mode</span></div>
+</div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 <div class="grid stat-grid">

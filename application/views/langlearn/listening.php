@@ -1,5 +1,5 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed'); ?>
-<div class="page-head"><div><h2>Listening practice — WINDELS AI WORKFORCE</h2><p>Audio is spoken by YOUR browser's speech synthesis via SpeechProvider abstraction — real playback when a voice for the language exists, honest notice when not. Replay, stop, speed control 0.75x/1x/1.25x, correct locale.</p></div></div>
+<div class="page-head"><div><h2>Listening practice</h2><p>Your browser speaks the sentence when a voice exists for this language. Replay, stop and speed stay honest — nothing is faked if audio is unavailable.</p></div></div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 <div class="notice warnbox" id="tts-support" style="display:none"></div>

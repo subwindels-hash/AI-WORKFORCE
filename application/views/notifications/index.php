@@ -1,9 +1,8 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed'); ?>
 <div class="page-head">
   <div>
-    <h2>Notifications — <span class="dim"><?= (int) $inbox['unread'] ?> unread</span></h2>
-    <p>Risk-alert transitions, approval requests, execution outcomes, broker disconnects and kill-switch events.
-      Dedupe keeps one unread notification per active issue until it is acknowledged.</p>
+    <h2>Alerts</h2>
+    <p><?= (int) $inbox['unread'] ?> unread. Risk transitions, approvals, executions, broker disconnects and kill-switch events — one unread item per active issue.</p>
   </div>
 </div>
 

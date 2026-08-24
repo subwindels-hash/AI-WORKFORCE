@@ -2,7 +2,7 @@
 $langCode = $view['languageCode'] ?? 'en';
 $locale = \Aegis\LangLearn\Translator::LOCALES[$langCode] ?? 'en-GB';
 ?>
-<div class="page-head"><div><h2>Conversation — <?= e($view['scenario'] ?? '') ?> (<?= e($locale) ?>)</h2><p>Correction mode: <?= e(str_replace('_', ' ', $view['correctionMode'] ?? '')) ?> — with 🔊 Listen for every AI and user turn. Voice uses correct locale.</p></div></div>
+<div class="page-head"><div><h2>Conversation — <?= e($view['scenario'] ?? '') ?></h2><p>Correction mode: <?= e(str_replace('_', ' ', $view['correctionMode'] ?? '')) ?>. Listen to any turn in <?= e($locale) ?>.</p></div></div>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 <?php if (!empty($view['aiOpens'])): ?><div class="panel"><div class="body"><b>AI:</b> <?= e($view['aiOpens']) ?> <button class="btn small" type="button" data-conv-listen="<?= e($view['aiOpens']) ?>">🔊 Listen</button></div></div><?php endif; ?>
 <?php foreach (($view['history'] ?? []) as $h): ?>

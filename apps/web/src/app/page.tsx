@@ -121,8 +121,8 @@ export default function HomePage() {
                 <span className="text-cyan-400">●</span> Real TTS · no fake
               </div>
             </div>
-            <p className="mx-auto mt-6 max-w-[380px] text-center text-[11px] leading-4 text-slate-500">
-              Professional hero composition · clear hierarchy · well-positioned visual · balanced spacing · responsive · does not overlap content
+            <p className="mx-auto mt-6 max-w-[380px] text-center text-[12px] leading-4 text-slate-500">
+              Grounded assistant · real voices · no invented scores
             </p>
           </div>
         </section>

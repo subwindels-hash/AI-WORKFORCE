@@ -2,6 +2,7 @@
 <section class="page-hero">
   <p class="kicker">How it works</p>
   <h1>From visitor to a role-checked workspace</h1>
+  <p class="lede">Create an account, sign in, and the server decides which dashboard you can open.</p>
 </section>
 <section class="band">
   <ol class="steps">
