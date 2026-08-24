@@ -13,7 +13,8 @@ $identity = is_array($identity) ? $identity : null;
 $ci->config->load('seo', true);
 $seo = $ci->config->item('settings', 'seo') ?: [];
 $pageTitle = (string) ($title ?? 'AEGIS');
-$canonical = ($seo['canonical'] ?? '') !== '' ? rtrim((string) $seo['canonical'], '/') . ($_SERVER['REQUEST_URI'] ?? '/') : '';
+$currentPath = (string) (parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH) ?: '/');
+$canonical = ($seo['canonical'] ?? '') !== '' ? rtrim((string) $seo['canonical'], '/') . '/' . ltrim($currentPath, '/') : '';
 ?>
 <!DOCTYPE html>
 <html lang="en">
