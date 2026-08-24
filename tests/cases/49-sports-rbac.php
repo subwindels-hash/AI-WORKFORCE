@@ -17,8 +17,16 @@ function fx_identity_for(array $permissions): Identity
     $repo = new class($permissions) implements \Aegis\Persistence\IdentityRepository {
         public function __construct(private array $p) {}
         public function findUserByEmail(string $e): ?array { return ['id' => 7, 'email' => $e, 'password_hash' => 'x', 'active' => 1]; }
+        public function findUserByUsername(string $u): ?array { return ['id' => 7, 'email' => 'a@b.c', 'password_hash' => 'x', 'active' => 1]; }
+        public function findUserByUid(string $u): ?array { return ['id' => 7, 'email' => 'a@b.c', 'password_hash' => 'x', 'active' => 1]; }
         public function findUserById(int $id): ?array { return ['id' => 7, 'email' => 'a@b.c', 'password_hash' => 'x', 'active' => 1]; }
+        public function findUserByIdentifier(string $i): ?array { return ['id' => 7, 'email' => $i, 'password_hash' => 'x', 'active' => 1]; }
         public function createUser(array $u): array { return $u; }
+        public function updateUser(int $id, array $patch): void {}
+        public function usernameTaken(string $u, ?int $e = null): bool { return false; }
+        public function emailTaken(string $e, ?int $x = null): bool { return false; }
+        public function generateUniqueUsername(string $b): string { return 'user7'; }
+        public function generateUniqueUid(): string { return '700001'; }
         public function ensureRole(string $c, string $n): int { return 1; }
         public function ensurePermission(string $c, string $n): int { return 1; }
         public function grantRolePermission(int $r, int $p): void {}

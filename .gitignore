@@ -21,3 +21,5 @@ __pycache__/
 *.pyc
 .pytest_cache/
 runtime/sessions/aegis_session*
+
+assets/uploads/

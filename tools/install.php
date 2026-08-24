@@ -130,6 +130,52 @@ echo "upgrade: sports_predictions odds columns ensured\n";
 // Lottery: background system-build payload (upgraded installs).
 try { $pdo->exec($driver === 'pdo_sqlite' ? 'ALTER TABLE lottery_sync_runs ADD COLUMN payload TEXT' : 'ALTER TABLE lottery_sync_runs ADD COLUMN payload MEDIUMTEXT NULL'); echo "upgrade: lottery_sync_runs.payload added\n"; }
 catch (Throwable $e) { /* column already exists on upgraded installs */ }
+// ---- Account profile columns (username, six-digit User ID, profile image) ----
+// Fresh installs get these in the schema; upgraded installs get them here.
+foreach (['username' => ($driver === 'pdo_sqlite' ? 'TEXT' : 'VARCHAR(64) NULL'),
+          'user_uid' => ($driver === 'pdo_sqlite' ? 'TEXT' : 'CHAR(6) NULL'),
+          'profile_image' => ($driver === 'pdo_sqlite' ? 'TEXT' : 'VARCHAR(255) NULL')] as $col => $def) {
+    try { $pdo->exec("ALTER TABLE users ADD COLUMN $col $def"); }
+    catch (Throwable $e) { /* column already exists on upgraded installs */ }
+}
+// Backfill: every existing user gets a unique username and a unique six-digit User ID.
+$uids = array_map(fn($r) => $r[0], $pdo->query('SELECT user_uid FROM users WHERE user_uid IS NOT NULL')->fetchAll(PDO::FETCH_NUM));
+$takenUsernames = array_map(fn($r) => strtolower((string) $r[0]), $pdo->query('SELECT username FROM users WHERE username IS NOT NULL')->fetchAll(PDO::FETCH_NUM));
+$rows = $pdo->query('SELECT id, email, display_name, username, user_uid FROM users')->fetchAll(PDO::FETCH_ASSOC);
+foreach ($rows as $r) {
+    $changed = [];
+    if (empty($r['user_uid'])) {
+        do { $uid = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT); } while (in_array($uid, $uids, true));
+        $uids[] = $uid;
+        $changed['user_uid'] = $uid;
+    }
+    if (empty($r['username'])) {
+        $base = preg_replace('/[^A-Za-z0-9_]/', '', str_replace(' ', '_', (string) ($r['display_name'] ?: $r['email'])));
+        $base = strtolower(substr($base, 0, 16));
+        if ($base === '' || !preg_match('/^[A-Za-z]/', $base)) $base = 'u' . $base;
+        $base = str_pad($base, 3, '_');
+        $candidate = substr($base, 0, 18); $n = 1;
+        while (in_array($candidate, $takenUsernames, true)) { $candidate = substr($base, 0, 18 - strlen((string) $n)) . $n; $n++; }
+        $takenUsernames[] = $candidate;
+        $changed['username'] = $candidate;
+    }
+    if ($changed) {
+        $pdo->prepare('UPDATE users SET ' . implode(' = ?, ', array_keys($changed)) . ' = ?, updated_at = ? WHERE id = ?')
+            ->execute(array_merge(array_values($changed), [gmdate('c'), (int) $r['id']]));
+    }
+}
+echo "upgrade: account profile columns (username / user_uid / profile_image) ensured\n";
+// Unique indexes for the account columns (added after the columns so upgraded
+// installs succeed; idempotent for fresh installs too).
+foreach ([$driver === 'pdo_sqlite'
+            ? 'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)'
+            : 'CREATE UNIQUE INDEX uq_users_username ON users(username)',
+          $driver === 'pdo_sqlite'
+            ? 'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_user_uid ON users(user_uid)'
+            : 'CREATE UNIQUE INDEX uq_users_user_uid ON users(user_uid)'] as $idx) {
+    try { $pdo->exec($idx); } catch (Throwable $e) { /* already exists on upgraded installs */ }
+}
+echo "upgrade: account unique indexes ensured\n";
 aegis_seed_rbac(
     function (string $code, string $name) use ($pdo, $insertIgnore): int {
         $pdo->prepare("{$insertIgnore} roles (code, name) VALUES (?, ?)")->execute([$code, $name]);

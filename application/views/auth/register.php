@@ -3,13 +3,28 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title><?= e(($title ?? 'Register') . ' · WINDELS AI WORKFORCE') ?></title>
+  <title><?= e(($title ?? 'Create an account') . ' · WINDELS AI WORKFORCE') ?></title>
   <meta name="robots" content="noindex,nofollow">
   <link rel="icon" href="/assets/images/windels-mark.png">
   <link rel="stylesheet" href="/assets/css/aegis.css">
 </head>
 <body class="auth-page">
-  <main class="auth-shell">
+  <main class="auth-shell auth-split">
+    <!-- LEFT — WINDELS AI WORKFORCE visual -->
+    <section class="auth-visual" aria-hidden="true">
+      <div class="auth-visual-frame">
+        <img src="/assets/images/hero-africa-mobility.jpg" alt="WINDELS AI WORKFORCE — create your workspace" class="auth-visual-img" loading="lazy"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='grid';">
+        <div class="auth-visual-fallback"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h13a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H3z"/><path d="m3 4 1 7 1-7M19 5l3 2-3 2"/></svg></div>
+      </div>
+      <div class="auth-visual-copy">
+        <p class="eyebrow">WINDELS AI WORKFORCE</p>
+        <h2>One account, a full AI workforce</h2>
+        <p>Register once and get a unique six-digit User ID. Sign in later with your username, email or User ID.</p>
+      </div>
+    </section>
+
+    <!-- RIGHT — Registration form -->
     <section class="auth-card">
       <div class="auth-brand">
         <img src="/assets/images/windels-mark.png" alt="" class="auth-brand-mark" onerror="this.onerror=null;this.src='/assets/images/aegis-mark.png'">
@@ -25,10 +40,11 @@
         <input type="hidden" name="csrf_token" value="<?= e((string) ($csrfToken ?? '')) ?>">
 
         <label class="auth-field">
-          <span>Full name</span>
+          <span>Username</span>
           <span class="auth-control">
-            <input name="display_name" id="reg-name" required maxlength="120" autocomplete="name" placeholder="Your full name">
+            <input name="username" id="reg-username" required maxlength="20" autocomplete="username" placeholder="carlosjohn">
           </span>
+          <span class="auth-hint">3–20 characters, letters, numbers or underscores, starting with a letter.</span>
         </label>
 
         <label class="auth-field">
@@ -82,7 +98,6 @@
     var submit = document.getElementById('register-submit');
     var inlineError = document.getElementById('register-inline-error');
 
-    // Password visibility toggles.
     document.querySelectorAll('.pw-toggle').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var input = document.getElementById(btn.getAttribute('data-toggle'));
@@ -100,16 +115,15 @@
       return false;
     }
 
-    // Client-side validation + loading state.
     form.addEventListener('submit', function (event) {
-      var name = document.getElementById('reg-name');
+      var username = document.getElementById('reg-username');
       var email = document.getElementById('reg-email');
       var password = document.getElementById('reg-password');
       var confirm = document.getElementById('reg-confirm');
       var terms = document.getElementById('reg-terms');
       inlineError.hidden = true;
       var ok = true;
-      if (!name.value.trim()) ok = fail('Enter your full name.', name);
+      if (!/^[a-z][a-z0-9_]{2,19}$/i.test(username.value.trim())) ok = fail('Username must be 3–20 characters, start with a letter, and use only letters, numbers or underscores.', username);
       else if (!email.value.trim()) ok = fail('Enter your email address.', email);
       else if (password.value.length < 12) ok = fail('Your password must be at least 12 characters.', password);
       else if (password.value !== confirm.value) ok = fail('The two passwords do not match.', confirm);

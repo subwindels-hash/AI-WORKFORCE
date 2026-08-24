@@ -7,9 +7,13 @@ use Aegis\Persistence\IdentityRepository;
 class Identity
 {
     public function __construct(private IdentityRepository $users) {}
-    public function authenticate(string $email, string $password): ?array
+    /**
+     * Authenticate using any single identifier — email address, username or
+     * six-digit User ID — plus the account password.
+     */
+    public function authenticate(string $identifier, string $password): ?array
     {
-        $user = $this->users->findUserByEmail(strtolower(trim($email)));
+        $user = $this->users->findUserByIdentifier(trim($identifier));
         if (!$user || empty($user['active']) || !password_verify($password, $user['password_hash'])) {
             if ($user) $this->users->recordAuthEvent((int) $user['id'], 'LOGIN_FAILED');
             return null;
