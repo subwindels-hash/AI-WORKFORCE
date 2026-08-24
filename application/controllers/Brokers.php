@@ -8,17 +8,17 @@ defined('BASEPATH') or exit('No direct script access allowed');
  */
 class Brokers extends MY_Controller
 {
-    /** Honest capability matrix for connectors that are NOT implemented. */
+    /** Honest capability matrix for connectors whose provider integration is not verified. */
     private const PLANNED = [
-        ['id' => 'mt4-bridge', 'name' => 'MetaTrader 4', 'status' => 'PLANNED', 'detail' => 'After MT5 is verified against a real terminal'],
-        ['id' => 'binance', 'name' => 'Binance', 'status' => 'PLANNED', 'detail' => 'Crypto exchanges are added one at a time after MT5'],
-        ['id' => 'bybit', 'name' => 'Bybit', 'status' => 'PLANNED', 'detail' => '—'],
-        ['id' => 'okx', 'name' => 'OKX', 'status' => 'PLANNED', 'detail' => '—'],
-        ['id' => 'coinbase', 'name' => 'Coinbase', 'status' => 'PLANNED', 'detail' => '—'],
-        ['id' => 'kraken', 'name' => 'Kraken', 'status' => 'PLANNED', 'detail' => '—'],
-        ['id' => 'ib', 'name' => 'InteractiveBrokers', 'status' => 'PLANNED', 'detail' => '—'],
-        ['id' => 'alpaca', 'name' => 'Alpaca', 'status' => 'PLANNED', 'detail' => '—'],
-        ['id' => 'oanda', 'name' => 'OANDA', 'status' => 'PLANNED', 'detail' => '—'],
+        ['id' => 'mt4-bridge', 'name' => 'MetaTrader 4', 'status' => 'PLANNED', 'detail' => 'Contract adapter scaffolded; verify against a real MT4 bridge after MT5 verification'],
+        ['id' => 'binance', 'name' => 'Binance', 'status' => 'PLANNED', 'detail' => 'Contract adapter scaffolded; provider-specific exchange mapping and demo/sandbox verification required'],
+        ['id' => 'bybit', 'name' => 'Bybit', 'status' => 'PLANNED', 'detail' => 'Contract adapter scaffolded; provider-specific exchange mapping and sandbox verification required'],
+        ['id' => 'okx', 'name' => 'OKX', 'status' => 'PLANNED', 'detail' => 'Contract adapter scaffolded; provider-specific exchange mapping and sandbox verification required'],
+        ['id' => 'coinbase', 'name' => 'Coinbase', 'status' => 'PLANNED', 'detail' => 'Contract adapter scaffolded; provider-specific exchange mapping and sandbox verification required'],
+        ['id' => 'kraken', 'name' => 'Kraken', 'status' => 'PLANNED', 'detail' => 'Contract adapter scaffolded; provider-specific exchange mapping and sandbox verification required'],
+        ['id' => 'ib', 'name' => 'InteractiveBrokers', 'status' => 'PLANNED', 'detail' => 'Contract adapter scaffolded; verify the gateway contract and demo account first'],
+        ['id' => 'alpaca', 'name' => 'Alpaca', 'status' => 'PLANNED', 'detail' => 'Contract adapter scaffolded; verify paper-account mapping and provider permissions first'],
+        ['id' => 'oanda', 'name' => 'OANDA', 'status' => 'PLANNED', 'detail' => 'Contract adapter scaffolded; verify the practice-account mapping first'],
     ];
 
     /** Toggle the SIMULATED MT5 bridge (offline demo only; writes the marker

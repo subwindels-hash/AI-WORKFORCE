@@ -9,6 +9,16 @@ defined('BASEPATH') or exit('No direct script access allowed');
 */
 $route['default_controller'] = 'welcome';
 $route['404_override'] = '';
+$route['login'] = 'auth/index';
+$route['admin/login'] = 'auth/admin_login';
+$route['login/submit'] = 'auth/login';
+$route['logout'] = 'auth/logout';
+$route['account'] = 'auth/account';
+$route['robots.txt'] = 'seo/robots';
+$route['sitemap.xml'] = 'seo/sitemap';
+$route['admin'] = 'admin/index';
+$route['admin/users/create'] = 'admin/create_user';
+$route['admin/users/(:num)/toggle'] = 'admin/toggle_user/$1';
 $route['translate_uri_dashes'] = false;
 
 // ---- pretty URLs for the MVC pages ---------------------------------------
@@ -48,6 +58,7 @@ $route['api/system/status'] = 'api_system/status';
 $route['api/auth/login'] = 'api_auth/login';
 $route['api/auth/logout'] = 'api_auth/logout';
 $route['api/auth/me'] = 'api_auth/me';
+$route['api/chat/respond'] = 'api_chat/respond';
 $route['api/sports/status'] = 'api_sports/status';
 $route['api/sports/dashboard'] = 'api_sports/dashboard';
 $route['api/sports/performance'] = 'api_sports/performance';

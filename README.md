@@ -1,5 +1,10 @@
 # AEGIS — Standalone AI Trading Intelligence Platform
 
+> **Standalone Lead Discovery update:** the independent Scout platform now lives
+> under `apps/api`, `apps/web` and `packages/shared`. It uses Fastify/TypeScript,
+> Next.js/React/Tailwind, PostgreSQL and Redis, and does not depend on the AEGIS
+> trading services. See [`docs/LEAD_DISCOVERY.md`](docs/LEAD_DISCOVERY.md).
+
 **CodeIgniter 3.1.13 · PHP 8.x · MySQL/MariaDB · Traditional MVC**
 
 A modular trading infrastructure that analyzes markets with a multi-agent AI
@@ -47,7 +52,7 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **Lottery Intelligence (EuroMillions)**: rule engine, validated idempotent ingestion (verified draws never silently overwritten), frequency/gap/hot-cold/distribution/pair statistics, per-line combination analyzer, 5-mode AI combination generator with lock/exclude + AI decision reports, diversification engine, system builder (C(N,5) combinatorics), user-scoped ticket builder + saved tickets, backtesting (Strategy Lab) with mandatory random baseline + same-period strategy comparison, model versioning, separated performance overview, RBAC (lottery.view/manage), idempotent lottery-cron | **TESTED** (admin controls/UI/security-E2E next; official feeds PLANNED) |
 | MT4 / crypto-exchange / stock-broker connectors | **PLANNED** (added one at a time after MT5 is verified) |
 
-**323 automated tests** run through the real CodeIgniter stack
+**328 automated tests** run through the real CodeIgniter stack
 (`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
 sandbox — see below), plus 9 contract tests for the Python bridge
 (`python-services/mt5-bridge/.venv/bin/python -m pytest test_bridge.py`).
@@ -75,26 +80,26 @@ sandbox — see below).
 
 ---
 
-## Production deployment (the normal path)
+## Production deployment (cPanel — no terminal required)
 
-Requirements: PHP 7.4–8.3 with `mysqli` + `mbstring`, MySQL 5.7+/MariaDB 10.3+,
-any web server (Apache/nginx + php-fpm).
+Requirements: PHP 8.1–8.3 with `mysqli` + `mbstring`, MySQL 5.7+/MariaDB 10.3+,
+Apache with `mod_rewrite` and permission for the bundled `.htaccess` rules.
 
-```bash
-# 1. Create the database + user, then:
-export AEGIS_DB_HOST=127.0.0.1 AEGIS_DB_USER=aegis AEGIS_DB_PASS=... AEGIS_DB_NAME=aegis_trading
-php tools/install.php          # creates all tables and RBAC defaults
-# Create the first operator once; values are environment-only and never committed:
-export AEGIS_BOOTSTRAP_ADMIN_EMAIL=admin@example.com AEGIS_BOOTSTRAP_ADMIN_PASSWORD='use-a-long-unique-password'
-php index.php tools bootstrap_admin
+The supported production flow is entirely browser-based:
 
-# 2. Point the vhost at the repo root (index.php is the front controller),
-#    set ENVIRONMENT=production, done:
-php index.php tools tests      # verify the full stack against your MariaDB
-```
+1. Upload and extract `application-deployment.zip` with **cPanel File Manager**.
+2. Create a database/user and grant **ALL PRIVILEGES** in **cPanel → MySQL Databases**.
+3. Import `database/production.sql` in **cPanel → phpMyAdmin**.
+4. Copy `.env.example` to `.env` and edit `CI_ENV`, `VP_BASE_URL`, the `VP_DB_*`
+   values, and preserve the existing `VP_ENCRYPTION_KEY` / `VP_AUTH_SECRET`.
+5. Open the domain. No install, seed, migration, Composer, Node, npm, Docker or
+   CLI admin-creation command is required.
 
-Configuration is environment-driven (`application/config/database.php`):
-`AEGIS_DB_DRIVER` (default `mysqli`), `AEGIS_DB_HOST/USER/PASS/NAME`.
+The complete cPanel guide is [`docs/CPANEL_DEPLOYMENT.md`](docs/CPANEL_DEPLOYMENT.md).
+The SQL import contains all application tables, indexes, foreign keys, defaults,
+RBAC, language/lottery reference data, built-in strategies and the initial
+administrator account. Configuration is read from `.env` by the bundled
+`application/config/env.php` loader.
 
 ## Offline dev / demo runtime (this repository's live preview)
 
@@ -150,7 +155,7 @@ application/
 python-services/mt5-bridge/     Phase 4 bridge: FastAPI + MetaTrader5 service,
                                 contract-tested with a simulated terminal
   helpers/aegis_helper.php      view-safe platform-state access
-tests/                          framework.php + cases/*.php (61 case files, 323 tests)
+tests/                          framework.php + cases/*.php (62 case files, 328 tests)
 tools/install.php               schema installer (mysqli or sqlite by driver)
 runtime/                        offline WASM-PHP bridge (dev only, not production)
 assets/css/aegis.css            dashboard styles (no CDN dependency)
@@ -495,6 +500,30 @@ To **demo** the full chain, Broker Center has a *Simulated MT5 bridge* toggle:
 | Every trade auditable | `audit_logs` table + UI trail; every order/position/journal row is linked |
 | Risk Engine veto power | `RiskEngine::evaluate()` sits in every order path |
 | Kill switch blocks orders | Checked first in `submitOrder()`, in the supervisor pipeline (step 1) and re-verified at routing time |
+
+## Unfinished-module scaffolds
+
+The previously planned integrations now have provider-neutral, testable code
+boundaries, but they remain **PLANNED** until their real external contracts
+are verified. Nothing is enabled by default and no missing data is fabricated.
+
+- **Licensed asset market data:** stock, ETF, futures and options adapters in
+  `application/libraries/Aegis/Providers/LicensedAssetMarketDataProvider.php`.
+  Each requires an explicit enable flag, safe URL, license identifier, token
+  where required and a symbol allow-list. It accepts only the documented
+  normalized candle/quote contract and reports `NOT_CONFIGURED`/`DOWN` honestly.
+- **Official lottery feeds:** `OfficialLotteryProvider` requires explicit
+  authorization metadata and HTTPS, normalizes the provider-neutral draw
+  contract, and leaves all validation/idempotency/conflict handling to the
+  existing lottery engine. The sandbox provider is never treated as official.
+- **MT4, crypto and stock-broker connectors:**
+  `ConfiguredTradingConnector` supplies the normalized bridge boundary for
+  MetaTrader 4, Binance, Bybit, OKX, Coinbase, Kraken, Interactive Brokers,
+  Alpaca and OANDA. Each connector is disabled by default; writes require
+  separate connector and adapter health gates and demo/live authorization.
+
+The scaffolds are intentionally not marked as working integrations in
+`GET /api/system/features` until a real provider is contract-tested.
 
 ## Roadmap
 

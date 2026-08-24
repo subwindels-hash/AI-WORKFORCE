@@ -37,9 +37,23 @@ class ProviderManager
         return $this->providers;
     }
 
-    public function candidatesFor(string $symbol, string $timeframe): array
+    public function candidatesFor(string $symbol, string $timeframe, ?string $marketClass = null): array
     {
-        $cands = array_values(array_filter($this->providers, fn($p) => $p->supportsSymbol($symbol)));
+        $cands = array_values(array_filter($this->providers, function ($p) use ($symbol, $marketClass) {
+            if (!$p->supportsSymbol($symbol)) return false;
+            // New asset-class providers expose this optional method. Keeping
+            // it optional preserves compatibility with existing providers and
+            // third-party test doubles implementing the original interface.
+            if ($marketClass !== null) {
+                if (method_exists($p, 'supportsMarketClass')) {
+                    if (!$p->supportsMarketClass($marketClass)) return false;
+                } else {
+                    $classes = $p->capabilities()['marketClasses'] ?? [];
+                    if (is_array($classes) && $classes !== [] && !in_array(strtolower($marketClass), array_map('strtolower', $classes), true)) return false;
+                }
+            }
+            return true;
+        }));
         usort($cands, function ($a, $b) use ($symbol, $timeframe) {
             $ta = $a->supportsTimeframe($symbol, $timeframe) ? 1 : 0;
             $tb = $b->supportsTimeframe($symbol, $timeframe) ? 1 : 0;
@@ -52,7 +66,7 @@ class ProviderManager
     public function getCandleSeries(string $symbol, string $marketClass, string $timeframe, int $limit): array
     {
         $fetchedAt = (int)(microtime(true) * 1000);
-        [$candles, $provider, $failed] = $this->fetchCandles($symbol, $timeframe, $limit);
+        [$candles, $provider, $failed] = $this->fetchCandles($symbol, $marketClass, $timeframe, $limit);
         $norm = CandleNormalizer::normalize($candles, $timeframe);
         $candles = $norm['candles'];
         $validation = $norm['validation'];
@@ -129,15 +143,15 @@ class ProviderManager
         return $out;
     }
 
-    private function fetchCandles(string $symbol, string $timeframe, int $limit): array
+    private function fetchCandles(string $symbol, string $marketClass, string $timeframe, int $limit): array
     {
-        $key = 'c:' . strtoupper($symbol) . ':' . $timeframe . ':' . $limit;
+        $key = 'c:' . strtolower($marketClass) . ':' . strtoupper($symbol) . ':' . $timeframe . ':' . $limit;
         if (isset($this->candleCache[$key]) && $this->candleCache[$key]['expires'] > microtime(true)) {
             $e = $this->candleCache[$key];
             return [$e['candles'], $e['provider'], []];
         }
         $failed = [];
-        foreach ($this->candidatesFor($symbol, $timeframe) as $provider) {
+        foreach ($this->candidatesFor($symbol, $timeframe, $marketClass) as $provider) {
             try {
                 $candles = $provider->getCandles(['symbol' => $symbol, 'timeframe' => $timeframe, 'limit' => $limit]);
                 if (!is_array($candles) || count($candles) === 0) {
