@@ -78,32 +78,46 @@ class Auth extends MY_Controller
             redirect('/register');
             return;
         }
-        $now = gmdate('c');
-        $new = $this->Aegis_model->identity->createUser([
-            'username' => $username,
-            'email' => $email,
-            'password_hash' => password_hash($password, PASSWORD_DEFAULT),
-            'display_name' => $username,
-            'active' => 1,
-            'created_at' => $now,
-            'updated_at' => $now,
-            'last_login_at' => $now,
-        ]);
-        $role = $this->Aegis_model->identity->ensureRole('platform_member', 'Platform member');
-        foreach (['trading.view', 'sports.view', 'lottery.view'] as $code) {
-            $pid = $this->Aegis_model->identity->ensurePermission($code, $code);
-            $this->Aegis_model->identity->grantRolePermission($role, $pid);
+        try {
+            \Aegis\IdentitySchema::ensure($this->db);
+            $now = gmdate('c');
+            $new = $this->Aegis_model->identity->createUser([
+                'username' => $username,
+                'email' => $email,
+                'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+                'display_name' => $username,
+                'active' => 1,
+                'created_at' => $now,
+                'updated_at' => $now,
+                'last_login_at' => $now,
+            ]);
+            if (empty($new['id'])) {
+                log_message('error', 'register_submit: createUser returned no id');
+                $this->flash('error', 'Unable to save your changes. Please try again.');
+                redirect('/register');
+                return;
+            }
+            $role = $this->Aegis_model->identity->ensureRole('platform_member', 'Platform member');
+            foreach (['trading.view', 'sports.view', 'lottery.view'] as $code) {
+                $pid = $this->Aegis_model->identity->ensurePermission($code, $code);
+                $this->Aegis_model->identity->grantRolePermission($role, $pid);
+            }
+            $this->Aegis_model->identity->assignRole((int) $new['id'], $role);
+            $this->Aegis_model->audit->emit('USER_REGISTERED', 'A visitor created a platform member account', ['userId' => (int) $new['id'], 'userUid' => (string) ($new['user_uid'] ?? '')], 'visitor');
+            $portal->notifyAdmins('USER_REGISTERED', 'info', 'New user registration: ' . ($new['username'] ?? $email), [
+                'userUid' => (string) ($new['user_uid'] ?? ''),
+                'username' => (string) ($new['username'] ?? ''),
+            ], 'register:' . (string) ($new['user_uid'] ?? $new['id']));
+            $user = $this->platform->identity->authenticate($username, $password);
+            if (!$user) { $this->flash('error', 'Account created. Sign in to continue.'); redirect('/login'); return; }
+            $this->establishSession($user);
+            $this->flash('notice', '✓ Changes saved successfully');
+            redirect('/dashboard');
+        } catch (Throwable $e) {
+            log_message('error', 'register_submit failed: ' . $e->getMessage());
+            $this->flash('error', 'Unable to save your changes. Please try again.');
+            redirect('/register');
         }
-        $this->Aegis_model->identity->assignRole((int) $new['id'], $role);
-        $this->Aegis_model->audit->emit('USER_REGISTERED', 'A visitor created a platform member account', ['userId' => (int) $new['id'], 'userUid' => (string) ($new['user_uid'] ?? '')], 'visitor');
-        $portal->notifyAdmins('USER_REGISTERED', 'info', 'New user registration: ' . ($new['username'] ?? $email), [
-            'userUid' => (string) ($new['user_uid'] ?? ''),
-            'username' => (string) ($new['username'] ?? ''),
-        ], 'register:' . (string) ($new['user_uid'] ?? $new['id']));
-        $user = $this->platform->identity->authenticate($username, $password);
-        if (!$user) { $this->flash('error', 'Account created. Sign in to continue.'); redirect('/login'); return; }
-        $this->establishSession($user);
-        redirect('/dashboard');
     }
 
     public function forgot()
@@ -237,10 +251,10 @@ class Auth extends MY_Controller
             }
             $this->Aegis_model->audit->emit('USER_UPDATED', 'User changed their username', ['userId' => (int) $user['id']], (string) $user['id']);
             $this->reestablishIdentity((int) $user['id']);
-            $this->flash('notice', 'Your username has been updated.');
+            $this->flash('notice', '✓ Changes saved successfully');
         } catch (Throwable $e) {
             log_message('error', 'update_username failed: ' . $e->getMessage());
-            $this->flash('error', 'Your username could not be updated. Please try again.');
+            $this->flash('error', 'Unable to save your changes. Please try again.');
         }
         redirect('/account');
     }
@@ -281,11 +295,22 @@ class Auth extends MY_Controller
         }
         if (strlen($password) < 12) { $this->flash('error', 'Your new password must be at least 12 characters.'); redirect('/account#security'); return; }
         if ($password !== $confirm) { $this->flash('error', 'The two new passwords do not match.'); redirect('/account#security'); return; }
-        $this->Aegis_model->identity->updateUser((int) $user['id'], ['password_hash' => password_hash($password, PASSWORD_DEFAULT)]);
-        $this->Aegis_model->audit->emit('PASSWORD_CHANGED', 'User changed their password', ['userId' => (int) $user['id']], (string) $user['id']);
-        // Regenerate the session and CSRF token after a password change.
-        $this->reestablishIdentity((int) $user['id']);
-        $this->flash('notice', 'Your password has been changed.');
+        try {
+            \Aegis\IdentitySchema::ensure($this->db);
+            $this->Aegis_model->identity->updateUser((int) $user['id'], ['password_hash' => password_hash($password, PASSWORD_DEFAULT)]);
+            $fresh = $this->Aegis_model->identity->findUserById((int) $user['id']);
+            if (!$fresh || !password_verify($password, (string) ($fresh['password_hash'] ?? ''))) {
+                log_message('error', 'change_password: persisted password mismatch for user ' . (int) $user['id']);
+                $this->flash('error', 'Unable to save your changes. Please try again.');
+                redirect('/account#security'); return;
+            }
+            $this->Aegis_model->audit->emit('PASSWORD_CHANGED', 'User changed their password', ['userId' => (int) $user['id']], (string) $user['id']);
+            $this->reestablishIdentity((int) $user['id']);
+            $this->flash('notice', '✓ Changes saved successfully');
+        } catch (Throwable $e) {
+            log_message('error', 'change_password failed: ' . $e->getMessage());
+            $this->flash('error', 'Unable to save your changes. Please try again.');
+        }
         redirect('/account#security');
     }
 
@@ -302,27 +327,25 @@ class Auth extends MY_Controller
                 redirect('/account#profile'); return;
             }
             $path = (string) $stored['path'];
+            $previous = (string) ($user['profile_image'] ?? '');
             $this->Aegis_model->identity->updateUser((int) $user['id'], ['profile_image' => $path]);
             $fresh = $this->Aegis_model->identity->findUserById((int) $user['id']);
             if (!$fresh || (string) ($fresh['profile_image'] ?? '') !== $path) {
                 \Aegis\ProfileImage::deletePublicPath($path);
                 log_message('error', 'upload_avatar: database path was not saved for user ' . (int) $user['id']);
-                $this->flash('error', 'The profile picture could not b$this->flash('error', 'Only PNG, JPEG, GIF or WebP images are allowed.'); redirect('/account#profile'); return; }
-        $uploadDir = FCPATH . 'assets/uploads/avatars';
-        if (!is_dir($uploadDir)) @mkdir($uploadDir, 0775, true);
-        if (!is_dir($uploadDir) || !is_writable($uploadDir)) { $this->flash('error', 'Profile storage is not available. Contact an administrator.'); redirect('/account#profile'); return; }
-        $filename = 'u' . (int) $user['id'] . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
-        if (!@move_uploaded_file($tmp, $uploadDir . '/' . $filename)) { $this->flash('error', 'Could not save the image.'); redirect('/account#profile'); return; }
-        $path = '/assets/uploads/avatars/' . $filename;
-        // Remove the previous uploaded avatar (never the user's own session image elsewhere).
-        $previous = (string) ($user['profile_image'] ?? '');
-        $this->Aegis_model->identity->updateUser((int) $user['id'], ['profile_image' => $path]);
-        if ($previous !== '' && str_starts_with($previous, '/assets/uploads/avatars/')) {
-            $old = FCPATH . ltrim($previous, '/');
-            if ($old !== $uploadDir . '/' . $filename && is_file($old)) @unlink($old);
+                $this->flash('error', 'Unable to save your changes. Please try again.');
+                redirect('/account#profile'); return;
+            }
+            if ($previous !== '' && $previous !== $path) {
+                \Aegis\ProfileImage::deletePublicPath($previous);
+            }
+            $this->Aegis_model->audit->emit('USER_UPDATED', 'User changed their profile image', ['userId' => (int) $user['id']], (string) $user['id']);
+            $this->reestablishIdentity((int) $user['id']);
+            $this->flash('notice', '✓ Changes saved successfully');
+        } catch (Throwable $e) {
+            log_message('error', 'upload_avatar failed: ' . $e->getMessage());
+            $this->flash('error', 'Unable to save your changes. Please try again.');
         }
-        $this->reestablishIdentity((int) $user['id']);
-        $this->flash('notice', 'Your profile image has been updated.');
         redirect('/account#profile');
     }
 
@@ -331,11 +354,17 @@ class Auth extends MY_Controller
     {
         $user = $this->requireLogin();
         if (!$this->validAuthCsrf()) { $this->flash('error', 'Your session expired. Please try again.'); redirect('/account'); return; }
-        $previous = (string) ($user['profile_image'] ?? '');
-        $this->Aegis_model->identity->updateUser((int) $user['id'], ['profile_image' => null]);
-        \Aegis\ProfileImage::deletePublicPath($previous);
-        $this->reestablishIdentity((int) $user['id']);
-        $this->flash('notice', 'Your profile image has been removed.');
+        try {
+            \Aegis\IdentitySchema::ensure($this->db);
+            $previous = (string) ($user['profile_image'] ?? '');
+            $this->Aegis_model->identity->updateUser((int) $user['id'], ['profile_image' => null]);
+            \Aegis\ProfileImage::deletePublicPath($previous);
+            $this->reestablishIdentity((int) $user['id']);
+            $this->flash('notice', '✓ Changes saved successfully');
+        } catch (Throwable $e) {
+            log_message('error', 'remove_avatar failed: ' . $e->getMessage());
+            $this->flash('error', 'Unable to save your changes. Please try again.');
+        }
         redirect('/account#profile');
     }
 
@@ -408,4 +437,6 @@ class Auth extends MY_Controller
     private function redirectLogin(bool $admin): void { redirect($admin ? '/admin/login' : '/login'); }
     private function flash(string $key, string $value): void { $this->session->set_flashdata($key, $value); }
     private function consumeFlash(string $key): ?string { $value = $this->session->flashdata($key); return is_string($value) && $value !== '' ? $value : null; }
+}
+& $value !== '' ? $value : null; }
 }

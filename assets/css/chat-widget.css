@@ -189,6 +189,32 @@
   font-size: 13px;
 }
 .aegis-chat-form input:focus { outline: none; border-color: #2f6bff; box-shadow: 0 0 0 3px #2f6bff22; }
+.aegis-chat-listen {
+  display: inline-block;
+  margin-left: 8px;
+  border: 0;
+  background: transparent;
+  color: #9aa7bd;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+.aegis-chat-listen:hover { color: #fff; }
+.aegis-chat-voice-status {
+  margin: 0;
+  padding: 0 14px 6px;
+  color: #fcd28a;
+  font-size: 11px;
+}
+.aegis-chat-mic {
+  border: 1px solid #2a3548 !important;
+  background: #131c2c !important;
+  color: #e7ecf4 !important;
+  padding: 0 10px !important;
+}
+.aegis-chat-mic.is-recording { border-color: #fb5d6b !important; color: #ffb3b9 !important; }
 .aegis-chat-form button {
   border: 0;
   border-radius: 10px;

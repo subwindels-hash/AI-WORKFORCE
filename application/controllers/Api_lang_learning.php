@@ -27,7 +27,30 @@ class Api_lang_learning extends Api_controller
     public function languages()
     {
         if (!$this->guard(false)) return;
+        $q = trim((string) $this->input->get('q'));
+        $limit = (int) ($this->input->get('limit') ?: 0);
+        if ($q !== '' || $limit > 0) {
+            $rows = $this->platform->langlearn->searchCatalog($q, $limit > 0 ? $limit : 20);
+            return $this->json([
+                'languages' => $rows,
+                'total' => $this->platform->langlearn->catalogCount(),
+                'query' => $q,
+            ]);
+        }
         $this->json(['languages' => $this->platform->langlearn->languages()]);
+    }
+
+    /** Searchable ISO catalog (does not dump thousands of rows). */
+    public function catalog()
+    {
+        if (!$this->guard(false)) return;
+        $q = trim((string) ($this->input->get('q') ?? ''));
+        $limit = (int) ($this->input->get('limit') ?: 20);
+        $this->json([
+            'languages' => $this->platform->langlearn->searchCatalog($q, $limit),
+            'total' => $this->platform->langlearn->catalogCount(),
+            'query' => $q,
+        ]);
     }
 
     public function show_language(string $code)

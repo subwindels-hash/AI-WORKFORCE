@@ -57,21 +57,61 @@ class LangLearnService
     public function language(string $code): array
     {
         $lang = LanguageRegistry::get($code);
-        if (!$lang || !$lang['active']) throw new \InvalidArgumentException("language {$code} is not in the registry");
-        return $lang;
+        if ($lang && ($lang['active'] ?? true)) return $lang;
+        $catalog = LanguageCatalog::get($code);
+        if ($catalog) return $catalog;
+        throw new \InvalidArgumentException("language {$code} is not in the registry");
+    }
+
+    /** Searchable catalog (ISO 639 + authored overlay). Does not dump thousands of rows. */
+    public function searchCatalog(string $query = '', int $limit = 20): array
+    {
+        return LanguageCatalog::search($query, $limit);
+    }
+
+    public function catalogCount(): int
+    {
+        return LanguageCatalog::count();
     }
 
     // ------------------------------------------------------------ profiles
 
     public function startLanguage(int $userId, string $code, ?string $goal = null, string $explanationLanguage = 'en'): array
     {
-        $this->language($code); // validates + active
+        $lang = $this->language($code); // validates against registry OR catalog
+        $code = (string) ($lang['code'] ?? strtolower(trim($code)));
+        $this->ensureLanguageRow($lang);
         $existing = $this->repo->findProfileByUserLanguage($userId, $code);
         if ($existing) return $existing; // idempotent: one profile per (user, language)
         return $this->repo->saveProfile([
             'user_id' => $userId, 'language_code' => $code, 'level' => 'Beginner',
             'goal' => mb_substr((string) $goal, 0, 300), 'explanation_language' => substr($explanationLanguage, 0, 8),
             'status' => 'ACTIVE', 'created_at' => gmdate('c'), 'updated_at' => gmdate('c'),
+        ]);
+    }
+
+    /** Persist a catalog language so FK-backed profiles can reference it. */
+    private function ensureLanguageRow(array $lang): void
+    {
+        $code = strtolower(trim((string) ($lang['code'] ?? '')));
+        if ($code === '') return;
+        $features = $lang['features'] ?? [
+            'registry' => isset($lang['features']),
+            'full_ai' => !empty($lang['full_ai']),
+            'translation' => !empty($lang['translation']),
+            'tts' => !empty($lang['tts']),
+            'stt' => !empty($lang['stt']),
+        ];
+        $this->repo->upsertLanguage([
+            'code' => $code,
+            'name' => (string) ($lang['name'] ?? $code),
+            'native_name' => (string) ($lang['native_name'] ?? $lang['name'] ?? $code),
+            'iso_code' => (string) ($lang['iso_code'] ?? $lang['iso6391'] ?? $lang['iso6393'] ?? $code),
+            'writing_system' => (string) ($lang['writing_system'] ?? 'unspecified'),
+            'direction' => in_array($lang['direction'] ?? 'ltr', ['ltr', 'rtl'], true) ? $lang['direction'] : 'ltr',
+            'features' => is_string($features) ? $features : json_encode($features),
+            'active' => 1,
+            'updated_at' => gmdate('c'),
         ]);
     }
 
@@ -87,7 +127,9 @@ class LangLearnService
     public function profiles(int $userId): array
     {
         return array_map(fn($p) => $p + [
-            'language' => LanguageRegistry::get($p['language_code']) ?? ['name' => $p['language_code']],
+            'language' => LanguageRegistry::get($p['language_code'])
+                ?? LanguageCatalog::get($p['language_code'])
+                ?? ['name' => $p['language_code']],
             'progress' => $this->progressFor($p),
         ], $this->repo->listProfilesByUser($userId));
     }

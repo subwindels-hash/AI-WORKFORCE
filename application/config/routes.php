@@ -239,6 +239,7 @@ $route['leads'] = 'leads/index';
 $route['lead-pipeline'] = 'leads/pipeline';
 // ---- AI Language Learning (/api/v1/language-learning) ----------------------
 $route['api/v1/language-learning/languages'] = 'api_lang_learning/languages';
+$route['api/v1/language-learning/catalog'] = 'api_lang_learning/catalog';
 $route['api/v1/language-learning/languages/(:any)'] = 'api_lang_learning/show_language/$1';
 $route['api/v1/language-learning/translate'] = 'api_lang_learning/translate';
 $route['api/v1/language-learning/detect'] = 'api_lang_learning/detect';

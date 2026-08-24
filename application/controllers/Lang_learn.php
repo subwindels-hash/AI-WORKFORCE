@@ -14,6 +14,8 @@ class Lang_learn extends App_Controller
         $user = $this->sessionUser();
         $data['user'] = $user;
         $data['languages'] = $this->platform->langlearn->languages();
+        $data['catalogPreview'] = $this->platform->langlearn->searchCatalog('', 30);
+        $data['catalogTotal'] = $this->platform->langlearn->catalogCount();
         $data['myProfiles'] = $user ? $this->platform->langlearn->profiles((int) $user['id']) : [];
         $this->render($data, 'langlearn/index');
     }
@@ -24,9 +26,17 @@ class Lang_learn extends App_Controller
         $user = $this->requireUser();
         $data = $this->base('AI Language Teacher');
         $data['active'] = 'teacher';
-        $data['languages'] = $this->platform->langlearn->languages();
+        $featured = $this->platform->langlearn->searchCatalog('', 80);
+        $must = [];
+        foreach (['nl', 'en', 'fr', 'de', 'es', 'it', 'ja'] as $code) {
+            $hit = \\Aegis\\LangLearn\\LanguageCatalog::get($code);
+            if ($hit) $must[$hit['code']] = $hit;
+        }
+        foreach ($featured as $row) $must[$row['code']] = $row;
+        $data['languages'] = array_values($must);
+        $data['catalogTotal'] = $this->platform->langlearn->catalogCount();
         $data['csrfToken'] = (string) $this->session->userdata('csrf_token');
-        $data['locales'] = \Aegis\LangLearn\Translator::LOCALES;
+        $data['locales'] = array_merge(\Aegis\LangLearn\Translator::LOCALES, \Aegis\LangLearn\LanguageCatalog::VOICE_LOCALES);
         // The user's real learning profile(s) so the "Continue studying"
         // links point somewhere useful instead of a hard-coded profile id.
         try { $data['myProfiles'] = $this->platform->langlearn->profiles((int) $user['id']); }

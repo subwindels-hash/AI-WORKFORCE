@@ -841,6 +841,75 @@ pre.raw {
   .admin-search input { width: 140px; }
 }
 
+/* ---------- Save toasts + language picker + voice buttons ---------- */
+.save-toasts {
+  position: fixed;
+  right: 20px;
+  bottom: 24px;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+  max-width: min(420px, calc(100vw - 32px));
+}
+.save-toast {
+  pointer-events: auto;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 700;
+  border: 1px solid;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity .2s ease, transform .2s ease;
+  box-shadow: 0 10px 28px #00000066;
+}
+.save-toast.is-in { opacity: 1; transform: translateY(0); }
+.save-toast--ok { background: #12301f; border-color: #22c55e66; color: #9fe9b6; }
+.save-toast--err { background: #3b121d; border-color: #fb5d6b66; color: #ffb3b9; }
+
+.lang-picker { position: relative; width: 100%; }
+.lang-picker-display {
+  width: 100%;
+  text-align: left;
+  background: #0b1119;
+  color: var(--text);
+  border: 1px solid var(--line2);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.lang-picker-display:hover, .lang-picker-display:focus { border-color: var(--brand); }
+.lang-picker-panel {
+  position: absolute;
+  z-index: 20;
+  left: 0; right: 0;
+  top: calc(100% + 4px);
+  background: var(--panel);
+  border: 1px solid var(--line2);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 8px;
+}
+.lang-picker-search { width: 100%; margin-bottom: 6px; }
+.lang-picker-list { max-height: 240px; overflow: auto; display: grid; gap: 2px; }
+.lang-picker-item {
+  display: grid; gap: 2px;
+  width: 100%; text-align: left;
+  background: transparent; border: 0; color: var(--text);
+  padding: 8px 10px; border-radius: 8px; cursor: pointer; font: inherit;
+}
+.lang-picker-item:hover, .lang-picker-item.is-selected { background: var(--brand-soft); }
+.lang-picker-name { font-weight: 700; font-size: 13px; }
+.lang-picker-meta { font-size: 11px; color: var(--dim); }
+.lang-picker-empty, .lang-picker-note { font-size: 11px; color: var(--dim); margin: 6px 4px 2px; }
+
+.btn.is-recording { background: #fb5d6b22; border-color: var(--red); color: #ffb3b9; }
+.voice-unavailable { font-size: 12px; color: var(--amber); margin-top: 8px; }
+
 /* The floating AI assistant (WINDELS Assistant) styles live in
    assets/css/chat-widget.css, loaded by the chat_widget partial itself so
    the widget floats correctly on every page shell — including the public

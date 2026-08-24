@@ -19,9 +19,11 @@ $locale = \Aegis\LangLearn\Translator::LOCALES[$langCode] ?? 'en-GB';
     <div class="body" style="padding-top:12px">
       <p style="font-weight:600">Turn <?= (int) $view['turn']['index'] ?>/<?= (int) $view['turn']['total'] ?>: <?= e($view['turn']['instruction']) ?> <button class="btn small" type="button" data-conv-listen="<?= e($view['turn']['instruction']) ?>">🔊 Listen</button></p>
       <form method="post" action="/app/languages/c/<?= e($view['sessionId']) ?>/say" class="inline" style="margin-top:8px">
-        <input class="sel" type="text" name="text" required placeholder="Reply in the language… (auto-detected, target stays <?= e($langCode) ?>)" autocomplete="off" style="min-width:240px">
+        <input class="sel" id="conv-text" type="text" name="text" required placeholder="Reply in the language… (auto-detected, target stays <?= e($langCode) ?>)" autocomplete="off" style="min-width:240px">
+        <button class="btn" type="button" id="conv-mic">🎤 Tap to Speak</button>
         <button class="btn primary">Say it</button>
       </form>
+      <p class="dim" id="conv-mic-status" style="font-size:12px;margin:6px 0 0"></p>
       <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <select class="sel" id="conv-voice"><option>Loading voices…</option></select>
         <input type="range" min="0.5" max="1.5" step="0.1" value="1" id="conv-rate" style="width:100px">

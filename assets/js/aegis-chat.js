@@ -45,6 +45,14 @@
     var item = document.createElement('div');
     item.className = 'aegis-chat-message ' + kind;
     item.textContent = text;
+    if (kind.indexOf('agent') === 0 && kind.indexOf('pending') === -1) {
+      var listen = document.createElement('button');
+      listen.type = 'button';
+      listen.className = 'aegis-chat-listen';
+      listen.textContent = '🔊 Listen';
+      listen.setAttribute('data-listen', text);
+      item.appendChild(listen);
+    }
     messages.appendChild(item);
     messages.scrollTop = messages.scrollHeight;
     return item;
@@ -81,13 +89,59 @@
         });
       })
       .then(function (body) {
+        var reply = body.message || 'No response was returned.';
         pending.className = 'aegis-chat-message agent';
-        pending.textContent = body.message || 'No response was returned.';
+        pending.textContent = reply;
+        var listen = document.createElement('button');
+        listen.type = 'button';
+        listen.className = 'aegis-chat-listen';
+        listen.textContent = '🔊 Listen';
+        listen.setAttribute('data-listen', reply);
+        pending.appendChild(listen);
       })
       .catch(function (error) {
         pending.className = 'aegis-chat-message error';
         pending.textContent = error.message || 'The assistant is unavailable.';
       })
       .finally(function () { button.disabled = false; });
+  });
+
+  var speech = window.windelsSpeech || (window.SpeechProvider ? new window.SpeechProvider() : null);
+  var statusEl = document.getElementById('aegis-chat-voice-status');
+  var micBtn = document.getElementById('aegis-chat-mic');
+  if (speech && micBtn && input) {
+    speech.bindMic(micBtn, input, {
+      locale: 'en-GB',
+      idleLabel: '🎤 Speak',
+      recordingLabel: 'Recording… Stop',
+      onStatus: function (msg) {
+        if (!statusEl) return;
+        statusEl.hidden = !msg;
+        statusEl.textContent = msg || '';
+      }
+    });
+  } else if (micBtn) {
+    micBtn.hidden = true;
+  }
+
+  root.addEventListener('click', function (ev) {
+    var btn = ev.target.closest('[data-listen]');
+    if (!btn || !speech) return;
+    ev.preventDefault();
+    var text = btn.getAttribute('data-listen');
+    if (!text) return;
+    if (speech.isSpeaking() && btn.classList.contains('is-playing')) {
+      speech.stop();
+      btn.classList.remove('is-playing');
+      btn.textContent = '🔊 Listen';
+      return;
+    }
+    btn.classList.add('is-playing');
+    btn.textContent = '⏹ Stop';
+    speech.textToSpeech(text, {
+      locale: 'en-GB',
+      onEnd: function () { btn.classList.remove('is-playing'); btn.textContent = '🔊 Listen'; },
+      onError: function () { btn.classList.remove('is-playing'); btn.textContent = '🔊 Listen'; }
+    });
   });
 }());

@@ -348,9 +348,14 @@ class Admin extends App_Controller
             $values['login_max_attempts'] = (string) max(3, min(20, (int) ($values['login_max_attempts'] ?? 5)));
             $values['login_lockout_seconds'] = (string) max(60, min(86400, (int) ($values['login_lockout_seconds'] ?? 900)));
         }
-        $this->portal->saveSettings($values, $category, (int) $actor['id']);
-        $this->portal->log($actor, 'SETTINGS_CHANGED', 'ok', ['type' => 'settings', 'id' => $category, 'label' => $category], array_keys($values), $this->ip());
-        $this->flash('notice', 'Settings saved.');
+        try {
+            $this->portal->saveSettings($values, $category, (int) $actor['id']);
+            $this->portal->log($actor, 'SETTINGS_CHANGED', 'ok', ['type' => 'settings', 'id' => $category, 'label' => $category], array_keys($values), $this->ip());
+            $this->flash('notice', '✓ Changes saved successfully');
+        } catch (Throwable $e) {
+            log_message('error', 'admin settings_save failed: ' . $e->getMessage());
+            $this->flash('error', 'Unable to save your changes. Please try again.');
+        }
         redirect('/admin/settings#' . $category);
     }
 
