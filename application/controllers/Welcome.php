@@ -8,7 +8,7 @@ class Welcome extends App_Controller
     {
         $state = $this->platform->state();
         $data = [
-            'title' => 'Dashboard',
+            'title' => 'AI Workforce',
             'active' => 'dashboard',
             'status' => $this->statusView(),
             'symbols' => $this->symbols(),

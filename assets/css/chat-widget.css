@@ -76,9 +76,22 @@
   transform-origin: bottom right;
   opacity: 0;
   transform: translateY(10px) scale(.97);
-  transition: opacity .18s ease, transform .18s ease;
+  /* At rest the panel is invisible AND inert: without visibility/pointer-events
+     the display:flex (which overrides the `hidden` attribute's display:none)
+     would leave a huge transparent overlay that swallows clicks from nearby
+     controls — e.g. the mobile sidebar "Menu" button. */
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity .18s ease, transform .18s ease, visibility 0s linear .18s;
 }
-.aegis-chat.is-open .aegis-chat-panel { opacity: 1; transform: translateY(0) scale(1); }
+.aegis-chat-panel[hidden] { display: none; }
+.aegis-chat.is-open .aegis-chat-panel {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  visibility: visible;
+  pointer-events: auto;
+  transition-delay: 0s;
+}
 
 .aegis-chat-panel > header {
   display: flex;

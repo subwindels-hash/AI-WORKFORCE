@@ -59,16 +59,18 @@ $biasClass = static function (?string $bias): string {
 <?php if (!empty($watch)): ?>
 <div class="panel" style="margin-bottom:12px">
   <h3>Watchlist consensus · <?= e($timeframe) ?></h3>
-  <div class="body" style="display:flex;flex-wrap:wrap;gap:8px">
+  <div class="body wl-list">
     <?php foreach ($watch as $w): ?>
       <form method="post" action="/analysis">
         <input type="hidden" name="symbol" value="<?= e($w['symbol']) ?>">
         <input type="hidden" name="timeframe" value="<?= e($timeframe) ?>">
-        <button class="btn" style="text-align:left;width:150px">
-          <b class="mono"><?= e($w['symbol']) ?></b>
-          <span class="badge <?= $biasClass($w['bias'] ?? '') ?>" style="margin-left:4px"><?= e(substr((string) $w['bias'], 0, 4)) ?></span>
-          <?php if ($w['synthetic']): ?><span class="badge b-amber" style="padding:0 4px">SIM</span><?php endif; ?>
-          <div class="dim" style="font-size:10px">conf <?= round($w['confidence'] * 100) ?>% · <?= e(strtolower(str_replace('_', ' ', $w['regime']))) ?></div>
+        <button class="btn wl-btn" type="submit">
+          <span class="wl-row">
+            <b class="mono"><?= e($w['symbol']) ?></b>
+            <span class="badge <?= $biasClass($w['bias'] ?? '') ?>"><?= e(substr((string) $w['bias'], 0, 4)) ?></span>
+            <?php if ($w['synthetic']): ?><span class="badge b-amber" style="padding:0 4px">SIM</span><?php endif; ?>
+          </span>
+          <span class="wl-meta">conf <?= round($w['confidence'] * 100) ?>% · <?= e(strtolower(str_replace('_', ' ', $w['regime']))) ?></span>
         </button>
       </form>
     <?php endforeach; ?>
