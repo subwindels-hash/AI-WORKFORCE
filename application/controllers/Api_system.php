@@ -25,8 +25,19 @@ class Api_system extends Api_controller
         ['name' => 'Strategy Engine + lifecycle', 'category' => 'engine', 'status' => 'TESTED', 'detail' => '4 built-ins, evidence-gated lifecycle through PAPER_TRADING (Phase 3)'],
         ['name' => 'Backtesting Engine', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'Next-bar-open fills, cost model, pessimistic stop rule, look-ahead guard'],
         ['name' => 'Paper Trading Engine', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'Phase 3: simulated accounts/orders/fills with full governance chain, strategy deployments, journaling'],
-        ['name' => 'Trade Execution Supervisor preflight', 'category' => 'engine', 'status' => 'IMPLEMENTED', 'detail' => 'Phase 5 foundation: kill-switch, HUMAN_APPROVAL mode, mandatory-stop and intent validation; never routes an order'],
-        ['name' => 'Broker order routing / approvals persistence', 'category' => 'engine', 'status' => 'PLANNED', 'detail' => 'Next Phase 5 increment — must remain behind the supervisor'],
+        ['name' => 'Trade Execution Supervisor (15-step pipeline)', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'Kill switch → mode → strategy → broker → session → freshness → duplicates → symbol permissions → margin → risk engine → automation limits → approval → route → confirm → audit → portfolio update; durable auditable proposals'],
+        ['name' => 'Portfolio Risk Monitor', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'Continuous scan: HIGH_EXPOSURE, EXCESSIVE_LEVERAGE, CORRELATED_POSITIONS (static disclosed groups), MAX_DRAWDOWN_WARNING, DAILY_LOSS_WARNING, BROKER_DISCONNECTED — transition-audited'],
+        ['name' => 'Strategy live-approval gate', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'APPROVED requires the PAPER_TRADING stage plus ≥10 closed paper trades with PF>1 and positive expectancy'],
+        ['name' => 'Operator RBAC on the trading API', 'category' => 'module', 'status' => 'TESTED', 'detail' => 'trading.view / trading.control / trading.execute permissions (seeded via tools/rbac.php) + CSRF on mutating endpoints; decisions record the deciding operator'],
+        ['name' => 'Operator notifications', 'category' => 'module', 'status' => 'TESTED', 'detail' => 'Risk transitions, approval requests, execution outcomes, broker disconnects, kill switch — unread-deduped, console + /api/notifications'],
+        ['name' => 'Scheduled operations worker (cron)', 'category' => 'module', 'status' => 'TESTED', 'detail' => 'php index.php tools cron — portfolio scan, broker READY/DOWN transitions, proposal expiry (spec §5), CRON_RUN audit summary'],
+        ['name' => 'Multi-agent debate (Phase 6)', 'category' => 'agent', 'status' => 'TESTED', 'detail' => 'Deterministic adversarial review: bull/bear advocates cite evidence, skeptic + risk-critic objections (conflicts, regime contradiction, staleness, conviction, setup quality). Verdict can only REDUCE a bias — never inflate; transcript is auditable'],
+        ['name' => 'Strategy optimizer (Phase 6)', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'Parameter grid search with walk-forward verification (in-sample 70% / out-of-sample 30%). Adopts ONLY candidates that survive out-of-sample and beat the baseline there; registered variants are source ai (DRAFT, human sign-off required)'],
+        ['name' => 'AI Language Learning — Phase 1', 'category' => 'module', 'status' => 'TESTED', 'detail' => 'Registry-driven 20-language catalog (expandable), per-user multi-language profiles with isolated progress, ADAPTIVE level assessment (levels computed only from real answers, capped at each language\'s verified bank ceiling), CEFR learning paths with real module checkpoints, activity-derived progress (streak, path %). Listening/speaking/writing honestly not assessed in this build'],
+        ['name' => 'AI Language Learning — Phase 2 (AI Teacher)', 'category' => 'module', 'status' => 'TESTED', 'detail' => 'Lessons (teach→examples→practice→grade, module completion), structured conversation drills with correction preferences (immediate/after/important/conversation-only, assisted advance after two misses), guided writing with real element checks (original text always preserved), grammar rules + simpler explanations, full lesson history'],
+        ['name' => 'AI Language Learning — Phase 3 (Vocabulary)', 'category' => 'module', 'status' => 'TESTED', 'detail' => '10-word authored bank per language (word/translation/pronunciation where confidently known/example where genuine), spaced repetition 1→3→7→14→30→90 days with lapse resets, deterministic MCQ quizzes (same options at start and submit), self-assessed flashcards, due-today queue, vocabulary progress from real reviews only'],
+        ['name' => 'AI Language Learning — Phase 4 (Listening + Speaking)', 'category' => 'module', 'status' => 'TESTED', 'detail' => 'Listening exercises from the real reading bank (browser speech-synthesis playback, slow/normal/replay/transcript; comprehension + transcription scoring). Speaking practice with browser speech-to-text where the user\'s browser exposes it; word accuracy from the REAL transcript; pronunciation/fluency scores never invented (no provider)'],
+        ['name' => 'AI Language Learning — Phase 5 (Adaptive)', 'category' => 'module', 'status' => 'TESTED', 'detail' => 'Weakness detection from stored attempts (per-skill averages, vocabulary lapses, repeated item misses, failed modules — every finding cites evidence; honest empty state), personalized daily plans budgeted to profile minutes with completion tracked from real same-day activity, evidence-cited recommendations, item-level mastery tracking'],
         ['name' => 'Kill switch', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'Ships ACTIVE in DB state; blocks all order placement (paper included)'],
         // platform
         ['name' => 'MySQL / MariaDB persistence', 'category' => 'module', 'status' => 'IMPLEMENTED', 'detail' => 'Canonical schema + mysqli config (application/database/schema.mysql.sql); the offline sandbox verifies the identical app+SQL through pdo_sqlite'],
@@ -34,11 +45,15 @@ class Api_system extends Api_controller
         ['name' => 'CodeIgniter 3.1.13 MVC', 'category' => 'module', 'status' => 'TESTED', 'detail' => 'Traditional server-rendered MVC + JSON API layer'],
         ['name' => 'ANALYSIS_ONLY mode', 'category' => 'mode', 'status' => 'TESTED', 'detail' => 'Default'],
         ['name' => 'PAPER_TRADING mode', 'category' => 'mode', 'status' => 'TESTED', 'detail' => 'Phase 3 — simulated execution with real prices when reachable'],
-        ['name' => 'HUMAN_APPROVAL / SEMI_AUTONOMOUS / FULLY_AUTOMATED', 'category' => 'mode', 'status' => 'PLANNED', 'detail' => 'Phase 5, gated on brokers + execution supervisor'],
+        ['name' => 'HUMAN_APPROVAL mode', 'category' => 'mode', 'status' => 'TESTED', 'detail' => 'Pipeline passes persist a proposal that a human must approve before routing'],
+        ['name' => 'SEMI_AUTONOMOUS mode', 'category' => 'mode', 'status' => 'TESTED', 'detail' => 'Auto-routes inside the automation envelope: max notional, max daily trades, max risk %, approved symbols only'],
+        ['name' => 'FULLY_AUTOMATED mode', 'category' => 'mode', 'status' => 'TESTED', 'detail' => 'Same envelope plus: APPROVED strategy mandatory, order-capable READY connector, kill switch released, explicit limits configured'],
         // brokers
-        ['name' => 'MT5 bridge connector (health + read-only account/quotes)', 'category' => 'broker', 'status' => 'IMPLEMENTED', 'detail' => 'Phase 4: environment-only authenticated bridge reads; no credentials exposed and no order submission capability'],
-        ['name' => 'MT4 / crypto exchange / stock broker connectors', 'category' => 'broker', 'status' => 'PLANNED', 'detail' => 'Future Phase 4 integrations; none implemented'],
-        ['name' => 'Broker order routing', 'category' => 'broker', 'status' => 'PLANNED', 'detail' => 'Phase 5 only, behind the execution supervisor and explicit approval controls'],
+        ['name' => 'MT5 bridge connector (account/quote/candles/positions/orders/history + place/modify/cancel/close)', 'category' => 'broker', 'status' => 'TESTED', 'detail' => 'Full Phase 4 surface against the documented bridge contract, unit-tested with a simulated bridge; order submission needs AEGIS_MT5_TRADING_ENABLED=1 AND bridge-side tradingEnabled AND a demo account unless AEGIS_MT5_LIVE_ALLOWED=1 — NOT yet verified against a real MetaTrader terminal'],
+        ['name' => 'Python MT5 bridge service', 'category' => 'broker', 'status' => 'IMPLEMENTED', 'detail' => 'python-services/mt5-bridge (FastAPI + MetaTrader5): full contract unit-tested against a simulated terminal; requires deployment on a Windows MT5 host with a demo account before real use'],
+        ['name' => 'Broker order routing', 'category' => 'broker', 'status' => 'TESTED', 'detail' => 'Supervisor-owned, connector-verified routing with durable proposals/executions, confirm + audit + post-trade portfolio snapshot; tested against a simulated bridge only'],
+        ['name' => 'Simulated MT5 bridge (offline demo)', 'category' => 'broker', 'status' => 'TESTED', 'detail' => 'Broker Center toggle starts an in-process mock that speaks the documented bridge contract (loopback, demo account, health reports simulated:true). Lets the offline demo run propose→approve→route→fill end-to-end. NEVER a real broker; production ignores the marker entirely'],
+        ['name' => 'MT4 / crypto exchange / stock broker connectors', 'category' => 'broker', 'status' => 'PLANNED', 'detail' => 'Future Phase 4 integrations — added one at a time after MT5 is verified; none implemented'],
     ];
 
     public function status()
@@ -46,11 +61,11 @@ class Api_system extends Api_controller
         $state = $this->platform->state();
         $this->json([
             'platform' => 'AEGIS Trading Intelligence (CodeIgniter 3 / PHP MVC edition)',
-            'phase' => 3,
-            'version' => '0.3.0',
+            'phase' => 5,
+            'version' => '0.5.0',
             'stack' => 'CodeIgniter ' . CI_VERSION . ' / PHP ' . PHP_VERSION . ' / ' . $this->db->platform(),
             'tradingMode' => $state['tradingMode'],
-            'implementedTradingModes' => ['ANALYSIS_ONLY', 'PAPER_TRADING', 'HUMAN_APPROVAL'],
+            'implementedTradingModes' => ['ANALYSIS_ONLY', 'PAPER_TRADING', 'HUMAN_APPROVAL', 'SEMI_AUTONOMOUS', 'FULLY_AUTOMATED'],
             'supportedTradingModes' => ['ANALYSIS_ONLY', 'PAPER_TRADING', 'HUMAN_APPROVAL', 'SEMI_AUTONOMOUS', 'FULLY_AUTOMATED'],
             'killSwitch' => $state['killSwitch'],
             'providers' => $this->platform->providers->getAllHealth(),
@@ -108,6 +123,7 @@ class Api_system extends Api_controller
 
     public function update_risk_limits()
     {
+        if (!$this->requirePermission('trading.control')) return;
         $body = $this->jsonBody();
         $allowed = ['riskPerTradePct', 'maxRiskPerTradePct', 'minRiskReward', 'maxPositionNotionalUsd', 'maxLeverage',
             'maxOpenPositions', 'maxDailyLossPct', 'maxWeeklyLossPct', 'maxDrawdownPct', 'maxSymbolExposurePct',
@@ -119,6 +135,7 @@ class Api_system extends Api_controller
 
     public function kill_switch()
     {
+        if (!$this->requirePermission('trading.control')) return;
         $body = $this->jsonBody();
         if (!isset($body['active']) || !is_bool($body['active'])) {
             return $this->jsonError('body must be {active: boolean, reason?: string}');
@@ -129,6 +146,7 @@ class Api_system extends Api_controller
 
     public function synthetic_paper()
     {
+        if (!$this->requirePermission('trading.control')) return;
         $body = $this->jsonBody();
         if (!isset($body['allow']) || !is_bool($body['allow'])) {
             return $this->jsonError('body must be {allow: boolean}');
@@ -142,41 +160,123 @@ class Api_system extends Api_controller
         $this->json(['allowSyntheticPaperData' => $body['allow']]);
     }
 
-    /** Phase 5 gate only: evaluates an intent, never routes to a broker. */
+    /**
+     * Phase 5 pipeline (steps 1–11) as a dry run: nothing is persisted and
+     * no order can be routed from this endpoint.
+     */
     public function execution_preflight()
     {
-        $this->json($this->platform->execution->preflight($this->jsonBody(), $this->platform->state()));
+        try { $this->json($this->platform->execution->evaluate($this->jsonBody(), false)); }
+        catch (\Throwable $e) { $this->jsonError($e->getMessage(), 400); }
     }
 
+    /** All proposals (optionally ?status=PENDING_APPROVAL), newest first. */
     public function execution_approvals()
     {
-        $this->json(['approvals' => $this->platform->execution->approvals($this->platform->state())]);
+        if (!$this->requirePermission('trading.view', false)) return;
+        $status = $this->input->get('status', true) ?: null;
+        $this->json(['proposals' => $this->platform->execution->proposals($status)]);
     }
 
-    public function execution_request_approval()
+    /** POST /api/trading/propose — run the pipeline and persist the proposal. */
+    public function execution_propose()
     {
-        try { $this->json(['approval' => $this->platform->execution->requestApproval($this->jsonBody(), $this->platform->state(), 'user')]); }
-        catch (\Throwable $e) { $this->jsonError($e->getMessage(), 409); }
+        $user = $this->requirePermission('trading.execute');
+        if (!$user) return;
+        try { $this->json(['proposal' => $this->platform->execution->propose($this->jsonBody(), $user['email'] ?? 'user')]); }
+        catch (\Throwable $e) { $this->jsonError($e->getMessage(), 400); }
+    }
+
+    /** POST /api/trading/execute — SEMI_AUTONOMOUS / FULLY_AUTOMATED entry. */
+    public function execution_execute()
+    {
+        $user = $this->requirePermission('trading.execute');
+        if (!$user) return;
+        try { $this->json($this->platform->execution->executeAutomated($this->jsonBody())); }
+        catch (\Throwable $e) { $this->jsonError($e->getMessage(), 400); }
     }
 
     public function execution_decide(string $id)
     {
+        $user = $this->requirePermission('trading.execute');
+        if (!$user) return;
         $body = $this->jsonBody();
         if (!isset($body['approve']) || !is_bool($body['approve'])) return $this->jsonError('body must include approve: boolean');
-        try { $this->json(['approval' => $this->platform->execution->decide($id, $body['approve'], 'user', $body['reason'] ?? null)]); }
+        try { $this->json(['proposal' => $this->platform->execution->decide($id, $body['approve'], $user['email'] ?? 'user', $body['reason'] ?? null)]); }
         catch (\InvalidArgumentException $e) { $this->jsonError($e->getMessage(), 404); }
         catch (\Throwable $e) { $this->jsonError($e->getMessage(), 409); }
     }
 
-    /** Final Phase 5 boundary: always reports routing disabled, never sends an order. */
+    /**
+     * Steps 12–15 (route an APPROVED/READY_TO_ROUTE proposal). Routing only
+     * proceeds through a connector with verified order submission — otherwise
+     * it is audited as ROUTING_BLOCKED and no order exists.
+     */
     public function execution_route(string $id)
     {
-        try { $this->json($this->platform->execution->route($id, $this->platform->state())); }
+        $user = $this->requirePermission('trading.execute');
+        if (!$user) return;
+        try { $this->json($this->platform->execution->route($id, $user['email'] ?? 'user')); }
         catch (\InvalidArgumentException $e) { $this->jsonError($e->getMessage(), 404); }
+        catch (\Throwable $e) { $this->jsonError($e->getMessage(), 409); }
+    }
+
+    public function execution_recent()
+    {
+        if (!$this->requirePermission('trading.view', false)) return;
+        $this->json(['executions' => $this->platform->execution->executions()]);
+    }
+
+    // ------------------------------------------------------- notifications
+
+    /** Operator inbox: broadcast (user_id NULL) + the signed-in operator's own. */
+    public function notifications()
+    {
+        $user = $this->requirePermission('system.authenticated', false);
+        if (!$user) return;
+        $unreadOnly = $this->input->get('unread') === '1';
+        $this->json($this->platform->notifications->inbox((int) $user['id'], $unreadOnly, 50));
+    }
+
+    public function notification_read(string $id)
+    {
+        $user = $this->requirePermission('system.authenticated');
+        if (!$user) return;
+        $ok = $this->platform->notifications->markRead($id, (int) $user['id']);
+        $ok ? $this->json(['ok' => true]) : $this->jsonError('notification not found or already read', 404);
+    }
+
+    public function notification_read_all()
+    {
+        $user = $this->requirePermission('system.authenticated');
+        if (!$user) return;
+        $this->json(['markedRead' => $this->platform->notifications->markAllRead((int) $user['id'])]);
+    }
+
+    /** Automation envelope for SEMI_AUTONOMOUS / FULLY_AUTOMATED modes. */
+    public function automation_limits()
+    {
+        $this->json(['limits' => \Aegis\ExecutionSupervisor::automationLimits($this->platform->state())]);
+    }
+
+    public function update_automation_limits()
+    {
+        if (!$this->requirePermission('trading.control')) return;
+        try { $this->json(['limits' => $this->platform->updateAutomationLimits($this->jsonBody())]); }
+        catch (\InvalidArgumentException $e) { $this->jsonError($e->getMessage()); }
+        catch (\Throwable $e) { $this->jsonError($e->getMessage(), 409); }
+    }
+
+    /** Continuous portfolio risk monitoring (spec §14). */
+    public function portfolio_scan()
+    {
+        if (!$this->requirePermission('trading.view', false)) return;
+        $this->json($this->platform->monitor->scan());
     }
 
     public function trading_mode()
     {
+        if (!$this->requirePermission('trading.control')) return;
         $body = $this->jsonBody();
         $mode = $body['mode'] ?? '';
         $result = $this->platform->setTradingMode($mode);

@@ -89,7 +89,7 @@ $autoload['drivers'] = array();
 |
 |	$autoload['helper'] = array('url', 'file');
 */
-$autoload['helper'] = array('aegis');
+$autoload['helper'] = array('url', 'aegis'); // url: redirect()/site_url() for the console's PRG flows
 
 /*
 | -------------------------------------------------------------------

@@ -61,6 +61,21 @@ class Api_strategies extends Api_controller
         $this->json(['ok' => true, 'strategy' => $result['strategy'], 'warnings' => $result['warnings']]);
     }
 
+    /** Phase 6: parameter optimization with walk-forward verification. */
+    public function optimize(string $strategyId = '')
+    {
+        $body = $this->jsonBody();
+        if ($strategyId !== '') $body['strategyId'] = $strategyId;
+        if (empty($body['strategyId'])) return $this->jsonError('missing required field: strategyId');
+        try {
+            $this->json(['optimization' => $this->platform->optimizeStrategy($body)]);
+        } catch (\InvalidArgumentException $e) {
+            $this->jsonError($e->getMessage(), 400);
+        } catch (\Throwable $e) {
+            $this->jsonError($e->getMessage(), 409);
+        }
+    }
+
     public function run_backtest()
     {
         $body = $this->jsonBody();

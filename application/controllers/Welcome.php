@@ -18,6 +18,8 @@ class Welcome extends MY_Controller
             'watch' => [],
             'error' => null,
             'events' => $this->platform->model->audit->recent(12),
+            'notice' => $this->session->flashdata('notice'),
+            'modeError' => $this->session->flashdata('modeError'),
             'history' => $this->platform->model->analysis->history(8),
         ];
 
@@ -56,7 +58,8 @@ class Welcome extends MY_Controller
     public function mode()
     {
         $mode = (string)$this->input->post('mode');
-        $this->platform->setTradingMode($mode);
+        $result = $this->platform->setTradingMode($mode);
+        $this->session->set_flashdata($result['ok'] ? 'notice' : 'modeError', $result['message']);
         redirect('/');
     }
 

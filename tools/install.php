@@ -26,6 +26,7 @@ if ($driver === 'pdo_sqlite') {
         __DIR__ . '/../application/database/sports.sqlite.sql',
         __DIR__ . '/../application/database/sports_decisions.sqlite.sql',
         __DIR__ . '/../application/database/sports_results.sqlite.sql',
+        __DIR__ . '/../application/database/langlearn.sqlite.sql',
     ];
     $sql = implode("\n", array_map(fn($file) => file_get_contents($file), $schemaFiles));
 } else {
@@ -42,9 +43,12 @@ if ($driver === 'pdo_sqlite') {
         __DIR__ . '/../application/database/sports.mysql.sql',
         __DIR__ . '/../application/database/sports_decisions.mysql.sql',
         __DIR__ . '/../application/database/sports_results.mysql.sql',
+        __DIR__ . '/../application/database/langlearn.mysql.sql',
     ];
     $sql = implode("\n", array_map(fn($file) => file_get_contents($file), $schemaFiles));
 }
+
+require_once __DIR__ . '/rbac.php';
 
 $statements = array_filter(array_map('trim', preg_split('/;\s*[\r\n]+/', $sql)));
 foreach ($statements as $stmt) {
@@ -58,6 +62,10 @@ foreach ($statements as $stmt) {
 
 $expected = ['platform_state', 'strategies', 'backtests', 'analysis_runs', 'journal_entries',
     'paper_accounts', 'paper_orders', 'paper_positions', 'paper_trades', 'paper_deployments', 'audit_logs',
+    'trade_proposals', 'trade_executions', 'notifications', 'ci_sessions',
+    'languages', 'user_language_profiles', 'language_assessments', 'learning_paths', 'learning_modules',
+    'lesson_attempts', 'study_sessions', 'language_progress', 'conversation_sessions', 'writing_attempts',
+    'vocabulary', 'user_vocabulary', 'listening_attempts', 'speaking_attempts', 'daily_learning_plans', 'ai_learning_recommendations',
     'users', 'roles', 'permissions', 'user_roles', 'role_permissions', 'auth_events',
     'sports_data_sources', 'sports_matches', 'sports_odds', 'sports_sync_runs', 'sports_model_versions',
     'sports_predictions', 'sports_tickets', 'sports_results'];
@@ -76,4 +84,30 @@ if ($missing) {
     return;
 }
 echo 'OK — ' . count($expected) . " tables verified.\n";
+// RBAC defaults (idempotent; unique keys make INSERT IGNORE safe on MySQL and SQLite).
+$insertIgnore = $driver === 'pdo_sqlite' ? 'INSERT OR IGNORE INTO' : 'INSERT IGNORE INTO'; // both engines honor unique keys
+
+// Best-effort upgrade for existing installs (fresh installs get the column in the schema).
+foreach ($schemaFiles as $_f) {
+    if (str_ends_with($_f, 'langlearn.' . ($driver === 'pdo_sqlite' ? 'sqlite' : 'mysql') . '.sql') && !str_contains((string) file_get_contents($_f), 'daily_minutes')) {
+        // schema mirror lacks the column hint; nothing to do — handled by CREATE below
+    }
+}
+try { $pdo->exec($driver === 'pdo_sqlite'
+    ? 'ALTER TABLE user_language_profiles ADD COLUMN daily_minutes INTEGER NOT NULL DEFAULT 20'
+    : 'ALTER TABLE user_language_profiles ADD COLUMN daily_minutes INT NOT NULL DEFAULT 20'); echo "upgrade: daily_minutes added\n"; }
+catch (Throwable $e) { /* column already exists on upgraded installs */ }
+aegis_seed_rbac(
+    function (string $code, string $name) use ($pdo, $insertIgnore): int {
+        $pdo->prepare("{$insertIgnore} roles (code, name) VALUES (?, ?)")->execute([$code, $name]);
+        return (int) $pdo->query('SELECT id FROM roles WHERE code = ' . $pdo->quote($code))->fetchColumn();
+    },
+    function (string $code, string $name) use ($pdo, $insertIgnore): int {
+        $pdo->prepare("{$insertIgnore} permissions (code, name) VALUES (?, ?)")->execute([$code, $name]);
+        return (int) $pdo->query('SELECT id FROM permissions WHERE code = ' . $pdo->quote($code))->fetchColumn();
+    },
+    function (int $roleId, int $permissionId) use ($pdo, $insertIgnore): void {
+        $pdo->prepare("{$insertIgnore} role_permissions (role_id, permission_id) VALUES (?, ?)")->execute([$roleId, $permissionId]);
+    }
+);
 echo "INSTALL-RESULT: 0\n";

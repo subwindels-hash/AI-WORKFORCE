@@ -68,6 +68,18 @@ function assert_contains(string $needle, string $haystack, string $msg = ''): vo
     }
 }
 
+function assert_in_array($needle, array $haystack, string $msg = ''): void
+{
+    if (!in_array($needle, $haystack, true)) {
+        throw new RuntimeException('ASSERT: ' . ($msg ?: 'expected ' . var_export($needle, true) . ' in [' . implode(',', $haystack) . ']'));
+    }
+}
+
+function assert_not_null($value, string $msg = 'expected non-null'): void
+{
+    if ($value === null) throw new RuntimeException('ASSERT: ' . $msg);
+}
+
 function run_all_tests(): int
 {
     $tests = $GLOBALS['__aegis_tests'];
@@ -82,7 +94,7 @@ function run_all_tests(): int
             printf("[ OK ] %-58s %5.0fms\n", mb_substr($t['name'], 0, 58), (microtime(true) - $t0) * 1000);
         } catch (Throwable $e) {
             $fail++;
-            printf("[FAIL] %-58s %5.0fms\n       → %s\n", mb_substr($t['name'], 0, 58), (microtime(true) - $t0) * 1000, $e->getMessage());
+            printf("[FAIL] %-58s %5.0fms\n       → %s\n       → %s:%d\n", mb_substr($t['name'], 0, 58), (microtime(true) - $t0) * 1000, $e->getMessage(), $e->getFile(), $e->getLine());
         }
     }
     printf(str_repeat('=', 60) . "\n%d passed, %d failed in %.1fs\n", $pass, $fail, microtime(true) - $start);

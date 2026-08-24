@@ -83,9 +83,12 @@ class PaperTradingEngine
         $today = gmdate('Y-m-d');
         $dailyPnl = 0.0; $weeklyPnl = 0.0;
         foreach ($this->repo->listTrades($accountId, 1000) as $t) {
-            $day = substr($t['exit_time'], 0, 10);
-            if ($day === $today) $dailyPnl += $t['net_pnl'];
-            if (strtotime($t['exit_time']) > strtotime('-7 days')) $weeklyPnl += $t['net_pnl'];
+            // listTrades() is a leg ledger — only EXIT legs carry realized P&L.
+            if (($t['leg'] ?? '') !== 'EXIT') continue;
+            $at = (string) ($t['time'] ?? '');
+            if ($at === '') continue;
+            if (substr($at, 0, 10) === $today) $dailyPnl += (float) ($t['net_pnl'] ?? 0);
+            if (strtotime($at) > strtotime('-7 days')) $weeklyPnl += (float) ($t['net_pnl'] ?? 0);
         }
         $equity = $account['balance'] + $unrealized;
         return [

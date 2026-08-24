@@ -32,6 +32,7 @@ class StrategyRegistry
     public function __construct(
         private readonly \Aegis\Persistence\StrategyRepository $repo,
         private readonly \Aegis\Persistence\AuditRepository $audit,
+        private readonly ?\Aegis\Persistence\JournalRepository $journal = null,
     ) {}
 
     public function seedBuiltins(): void
@@ -79,6 +80,40 @@ class StrategyRegistry
         return $this->repo->find($id, $version);
     }
 
+    /**
+     * Register an optimized variant (new version, source 'ai'). The variant
+     * starts at DRAFT and is subject to the full lifecycle — the AI-source
+     * rule additionally blocks paper/live advancement without human sign-off.
+     */
+    public function registerVariant(\Aegis\Strategies\TradingStrategy $strategy, array $record): array
+    {
+        $key = $strategy->id() . '@' . $strategy->version();
+        if (isset($this->implementations[$key]) || $this->repo->find($strategy->id(), $strategy->version())) {
+            throw new \RuntimeException("variant {$key} already exists");
+        }
+        $this->implementations[$key] = $strategy;
+        $this->repo->save($record);
+        $this->audit->emit('STRATEGY_VARIANT_REGISTERED', sprintf('Optimized variant %s registered (source ai, DRAFT, human sign-off required)', $key), [
+            'strategyId' => $strategy->id(), 'version' => $strategy->version(), 'params' => $strategy->params(),
+        ]);
+        return $record;
+    }
+
+    /**
+     * Record lookup for the execution supervisor: exact version, or the most
+     * recently updated record for the id when no version is given.
+     */
+    public function findRecord(string $id, ?string $version = null): ?array
+    {
+        if ($version !== null && $version !== '') return $this->repo->find($id, $version);
+        $best = null;
+        foreach ($this->repo->all() as $record) {
+            if ($record['strategy_id'] !== $id) continue;
+            if ($best === null || strcmp((string) $record['updated_at'], (string) $best['updated_at']) >= 0) $best = $record;
+        }
+        return $best;
+    }
+
     public function transition(string $strategyId, string $version, string $to, ?string $reason = null): array
     {
         $record = $this->repo->find($strategyId, $version);
@@ -122,12 +157,16 @@ class StrategyRegistry
             $gate = $this->canDeployToPaper($record);
             if (!$gate['ok']) return ['ok' => false, 'reasons' => $gate['reasons'], 'warnings' => [], 'strategy' => $record];
         }
+        $evidence = null;
         if ($to === 'APPROVED') {
-            return ['ok' => false, 'reasons' => ['Live approval requires the Trade Execution Supervisor and broker connectors (Phase 4–5).'], 'warnings' => [], 'strategy' => $record];
+            // Phase 5: live approval requires real paper-trading evidence.
+            $report = $this->approvalReview($record);
+            if (!$report['ok']) return $report + ['strategy' => $record];
+            $evidence = $report['evidence'] ?? null;
         }
 
         $this->apply($record, $to, $reason ?? "gate checks passed ({$from} -> {$to})");
-        return ['ok' => true, 'reasons' => [], 'warnings' => [], 'strategy' => $record];
+        return ['ok' => true, 'reasons' => [], 'warnings' => [], 'strategy' => $record] + ($evidence !== null ? ['evidence' => $evidence] : []);
     }
 
     /**
@@ -146,6 +185,47 @@ class StrategyRegistry
             return ['ok' => false, 'reasons' => ['AI-generated strategies require manual human risk sign-off before paper/live stages (auto-advancement blocked by design)']];
         }
         return ['ok' => true, 'reasons' => []];
+    }
+
+    /**
+     * Live-approval gate (spec §12: paper trading precedes live deployment).
+     * Requires the PAPER_TRADING stage plus at least 10 closed paper trades
+     * for this strategy with positive expectancy and profit factor > 1.
+     */
+    public function approvalReview(array $record): array
+    {
+        $reasons = [];
+        $warnings = [];
+        $id = $record['strategy_id'];
+        if (array_search($record['lifecycle'], self::ORDER, true) < array_search('PAPER_TRADING', self::ORDER, true)) {
+            $reasons[] = "Strategy lifecycle is {$record['lifecycle']} — live approval requires the PAPER_TRADING stage first";
+        }
+        if ($record['source'] === 'ai') {
+            $reasons[] = 'AI-generated strategies require manual human risk sign-off before live stages (auto-advancement blocked by design)';
+        }
+        if ($this->journal === null) {
+            $reasons[] = 'Paper-trading evidence is unavailable (journal not wired)';
+            return ['ok' => false, 'reasons' => $reasons, 'warnings' => $warnings];
+        }
+        $trades = array_filter(
+            $this->journal->list(['source' => 'paper', 'strategy' => $id], 200),
+            fn($t) => ($t['strategy'] ?? null) === $id
+        );
+        $count = count($trades);
+        if ($count < 10) $reasons[] = "Paper-trading evidence too thin: {$count} closed paper trades — at least 10 required";
+        $grossWin = 0.0; $grossLoss = 0.0; $net = 0.0;
+        foreach ($trades as $t) {
+            $pnl = (float) ($t['pnl'] ?? 0);
+            $net += $pnl;
+            if ($pnl > 0) $grossWin += $pnl; else $grossLoss += -$pnl;
+        }
+        $pf = $grossLoss > 0 ? $grossWin / $grossLoss : null;
+        if ($count >= 10) {
+            if ($pf !== null && $pf <= 1.0) $reasons[] = sprintf('Paper profit factor %.2f does not exceed 1.0', $pf);
+            if ($net <= 0) $reasons[] = sprintf('Paper expectancy is negative (%.2f net over %d trades)', $net, $count);
+            if ($pf !== null && $pf > 3) $warnings[] = sprintf('Paper profit factor %.2f is unusually high — verify fills are realistic', $pf);
+        }
+        return ['ok' => count($reasons) === 0, 'reasons' => $reasons, 'warnings' => $warnings, 'evidence' => ['paperTrades' => $count, 'profitFactor' => $pf !== null ? round($pf, 3) : null, 'netPnl' => round($net, 2)]];
     }
 
     public function riskReview(array $record): array

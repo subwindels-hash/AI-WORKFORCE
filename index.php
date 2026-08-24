@@ -77,6 +77,34 @@ if (!empty($_SERVER['HTTP_X_AEGIS_ORIG_URI'])) {
         putenv('AEGIS_DB_DRIVER=pdo_sqlite');
         putenv('AEGIS_SQLITE_PATH=' . __DIR__ . '/application/data/aegis.sqlite');
     }
+    // Each request runs in a fresh PHP instance, so CI3 *file* sessions do
+    // not reliably carry across requests — route them through the shared
+    // database instead (the ci_sessions table ships in both schemas).
+    if (getenv('AEGIS_SESSION_DRIVER') === false) {
+        putenv('AEGIS_SESSION_DRIVER=database');
+    }
+    // SIMULATED MT5 bridge (offline demo only): translate the demo marker
+    // file into AEGIS_MT5_* env for this request. Never active in production
+    // (this whole block only runs behind the dev bridge header), never
+    // overrides an explicitly configured real bridge, and is locked to
+    // loopback with live trading impossible.
+    require_once __DIR__ . '/application/libraries/Aegis/Brokers/DemoBridgeConfig.php';
+    \Aegis\Brokers\DemoBridgeConfig::applyEnv(__DIR__ . '/application/data/mt5-demo.json');
+
+    // php-wasm's handler blanks CGI HTTP_COOKIE — restore the raw Cookie
+    // header the bridge forwards and rebuild $_COOKIE before CI3 boots.
+    $bridgeCookie = $_SERVER['HTTP_X_AEGIS_COOKIE'] ?? '';
+    if ($bridgeCookie !== '' && (string) ($_SERVER['HTTP_COOKIE'] ?? '') === '') {
+        $_SERVER['HTTP_COOKIE'] = $bridgeCookie;
+        foreach (explode(';', $bridgeCookie) as $pair) {
+            $pos = strpos($pair, '=');
+            if ($pos === false) continue;
+            $name = trim(substr($pair, 0, $pos));
+            if ($name !== '' && !isset($_COOKIE[$name])) {
+                $_COOKIE[$name] = urldecode(substr($pair, $pos + 1));
+            }
+        }
+    }
 }
 
 /*

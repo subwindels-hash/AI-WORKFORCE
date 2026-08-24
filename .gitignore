@@ -16,3 +16,8 @@ npm-debug.log*
 application/data/*.sqlite
 application/data/*.sqlite-journal
 application/logs/*.log
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+runtime/sessions/aegis_session*

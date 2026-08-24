@@ -33,6 +33,29 @@
           <p class="dim" style="font-size:10px;margin:8px 0 0">Fills at the NEXT bar open after a signal, half-spread + slippage + commission per side, stop-before-target when a bar touches both, hard look-ahead guard.</p>
         </div>
       </div>
+
+      <div class="panel">
+        <h3>Optimizer — walk-forward parameter search</h3>
+        <div class="body" style="padding-top:12px">
+          <form method="post" action="/strategy/optimize" class="inline">
+            <input type="hidden" name="strategyId" value="<?= e($d['strategy_id']) ?>">
+            <label class="fld">Symbol <select name="symbol" class="sel">
+              <?php foreach (['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'EURUSD', 'GBPUSD', 'XAUUSD'] as $s): ?>
+                <option><?= $s ?></option>
+              <?php endforeach; ?>
+            </select></label>
+            <label class="fld">Timeframe <select name="timeframe" class="sel">
+              <?php foreach (['15m', '1h', '4h', '1d'] as $tf): ?><option <?= $tf === '1h' ? 'selected' : '' ?>><?= $tf ?></option><?php endforeach; ?>
+            </select></label>
+            <label class="fld">Bars <input class="sel" type="number" name="limit" value="1000" min="420" max="2000" step="20"></label>
+            <label class="fld" style="flex-direction:row;align-items:center;gap:6px;padding-top:14px">
+              <input type="checkbox" name="register" value="1" style="accent-color:#0ea5e9"> register variant
+            </label>
+            <button class="btn">⚙ Optimize</button>
+          </form>
+          <p class="dim" style="font-size:10px;margin:8px 0 0">Grid search on the first 70% (in-sample), verification on the last 30% (out-of-sample). A candidate is recommended ONLY if it survives out-of-sample and beats the baseline there; in-sample-only performance is never adopted. Registered variants are source <b>ai</b> — DRAFT lifecycle, human sign-off required.</p>
+        </div>
+      </div>
     <?php endif; ?>
 
     <?php if (!empty($results)): ?>

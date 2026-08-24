@@ -179,6 +179,70 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   detail  LONGTEXT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Phase 5 execution governance: every broker intent is a durable, auditable
+-- proposal; every routed order leaves an execution record linked to it.
+CREATE TABLE IF NOT EXISTS trade_proposals (
+  id           VARCHAR(40) PRIMARY KEY,
+  created_at   VARCHAR(32) NOT NULL,
+  actor        VARCHAR(80) NOT NULL DEFAULT 'user',
+  broker       VARCHAR(40) NOT NULL,
+  symbol       VARCHAR(32) NOT NULL,
+  market_class VARCHAR(20) NOT NULL,
+  side         VARCHAR(4)  NOT NULL,
+  order_type   VARCHAR(10) NOT NULL,
+  volume       DECIMAL(18,6) NOT NULL,
+  price        DECIMAL(18,8) NULL,
+  stop_loss    DECIMAL(18,8) NOT NULL,
+  take_profit  DECIMAL(18,8) NULL,
+  strategy_id  VARCHAR(60) NULL,
+  reason       VARCHAR(500) NULL,
+  status       VARCHAR(24) NOT NULL,
+  intent       LONGTEXT NOT NULL,
+  checks       LONGTEXT NOT NULL,
+  risk_decision LONGTEXT NULL,
+  decision_by  VARCHAR(80) NULL,
+  decided_at   VARCHAR(32) NULL,
+  updated_at   VARCHAR(32) NOT NULL,
+  KEY idx_proposals_status (status, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS trade_executions (
+  id              VARCHAR(40) PRIMARY KEY,
+  proposal_id     VARCHAR(40) NOT NULL,
+  broker          VARCHAR(40) NOT NULL,
+  broker_order_id VARCHAR(64) NULL,
+  automated       TINYINT(1) NOT NULL DEFAULT 0,
+  submitted_at    VARCHAR(32) NOT NULL,
+  status          VARCHAR(24) NOT NULL,
+  result          LONGTEXT NOT NULL,
+  KEY idx_executions_proposal (proposal_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Sessions (CI3 'database' session driver; used by the offline dev runtime
+-- where per-request instances cannot share file sessions reliably).
+CREATE TABLE IF NOT EXISTS ci_sessions (
+  id         VARCHAR(128) NOT NULL PRIMARY KEY,
+  ip_address VARCHAR(45) NOT NULL,
+  timestamp  INT NOT NULL DEFAULT 0,
+  data       MEDIUMTEXT NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Operator notifications (spec §16/§18): risk alerts, approval requests,
+-- execution outcomes. user_id NULL = broadcast to every operator.
+CREATE TABLE IF NOT EXISTS notifications (
+  id          VARCHAR(36) PRIMARY KEY,
+  user_id     INT NULL,
+  type        VARCHAR(40) NOT NULL,
+  severity    VARCHAR(10) NOT NULL DEFAULT 'info',
+  title       VARCHAR(200) NOT NULL,
+  detail      LONGTEXT NOT NULL,
+  dedupe_key  VARCHAR(120) NULL,
+  read_at     VARCHAR(32) NULL,
+  created_at  VARCHAR(32) NOT NULL,
+  KEY idx_notifications_unread (user_id, read_at, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
 -- Lead Discovery module (organization-scoped permanent PostgreSQL-compatible design).
 CREATE TABLE IF NOT EXISTS leads (id VARCHAR(36) PRIMARY KEY, organization_id VARCHAR(80) NOT NULL, source VARCHAR(40) NOT NULL, source_id VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, category VARCHAR(255), address TEXT, city VARCHAR(120), region VARCHAR(120), country VARCHAR(120), phone VARCHAR(80), website TEXT, latitude DECIMAL(10,7), longitude DECIMAL(10,7), status VARCHAR(20) NOT NULL DEFAULT 'new', owner_id INT NULL, metadata LONGTEXT NOT NULL, created_at VARCHAR(32) NOT NULL, updated_at VARCHAR(32) NOT NULL, UNIQUE KEY uq_lead_source (organization_id,source,source_id), KEY idx_leads_org_status(organization_id,status), KEY idx_leads_owner(organization_id,owner_id), KEY idx_leads_created(organization_id,created_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS lead_notes (id VARCHAR(36) PRIMARY KEY, lead_id VARCHAR(36) NOT NULL, organization_id VARCHAR(80) NOT NULL, author_id INT NOT NULL, body TEXT NOT NULL, created_at VARCHAR(32) NOT NULL, KEY idx_notes_lead(organization_id,lead_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

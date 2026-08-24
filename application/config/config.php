@@ -395,11 +395,14 @@ $config['encryption_key'] = getenv('VP_ENCRYPTION_KEY') ?: (getenv('AEGIS_ENCRYP
 | except for 'cookie_prefix' and 'cookie_httponly', which are ignored here.
 |
 */
-$config['sess_driver'] = 'files';
+$config['sess_driver'] = getenv('AEGIS_SESSION_DRIVER') ?: 'files'; // dev bridge sets 'database' (per-request instances)
 $config['sess_cookie_name'] = getenv('VP_SESSION_COOKIE') ?: 'aegis_session';
 $config['sess_samesite'] = 'Lax';
 $config['sess_expiration'] = 7200;
-$config['sess_save_path'] = getenv('VP_SESSION_PATH') ?: (getenv('AEGIS_SESSION_PATH') ?: APPPATH . '../runtime/sessions');
+// The database driver requires the TABLE NAME here (CI3 contract), not a path.
+$config['sess_save_path'] = $config['sess_driver'] === 'database'
+	? 'ci_sessions'
+	: (getenv('VP_SESSION_PATH') ?: (getenv('AEGIS_SESSION_PATH') ?: APPPATH . '../runtime/sessions'));
 $config['sess_match_ip'] = FALSE;
 $config['sess_time_to_update'] = 300;
 $config['sess_regenerate_destroy'] = TRUE;

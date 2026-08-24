@@ -9,7 +9,12 @@ import { PHP, ProcessIdAllocator } from '@php-wasm/universal';
 const APP_ROOT = path.resolve(new URL('..', import.meta.url).pathname);
 process.env.AEGIS_DB_DRIVER = 'pdo_sqlite';
 // Tests use a THROWAWAY database so they never pollute the demo data.
-process.env.AEGIS_SQLITE_PATH = path.join(APP_ROOT, 'application', 'data', 'aegis-test.sqlite');
+import fs from 'node:fs';
+const TEST_DB = path.join(APP_ROOT, 'application', 'data', 'aegis-test.sqlite');
+process.env.AEGIS_SQLITE_PATH = TEST_DB;
+// Tests assume a pristine database — remove the throwaway file so state from
+// a previous run (strategies mid-lifecycle, alert baselines…) cannot leak.
+fs.rmSync(TEST_DB, { force: true });
 
 const allocator = new ProcessIdAllocator();
 const runtime = await loadNodeRuntime(process.env.PHP_VERSION ?? '8.2', {

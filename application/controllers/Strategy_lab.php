@@ -59,6 +59,39 @@ class Strategy_lab extends MY_Controller
         redirect('/strategy?strategy=' . urlencode($strategyId));
     }
 
+    /** Phase 6: parameter optimization with walk-forward verification. */
+    public function optimize()
+    {
+        $strategyId = (string) $this->input->post('strategyId');
+        try {
+            $symbol = strtoupper((string) $this->input->post('symbol'));
+            $marketClass = str_ends_with($symbol, 'USDT') ? 'crypto' : 'forex';
+            if ($symbol === 'XAUUSD') $marketClass = 'commodity';
+            $report = $this->platform->optimizeStrategy([
+                'strategyId' => $strategyId,
+                'symbol' => $symbol,
+                'marketClass' => $marketClass,
+                'timeframe' => (string) $this->input->post('timeframe'),
+                'limit' => (int) $this->input->post('limit'),
+                'register' => $this->input->post('register') === '1',
+            ]);
+            $rec = $report['recommendation'];
+            $bits = [
+                sprintf('%d combinations · split %d/%d bars', $report['searchSpace']['combinationsEvaluated'], $report['split']['inSampleBars'], $report['split']['outOfSampleBars']),
+                $rec['adopt'] ? 'ADOPT ' . json_encode($rec['params']) : 'keep current params',
+            ];
+            if (!empty($report['registeredVariant'])) {
+                $bits[] = 'registered variant @' . $report['registeredVariant']['version'] . ' (DRAFT, source ai — human sign-off required)';
+            }
+            foreach ($report['overfitWarnings'] as $w) $bits[] = '⚠ ' . $w;
+            $bits[] = $report['dataProvenance']['synthetic'] ? 'SYNTHETIC data (simulation)' : 'real data';
+            $this->flash('notice', 'Optimization complete — ' . implode(' · ', $bits));
+        } catch (Throwable $e) {
+            $this->flash('error', 'Optimization failed: ' . $e->getMessage());
+        }
+        redirect('/strategy?strategy=' . urlencode($strategyId));
+    }
+
     public function advance()
     {
         $strategyId = (string)$this->input->post('strategyId');

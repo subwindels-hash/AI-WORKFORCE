@@ -3,8 +3,10 @@
 **CodeIgniter 3.1.13 · PHP 8.x · MySQL/MariaDB · Traditional MVC**
 
 A modular trading infrastructure that analyzes markets with a multi-agent AI
-stack, runs versioned strategies through an evidence-gated pipeline, and
-**simulates execution with full risk governance (Phase 3: Paper Trading)**.
+stack, runs versioned strategies through an evidence-gated lifecycle, and
+governs every broker-bound order through the full execution-supervisor
+pipeline (**Phase 4/5: MT5 trading surface + execution governance + portfolio
+risk monitoring**).
 
 > **Core principle:** AI can analyze, recommend, and automate within approved
 > rules, but it must never bypass market-data validation, risk controls,
@@ -12,17 +14,45 @@ stack, runs versioned strategies through an evidence-gated pipeline, and
 
 ```text
 MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INTELLIGENCE / CONSENSUS
-      →  STRATEGY ENGINE (backtested, validated, risk-reviewed)  →  RISK ENGINE
-      →  PAPER TRADING ENGINE (Phase 3)  →  [EXECUTION SUPERVISOR — Phase 5]  →  [BROKERS — Phase 4]
-      →  PORTFOLIO + PERFORMANCE MONITORING
+      →  STRATEGY ENGINE (backtested, validated, risk-reviewed, paper-proven)  →  RISK ENGINE
+      →  PAPER TRADING ENGINE  →  TRADE EXECUTION SUPERVISOR (15 steps, human approval / automation envelope)
+      →  BROKER CONNECTOR (MT5 bridge, demo-gated)  →  PORTFOLIO + PERFORMANCE MONITORING
 ```
 
 ---
 
-## Current state: Phases 1–3 complete; Phase 4 foundation underway
+## Current state: Phases 1–3 complete; Phase 4/5 automation core complete
 
 | Area | Status |
 |---|---|
+| CodeIgniter 3.1.13 MVC (controllers / models / views / libraries) | **TESTED** |
+| **MySQL / MariaDB** persistence — canonical schema + mysqli config (`application/database/schema.mysql.sql`) | **IMPLEMENTED** |
+| Market-data abstraction (health checks, retry, timeout, circuit breaker, cache, fallback, provenance) | **TESTED** |
+| Binance + Frankfurter/ECB real providers; labeled synthetic demo provider | **TESTED** |
+| Multi-agent analysis (technical, market-structure, forex, crypto, sentiment, consensus) | **TESTED** |
+| Regime detection + trade setup generator + Risk Engine (independent veto, actual-volume checks) | **TESTED** |
+| Strategy framework: 4 built-ins, evidence-gated lifecycle; **live APPROVED gate requires ≥10 paper trades with PF>1** | **TESTED** |
+| Backtester: next-bar fills, cost model, pessimistic stop rule, look-ahead guard | **TESTED** |
+| Paper Trading Engine: accounts, orders, fills, positions, ticks, strategy deployments | **TESTED** |
+| Trade journal + analytics + confidence calibration | **TESTED** |
+| **Trade Execution Supervisor — full 15-step pipeline** with durable auditable proposals | **TESTED** |
+| **HUMAN_APPROVAL / SEMI_AUTONOMOUS / FULLY_AUTOMATED modes** (automation envelope: notional, daily cap, risk %, approved symbols) | **TESTED** |
+| **MT5 connector — full trading surface** (account/quote/candles/positions/orders/history + place/modify/cancel/close) | **TESTED** (simulated bridge; not yet verified against a real MetaTrader terminal) |
+| **Python MT5 bridge service** (`python-services/mt5-bridge`, FastAPI + MetaTrader5, demo-only default) | **IMPLEMENTED** (contract unit-tested; requires deployment on a Windows MT5 host) |
+| **Portfolio Risk Monitor**: HIGH_EXPOSURE, EXCESSIVE_LEVERAGE, CORRELATED_POSITIONS, MAX_DRAWDOWN_WARNING, DAILY_LOSS_WARNING, BROKER_DISCONNECTED | **TESTED** |
+| Kill switch, audit trail, ANALYSIS_ONLY default | **TESTED** |
+| **RBAC on the trading API**: trading.view / trading.control / trading.execute (+ CSRF); approval decisions record the deciding operator | **TESTED** |
+| **Notifications**: risk alerts, approval requests, execution outcomes, broker disconnects, kill switch — deduped until acknowledged | **TESTED** |
+| **Scheduled operations worker** (`php index.php tools cron`): portfolio scan, broker transitions, proposal expiry | **TESTED** |
+| MT4 / crypto-exchange / stock-broker connectors | **PLANNED** (added one at a time after MT5 is verified) |
+
+**196 automated tests** run through the real CodeIgniter stack
+(`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
+sandbox — see below), plus 9 contract tests for the Python bridge
+(`python-services/mt5-bridge/.venv/bin/python -m pytest test_bridge.py`).
+
+---
+---|---|
 | CodeIgniter 3.1.13 MVC (controllers / models / views / libraries) | **TESTED** |
 | **MySQL / MariaDB** persistence — canonical schema + mysqli config (`application/database/schema.mysql.sql`) | **IMPLEMENTED** |
 | Market-data abstraction (health checks, retry, timeout, circuit breaker, cache, fallback, provenance) | **TESTED** |
@@ -95,8 +125,10 @@ system/                         CodeIgniter 3.1.13 core (unmodified)
 application/
   config/                       config.php, database.php (mysqli/pdo_sqlite), routes.php
   controllers/                  Welcome (dashboard), Strategy_lab, Paper, Journal,
-                                Api_system, Api_analysis, Api_marketdata, Api_strategies,
-                                Api_paper, Api_journal, Tools (CLI: install/tests)
+                                Execution (supervisor console), Brokers (broker center),
+                                Risk_center (limits + monitor), Api_system, Api_analysis,
+                                Api_marketdata, Api_strategies, Api_paper, Api_journal,
+                                Tools (CLI: install/tests)
   models/Aegis_model.php        THE only place SQL lives — repository interfaces
                                 implemented over CI3's query builder (mysqli/sqlite)
   libraries/Aegis/              domain layer (no framework dependency):
@@ -107,10 +139,15 @@ application/
     Strategies/ (SeriesView w/ look-ahead guard, 4 built-ins, StrategyRegistry)
     Backtest/ (Backtester + Metrics), Journal/Analytics
     Paper/PaperTradingEngine    Phase 3: accounts/orders/fills/ticks/deployments
+    Brokers/ (TradingConnector, Mt5BridgeConnector, BrokerDataNormalizer)
+    ExecutionSupervisor         Phase 5: 15-step pipeline, proposals, routing
+    Portfolio/PortfolioRiskMonitor  continuous portfolio risk alerts
     Platform                    service container wired from the model layer
   views/                        server-rendered dashboard (layout, welcome, strategy,
-                                paper, journal) + SVG candlestick chart
+                                paper, execution, brokers, risk, journal) + SVG chart
   database/                     schema.mysql.sql (canonical) + schema.sqlite.sql (dev)
+python-services/mt5-bridge/     Phase 4 bridge: FastAPI + MetaTrader5 service,
+                                contract-tested with a simulated terminal
   helpers/aegis_helper.php      view-safe platform-state access
 tests/                          framework.php + cases/*.php (57 tests)
 tools/install.php               schema installer (mysqli or sqlite by driver)
@@ -158,9 +195,168 @@ curl -X POST :8080/api/accounts/1/deploy -d '{"strategyId":"trend-following","sy
 curl -X POST :8080/api/accounts/1/tick
 ```
 
+## Phase 4/5 — Execution governance (how it works)
+
+Every broker-bound intent is a **durable, auditable proposal** that runs the
+15-step pipeline inside `TradeExecutionSupervisor`:
+
+```text
+1 kill switch → 2 trading mode → 3 strategy (APPROVED lifecycle required for
+automated intents) → 4 broker connection (bridge-VERIFIED order submission) →
+5 market session → 6 data freshness → 7 duplicate orders → 8 symbol
+permissions → 9 margin estimate → 10 Risk Engine (actual order volume:
+notional / leverage / risk% / RR / exposure / daily+weekly loss / drawdown) →
+automation envelope (SEMI/FULLY: max notional, max daily trades, max risk %,
+approved symbols) → 11 human approval (HUMAN_APPROVAL mode) → 12 place order
+→ 13 confirm execution → 14 audit log → 15 portfolio snapshot
+```
+
+- **Routing only happens through a connector whose bridge-verified status
+  reports effective order submission** — otherwise the attempt is audited as
+  `ROUTING_BLOCKED` and no order exists.
+- The MT5 connector refuses orders unless `AEGIS_MT5_TRADING_ENABLED=1` AND
+  the deployed bridge reports `tradingEnabled=true` AND the account is
+  **demo** (unless `AEGIS_MT5_LIVE_ALLOWED=1`).
+- The **Portfolio Risk Monitor** scans every paper account and connector;
+  only alert *transitions* are audited (no spam). Correlation warnings use
+  static disclosed groups — explicitly labeled heuristic, not statistical.
+- Strategy lifecycle now includes the **live-approval gate**: `APPROVED`
+  requires the PAPER_TRADING stage plus ≥10 closed paper trades with
+  profit factor > 1 and positive expectancy.
+
+### Operator access control, notifications, scheduled operations
+
+- **RBAC** (seeded by the installer, shared matrix in `tools/rbac.php`):
+  `trading.view` (read status/proposals/executions), `trading.control` (kill
+  switch, mode, risk/automation limits), `trading.execute` (propose/decide/
+  route). Mutating trading endpoints require session auth + `X-CSRF-Token`.
+  The operator console stays server-rendered; API integrations authenticate
+  via `POST /api/auth/login`.
+- **Notifications** (`notifications` table + `/api/notifications` + the
+  Alerts page): portfolio risk transitions, `TRADE_APPROVAL_REQUESTED`,
+  `ORDER_FILLED`, `EXECUTION_FAILED`, `ROUTING_BLOCKED`, `BROKER_DISCONNECTED`
+  / `BROKER_CONNECTED`, kill-switch activation, `PROPOSAL_EXPIRED`. Unread
+  dedupe: one badge per active issue until acknowledged.
+- **Cron worker** — run every minute:
+  `* * * * * php /path/index.php tools cron`
+  Executes the portfolio risk scan (with broker transition detection), expires
+  undecided proposals after `proposalExpiryMinutes` (default 240, spec §5
+  invalidation) and audits a `CRON_RUN` summary.
+
+### AI Language Learning (Phase 1 complete)
+
+`/app/languages` (console) · `/api/v1/language-learning` (API)
+
+- **Language registry** — 20 languages (Dutch, Spanish, Italian, French,
+  German, English, Portuguese, Arabic, Chinese, Japanese, Korean, Russian,
+  Hindi, Turkish, Swahili, Yoruba, Igbo, Hausa, Afrikaans, Zulu) with native
+  names, script, LTR/RTL and an honest per-language feature table. Nothing
+  hard-codes languages; `LanguageRegistry::register()` extends the catalog.
+- **Profiles** — one per (user, language), fully independent progress; strict
+  ownership isolation on every endpoint.
+- **Adaptive AI level assessment** — staircase difficulty per skill
+  (vocabulary / grammar / reading) over real authored item banks; levels are
+  computed from actual answers, never random, and can never exceed a
+  language's verified bank ceiling (disclosed in the result). Listening,
+  speaking and writing are reported as not assessed in this build — never
+  faked.
+- **Learning paths** — CEFR module chains from the assessed level with real
+  checkpoint quizzes (pass ≥ 75% unlocks the next module).
+- **Progress** — levels, path completion and study streaks derived only from
+  stored activity (assessments, checkpoints, study sessions).
+
+**Phase 2 — AI Teacher (complete)**: lessons (teach → examples from the
+verified bank → practice → grade → module completion), structured
+conversation drills for every banked language (first-meeting; café where
+confidently authored) with all four correction preferences and assisted
+advance after two misses, guided writing tasks with real element checks
+(original text always stored unchanged next to the feedback), grammar rules
+with on-demand simpler explanations, and full lesson history.
+
+**Phase 3 — Vocabulary (complete)**: a 10-word authored bank per language
+(word, translation, pronunciation only where confidently romanized, example
+sentences only when the sentence genuinely contains the word), a learner word
+list, and a real spaced-repetition schedule — remembered walks 1→3→7→14→30→90
+days by demonstrated stage, forgotten resets to tomorrow with a lapse
+counted. Daily reviews pull the due-today queue; quizzes are deterministic
+multiple-choice graded against the same options shown (start and submit build
+identically), flashcards are self-assessed and labeled as such, and
+vocabulary progress (learned / learning / due / average familiarity /
+mastery) is computed only from stored reviews.
+
+**Phase 4 — Listening + Speaking (complete, honest provider boundaries)**:
+listening exercises are built from the language's real reading bank — the
+browser's speech synthesis speaks the actual sentence (feature-detected; no
+voice → an honest notice, never fake audio) with slow/normal speeds, replay
+and show/hide transcript; attempts are graded server-side (comprehension
+against the bank answer, transcription by diacritic-tolerant word accuracy).
+Speaking practice prompts real sentences and captures the transcript through
+the browser's SpeechRecognition where available; word accuracy is computed
+from the transcript that was actually returned, an empty transcript is
+stored unscored, and **pronunciation/fluency scores are never produced** —
+they require a pronunciation-assessment provider that is not configured.
+
+**Phase 5 — Adaptive AI learning (complete)**: weakness detection reads only
+stored performance — per-skill averages (≥3 attempts), vocabulary words with
+repeated SRS lapses, bank items missed ≥2 times, modules failed repeatedly —
+and every finding cites its evidence; with insufficient activity the answer
+is an explicit "not enough data" instead of invented findings. Daily plans
+are built from real state (vocabulary due today, current path module,
+measured weak areas) and sized to the profile's daily minutes; block
+completion is computed from the same day's actual activity, never assumed.
+Recommendations are generated from the same evidence, and item-level mastery
+(mastered / learning / weak / unseen) is graded from real attempt outcomes.
+All five phases of the language-learning module are now complete.
+
+### Phase 6 intelligence: agent debate + strategy optimizer
+
+- **Multi-agent debate** runs as a deterministic adversarial review in front
+  of every consensus: bull/bear advocates state their strongest evidence
+  (citing the agent + signal each claim came from), a **skeptic** challenges
+  the leading bias (split panel, regime contradiction, stale data, weak
+  conviction), and a **risk critic** challenges the concrete setup
+  (risk/reward, stop width). Verdicts can only **reduce** a bias — NO_TRADE
+  on any sustained critical objection, NEUTRAL on two majors, confidence cuts
+  otherwise — never manufacture conviction. The transcript ships with every
+  analysis run (`debate` field; dashboard renders it).
+- **Strategy optimizer** (`POST /api/strategies/:id/optimize`, Strategy Lab):
+  grid search over the strategy's small declared `paramGrid()` on the first
+  70% of the series, then **out-of-sample verification** on the last 30%.
+  A candidate is recommended only if it survives out-of-sample (PF > 1,
+  positive expectancy, ≥ 5 trades) and beats the baseline there; in-sample
+  wins alone are never adopted, and degradation is reported as explicit
+  overfit warnings. Registering a winner creates a **new version with source
+  `ai`** — DRAFT lifecycle, human sign-off required before paper/live, same
+  as any AI-generated strategy.
+
+### Simulated MT5 bridge (offline demo only)
+
+The sandbox has no MetaTrader terminal, and the platform refuses to pretend
+otherwise: with no bridge deployed, routing is audited as `ROUTING_BLOCKED`.
+To **demo** the full chain, Broker Center has a *Simulated MT5 bridge* toggle:
+
+- The dev runtime runs an in-process mock on `127.0.0.1:8790` that speaks the
+  **exact documented bridge contract** (health, quotes, candles, positions,
+  pending orders, history, place/modify/cancel/close) with in-memory state.
+- It is activated by a marker file (`application/data/mt5-demo.json`) that
+  only the dev bridge's front controller honors — production never reads it,
+  it never overrides an explicitly configured real bridge, it is locked to
+  loopback, and `AEGIS_MT5_LIVE_ALLOWED` stays 0.
+- `/health` reports `simulated: true`; the connector surfaces the flag, and
+  the Broker/Execution consoles show a **SIMULATION** banner. Every fill is a
+  simulation — no real broker, no real order.
+- All connector gates still apply (demo account, trading flags), so the demo
+  exercises the genuine 15-step pipeline: propose → PENDING_APPROVAL (with
+  operator notification) → approve → route → simulated fill → audit +
+  post-trade portfolio snapshot. SEMI_AUTONOMOUS still refuses without an
+  APPROVED (paper-proven) strategy — by design.
+
 ## API surface
 
+`/api/auth/{login,me,logout}` · `/api/notifications[/read-all|/:id/read]`
 `/api/system/{status,features}` · `/api/events` · `/api/trading/{kill-switch,mode,synthetic-paper}`
+`/api/trading/limits[/update]` · `/api/trading/propose` · `/api/trading/execute` · `/api/trading/:id/{approve,route}`
+`/api/execution/{preflight,proposals,executions}` · `/api/portfolio/risk-scan` · `/api/brokers` · `/api/brokers/mt5/{account,quote}`
 `/api/market-data/{candles,quote,providers}` · `/api/analysis/{run,history}` · `/api/agents/consensus`
 `/api/strategies[/:id[/status]]` · `/api/backtesting/{run,results[/:id]}`
 `/api/accounts[/create|/:id|/:id/order|/:id/positions|/:id/positions/:pid/close|/:id/tick|/:id/deploy|/:id/deployments]`
@@ -170,28 +366,36 @@ curl -X POST :8080/api/accounts/1/tick
 
 | Rule | Enforcement |
 |---|---|
-| Agents never call brokers | Agents see only `AnalysisContext`; the paper engine routes every order through the Risk Engine; no broker code exists yet |
+| Agents never call brokers | Agents see only `AnalysisContext`; every order path (paper AND broker) runs through the Risk Engine + Execution Supervisor; only the supervisor holds a TradingConnector |
 | Never silently use fake data | `provenance.synthetic` flows end-to-end; paper fills on synthetic prices require the explicit, audited `allowSyntheticPaperData` dev flag |
-| No integration claimed unless tested | `GET /api/system/features` renders the same matrix |
-| Live trading disabled by default | Boot state: `ANALYSIS_ONLY` + kill switch ACTIVE; only `ANALYSIS_ONLY` and `PAPER_TRADING` are implemented |
+| No integration claimed unless tested | `GET /api/system/features` renders the same matrix; unverified integrations are listed as PLANNED (Broker Center) |
+| Live trading disabled by default | Boot state: `ANALYSIS_ONLY` + kill switch ACTIVE; broker routing needs an explicitly deployed bridge + `AEGIS_MT5_TRADING_ENABLED=1` + demo account; automated modes need a configured automation envelope |
 | Every trade auditable | `audit_logs` table + UI trail; every order/position/journal row is linked |
 | Risk Engine veto power | `RiskEngine::evaluate()` sits in every order path |
-| Kill switch blocks orders | Checked first in `submitOrder()` and in every Risk Engine context |
+| Kill switch blocks orders | Checked first in `submitOrder()`, in the supervisor pipeline (step 1) and re-verified at routing time |
 
 ## Roadmap
 
-- **Phase 4** — MT5 bridge discovery plus read-only account and quote reads
-  are implemented through a separately deployed Python/MT5 bridge. Configure
-  `AEGIS_MT5_BRIDGE_URL`, `AEGIS_MT5_BRIDGE_TOKEN`, and the explicit
-  `AEGIS_MT5_BRIDGE_ENABLED=1` switch. It has no order-submission capability.
-  Next: normalize broker account/quote contracts, then add crypto exchanges
-  one at a time.
-- **Phase 5** — Trade Execution Supervisor (15-step pipeline), human
-  approval, semi/fully-automated modes, and only then broker order routing.
-- **Phase 6** — fundamentals agent boundary is implemented and explicitly
-  abstains until a licensed, attributable feed is configured. Next: add
-  licensed fundamentals, sentiment, on-chain, and options providers one at a
-  time with provenance and freshness validation.
+- **Phase 4 (verification)** — the MT5 surface and the Python bridge are
+  implemented and contract-tested with a simulated terminal. Remaining
+  before any real-money consideration: deploy the bridge on a Windows host
+  with a **demo** MT5 account, verify the PHP↔bridge path end-to-end, and
+  only then review `AEGIS_MT5_LIVE_ALLOWED` (default stays off). Crypto
+  exchanges are added **one at a time** after MT5 is verified.
+- **Phase 5 (core + hardening done)** — supervisor pipeline, human approval,
+  automation modes, kill switch, duplicate protection, broker health
+  monitoring, portfolio risk monitoring, RBAC on the trading API,
+  notifications and the scheduled-operations worker are implemented and
+  tested, and the offline demo can run the full chain through the clearly
+  labeled SIMULATED bridge (real routing still requires a deployed bridge).
+  Next: verify MT5 against a real demo terminal, then crypto exchanges one at
+  a time.
+- **Phase 6 (in progress)** — multi-agent debate and the strategy optimizer
+  are implemented and tested. The fundamentals agent boundary is implemented
+  and explicitly abstains until a licensed, attributable feed is configured.
+  Next: add licensed fundamentals, sentiment, on-chain, and options providers
+  one at a time with provenance and freshness validation; portfolio
+  optimization.
 
 ## Disclaimer
 

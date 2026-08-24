@@ -23,6 +23,9 @@ class Aegis_model extends CI_Model
     public object $analysis;
     public object $state;
     public object $paper;
+    public object $proposals;
+    public object $notifications;
+    public object $langlearn;
 
     public function __construct()
     {
@@ -388,6 +391,429 @@ class Aegis_model extends CI_Model
                 if ($accountId !== null) $this->db->where('account_id', $accountId);
                 if ($active !== null) $this->db->where('active', $active ? 1 : 0);
                 return $this->db->order_by('id', 'ASC')->get('paper_deployments')->result_array();
+            }
+        };
+
+        $this->notifications = new class($db) implements Aegis\Persistence\NotificationRepository {
+            public function __construct(private object $db) {}
+
+            public function save(array $n): array {
+                if (empty($n['id'])) $n['id'] = bin2hex(random_bytes(16));
+                $row = [
+                    'id' => $n['id'], 'user_id' => $n['userId'] ?? null, 'type' => (string) $n['type'],
+                    'severity' => in_array($n['severity'] ?? 'info', ['info', 'warning', 'critical'], true) ? $n['severity'] : 'info',
+                    'title' => mb_substr((string) $n['title'], 0, 200),
+                    'detail' => json_encode($n['detail'] ?? []),
+                    'dedupe_key' => $n['dedupeKey'] ?? null,
+                    'read_at' => null, 'created_at' => $n['createdAt'] ?? gmdate('c'),
+                ];
+                $this->db->insert('notifications', $row);
+                $n['id'] = $row['id'];
+                return $n;
+            }
+
+            public function list(?int $userId = null, bool $unreadOnly = false, int $limit = 50): array {
+                if ($userId === null) {
+                    // broadcast only (no authenticated operator)
+                    $this->db->where('user_id', null);
+                } else {
+                    $this->db->group_start()->where('user_id', null)->or_where('user_id', $userId)->group_end();
+                }
+                if ($unreadOnly) $this->db->where('read_at', null);
+                $rows = $this->db->order_by('created_at', 'DESC')->limit(max(1, min(200, $limit)))->get('notifications')->result_array();
+                $out = [];
+                foreach ($rows as $r) {
+                    $r['detail'] = json_decode($r['detail'], true) ?: [];
+                    $out[] = $r;
+                }
+                return $out;
+            }
+
+            public function markRead(string $id, ?int $userId = null): bool {
+                $this->db->where('id', $id)->where('read_at', null);
+                if ($userId === null) $this->db->where('user_id', null);
+                else $this->db->group_start()->where('user_id', null)->or_where('user_id', $userId)->group_end();
+                $this->db->set('read_at', gmdate('c'))->update('notifications');
+                return $this->db->affected_rows() > 0;
+            }
+
+            public function markAllRead(?int $userId = null): int {
+                $this->db->where('read_at', null);
+                if ($userId === null) $this->db->where('user_id', null);
+                else $this->db->group_start()->where('user_id', null)->or_where('user_id', $userId)->group_end();
+                $this->db->set('read_at', gmdate('c'))->update('notifications');
+                return $this->db->affected_rows();
+            }
+
+            public function unreadCount(?int $userId = null): int {
+                $this->db->where('read_at', null);
+                if ($userId === null) $this->db->where('user_id', null);
+                else $this->db->group_start()->where('user_id', null)->or_where('user_id', $userId)->group_end();
+                return (int) $this->db->count_all_results('notifications');
+            }
+
+            public function hasUnreadDedupe(string $dedupeKey): bool {
+                return $this->db->from('notifications')
+                    ->where('dedupe_key', $dedupeKey)->where('read_at', null)->count_all_results() > 0;
+            }
+        };
+
+        $this->langlearn = new class($db) implements Aegis\LangLearn\Persistence\LangLearnRepository {
+            public function __construct(private object $db) {}
+
+            public function upsertLanguage(array $row): void {
+                $exists = $this->db->from('languages')->where('code', $row['code'])->count_all_results() > 0;
+                if ($exists) $this->db->where('code', $row['code'])->update('languages', $row);
+                else $this->db->insert('languages', $row);
+            }
+            public function listLanguages(bool $activeOnly = true): array {
+                if ($activeOnly) $this->db->where('active', 1);
+                return $this->db->order_by('name', 'ASC')->get('languages')->result_array();
+            }
+            public function findLanguage(string $code): ?array {
+                return $this->db->get_where('languages', ['code' => $code], 1)->row_array() ?: null;
+            }
+
+            public function saveProfile(array $p): array {
+                if (!empty($p['id'])) $this->db->where('id', $p['id'])->update('user_language_profiles', $p);
+                else { $this->db->insert('user_language_profiles', $p); $p['id'] = (int) $this->db->insert_id(); }
+                return $this->repoFindProfile((int) $p['id']) ?? $p;
+            }
+            public function findProfile(int $id): ?array { return $this->repoFindProfile($id); }
+            private function repoFindProfile(int $id): ?array {
+                $r = $this->db->get_where('user_language_profiles', ['id' => $id], 1)->row_array();
+                if ($r) $r['id'] = (int) $r['id'];
+                return $r ?: null;
+            }
+            public function findProfileByUserLanguage(int $userId, string $code): ?array {
+                $r = $this->db->get_where('user_language_profiles', ['user_id' => $userId, 'language_code' => $code], 1)->row_array();
+                if ($r) $r['id'] = (int) $r['id'];
+                return $r ?: null;
+            }
+            public function listProfilesByUser(int $userId): array {
+                return $this->db->where('user_id', $userId)->order_by('created_at', 'ASC')->get('user_language_profiles')->result_array();
+            }
+
+            public function saveAssessment(array $a): array {
+                $row = $a;
+                $row['state'] = is_array($a['state'] ?? null) ? json_encode($a['state']) : $a['state'];
+                $row['result'] = is_array($a['result'] ?? null) ? json_encode($a['result']) : $a['result'];
+                $exists = $this->db->from('language_assessments')->where('id', $row['id'])->count_all_results() > 0;
+                if ($exists) { unset($row['started_at']); $this->db->where('id', $row['id'])->update('language_assessments', $row); }
+                else $this->db->insert('language_assessments', $row);
+                return $this->castAssessment($this->db->get_where('language_assessments', ['id' => $a['id']], 1)->row_array());
+            }
+            public function findAssessment(string $id): ?array {
+                $r = $this->db->get_where('language_assessments', ['id' => $id], 1)->row_array();
+                return $r ? $this->castAssessment($r) : null;
+            }
+            public function latestCompletedAssessment(int $profileId): ?array {
+                $r = $this->db->where('profile_id', $profileId)->where('status', 'COMPLETED')
+                    ->order_by('completed_at', 'DESC')->limit(1)->get('language_assessments')->row_array();
+                return $r ? $this->castAssessment($r) : null;
+            }
+            private function castAssessment(array $r): array {
+                $r['state'] = json_decode((string) $r['state'], true) ?: [];
+                $r['result'] = $r['result'] !== null ? (json_decode((string) $r['result'], true) ?: null) : null;
+                $r['profile_id'] = (int) $r['profile_id'];
+                $r['user_id'] = (int) $r['user_id'];
+                return $r;
+            }
+
+            public function savePath(array $p): array {
+                $exists = $this->db->from('learning_paths')->where('id', $p['id'])->count_all_results() > 0;
+                if ($exists) $this->db->where('id', $p['id'])->update('learning_paths', $p);
+                else $this->db->insert('learning_paths', $p);
+                return $this->db->get_where('learning_paths', ['id' => $p['id']], 1)->row_array() ?: $p;
+            }
+            public function activePath(int $profileId): ?array {
+                return $this->db->where('profile_id', $profileId)->where('status', 'ACTIVE')
+                    ->order_by('created_at', 'DESC')->limit(1)->get('learning_paths')->row_array() ?: null;
+            }
+
+            public function saveModule(array $m): array {
+                $row = $m;
+                $exists = $this->db->from('learning_modules')->where('id', $row['id'])->count_all_results() > 0;
+                if ($exists) { unset($row['path_id'], $row['profile_id'], $row['sequence']); $this->db->where('id', $row['id'])->update('learning_modules', $row); }
+                else $this->db->insert('learning_modules', $row);
+                return $this->findModule($m['id']) ?? $m;
+            }
+            public function findModule(string $id): ?array {
+                $r = $this->db->get_where('learning_modules', ['id' => $id], 1)->row_array();
+                if ($r) { $r['sequence'] = (int) $r['sequence']; $r['attempts_count'] = (int) $r['attempts_count']; $r['profile_id'] = (int) $r['profile_id']; }
+                return $r ?: null;
+            }
+            public function listModules(string $pathId): array {
+                return $this->db->where('path_id', $pathId)->order_by('sequence', 'ASC')->get('learning_modules')->result_array();
+            }
+
+            public function saveAttempt(array $a): array {
+                $row = $a;
+                $row['detail'] = json_encode($a['detail'] ?? []);
+                $this->db->insert('lesson_attempts', $row);
+                return $row;
+            }
+            public function saveSession(array $s): void {
+                $this->db->insert('study_sessions', $s);
+            }
+            public function listAttemptsForProfile(int $profileId, int $limit = 100): array {
+                $rows = $this->db->where('profile_id', $profileId)->order_by('created_at', 'DESC')
+                    ->limit(max(1, min(300, $limit)))->get('lesson_attempts')->result_array();
+                foreach ($rows as &$r) {
+                    $r['detail'] = json_decode((string) $r['detail'], true) ?: [];
+                    if ($r['score_pct'] !== null) $r['score_pct'] = (float) $r['score_pct'];
+                }
+                return $rows;
+            }
+            public function sessionDays(int $profileId): array {
+                $rows = $this->db->select('day')->distinct()->where('profile_id', $profileId)
+                    ->order_by('day', 'DESC')->limit(400)->get('study_sessions')->result_array();
+                return array_map(fn($r) => (string) $r['day'], $rows);
+            }
+
+            public function saveConversation(array $c): array {
+                $row = $c;
+                $row['state'] = is_array($c['state'] ?? null) ? json_encode($c['state']) : $c['state'];
+                $exists = $this->db->from('conversation_sessions')->where('id', $row['id'])->count_all_results() > 0;
+                if ($exists) { unset($row['started_at']); $this->db->where('id', $row['id'])->update('conversation_sessions', $row); }
+                else $this->db->insert('conversation_sessions', $row);
+                return $this->castConversation($this->db->get_where('conversation_sessions', ['id' => $c['id']], 1)->row_array());
+            }
+            public function findConversation(string $id): ?array {
+                $r = $this->db->get_where('conversation_sessions', ['id' => $id], 1)->row_array();
+                return $r ? $this->castConversation($r) : null;
+            }
+            public function listConversations(int $profileId, int $limit = 20): array {
+                return $this->db->where('profile_id', $profileId)->order_by('started_at', 'DESC')
+                    ->limit(max(1, min(100, $limit)))->get('conversation_sessions')->result_array();
+            }
+            private function castConversation(array $r): array {
+                $r['state'] = json_decode((string) $r['state'], true) ?: [];
+                $r['profile_id'] = (int) $r['profile_id'];
+                $r['user_id'] = (int) $r['user_id'];
+                $r['turn_count'] = (int) $r['turn_count'];
+                return $r;
+            }
+            public function saveWriting(array $w): array {
+                $row = $w;
+                $row['feedback'] = json_encode($w['feedback'] ?? []);
+                $this->db->insert('writing_attempts', $row);
+                $row['feedback'] = $w['feedback'] ?? [];
+                return $row;
+            }
+            public function listWriting(int $profileId, int $limit = 20): array {
+                $rows = $this->db->where('profile_id', $profileId)->order_by('created_at', 'DESC')
+                    ->limit(max(1, min(100, $limit)))->get('writing_attempts')->result_array();
+                foreach ($rows as &$r) $r['feedback'] = json_decode((string) $r['feedback'], true) ?: [];
+                return $rows;
+            }
+
+            public function upsertVocabulary(array $w): array {
+                $exists = $this->db->from('vocabulary')->where(['language_code' => $w['language_code'], 'word' => $w['word']])->count_all_results() > 0;
+                if ($exists) {
+                    $this->db->where(['language_code' => $w['language_code'], 'word' => $w['word']])->update('vocabulary', $w);
+                } else {
+                    $this->db->insert('vocabulary', $w);
+                }
+                $row = $this->db->get_where('vocabulary', ['language_code' => $w['language_code'], 'word' => $w['word']], 1)->row_array();
+                if ($row) $row['id'] = (int) $row['id'];
+                return $row ?: $w;
+            }
+            public function listVocabulary(string $languageCode, bool $activeOnly = true): array {
+                if ($activeOnly) $this->db->where('active', 1);
+                $rows = $this->db->where('language_code', $languageCode)->order_by('id', 'ASC')->get('vocabulary')->result_array();
+                foreach ($rows as &$r) $r['id'] = (int) $r['id'];
+                return $rows;
+            }
+            public function findVocabulary(int $id): ?array {
+                $r = $this->db->get_where('vocabulary', ['id' => $id], 1)->row_array();
+                if ($r) $r['id'] = (int) $r['id'];
+                return $r ?: null;
+            }
+            public function saveUserVocabulary(array $u): array {
+                $keys = ['profile_id' => $u['profile_id'], 'vocabulary_id' => $u['vocabulary_id']];
+                $exists = $this->db->from('user_vocabulary')->where($keys)->count_all_results() > 0;
+                if ($exists) { $this->db->where($keys)->update('user_vocabulary', $u); }
+                else { $this->db->insert('user_vocabulary', $u); }
+                return $this->db->get_where('user_vocabulary', $keys, 1)->row_array() ?: $u;
+            }
+            public function findUserVocabulary(int $profileId, int $vocabularyId): ?array {
+                return $this->db->get_where('user_vocabulary', ['profile_id' => $profileId, 'vocabulary_id' => $vocabularyId], 1)->row_array() ?: null;
+            }
+            public function listUserVocabulary(int $profileId, bool $dueOnly = false, int $limit = 100): array {
+                if ($dueOnly) $this->db->where('next_review_at <=', gmdate('c'));
+                $rows = $this->db->where('profile_id', $profileId)->order_by('next_review_at', 'ASC')->limit(max(1, min(200, $limit)))->get('user_vocabulary')->result_array();
+                foreach ($rows as &$r) {
+                    $r['id'] = (int) $r['id'];
+                    $r['stage'] = (int) $r['stage'];
+                    $r['review_count'] = (int) $r['review_count'];
+                    $r['lapse_count'] = (int) $r['lapse_count'];
+                    $r['familiarity'] = (float) $r['familiarity'];
+                }
+                return $rows;
+            }
+
+            public function saveListeningAttempt(array $a): array {
+                $row = $a;
+                $row['detail'] = json_encode($a['detail'] ?? []);
+                $this->db->insert('listening_attempts', $row);
+                $row['detail'] = $a['detail'] ?? [];
+                return $row;
+            }
+            public function listListeningAttempts(int $profileId, int $limit = 20): array {
+                $rows = $this->db->where('profile_id', $profileId)->order_by('created_at', 'DESC')
+                    ->limit(max(1, min(100, $limit)))->get('listening_attempts')->result_array();
+                foreach ($rows as &$r) {
+                    $r['detail'] = json_decode((string) $r['detail'], true) ?: [];
+                    if ($r['score_pct'] !== null) $r['score_pct'] = (float) $r['score_pct'];
+                }
+                return $rows;
+            }
+            public function saveSpeakingAttempt(array $a): array {
+                $row = $a;
+                $row['detail'] = json_encode($a['detail'] ?? []);
+                $this->db->insert('speaking_attempts', $row);
+                $row['detail'] = $a['detail'] ?? [];
+                return $row;
+            }
+            public function listSpeakingAttempts(int $profileId, int $limit = 20): array {
+                $rows = $this->db->where('profile_id', $profileId)->order_by('created_at', 'DESC')
+                    ->limit(max(1, min(100, $limit)))->get('speaking_attempts')->result_array();
+                foreach ($rows as &$r) {
+                    $r['detail'] = json_decode((string) $r['detail'], true) ?: [];
+                    if ($r['word_accuracy_pct'] !== null) $r['word_accuracy_pct'] = (float) $r['word_accuracy_pct'];
+                }
+                return $rows;
+            }
+
+            public function saveDailyPlan(array $p): array {
+                $row = $p;
+                $row['plan'] = is_array($p['plan'] ?? null) ? json_encode($p['plan']) : $p['plan'];
+                $keys = ['profile_id' => $p['profile_id'], 'day' => $p['day']];
+                $exists = $this->db->from('daily_learning_plans')->where($keys)->count_all_results() > 0;
+                if ($exists) { $this->db->where($keys)->update('daily_learning_plans', $row); $row['id'] = $this->db->select('id')->where($keys)->get('daily_learning_plans')->row_array()['id'] ?? $row['id']; }
+                else $this->db->insert('daily_learning_plans', $row);
+                return $this->findDailyPlan((int) $p['profile_id'], $p['day']) ?? $row;
+            }
+            public function findDailyPlan(int $profileId, string $day): ?array {
+                $r = $this->db->get_where('daily_learning_plans', ['profile_id' => $profileId, 'day' => $day], 1)->row_array();
+                if ($r) {
+                    $r['plan'] = json_decode((string) $r['plan'], true) ?: [];
+                    $r['profile_id'] = (int) $r['profile_id'];
+                    $r['est_minutes'] = (int) $r['est_minutes'];
+                }
+                return $r ?: null;
+            }
+            public function saveRecommendation(array $r): array {
+                $row = $r;
+                $row['evidence'] = json_encode($r['evidence'] ?? []);
+                $this->db->insert('ai_learning_recommendations', $row);
+                $row['evidence'] = $r['evidence'] ?? [];
+                return $row;
+            }
+            public function clearRecommendations(int $profileId): void {
+                $this->db->where('profile_id', $profileId)->delete('ai_learning_recommendations');
+            }
+
+            public function upsertProgress(array $row): void {
+                $keys = ['profile_id' => $row['profile_id'], 'skill' => $row['skill'], 'source' => $row['source']];
+                $exists = $this->db->from('language_progress')->where($keys)->count_all_results() > 0;
+                if ($exists) $this->db->where($keys)->update('language_progress', ['level' => $row['level'], 'value_pct' => $row['value_pct'], 'updated_at' => $row['updated_at']]);
+                else $this->db->insert('language_progress', $row);
+            }
+            public function listProgress(int $profileId): array {
+                return $this->db->where('profile_id', $profileId)->get('language_progress')->result_array();
+            }
+        };
+
+        $this->proposals = new class($db) implements Aegis\Persistence\ProposalRepository {
+            public function __construct(private object $db) {}
+
+            public function saveProposal(array $p): array {
+                // Accepts both the supervisor's camelCase contract and rows
+                // returned by findProposal()/listProposals() (snake_case).
+                $pick = fn(string $camel, string $snake, $default = null) => $p[$camel] ?? $p[$snake] ?? $default;
+                $intent = $pick('intent', 'intent', []);
+                $row = [
+                    'id' => $p['id'], 'created_at' => $pick('createdAt', 'created_at', gmdate('c')),
+                    'actor' => $pick('actor', 'actor', 'user'),
+                    'broker' => $pick('broker', 'broker', 'none'),
+                    'symbol' => $pick('symbol', 'symbol', ''),
+                    'market_class' => $pick('marketClass', 'market_class', ''),
+                    'side' => $pick('side', 'side', ''), 'order_type' => $pick('orderType', 'order_type', 'MARKET'),
+                    'volume' => (float)$pick('volume', 'volume', 0),
+                    'price' => ($px = $pick('price', 'price')) !== null ? (float)$px : null,
+                    'stop_loss' => (float)$pick('stopLoss', 'stop_loss', 0),
+                    'take_profit' => ($tp = $pick('takeProfit', 'take_profit')) !== null ? (float)$tp : null,
+                    'strategy_id' => $pick('strategyId', 'strategy_id'), 'reason' => mb_substr((string)$pick('reason', 'reason', ''), 0, 500),
+                    'status' => $p['status'], 'intent' => json_encode($intent),
+                    'checks' => json_encode($pick('checks', 'checks', [])),
+                    'risk_decision' => ($rd = $pick('riskDecision', 'riskDecision')) !== null ? json_encode($rd) : null,
+                    'decision_by' => $pick('decisionBy', 'decision_by'), 'decided_at' => $pick('decidedAt', 'decided_at'),
+                    'updated_at' => gmdate('c'),
+                ];
+                $exists = $this->db->from('trade_proposals')->where('id', $row['id'])->count_all_results() > 0;
+                if ($exists) { unset($row['created_at'], $row['actor']); $this->db->where('id', $row['id'])->update('trade_proposals', $row); }
+                else $this->db->insert('trade_proposals', $row);
+                return $this->findProposal($p['id']) ?? $p;
+            }
+
+            public function findProposal(string $id): ?array {
+                $r = $this->db->get_where('trade_proposals', ['id' => $id], 1)->row_array();
+                return $r ? self::cast($r) : null;
+            }
+
+            public function listProposals(?string $status = null, int $limit = 100): array {
+                if ($status !== null) $this->db->where('status', $status);
+                $rows = $this->db->order_by('created_at', 'DESC')->limit(max(1, min(500, $limit)))->get('trade_proposals')->result_array();
+                return array_map(self::cast(...), $rows);
+            }
+
+            public function countAutomatedExecutionsToday(): int {
+                return (int) $this->db->from('trade_executions')
+                    ->where('automated', 1)->where('submitted_at >=', gmdate('Y-m-d'))
+                    ->count_all_results();
+            }
+
+            public function saveExecution(array $e): array {
+                $pick = fn(string $camel, string $snake, $default = null) => $e[$camel] ?? $e[$snake] ?? $default;
+                $row = [
+                    'id' => $e['id'], 'proposal_id' => $pick('proposalId', 'proposal_id'), 'broker' => $e['broker'],
+                    'broker_order_id' => $pick('brokerOrderId', 'broker_order_id'), 'automated' => !empty($e['automated']) ? 1 : 0,
+                    'submitted_at' => $pick('submittedAt', 'submitted_at', gmdate('c')), 'status' => $e['status'],
+                    'result' => json_encode($e['result'] ?? []),
+                ];
+                $exists = $this->db->from('trade_executions')->where('id', $row['id'])->count_all_results() > 0;
+                if ($exists) $this->db->where('id', $row['id'])->update('trade_executions', $row);
+                else $this->db->insert('trade_executions', $row);
+                return self::castExecution(array_merge($row, ['result' => $e['result'] ?? []]));
+            }
+
+            public function listExecutions(string $proposalId, int $limit = 10): array {
+                $rows = $this->db->where('proposal_id', $proposalId)->order_by('submitted_at', 'DESC')
+                    ->limit(max(1, min(50, $limit)))->get('trade_executions')->result_array();
+                return array_map(self::castExecution(...), $rows);
+            }
+
+            public function listRecentExecutions(int $limit = 50): array {
+                $rows = $this->db->order_by('submitted_at', 'DESC')->limit(max(1, min(200, $limit)))
+                    ->get('trade_executions')->result_array();
+                return array_map(self::castExecution(...), $rows);
+            }
+
+            private static function cast(array $r): array {
+                foreach (['volume', 'price', 'stop_loss', 'take_profit'] as $k) if ($r[$k] !== null) $r[$k] = (float)$r[$k];
+                $r['intent'] = json_decode($r['intent'], true) ?: [];
+                $r['checks'] = json_decode($r['checks'], true) ?: [];
+                $r['riskDecision'] = $r['risk_decision'] !== null ? (json_decode($r['risk_decision'], true) ?: null) : null;
+                unset($r['risk_decision']);
+                return $r;
+            }
+
+            private static function castExecution(array $r): array {
+                $r['automated'] = (bool)$r['automated'];
+                if (is_string($r['result'])) $r['result'] = json_decode($r['result'], true) ?: [];
+                return $r;
             }
         };
     }

@@ -65,17 +65,30 @@ class RiskEngine
             $entry = $setup['entry']['reference'];
             $stopDistance = abs($entry - $setup['stopLoss']);
             if ($stopDistance > 0) {
-                $riskPct = min($L['riskPerTradePct'], $L['maxRiskPerTradePct']);
-                $riskAmount = $equity * $riskPct;
-                $units = $riskAmount / $stopDistance;
+                // Broker execution passes the ACTUAL order volume (givenUnits),
+                // so sizing/notional/leverage checks apply to the real order
+                // instead of a derived position.
+                $givenUnits = $ctx['givenUnits'] ?? null;
+                if (is_numeric($givenUnits) && (float)$givenUnits > 0) {
+                    $units = (float)$givenUnits;
+                    $riskAmount = $units * $stopDistance;
+                    $riskPct = $equity > 0 ? $riskAmount / $equity : 1.0;
+                } else {
+                    $riskPct = min($L['riskPerTradePct'], $L['maxRiskPerTradePct']);
+                    $riskAmount = $equity * $riskPct;
+                    $units = $riskAmount / $stopDistance;
+                }
                 $notional = $units * $entry;
                 $leverage = $equity > 0 ? $notional / $equity : null;
                 if ($notional > $L['maxPositionNotionalUsd']) $reasons[] = sprintf('Position notional $%s exceeds limit $%s', number_format($notional, 0), number_format($L['maxPositionNotionalUsd'], 0));
                 if ($leverage !== null && $leverage > $L['maxLeverage']) $reasons[] = sprintf('Implied leverage %sx exceeds limit %sx', number_format($leverage, 1), $L['maxLeverage']);
+                if (is_numeric($givenUnits) && $riskPct > $L['maxRiskPerTradePct']) {
+                    $reasons[] = sprintf('Order risk %s%% of equity exceeds hard cap %s%%', number_format($riskPct * 100, 2), $L['maxRiskPerTradePct'] * 100);
+                }
                 $sizing = [
                     'equity' => round($equity, 2),
                     'riskAmount' => round($riskAmount, 2),
-                    'riskPct' => $riskPct,
+                    'riskPct' => round($riskPct, 4),
                     'entryReference' => $entry,
                     'stopDistance' => $stopDistance,
                     'units' => round($units, 2),
