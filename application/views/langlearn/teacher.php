@@ -18,13 +18,15 @@ $localeMap = $locales ?? [];
 .tt-mode:hover { border-color:var(--brand);color:#fff }
 .tt-mode.active { background:var(--brand);border-color:var(--brand);color:#fff }
 .tt-swapbar { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: end; margin-bottom: 14px; }
-.tt-side { display: grid; gap: 5px; min-width: 0; }
-.tt-side > span { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: var(--dim); font-weight: 700; }
-.tt-side select { width: 100%; }
-.tt-swap { width: 40px; height: 38px; display: grid; place-items: center; border: 1px solid var(--line2); border-radius: var(--radius-sm); background: var(--panel2); color: var(--muted); cursor: pointer; transition: color .15s, border-color .15s, transform .2s; }
-.tt-swap:hover { color: #fff; border-color: var(--brand); }
+.tt-side { display: grid; gap: 6px; min-width: 0; }
+.tt-side > span { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); font-weight: 800; }
+.tt-side select { width: 100%; font-weight: 700; }
+.tt-swap-wrap { display: flex; flex-direction: column; align-items: center; gap: 5px; padding-bottom: 2px; }
+.tt-swap { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid var(--line2); border-radius: var(--radius-sm); background: var(--panel2); color: var(--muted); cursor: pointer; transition: color .15s, border-color .15s, transform .2s; }
+.tt-swap:hover { color: #fff; border-color: var(--brand); background: var(--brand-soft); }
 .tt-swap:active { transform: rotate(180deg); }
 .tt-swap svg { width: 18px; height: 18px; }
+.tt-swap-label { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); font-weight: 700; }
 .tt-panes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
 .tt-pane { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel2); padding: 14px; min-width: 0; }
 .tt-pane-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px; margin-bottom: 8px; }
@@ -122,20 +124,23 @@ $localeMap = $locales ?? [];
     <!-- Two-sided language selection -->
     <div class="tt-swapbar">
       <label class="tt-side">
-        <span>Left / source — you type (auto-detect)</span>
-        <select id="tt-source" class="sel" aria-label="Source language">
+        <span>You speak</span>
+        <select id="tt-source" class="sel" aria-label="Language you speak">
           <option value="auto">Auto-detect</option>
           <?php foreach ($langOptions as $code => $label): ?>
             <option value="<?= e($code) ?>" <?= $code === 'en' ? 'selected' : '' ?>><?= e($label) ?></option>
           <?php endforeach; ?>
         </select>
       </label>
-      <button type="button" class="tt-swap" id="tt-swap" title="Swap languages" aria-label="Swap languages">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4 3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 4 4"/><path d="m17 20 4-4-4-4"/><path d="M21 16H8a4 4 0 0 1-4-4"/></svg>
-      </button>
+      <div class="tt-swap-wrap">
+        <button type="button" class="tt-swap" id="tt-swap" title="Swap languages" aria-label="Swap languages">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4 3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 4 4"/><path d="m17 20 4-4-4-4"/><path d="M21 16H8a4 4 0 0 1-4-4"/></svg>
+        </button>
+        <span class="tt-swap-label">Swap</span>
+      </div>
       <label class="tt-side">
-        <span>Right / target — you learn (explicit change only)</span>
-        <select id="tt-target" class="sel" aria-label="Target language">
+        <span>You learn</span>
+        <select id="tt-target" class="sel" aria-label="Language you are learning">
           <?php foreach ($langOptions as $code => $label): ?>
             <option value="<?= e($code) ?>" <?= $code === 'nl' ? 'selected' : '' ?>><?= e($label) ?></option>
           <?php endforeach; ?>

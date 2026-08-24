@@ -16,7 +16,7 @@
         <span class="auth-brand-text">WINDELS AI Workforce</span>
       </div>
       <h1>Create your account</h1>
-      <p class="auth-sub">One account. Then your dashboard, language teacher and research tools.</p>
+      <p class="auth-sub">Start your WINDELS AI WORKFORCE workspace in a few seconds.</p>
 
       <?php if (!empty($error)): ?><div class="notice err auth-notice" role="alert"><?= e($error) ?></div><?php endif; ?>
       <?php if (!empty($notice)): ?><div class="notice ok auth-notice" role="status"><?= e($notice) ?></div><?php endif; ?>

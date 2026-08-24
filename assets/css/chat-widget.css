@@ -22,10 +22,11 @@
   pointer-events: auto;
 }
 
-/* ---------- Launcher (floating circular button) ---------- */
+/* ---------- Launcher (floating circular button + brand label) ---------- */
 .aegis-chat-launch {
-  width: 56px;
-  height: 56px;
+  position: relative;
+  width: 64px;
+  height: 64px;
   border-radius: 50%;
   border: 1px solid #2f6bff66;
   background: #0d1422;
@@ -38,7 +39,24 @@
 }
 .aegis-chat-launch:hover { border-color: #2f6bff; transform: translateY(-1px); box-shadow: 0 10px 28px #00000073, 0 2px 6px #0000004d; }
 .aegis-chat-launch:focus-visible { outline: 2px solid #2f6bff; outline-offset: 2px; }
-.aegis-chat-launch .aegis-chat-avatar { width: 40px; height: 40px; }
+.aegis-chat-launch .aegis-chat-avatar { width: 46px; height: 46px; }
+.aegis-chat-launch .aegis-chat-launch-label {
+  position: absolute;
+  right: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 700;
+  color: #e7ecf4;
+  background: #0d1422;
+  border: 1px solid #2a3548;
+  border-radius: 999px;
+  padding: 7px 12px;
+  box-shadow: 0 6px 18px #00000059;
+  pointer-events: none;
+  opacity: .96;
+}
 
 .aegis-chat-avatar {
   position: relative;
@@ -204,6 +222,7 @@
 @media (max-width: 560px) {
   .aegis-chat { right: 14px; bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
   .aegis-chat-launch { width: 52px; height: 52px; }
+  .aegis-chat-launch .aegis-chat-launch-label { display: none; }
   .aegis-chat-launch .aegis-chat-avatar { width: 36px; height: 36px; }
   .aegis-chat-panel { width: calc(100vw - 28px); height: min(440px, calc(100vh - 180px)); }
 }

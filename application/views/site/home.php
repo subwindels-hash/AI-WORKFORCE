@@ -42,34 +42,77 @@
 </section>
 
 <section class="band" id="what">
-  <div class="section-head">
-    <p class="kicker">What is WINDELS AI WORKFORCE?</p>
-    <h2>One platform. Five working modules.</h2>
-    <p>Behind login you use the tools that already ship in this product — a language teacher with real voices, plus research and analysis with an audit trail.</p>
+  <div class="section-head left">
+    <p class="kicker">What WINDELS AI WORKFORCE does</p>
+    <h2>One AI workforce. Every day's work in one workspace.</h2>
+    <p>WINDELS AI WORKFORCE brings AI assistance, conversations, language learning and research tools into a single professional workspace — so you can run a task, understand the result and act on it from one place.</p>
   </div>
-  <div class="split">
-    <img src="/assets/images/about-workspace.jpg" alt="Team reviewing live workspace data" loading="lazy" width="800" height="550">
-    <ul class="checklist">
-      <li>Multi-agent market analysis with a mandatory risk engine</li>
-      <li>Paper trading, strategy lab and a 15-step execution supervisor</li>
-      <li>Sports intelligence that stays dark until a provider is configured</li>
-      <li>Language learning across a 20-language registry with real TTS</li>
-      <li>Lead discovery through Google Places when a key is set</li>
-    </ul>
+  <div class="split product-split">
+    <div class="split-copy">
+      <h3>Built for real tasks, not a demo display</h3>
+      <ul class="checklist">
+        <li><b>AI Workforce</b> — multi-agent analysis with an evidence trail and risk checks</li>
+        <li><b>AI Assistant &amp; Conversations</b> — ask questions, keep context and get grounded answers</li>
+        <li><b>Language Learning</b> — translation, listening, voice and speaking practice</li>
+        <li><b>Productivity</b> — dashboards, alerts, analytics and account settings in one place</li>
+      </ul>
+      <div class="hero-cta">
+        <a class="btn solid" href="/services">Explore the product</a>
+      </div>
+    </div>
+    <figure class="media">
+      <img src="/assets/images/about-workspace.jpg" alt="Professional workspace running WINDELS AI WORKFORCE" loading="lazy" width="800" height="550">
+    </figure>
   </div>
 </section>
 
 <section class="band alt" id="capabilities">
   <div class="section-head">
-    <p class="kicker">Capabilities</p>
-    <h2>Choose a workspace, not a slogan</h2>
-    <p>Every capability is real, tested, and labelled honestly.</p>
+    <p class="kicker">AI features</p>
+    <h2>Everything you need, clearly organised</h2>
+    <p>Every feature below is live in the product. Head to the right module when you are ready to use it.</p>
   </div>
-  <div class="cards four">
-    <article class="card"><h3>Trading intelligence</h3><p>Consensus, regime detection and risk-reviewed proposals. No orders leave this process from the public site.</p><a href="/services">Learn more</a></article>
-    <article class="card"><h3>AI language teacher</h3><p>Translation, listening and speaking from authored banks. The target language only changes when you select it.</p><a href="/services">Learn more</a></article>
-    <article class="card"><h3>Sports intelligence</h3><p>Daily ticket research from stored fixtures and odds. Disabled until a real provider is configured.</p><a href="/services">Learn more</a></article>
-    <article class="card"><h3>Lead discovery</h3><p>Search, deduplicate and export real businesses. Coverage is calculated from stored fields.</p><a href="/services">Learn more</a></article>
+  <div class="cards feature-cards four">
+    <article class="card">
+      <h3>AI Workforce</h3>
+      <p>Run multi-agent analysis and review a clear consensus, regime and risk decision.</p>
+      <a href="/services">Open AI Workforce</a>
+    </article>
+    <article class="card">
+      <h3>AI Assistant</h3>
+      <p>Ask a question while you work and get a grounded answer from the product help guide.</p>
+      <a href="/how-it-works">See how it answers</a>
+    </article>
+    <article class="card">
+      <h3>AI Conversations</h3>
+      <p>Keep talking to the assistant in the floating chat window without losing your place.</p>
+      <a href="/how-it-works">Open the guide</a>
+    </article>
+    <article class="card">
+      <h3>Language Learning</h3>
+      <p>Learn any supported language with a real learning path and authored content.</p>
+      <a href="/services">Explore learning</a>
+    </article>
+    <article class="card">
+      <h3>Translation</h3>
+      <p>Translate both ways between any supported language pair with one click.</p>
+      <a href="/services">Try translation</a>
+    </article>
+    <article class="card">
+      <h3>Voice / Pronunciation</h3>
+      <p>Listen to natural voice playback and replay the pronunciation while you learn.</p>
+      <a href="/services">Hear the voices</a>
+    </article>
+    <article class="card">
+      <h3>Speaking Practice</h3>
+      <p>Practice speaking with real speech recognition and helpful, honest feedback.</p>
+      <a href="/services">Start speaking</a>
+    </article>
+    <article class="card">
+      <h3>Productivity</h3>
+      <p>Keep dashboards, alerts, analytics and settings organised in one professional layout.</p>
+      <a href="/services">See the workflow</a>
+    </article>
   </div>
 </section>
 

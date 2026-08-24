@@ -342,7 +342,7 @@
 
   // ---------- UI init (sidebar toggle, profile menu, back/forward) ----------
   function initUI() {
-    const toggle = document.querySelector('.sidebar-toggle');
+    const toggle = document.getElementById('sidebar-toggle') || document.querySelector('.sidebar-toggle');
     const sidebar = document.getElementById('app-sidebar');
     if (toggle && sidebar) {
       // Remove old listeners by cloning? Simpler: use a flag

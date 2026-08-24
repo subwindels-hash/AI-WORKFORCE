@@ -36,7 +36,6 @@ $isActive = function(array $keys) use ($active): bool {
 </head>
 <body class="app-shell">
 <?php $this->load->view('partials/announcement_bar'); ?>
-<button class="sidebar-toggle" type="button" aria-expanded="false" aria-label="Open menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg> Menu</button>
 <aside class="sidebar" id="app-sidebar" aria-label="Dashboard navigation">
   <a class="sidebar-brand" href="/dashboard">
     <img src="/assets/images/windels-mark.png" alt="WINDELS AI WORKFORCE" onerror="this.onerror=null;this.src='/assets/images/aegis-mark.png'">
@@ -90,11 +89,15 @@ $isActive = function(array $keys) use ($active): bool {
 <div class="app-main" id="app-main">
 <header class="topbar" id="dashboard-header">
   <div class="topbar-left">
+    <button class="sidebar-toggle topbar-menu" id="sidebar-toggle" type="button" aria-expanded="false" aria-controls="app-sidebar" aria-label="Open navigation menu" title="Menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
     <div class="nav-controls" aria-label="Dashboard navigation history">
       <button id="dash-back" class="btn small ghost" type="button" aria-label="Go back" disabled title="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg> Back</button>
       <button id="dash-forward" class="btn small ghost" type="button" aria-label="Go forward" disabled title="Forward">Forward <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg></button>
     </div>
     <div class="brand">
+      <span class="mark"><img src="/assets/images/windels-mark.png" alt="" onerror="this.onerror=null;this.src='/assets/images/aegis-mark.png'"></span>
       <h1 id="page-title"><?= e($pageTitle) ?></h1>
     </div>
   </div>
