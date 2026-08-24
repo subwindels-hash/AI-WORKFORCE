@@ -23,6 +23,7 @@ class Lang_learn extends App_Controller
     {
         $user = $this->requireUser();
         $data = $this->base('AI Language Teacher');
+        $data['active'] = 'teacher';
         $data['languages'] = $this->platform->langlearn->languages();
         $data['csrfToken'] = (string) $this->session->userdata('csrf_token');
         $data['locales'] = \Aegis\LangLearn\Translator::LOCALES;

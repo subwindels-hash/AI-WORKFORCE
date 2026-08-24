@@ -26,7 +26,7 @@
     // Must stay inside authenticated area - dashboard pages
     // Consider /dashboard and all prefixes above as authenticated
     if (path === '/dashboard') return true;
-    return AUTHENTICATED_PREFIXES.some(p => path === p || path.startsWith(p + '/') || path.startsWith(p + '?') || path.startsWith(p));
+    return AUTHENTICATED_PREFIXES.some(p => path === p || path.startsWith(p + '/') || path.startsWith(p + '?'));
   }
 
   function getCurrentPath() {
@@ -160,15 +160,23 @@
   }
 
   // ---------- SPA fetch & swap to keep sidebar mounted ----------
-  let isFetching = false;
+  // Latest-navigation-wins token: rapid back/forward (or quick clicks) must
+  // never leave a stale page mounted under a newer URL. Every navigation
+  // increments the token; only the newest fetch is allowed to swap.
+  let navSeq = 0;
+
+  // External scripts already executed in this browser session. Their
+  // globals survive SPA swaps, so swapped-in copies must not re-run.
+  const executedScripts = new Set(
+    Array.from(document.querySelectorAll('script[src]')).map((s) => s.getAttribute('src'))
+  );
   async function fetchAndSwap(path, replaceHistory = false, pushAppHistory = true) {
-    if (isFetching) return;
     if (!isAuthenticatedPath(path)) {
       // Outside authenticated area - do full navigation
       navigateTo(path, { replace: replaceHistory, spa: false });
       return;
     }
-    isFetching = true;
+    const seq = ++navSeq;
     const pageContent = document.getElementById('page-content');
     if (pageContent) {
       pageContent.style.opacity = '0.6';
@@ -178,34 +186,56 @@
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
         credentials: 'same-origin',
       });
+      if (seq !== navSeq) return; // superseded by a newer navigation
       if (!res.ok) {
         throw new Error('HTTP ' + res.status);
       }
       const html = await res.text();
+      if (seq !== navSeq) return; // superseded while parsing
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, 'text/html');
 
-      // Extract new app-main or page-content
-      const newMain = doc.getElementById('app-main') || doc.querySelector('.app-main');
-      const newContent = doc.getElementById('page-content') || doc.querySelector('.wrap');
+      // Only pages rendered inside the dashboard shell have #app-main.
+      // Standalone documents (e.g. Lead Discovery) must load with a full
+      // navigation — swapping only a fragment leaves their scripts dead.
+      const newMain = doc.getElementById('app-main');
       const newTitle = doc.querySelector('title');
 
-      if (!newMain && !newContent) {
-        throw new Error('No app-main found');
+      if (!newMain) {
+        throw new Error('Target page is not an app-shell page');
       }
 
-      // If we have full app-main, replace current app-main but keep sidebar
-      // Actually we want to keep sidebar mounted, so we only replace topbar + wrap inside app-main
-      // Our header has #app-main containing topbar and #page-content
-      // We will replace the innerHTML of #app-main with newMain's innerHTML if possible
       const currentMain = document.getElementById('app-main');
-      if (currentMain && newMain) {
-        // Preserve sidebar toggle state? No need
-        currentMain.innerHTML = newMain.innerHTML;
-      } else if (pageContent && newContent) {
-        pageContent.innerHTML = newContent.innerHTML;
-        if (newTitle) document.title = newTitle.textContent;
+      if (!currentMain) {
+        throw new Error('Current page lost #app-main');
       }
+      currentMain.innerHTML = newMain.innerHTML;
+
+      // innerHTML never executes <script> tags — re-create them so page
+      // scripts (language lessons, speaking/listening tools, etc.) run
+      // after every SPA swap, exactly like a full page load.
+      // External scripts run once per browser session (their globals
+      // persist across swaps); inline scripts run on every swap.
+      currentMain.querySelectorAll('script').forEach((oldScript) => {
+        const src = oldScript.getAttribute('src');
+        if (src) {
+          if (executedScripts.has(src)) {
+            oldScript.remove();
+            return;
+          }
+          executedScripts.add(src);
+        }
+        const fresh = document.createElement('script');
+        for (const attr of oldScript.attributes) fresh.setAttribute(attr.name, attr.value);
+        if (!src) fresh.textContent = oldScript.textContent;
+        oldScript.replaceWith(fresh);
+      });
+
+      // Page scripts that wait for DOMContentLoaded must still initialize:
+      // the real event fired long ago, so re-notify after the swap.
+      try {
+        document.dispatchEvent(new Event('DOMContentLoaded', { bubbles: false, cancelable: false }));
+      } catch (_) {}
 
       // Update document title
       if (newTitle) {
@@ -246,7 +276,8 @@
 
       updateButtons();
     } catch (err) {
-      // Fallback to full navigation on failure
+      // Fallback to full navigation on failure (but never override a newer navigation)
+      if (seq !== navSeq) return;
       console.warn('SPA navigation failed, falling back', err);
       if (replaceHistory) {
         window.location.replace(path);
@@ -254,8 +285,7 @@
         window.location.assign(path);
       }
     } finally {
-      isFetching = false;
-      if (pageContent) pageContent.style.opacity = '';
+      if (seq === navSeq && pageContent) pageContent.style.opacity = '';
     }
   }
 
