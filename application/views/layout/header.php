@@ -1,7 +1,9 @@
 <?php
 defined('BASEPATH') or exit('No direct script access allowed');
 /** @var string $title @var string $active @var array $status */
-function e(?string $s): string { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
+if (!function_exists('e')) {
+    function e(?string $s): string { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
+}
 $status = $status ?? null;
 $mode = $status['tradingMode'] ?? '…';
 $ks = $status['killSwitch'] ?? null;
@@ -32,6 +34,7 @@ $ks = $status['killSwitch'] ?? null;
     <a href="/risk" class="<?= ($active ?? '') === 'risk' ? 'active' : '' ?>">Risk Center</a>
     <a href="/notifications" class="<?= ($active ?? '') === 'notifications' ? 'active' : '' ?>">Alerts<?php $unread = Aegis_NotificationsHelper::unreadCount(); if ($unread > 0): ?> <span class="badge b-red"><?= (int) $unread ?></span><?php endif; ?></a>
     <a href="/journal" class="<?= ($active ?? '') === 'journal' ? 'active' : '' ?>">Journal &amp; Analytics</a>
+    <a href="/sports" class="<?= ($active ?? '') === 'sports' ? 'active' : '' ?>">Sports</a>
     <a href="/app/languages" class="<?= ($active ?? '') === 'languages' ? 'active' : '' ?>">Languages</a>
   </nav>
   <div class="top-right">

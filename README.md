@@ -44,9 +44,10 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **RBAC on the trading API**: trading.view / trading.control / trading.execute (+ CSRF); approval decisions record the deciding operator | **TESTED** |
 | **Notifications**: risk alerts, approval requests, execution outcomes, broker disconnects, kill switch — deduped until acknowledged | **TESTED** |
 | **Scheduled operations worker** (`php index.php tools cron`): portfolio scan, broker transitions, proposal expiry | **TESTED** |
+| **Lottery Intelligence (EuroMillions)**: rule engine, validated idempotent ingestion (verified draws never silently overwritten), frequency/gap/hot-cold/distribution/pair statistics, per-line combination analyzer, 5-mode AI combination generator with lock/exclude + AI decision reports, diversification engine, system builder (C(N,5) combinatorics), user-scoped ticket builder + saved tickets, backtesting (Strategy Lab) with mandatory random baseline + same-period strategy comparison, model versioning, separated performance overview, RBAC (lottery.view/manage), idempotent lottery-cron | **TESTED** (admin controls/UI/security-E2E next; official feeds PLANNED) |
 | MT4 / crypto-exchange / stock-broker connectors | **PLANNED** (added one at a time after MT5 is verified) |
 
-**196 automated tests** run through the real CodeIgniter stack
+**323 automated tests** run through the real CodeIgniter stack
 (`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
 sandbox — see below), plus 9 contract tests for the Python bridge
 (`python-services/mt5-bridge/.venv/bin/python -m pytest test_bridge.py`).
@@ -149,7 +150,7 @@ application/
 python-services/mt5-bridge/     Phase 4 bridge: FastAPI + MetaTrader5 service,
                                 contract-tested with a simulated terminal
   helpers/aegis_helper.php      view-safe platform-state access
-tests/                          framework.php + cases/*.php (57 tests)
+tests/                          framework.php + cases/*.php (61 case files, 323 tests)
 tools/install.php               schema installer (mysqli or sqlite by driver)
 runtime/                        offline WASM-PHP bridge (dev only, not production)
 assets/css/aegis.css            dashboard styles (no CDN dependency)
@@ -329,6 +330,127 @@ All five phases of the language-learning module are now complete.
   `ai`** — DRAFT lifecycle, human sign-off required before paper/live, same
   as any AI-generated strategy.
 
+### Lottery Intelligence (native WINDELS module — EuroMillions first)
+
+A provider-neutral lottery intelligence platform inside WINDELS (not a
+separate site, not a random number generator). EuroMillions is the first
+supported lottery; the `LotteryProvider` + `LotteryRules` contract means
+additional lotteries plug in as configuration + a provider, not a rebuild.
+
+**Honesty contract (mandatory):** EuroMillions is a random lottery. Every
+statistical output carries the engine's independence disclaimer; hot/cold,
+frequency and gaps are labeled **historical observations**, never predictions;
+no "win chance" or "due" number exists anywhere in the module.
+
+Implemented and tested in this increment:
+
+- **Rule engine** (`EuroMillionsRules`): 5 mains from 1–50, 2 Lucky Stars from
+  1–12, Tue/Fri 21:00 UTC — stored as data (DB-updatable `lottery_rules`
+  table), enforced for validation, statistics and (future) generation.
+- **Provider abstraction** (`LotteryProvider`): `UnavailableLotteryProvider`
+  default (honest `DISABLED_NO_PROVIDER`) + clearly-labeled
+  `SandboxLotteryProvider` (env-gated `WINDELS_LOTTERY_SANDBOX=1`,
+  deterministic, source `sandbox-simulation`) for pipeline testing. Official
+  licensed feeds are PLANNED, added one at a time.
+- **Ingestion with validation** (spec §6): every imported draw must pass
+  count/range/duplicate/date/source checks or it is marked
+  `DATA_VALIDATION_FAILED` and audited — never stored as official. Imports
+  are idempotent (unique `lottery_code + external_id`), and a `VERIFIED` draw
+  is **never silently overwritten** — conflicts are audited for manual
+  correction. Every row carries source, source timestamp and retrieved time.
+- **Historical database**: `lotteries`, `lottery_rules`, `lottery_draws`,
+  `lottery_draw_numbers`, `lottery_data_sources`, `lottery_provider_health`,
+  `lottery_sync_runs` (sqlite + mysql), through the existing `Aegis_model`
+  repository pattern.
+- **Statistics engine** (pure, tested): per-number and per-star frequency /
+  appearance% / last appearance / current gap / avg-min-max gaps / windowed
+  recent stats (all-history or last N draws); hot/cold by window (labeled
+  non-predictive); distribution (odd/even, low/high, sum min/max/avg/median,
+  spread, consecutive runs); pair/triplet/star-pair co-occurrence with gaps.
+- **Combination analyzer** (spec §13, `CombinationAnalyzer`): full profile of
+  one 5+2 line against stored draws — odd/even, low/high, sum & spread with
+  historical min/max/avg/percentile, consecutive patterns, per-number and
+  per-star history (appearances, gaps, absence), historical similarity
+  (best overlap, shared-3+ draws, same split), pattern characteristics
+  (birthday range, sequences, visual patterns) and a labelled
+  **STATISTICAL BALANCE SCORE: N/100** with documented component weights —
+  explicitly *not* a probability.
+- **AI combination generator** (spec §15/§16/§21/§26/§33,
+  `CombinationGenerator`): five modes — `RANDOM`, `BALANCED` (historical
+  profile targets), `HISTORICAL` (frequency-weighted sampling),
+  `DIVERSIFIED` (min-overlap greedy) and `ANTI-POPULAR` (avoids birthday-heavy
+  / sequence / visual patterns) — with LOCK/EXCLUDE respected by every mode,
+  seeded reproducibility (same seed ⇒ same lines) and a full AI decision
+  report recording the *actual* inputs: model (`WINDELS Lottery Model v1.0`),
+  seed, rules version, dataset version, locks/excludes, factors and method.
+  Every report carries the independence disclaimer and the honesty note that
+  no mode changes the mathematical chance of any valid combination.
+- **Diversification engine** (spec §22, `DiversificationEngine`): exact
+  number/pair/triplet/star overlap for every pair of lines (pair overlap =
+  C(|A∩B|, 2)), duplicate detection, distribution similarity and a labelled
+  **DIVERSITY SCORE: N/100** — how different the lines are from each other,
+  never a likelihood. Scales to 50+ lines.
+- **System builder** (spec §18/§19, `SystemBuilder`): a pool of N mains +
+  S stars → the full system. Line count is computed as
+  `C(N,5) x C(S,2)` — **never hardcoded**; 100% pool coverage (numbers, main
+  pairs, star pairs); estimated cost stays `null` with an explicit
+  "no cost is fabricated" note while official pricing is unavailable. Lines
+  enumerate lazily (constant memory) with paginated windows; systems above
+  10,000 lines are queued idempotently (execution key) and built by the
+  background `systems` cron job. Built systems persist as `SYSTEM`
+  combination rows with model stamping + audit.
+- **Ticket builder + saved tickets** (spec §20/§29/§38,
+  `lottery_tickets` + `lottery_ticket_lines`): user-scoped named tickets with
+  multiple lines — **every line validated before anything is stored**, lines
+  normalized, generation method + model version + configuration stamped.
+  Check against stored `VERIFIED` draws with per-line main/star matches and
+  the official EuroMillions prize tiers (amounts never stored); automatic
+  post-draw checking via the idempotent `tickets` cron job; archive/soft
+  delete. Users can only access **their own** tickets unless they hold
+  `lottery.manage`. Actual ticket outcomes stay separate from backtests and
+  demo data (spec §30).
+- **Backtesting — Strategy Lab** (spec §23/§24/§25, `LotteryBacktester`):
+  four deterministic strategies — `RANDOM_BASELINE` (mandatory, spec §25),
+  `BALANCED_PROFILE`, `HISTORICAL_FREQ`, `ANTI_POPULAR` — replayed over
+  stored draws **without look-ahead** (test draw i only sees draws 1..i-1).
+  Reports: main/star match distributions, official tier counts (amounts
+  never stored), best line, per-draw detail — labelled **HISTORICAL
+  SIMULATION**, with simulated cost/winnings `null` while official figures
+  are unavailable. Strategy comparison runs every strategy on the **same
+  period** and never declares one "better" (spec §24/§34). Runs persist in
+  `lottery_backtests` (audited `LOTTERY_BACKTEST_RUN`) and the daily
+  `backtests` cron job is execution-key idempotent (one run per strategy per
+  day).
+- **Model versioning** (spec §33, `lottery_model_versions`):
+  `WINDELS Lottery Model v1.0` row records the full statistical
+  configuration (score weights, generator modes, backtester strategies).
+  Versions are **never deleted or replaced** — historical results stay
+  connected to the model that generated them.
+- **Performance overview** (spec §30, `api/lottery/performance`):
+  **ACTUAL TICKET RESULTS**, **HISTORICAL BACKTEST RESULTS** and
+  **DEMO/SANDBOX DATA** in three separate sections that are **never
+  mixed**; sandbox data is explicitly labeled synthetic.
+- **Persistence**: `lottery_combinations` (lines + constraints + model
+  version), `lottery_ai_decisions` (full report), `lottery_tickets`,
+  `lottery_ticket_lines`, `lottery_backtests`, `lottery_model_versions` —
+  every artefact stays connected to the model that produced it (spec §33);
+  each generation/backtest is audited with the acting user.
+- **API + RBAC + cron**: `api/lottery/*` (status public; reads `lottery.view`;
+  `POST generate` / `POST diversity` / `POST system` / `POST backtest` /
+  `POST backtest-compare` / ticket mutations `lottery.view` + session CSRF;
+  `POST sync` + `POST system-build` `lottery.manage` + CSRF),
+  `lottery_admin` / `lottery_viewer` roles seeded by `tools/rbac.php`,
+  idempotent `php index.php tools lottery-cron
+  [sync|health|statistics|systems|tickets|backtests|cleanup]`
+  (execution-key guarded; integrity sweep audits violations without rewriting
+  verified data).
+
+Next increments: result-verification pipeline formalization (spec §28/§19),
+provider-health + AI-decision-report endpoints/UI, admin controls (spec §39,
+every change logged), the WINDELS-styled desktop + mobile lottery console
+(spec §35/§36/§37), security testing (spec §31) and the full E2E +
+production-readiness review (spec §32/§33).
+
 ### Simulated MT5 bridge (offline demo only)
 
 The sandbox has no MetaTrader terminal, and the platform refuses to pretend
@@ -393,9 +515,12 @@ To **demo** the full chain, Broker Center has a *Simulated MT5 bridge* toggle:
 - **Phase 6 (in progress)** — multi-agent debate and the strategy optimizer
   are implemented and tested. The fundamentals agent boundary is implemented
   and explicitly abstains until a licensed, attributable feed is configured.
-  Next: add licensed fundamentals, sentiment, on-chain, and options providers
-  one at a time with provenance and freshness validation; portfolio
-  optimization.
+  The sentiment feed boundary is implemented next: a `SentimentFeed` contract
+  with provenance + freshness validation (per-observation source, timestamp,
+  license, 1h staleness floor) that votes only on licensed, attributable,
+  fresh data and abstains otherwise.
+  Next: add on-chain and options providers one at a time with the same
+  provenance/freshness contract; portfolio optimization.
 
 ## Disclaimer
 

@@ -11,6 +11,7 @@
 $aegisDir = __DIR__;
 $priority = [
     $aegisDir . '/Providers/MarketDataProvider.php',   // provider interface
+    $aegisDir . '/Sports/Providers/SportsDataProvider.php', // sports provider interface + manager
     $aegisDir . '/Persistence/Repositories.php',      // repository interfaces
     $aegisDir . '/Brokers/BrokerConnector.php',       // broker interface + manager
     $aegisDir . '/Brokers/TradingConnector.php',      // order-capable broker interface

@@ -19,8 +19,34 @@ class SportsDataNormalizer
             'homeTeam' => trim((string) $raw['homeTeam']), 'awayTeam' => trim((string) $raw['awayTeam']),
             'competition' => trim((string) $raw['competition']), 'kickoff' => $kickoff, 'status' => $status,
             'sourceTimestamp' => self::timestamp($raw['sourceTimestamp'] ?? null),
+            'simulated' => !empty($raw['simulated']),
+            'context' => self::context($raw['context'] ?? null),
             'fieldsPresent' => array_keys($raw),
         ];
+    }
+
+    /**
+     * Validates optional verified match context. Missing or malformed context
+     * is dropped (returned as null), never guessed or invented.
+     */
+    private static function context($raw): ?array
+    {
+        if (!is_array($raw)) return null;
+        $out = [];
+        if (isset($raw['recentForm']) && is_array($raw['recentForm'])) {
+            $form = [];
+            foreach (['homeGoalsPerMatch', 'awayGoalsPerMatch', 'homeConcededPerMatch', 'awayConcededPerMatch'] as $k) {
+                if (isset($raw['recentForm'][$k]) && is_numeric($raw['recentForm'][$k]) && $raw['recentForm'][$k] >= 0) $form[$k] = (float) $raw['recentForm'][$k];
+            }
+            if (count($form) === 4) {
+                $form['source'] = is_string($raw['recentForm']['source'] ?? null) ? $raw['recentForm']['source'] : null;
+                $out['recentForm'] = $form;
+            }
+        }
+        foreach (['marketLiquidity', 'restDays'] as $k) {
+            if (isset($raw[$k]) && is_numeric($raw[$k]) && $raw[$k] >= 0) $out[$k] = (float) $raw[$k];
+        }
+        return $out === null ? null : (count($out) ? $out : null);
     }
     public static function odds(array $raw, string $provider): array
     {

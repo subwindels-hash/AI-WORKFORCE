@@ -26,7 +26,9 @@ if ($driver === 'pdo_sqlite') {
         __DIR__ . '/../application/database/sports.sqlite.sql',
         __DIR__ . '/../application/database/sports_decisions.sqlite.sql',
         __DIR__ . '/../application/database/sports_results.sqlite.sql',
+        __DIR__ . '/../application/database/sports_intelligence.sqlite.sql',
         __DIR__ . '/../application/database/langlearn.sqlite.sql',
+        __DIR__ . '/../application/database/lottery.sqlite.sql',
     ];
     $sql = implode("\n", array_map(fn($file) => file_get_contents($file), $schemaFiles));
 } else {
@@ -43,7 +45,9 @@ if ($driver === 'pdo_sqlite') {
         __DIR__ . '/../application/database/sports.mysql.sql',
         __DIR__ . '/../application/database/sports_decisions.mysql.sql',
         __DIR__ . '/../application/database/sports_results.mysql.sql',
+        __DIR__ . '/../application/database/sports_intelligence.mysql.sql',
         __DIR__ . '/../application/database/langlearn.mysql.sql',
+        __DIR__ . '/../application/database/lottery.mysql.sql',
     ];
     $sql = implode("\n", array_map(fn($file) => file_get_contents($file), $schemaFiles));
 }
@@ -68,7 +72,13 @@ $expected = ['platform_state', 'strategies', 'backtests', 'analysis_runs', 'jour
     'vocabulary', 'user_vocabulary', 'listening_attempts', 'speaking_attempts', 'daily_learning_plans', 'ai_learning_recommendations',
     'users', 'roles', 'permissions', 'user_roles', 'role_permissions', 'auth_events',
     'sports_data_sources', 'sports_matches', 'sports_odds', 'sports_sync_runs', 'sports_model_versions',
-    'sports_predictions', 'sports_tickets', 'sports_results'];
+    'sports_predictions', 'sports_tickets', 'sports_results',
+    'sports_configurations', 'sports_calibrations', 'sports_job_runs', 'sports_backtests',
+    'sports_model_metrics', 'sports_daily_tickets', 'sports_performance_snapshots',
+    'lotteries', 'lottery_rules', 'lottery_data_sources', 'lottery_provider_health',
+    'lottery_draws', 'lottery_draw_numbers', 'lottery_sync_runs',
+    'lottery_combinations', 'lottery_ai_decisions', 'lottery_tickets', 'lottery_ticket_lines',
+    'lottery_backtests', 'lottery_model_versions'];
 if ($driver === 'pdo_sqlite') {
     $rows = $pdo->query("SELECT name FROM sqlite_master WHERE type='table'")->fetchAll(PDO::FETCH_COLUMN);
 } else {
@@ -84,6 +94,10 @@ if ($missing) {
     return;
 }
 echo 'OK — ' . count($expected) . " tables verified.\n";
+// Spec §30: index upgrades for pre-existing sports tables (idempotent).
+require_once __DIR__ . '/sports_indexes.php';
+aegis_ensure_sports_indexes($pdo, $driver);
+echo "index upgrades applied\n";
 // RBAC defaults (idempotent; unique keys make INSERT IGNORE safe on MySQL and SQLite).
 $insertIgnore = $driver === 'pdo_sqlite' ? 'INSERT OR IGNORE INTO' : 'INSERT IGNORE INTO'; // both engines honor unique keys
 
@@ -96,6 +110,25 @@ foreach ($schemaFiles as $_f) {
 try { $pdo->exec($driver === 'pdo_sqlite'
     ? 'ALTER TABLE user_language_profiles ADD COLUMN daily_minutes INTEGER NOT NULL DEFAULT 20'
     : 'ALTER TABLE user_language_profiles ADD COLUMN daily_minutes INT NOT NULL DEFAULT 20'); echo "upgrade: daily_minutes added\n"; }
+catch (Throwable $e) { /* column already exists on upgraded installs */ }
+// Sports Intelligence: stake column for paper P/L accounting (upgraded installs).
+try { $pdo->exec($driver === 'pdo_sqlite'
+    ? 'ALTER TABLE sports_tickets ADD COLUMN stake REAL'
+    : 'ALTER TABLE sports_tickets ADD COLUMN stake DECIMAL(12,2) NULL'); echo "upgrade: sports_tickets.stake added\n"; }
+catch (Throwable $e) { /* column already exists on upgraded installs */ }
+// Sports Intelligence: settlement P/L column (upgraded installs).
+try { $pdo->exec($driver === 'pdo_sqlite' ? 'ALTER TABLE sports_tickets ADD COLUMN pnl REAL' : 'ALTER TABLE sports_tickets ADD COLUMN pnl DECIMAL(14,4) NULL'); }
+catch (Throwable $e) { /* column already exists on upgraded installs */ }
+// Sports Intelligence: odds-at-prediction columns for the audit trail (spec §29).
+foreach ([
+    $driver === 'pdo_sqlite' ? 'ALTER TABLE sports_predictions ADD COLUMN odds REAL' : 'ALTER TABLE sports_predictions ADD COLUMN odds DECIMAL(14,6) NULL',
+    $driver === 'pdo_sqlite' ? 'ALTER TABLE sports_predictions ADD COLUMN odds_timestamp TEXT' : 'ALTER TABLE sports_predictions ADD COLUMN odds_timestamp VARCHAR(32) NULL',
+] as $alter) {
+    try { $pdo->exec($alter); } catch (Throwable $e) { /* column already exists on upgraded installs */ }
+}
+echo "upgrade: sports_predictions odds columns ensured\n";
+// Lottery: background system-build payload (upgraded installs).
+try { $pdo->exec($driver === 'pdo_sqlite' ? 'ALTER TABLE lottery_sync_runs ADD COLUMN payload TEXT' : 'ALTER TABLE lottery_sync_runs ADD COLUMN payload MEDIUMTEXT NULL'); echo "upgrade: lottery_sync_runs.payload added\n"; }
 catch (Throwable $e) { /* column already exists on upgraded installs */ }
 aegis_seed_rbac(
     function (string $code, string $name) use ($pdo, $insertIgnore): int {

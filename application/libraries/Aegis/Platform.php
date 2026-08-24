@@ -29,6 +29,7 @@ class Platform
     public readonly BrokerManager $brokers;
     public readonly ExecutionSupervisor $execution;
     public readonly \Aegis\Sports\SportsIntelligence $sports;
+    public readonly \Aegis\Lottery\LotteryIntelligence $lottery;
     public readonly Identity $identity;
     public readonly RiskEngine $risk;
     public readonly StrategyRegistry $strategies;
@@ -60,7 +61,14 @@ class Platform
         });
 
         $this->risk = new RiskEngine();
-        $this->sports = new \Aegis\Sports\SportsIntelligence($model->sports, $model->audit);
+        $this->notifications = new \Aegis\Notifications\Notifier($model->notifications);
+        $this->sports = new \Aegis\Sports\SportsIntelligence($model->sports, $model->audit, $this->notifications);
+        $this->lottery = new \Aegis\Lottery\LotteryIntelligence(
+            $model->lottery, $model->audit,
+            getenv('WINDELS_LOTTERY_SANDBOX') === '1'
+                ? new \Aegis\Lottery\SandboxLotteryProvider()
+                : new \Aegis\Lottery\UnavailableLotteryProvider(),
+        );
         $this->identity = new Identity($model->identity);
         $this->strategies = new StrategyRegistry($model->strategies, $model->audit, $model->journal);
         $this->strategies->seedBuiltins();
@@ -75,7 +83,6 @@ class Platform
             $this->providers, $this->risk, $this->strategies
         );
 
-        $this->notifications = new \Aegis\Notifications\Notifier($model->notifications);
         $this->langlearn = new \Aegis\LangLearn\LangLearnService($model->langlearn);
         $this->langteacher = new \Aegis\LangLearn\TeacherService($model->langlearn, $this->langlearn);
         $this->vocabulary = new \Aegis\LangLearn\VocabularyService($model->langlearn, $this->langlearn);
