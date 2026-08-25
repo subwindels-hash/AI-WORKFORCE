@@ -16,10 +16,10 @@ test('user and administrator login/account pages are routed and use the secure c
 });
 
 test('generated brand assets are wired into PHP views', function () {
-    assert_true(is_file(FCPATH . 'assets/images/aegis-mark.png'));
+    assert_true(is_file(FCPATH . 'assets/images/ai_workforce-mark.png'));
     assert_true(is_file(FCPATH . 'assets/images/ai-agent-avatar.png'));
     $header = file_get_contents(FCPATH . 'application/views/layout/header.php');
-    assert_contains('/assets/images/aegis-mark.png', $header);
+    assert_contains('/assets/images/ai_workforce-mark.png', $header);
     assert_contains('/dashboard', $header);
     assert_contains('/assets/images/ai-agent-avatar.png', file_get_contents(FCPATH . 'application/views/admin/index.php'));
 });
@@ -32,7 +32,7 @@ test('SEO documents and public chat widget are routed for every PHP page', funct
     assert_true(is_file(FCPATH . 'application/config/seo.php'));
     assert_true(is_file(FCPATH . 'application/controllers/Seo.php'));
     assert_true(is_file(FCPATH . 'application/controllers/Api_chat.php'));
-    assert_true(is_file(FCPATH . 'application/libraries/Aegis/ChatAssistant.php'));
-    assert_true(is_file(FCPATH . 'assets/js/aegis-chat.js'));
-    assert_contains('aegis-chat', file_get_contents(FCPATH . 'application/views/layout/footer.php') . file_get_contents(FCPATH . 'application/views/partials/chat_widget.php'));
+    assert_true(is_file(FCPATH . 'application/libraries/AIWorkforce/ChatAssistant.php'));
+    assert_true(is_file(FCPATH . 'assets/js/ai_workforce-chat.js'));
+    assert_contains('ai_workforce-chat', file_get_contents(FCPATH . 'application/views/layout/footer.php') . file_get_contents(FCPATH . 'application/views/partials/chat_widget.php'));
 });

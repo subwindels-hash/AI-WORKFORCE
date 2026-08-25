@@ -1,10 +1,10 @@
 <?php
 /** Contract tests for the disabled-by-default unfinished-module scaffolds. */
-use Aegis\Brokers\BinanceTradingConnector;
-use Aegis\Brokers\Mt4BridgeConnector;
-use Aegis\Lottery\OfficialLotteryProvider;
-use Aegis\Providers\LicensedAssetMarketDataProvider;
-use Aegis\ProviderManager;
+use AIWorkforce\Brokers\BinanceTradingConnector;
+use AIWorkforce\Brokers\Mt4BridgeConnector;
+use AIWorkforce\Lottery\OfficialLotteryProvider;
+use AIWorkforce\Providers\LicensedAssetMarketDataProvider;
+use AIWorkforce\ProviderManager;
 
 function fx_scaffold_env(string $key, $value): void
 {
@@ -12,19 +12,19 @@ function fx_scaffold_env(string $key, $value): void
 }
 
 test('licensed asset providers stay disabled and cannot claim symbols by default', function () {
-    $provider = new LicensedAssetMarketDataProvider('stock', 'stock-test', 'Test stocks', 'AEGIS_TEST_STOCK_DATA');
+    $provider = new LicensedAssetMarketDataProvider('stock', 'stock-test', 'Test stocks', 'AI_WORKFORCE_TEST_STOCK_DATA');
     assert_equals('DISABLED', $provider->healthCheck()['status']);
     assert_false($provider->supportsSymbol('AAPL'));
     assert_false($provider->capabilities()['licenseConfigured']);
 });
 
 test('licensed asset provider requires explicit license, symbols and enabled flag', function () {
-    fx_scaffold_env('AEGIS_TEST_STOCK_DATA_LICENSE', 'contract-123');
-    fx_scaffold_env('AEGIS_TEST_STOCK_DATA_SYMBOLS', 'AAPL, MSFT');
+    fx_scaffold_env('AI_WORKFORCE_TEST_STOCK_DATA_LICENSE', 'contract-123');
+    fx_scaffold_env('AI_WORKFORCE_TEST_STOCK_DATA_SYMBOLS', 'AAPL, MSFT');
     try {
         $calls = [];
         $provider = new LicensedAssetMarketDataProvider(
-            'stock', 'stock-test', 'Test stocks', 'AEGIS_TEST_STOCK_DATA',
+            'stock', 'stock-test', 'Test stocks', 'AI_WORKFORCE_TEST_STOCK_DATA',
             'https://feed.example/v1', true,
             'token-1',
             function (string $url, ?string $token) use (&$calls) {
@@ -44,16 +44,16 @@ test('licensed asset provider requires explicit license, symbols and enabled fla
         assert_equals(1, count($provider->getCandles(['symbol' => 'AAPL', 'timeframe' => '1h', 'limit' => 10])));
         assert_equals('token-1', $calls[0][1]);
     } finally {
-        putenv('AEGIS_TEST_STOCK_DATA_LICENSE');
-        putenv('AEGIS_TEST_STOCK_DATA_SYMBOLS');
+        putenv('AI_WORKFORCE_TEST_STOCK_DATA_LICENSE');
+        putenv('AI_WORKFORCE_TEST_STOCK_DATA_SYMBOLS');
     }
 });
 
 test('provider manager routes market-class requests only to matching licensed adapters', function () {
-    fx_scaffold_env('AEGIS_TEST_STOCK_DATA_LICENSE', 'contract-123');
-    fx_scaffold_env('AEGIS_TEST_STOCK_DATA_SYMBOLS', 'AAPL');
+    fx_scaffold_env('AI_WORKFORCE_TEST_STOCK_DATA_LICENSE', 'contract-123');
+    fx_scaffold_env('AI_WORKFORCE_TEST_STOCK_DATA_SYMBOLS', 'AAPL');
     try {
-        $stock = new LicensedAssetMarketDataProvider('stock', 'stock-test', 'Test stocks', 'AEGIS_TEST_STOCK_DATA', 'https://feed.example/v1', true, 'token', function (string $url, ?string $token) {
+        $stock = new LicensedAssetMarketDataProvider('stock', 'stock-test', 'Test stocks', 'AI_WORKFORCE_TEST_STOCK_DATA', 'https://feed.example/v1', true, 'token', function (string $url, ?string $token) {
             $candles = [];
             $base = 1700000000000;
             for ($i = 0; $i < 35; $i++) {
@@ -69,8 +69,8 @@ test('provider manager routes market-class requests only to matching licensed ad
         assert_equals('stock-test', $series['provenance']['source']);
         assert_false($series['provenance']['synthetic']);
     } finally {
-        putenv('AEGIS_TEST_STOCK_DATA_LICENSE');
-        putenv('AEGIS_TEST_STOCK_DATA_SYMBOLS');
+        putenv('AI_WORKFORCE_TEST_STOCK_DATA_LICENSE');
+        putenv('AI_WORKFORCE_TEST_STOCK_DATA_SYMBOLS');
     }
 });
 

@@ -3,14 +3,14 @@
  * PHASE 6 — Strategy Optimizer: grid search with walk-forward verification
  * (in-sample 70% / out-of-sample 30%) and variant registration governance.
  */
-use Aegis\Optimization\StrategyOptimizer;
-use Aegis\Strategies\VersionedStrategyDecorator;
-use function Aegis\Strategies\builtinStrategyFactory;
+use AIWorkforce\Optimization\StrategyOptimizer;
+use AIWorkforce\Strategies\VersionedStrategyDecorator;
+use function AIWorkforce\Strategies\builtinStrategyFactory;
 
 /** Deterministic candle fixture: trend slope + sine wiggle + tiny noise. */
 function opt_series(int $n, float $slope, float $wiggle, int $seed = 7): array
 {
-    $rand = \Aegis\MathUtils::seededRandom($seed);
+    $rand = \AIWorkforce\MathUtils::seededRandom($seed);
     $candles = [];
     $price = 100.0;
     for ($i = 0; $i < $n; $i++) {

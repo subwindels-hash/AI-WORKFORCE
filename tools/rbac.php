@@ -4,12 +4,12 @@
  * tools/install.php (direct PDO, script installs) and Tools::seedAccessControls
  * (CI3 model layer, controller installs). Roles/permissions are idempotent.
  *
- * Consumed by aegis_seed_rbac(callable $ensureRole, callable $ensurePermission,
+ * Consumed by ai_workforce_seed_rbac(callable $ensureRole, callable $ensurePermission,
  * callable $grant): all callables return/accept integer ids.
  */
 
-if (!defined('AEGIS_RBAC_ROLES')) {
-    define('AEGIS_RBAC_ROLES', [
+if (!defined('AI_WORKFORCE_RBAC_ROLES')) {
+    define('AI_WORKFORCE_RBAC_ROLES', [
         'super_admin' => 'Super administrator',
         'sports_admin' => 'Sports administrator',
         'sports_viewer' => 'Sports viewer',
@@ -21,7 +21,7 @@ if (!defined('AEGIS_RBAC_ROLES')) {
         'admin' => 'Administrator',
         'support_admin' => 'Support administrator',
     ]);
-    define('AEGIS_RBAC_PERMISSIONS', [
+    define('AI_WORKFORCE_RBAC_PERMISSIONS', [
         'system.super_admin' => 'Full platform administration',
         'sports.view' => 'View sports intelligence',
         'sports.manage' => 'Manage sports providers and configuration',
@@ -47,8 +47,8 @@ if (!defined('AEGIS_RBAC_ROLES')) {
         'admin.api.test' => 'Test API provider connections',
         'admin.api.credentials' => 'View and change API credentials',
     ]);
-    define('AEGIS_RBAC_GRANTS', [
-        'super_admin' => array_keys(AEGIS_RBAC_PERMISSIONS), // everything
+    define('AI_WORKFORCE_RBAC_GRANTS', [
+        'super_admin' => array_keys(AI_WORKFORCE_RBAC_PERMISSIONS), // everything
         'sports_admin' => ['sports.view', 'sports.manage', 'sports.approve', 'sports.settle'],
         'sports_viewer' => ['sports.view'],
         'trading_operator' => ['trading.view', 'trading.control', 'trading.execute'],
@@ -72,13 +72,13 @@ if (!defined('AEGIS_RBAC_ROLES')) {
  * @param callable(string, string): int $ensurePermission
  * @param callable(int, int): void $grant
  */
-function aegis_seed_rbac(callable $ensureRole, callable $ensurePermission, callable $grant): void
+function ai_workforce_seed_rbac(callable $ensureRole, callable $ensurePermission, callable $grant): void
 {
     $roleIds = [];
-    foreach (AEGIS_RBAC_ROLES as $code => $name) $roleIds[$code] = $ensureRole($code, $name);
+    foreach (AI_WORKFORCE_RBAC_ROLES as $code => $name) $roleIds[$code] = $ensureRole($code, $name);
     $permissionIds = [];
-    foreach (AEGIS_RBAC_PERMISSIONS as $code => $name) $permissionIds[$code] = $ensurePermission($code, $name);
-    foreach (AEGIS_RBAC_GRANTS as $role => $permissions) {
+    foreach (AI_WORKFORCE_RBAC_PERMISSIONS as $code => $name) $permissionIds[$code] = $ensurePermission($code, $name);
+    foreach (AI_WORKFORCE_RBAC_GRANTS as $role => $permissions) {
         foreach ($permissions as $permission) {
             $grant($roleIds[$role], $permissionIds[$permission]);
         }

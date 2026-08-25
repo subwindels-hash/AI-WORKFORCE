@@ -102,12 +102,12 @@ class Api_lang_learning extends Api_controller
     {
         if (!$this->guard(false)) return;
         $this->json([
-            'translation' => \Aegis\ApiProviders::publicStatus('translation'),
-            'stt' => \Aegis\ApiProviders::publicStatus('stt'),
-            'tts' => \Aegis\ApiProviders::publicStatus('tts'),
-            'languageAi' => \Aegis\ApiProviders::publicStatus('language_ai'),
-            'pronunciation' => \Aegis\ApiProviders::publicStatus('pronunciation'),
-            'unavailable' => \Aegis\ApiProviders::USER_UNAVAILABLE,
+            'translation' => \AIWorkforce\ApiProviders::publicStatus('translation'),
+            'stt' => \AIWorkforce\ApiProviders::publicStatus('stt'),
+            'tts' => \AIWorkforce\ApiProviders::publicStatus('tts'),
+            'languageAi' => \AIWorkforce\ApiProviders::publicStatus('language_ai'),
+            'pronunciation' => \AIWorkforce\ApiProviders::publicStatus('pronunciation'),
+            'unavailable' => \AIWorkforce\ApiProviders::USER_UNAVAILABLE,
         ]);
     }
 

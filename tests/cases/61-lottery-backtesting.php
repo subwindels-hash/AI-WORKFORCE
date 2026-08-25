@@ -12,14 +12,14 @@
  * - Actual ticket results / historical backtests / demo data are never
  *   mixed (spec §30).
  */
-use Aegis\Lottery\CombinationAnalyzer;
-use Aegis\Lottery\CombinationGenerator;
-use Aegis\Lottery\EuroMillionsRules;
-use Aegis\Lottery\LotteryBacktester;
-use Aegis\Lottery\LotteryCronService;
-use Aegis\Lottery\LotteryIntelligence;
-use Aegis\Lottery\LotteryStatisticsEngine;
-use Aegis\Lottery\SandboxLotteryProvider;
+use AIWorkforce\Lottery\CombinationAnalyzer;
+use AIWorkforce\Lottery\CombinationGenerator;
+use AIWorkforce\Lottery\EuroMillionsRules;
+use AIWorkforce\Lottery\LotteryBacktester;
+use AIWorkforce\Lottery\LotteryCronService;
+use AIWorkforce\Lottery\LotteryIntelligence;
+use AIWorkforce\Lottery\LotteryStatisticsEngine;
+use AIWorkforce\Lottery\SandboxLotteryProvider;
 
 /** Deterministic fixture: $n valid EuroMillions draws, oldest first. */
 function fx_lotto_backtest_draws(int $n): array
@@ -255,8 +255,8 @@ test('lottery backtesting: routes, RBAC, feature matrix, honesty scan', function
 
     // honesty scan of the files in this increment
     foreach ([
-        'application/libraries/Aegis/Lottery/LotteryBacktester.php',
-        'application/libraries/Aegis/Lottery/LotteryCronService.php',
+        'application/libraries/AIWorkforce/Lottery/LotteryBacktester.php',
+        'application/libraries/AIWorkforce/Lottery/LotteryCronService.php',
         'application/controllers/Api_lottery.php',
     ] as $file) {
         $src = strtolower(file_get_contents(FCPATH . $file));

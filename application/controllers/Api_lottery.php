@@ -72,7 +72,7 @@ class Api_lottery extends Api_controller
     public function providers()
     {
         if (!$this->requirePermission('lottery.view', false)) return;
-        $this->json(['providers' => $this->Aegis_model->lottery->listProviders()]);
+        $this->json(['providers' => $this->AIWorkforce_model->lottery->listProviders()]);
     }
 
     public function health()
@@ -85,7 +85,7 @@ class Api_lottery extends Api_controller
     {
         if (!$this->requirePermission('lottery.view', false)) return;
         $g = $this->input->get(NULL, true) ?: [];
-        $this->json(['jobs' => $this->Aegis_model->lottery->listJobRuns(!empty($g['jobType']) ? (string) $g['jobType'] : null, (int) ($g['limit'] ?: 50))]);
+        $this->json(['jobs' => $this->AIWorkforce_model->lottery->listJobRuns(!empty($g['jobType']) ? (string) $g['jobType'] : null, (int) ($g['limit'] ?: 50))]);
     }
 
     /**
@@ -185,10 +185,10 @@ class Api_lottery extends Api_controller
                 is_array($body['stars'] ?? null) ? $body['stars'] : []
             );
             if ($plan['requiresBackground']) {
-                return $this->jsonError('system has ' . $plan['totalLines'] . ' lines — above the synchronous limit (' . \Aegis\Lottery\SystemBuilder::SYNC_LINE_LIMIT . '); use POST api/lottery/system-build for a background build', 409);
+                return $this->jsonError('system has ' . $plan['totalLines'] . ' lines — above the synchronous limit (' . \AIWorkforce\Lottery\SystemBuilder::SYNC_LINE_LIMIT . '); use POST api/lottery/system-build for a background build', 409);
             }
             $page = max(0, (int) ($body['page'] ?? 0));
-            $limit = min(\Aegis\Lottery\SystemBuilder::MAX_PAGE, max(1, (int) ($body['limit'] ?: 50)));
+            $limit = min(\AIWorkforce\Lottery\SystemBuilder::MAX_PAGE, max(1, (int) ($body['limit'] ?: 50)));
             $this->json([
                 'plan' => $plan,
                 'page' => $page,
@@ -243,7 +243,7 @@ class Api_lottery extends Api_controller
                 isset($body['modelVersion']) && $body['modelVersion'] !== null ? (string) $body['modelVersion'] : null,
                 is_array($body['configuration'] ?? null) ? $body['configuration'] : []
             );
-            $this->json(['ticket' => $ticket, 'lines' => $this->Aegis_model->lottery->ticketLines((int) $ticket['id'])]);
+            $this->json(['ticket' => $ticket, 'lines' => $this->AIWorkforce_model->lottery->ticketLines((int) $ticket['id'])]);
         } catch (\InvalidArgumentException $e) {
             $this->jsonError($e->getMessage(), 400);
         }

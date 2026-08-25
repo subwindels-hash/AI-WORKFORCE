@@ -1,7 +1,7 @@
 <?php
-use Aegis\Sports\CalibrationEngine;
-use Aegis\Sports\ConfidenceEngine;
-use Aegis\Sports\PredictionEngine;
+use AIWorkforce\Sports\CalibrationEngine;
+use AIWorkforce\Sports\ConfidenceEngine;
+use AIWorkforce\Sports\PredictionEngine;
 
 test('calibration refuses to fit on an insufficient settled sample', function () {
     $out = (new CalibrationEngine())->fit(array_map(fn($i) => ['raw_probability' => 0.5 + ($i % 10) / 100, 'outcome' => $i % 2], range(0, 9)));

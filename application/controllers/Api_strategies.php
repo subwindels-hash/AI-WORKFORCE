@@ -37,7 +37,7 @@ class Api_strategies extends Api_controller
         $impl = $this->platform->strategies->implementation($rec['strategy_id'], $rec['version']);
         $this->json($rec + [
             'supportsShorts' => $impl?->supportsShorts() ?? false,
-            'nextStage' => \Aegis\Strategies\StrategyRegistry::nextStage($rec['lifecycle']),
+            'nextStage' => \AIWorkforce\Strategies\StrategyRegistry::nextStage($rec['lifecycle']),
         ]);
     }
 

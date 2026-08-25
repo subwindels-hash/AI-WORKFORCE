@@ -4,7 +4,7 @@
  * real reading bank, deterministic scoring, honest provider boundaries
  * (browser TTS/STT feature-detected; pronunciation scores never invented).
  */
-use Aegis\LangLearn\AudioPracticeService;
+use AIWorkforce\LangLearn\AudioPracticeService;
 
 test('listening exercises are built from real reading bank items', function () {
     $t = platform();
@@ -42,7 +42,7 @@ test('listening comprehension grades against the bank answer', function () {
     $ctx = teacher_profile('listen-es', 'es');
     $res = $t->audiopractice->listeningExercises($ctx['userId'], (int) $ctx['profile']['id']);
     $ex = $res['exercises'][0];
-    $bank = \Aegis\LangLearn\ItemBanks::find('es', $ex['itemId']);
+    $bank = \AIWorkforce\LangLearn\ItemBanks::find('es', $ex['itemId']);
 
     $wrong = $t->audiopractice->submitListening($ctx['userId'], (int) $ctx['profile']['id'], $ex['itemId'], 'comprehension', ($bank['answer'] + 1) % 4);
     assert_false($wrong['passed']);
@@ -115,7 +115,7 @@ test('listening/speaking activity contributes to streaks and is isolated', funct
     $ctx = teacher_profile('speak-streak', 'it');
     $res = $t->audiopractice->listeningExercises($ctx['userId'], (int) $ctx['profile']['id']);
     $ex = $res['exercises'][0];
-    $bank = \Aegis\LangLearn\ItemBanks::find('it', $ex['itemId']);
+    $bank = \AIWorkforce\LangLearn\ItemBanks::find('it', $ex['itemId']);
     $t->audiopractice->submitListening($ctx['userId'], (int) $ctx['profile']['id'], $ex['itemId'], 'comprehension', $bank['answer']);
     $progress = $t->langlearn->progressFor($ctx['profile']);
     assert_equals(1, $progress['studyStreakDays'], 'listening counts as study activity');

@@ -7,7 +7,7 @@
 </div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
-<?php if (!empty(Aegis_PlatformStateHelper::current()['allowSyntheticPaperData'])): ?>
+<?php if (!empty(AIWorkforce_PlatformStateHelper::current()['allowSyntheticPaperData'])): ?>
   <div class="notice warnbox"><b>SIMULATION PRICES</b> — synthetic-paper mode is ON for this offline demo: fills use clearly-labeled synthetic quotes (no market egress here). Production keeps this OFF; the Risk Engine then vetoes any synthetic-data trade.</div>
 <?php endif; ?>
 

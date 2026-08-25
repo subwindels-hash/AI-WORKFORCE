@@ -55,5 +55,5 @@ test('sports prod review: kill switch gate reads live platform state and boots f
     assert_true((bool) ($p->state()['killSwitch']['active'] ?? false), 'engaged kill switch persists and reloads');
     $p->setKillSwitch(false, 'prod review: release');
     assert_true(empty($p->state()['killSwitch']['active']), 'released kill switch reloads inactive');
-    assert_contains('Default state at boot', file_get_contents(FCPATH . 'application/models/Aegis_model.php'), 'fresh installs boot with the kill switch ACTIVE (fail closed)');
+    assert_contains('Default state at boot', file_get_contents(FCPATH . 'application/models/AIWorkforce_model.php'), 'fresh installs boot with the kill switch ACTIVE (fail closed)');
 });

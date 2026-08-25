@@ -1,8 +1,8 @@
 <?php
-use Aegis\Sports\CorrelationEngine;
-use Aegis\Sports\PredictionPipeline;
-use Aegis\Sports\RiskEngine;
-use Aegis\Sports\TicketOptimizer;
+use AIWorkforce\Sports\CorrelationEngine;
+use AIWorkforce\Sports\PredictionPipeline;
+use AIWorkforce\Sports\RiskEngine;
+use AIWorkforce\Sports\TicketOptimizer;
 
 function fx_gate_match(int $id = 1, array $over = []): array
 {

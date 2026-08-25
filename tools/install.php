@@ -1,6 +1,6 @@
 <?php
 /**
- * AEGIS database installer.
+ * AI_WORKFORCE database installer.
  *
  *   php tools/install.php
  *
@@ -9,14 +9,14 @@
  * tables idempotently, then verifies each table exists.
  */
 // Caller decides the exit code (the WASM runtime loses output on exit()).
-define('AEGIS_NO_EXIT', true);
-echo "AEGIS installer\n===============\n";
+define('AI_WORKFORCE_NO_EXIT', true);
+echo "AI_WORKFORCE installer\n===============\n";
 
-$driver = getenv('AEGIS_DB_DRIVER') ?: 'mysqli';
+$driver = getenv('AI_WORKFORCE_DB_DRIVER') ?: 'mysqli';
 echo "Driver: {$driver}\n";
 
 if ($driver === 'pdo_sqlite') {
-    $path = getenv('AEGIS_SQLITE_PATH') ?: __DIR__ . '/../application/data/aegis.sqlite';
+    $path = getenv('AI_WORKFORCE_SQLITE_PATH') ?: __DIR__ . '/../application/data/ai_workforce.sqlite';
     @mkdir(dirname($path), 0775, true);
     $pdo = new PDO('sqlite:' . $path);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -33,10 +33,10 @@ if ($driver === 'pdo_sqlite') {
     ];
     $sql = implode("\n", array_map(fn($file) => file_get_contents($file), $schemaFiles));
 } else {
-    $host = getenv('AEGIS_DB_HOST') ?: '127.0.0.1';
-    $user = getenv('AEGIS_DB_USER') ?: 'aegis';
-    $pass = getenv('AEGIS_DB_PASS') ?: 'aegis';
-    $name = getenv('AEGIS_DB_NAME') ?: 'aegis_trading';
+    $host = getenv('AI_WORKFORCE_DB_HOST') ?: '127.0.0.1';
+    $user = getenv('AI_WORKFORCE_DB_USER') ?: 'ai_workforce';
+    $pass = getenv('AI_WORKFORCE_DB_PASS') ?: 'ai_workforce';
+    $name = getenv('AI_WORKFORCE_DB_NAME') ?: 'ai_workforce_trading';
     $rootPdo = new PDO("mysql:host={$host}", $user, $pass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
     $rootPdo->exec("CREATE DATABASE IF NOT EXISTS `{$name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci");
     $pdo = new PDO("mysql:host={$host};dbname={$name}", $user, $pass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
@@ -91,7 +91,7 @@ $missing = array_diff($expected, $rows);
 if ($missing) {
     if (defined('STDERR')) { fwrite(STDERR, 'MISSING TABLES: ' . implode(', ', $missing) . "\n"); }
     echo "INSTALL-RESULT: 1\n";
-    if (PHP_SAPI === 'cli' && !defined('AEGIS_NO_EXIT')) {
+    if (PHP_SAPI === 'cli' && !defined('AI_WORKFORCE_NO_EXIT')) {
         exit(1);
     }
     return;
@@ -99,7 +99,7 @@ if ($missing) {
 echo 'OK — ' . count($expected) . " tables verified.\n";
 // Spec §30: index upgrades for pre-existing sports tables (idempotent).
 require_once __DIR__ . '/sports_indexes.php';
-aegis_ensure_sports_indexes($pdo, $driver);
+ai_workforce_ensure_sports_indexes($pdo, $driver);
 echo "index upgrades applied\n";
 // RBAC defaults (idempotent; unique keys make INSERT IGNORE safe on MySQL and SQLite).
 $insertIgnore = $driver === 'pdo_sqlite' ? 'INSERT OR IGNORE INTO' : 'INSERT IGNORE INTO'; // both engines honor unique keys
@@ -179,7 +179,7 @@ foreach ([$driver === 'pdo_sqlite'
     try { $pdo->exec($idx); } catch (Throwable $e) { /* already exists on upgraded installs */ }
 }
 echo "upgrade: account unique indexes ensured\n";
-aegis_seed_rbac(
+ai_workforce_seed_rbac(
     function (string $code, string $name) use ($pdo, $insertIgnore): int {
         $pdo->prepare("{$insertIgnore} roles (code, name) VALUES (?, ?)")->execute([$code, $name]);
         return (int) $pdo->query('SELECT id FROM roles WHERE code = ' . $pdo->quote($code))->fetchColumn();

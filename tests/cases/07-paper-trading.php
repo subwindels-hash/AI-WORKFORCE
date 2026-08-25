@@ -3,7 +3,7 @@
  * PHASE 3 — Paper Trading Engine (DB-backed integration through CI3).
  * Governance chain: kill switch -> trading mode -> risk engine -> fill.
  */
-use Aegis\Paper\PaperTradingEngine;
+use AIWorkforce\Paper\PaperTradingEngine;
 
 function pt_reset_state(bool $killSwitch = false): void
 {
@@ -200,7 +200,7 @@ test('paper: strategy deployment gated on lifecycle; deploy advances to PAPER_TR
             assert_contains('RISK_REVIEWED', $e->getMessage());
         }
         // advance through the pipeline with a passing backtest record
-        $bt = ['id' => \Aegis\Backtest\Backtester::uuid(), 'created_at' => gmdate('c'),
+        $bt = ['id' => \AIWorkforce\Backtest\Backtester::uuid(), 'created_at' => gmdate('c'),
             'request' => ['strategyId' => 'momentum', 'strategyVersion' => '1.0.0', 'symbol' => 'BTCUSDT', 'timeframe' => '1h'],
             'dataProvenance' => ['synthetic' => true],
             'metrics' => ['trades' => 40, 'profitFactor' => 1.6, 'maxDrawdownPct' => 8, 'expectancyPnl' => 30, 'sharpe' => 1.4],

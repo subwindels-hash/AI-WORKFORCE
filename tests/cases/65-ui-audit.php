@@ -52,7 +52,7 @@ test('dashboard sidebar contains every required item with a real route and an ic
 });
 
 test('sidebar icons are one consistent compact size', function () {
-    $css = file_get_contents(FCPATH . 'assets/css/aegis.css');
+    $css = file_get_contents(FCPATH . 'assets/css/ai_workforce.css');
     assert_contains('.sidebar a svg { width: 20px; height: 20px;', $css, 'sidebar svg icons sized 20x20');
     $header = file_get_contents(FCPATH . 'application/views/layout/header.php');
     // Sidebar icons rely on the stylesheet size: no inline width/height overrides.
@@ -68,7 +68,7 @@ test('sidebar icons are one consistent compact size', function () {
 
 test('top-right controls are compact and contain no oversized dot glyph', function () {
     $header = file_get_contents(FCPATH . 'application/views/layout/header.php');
-    $css = file_get_contents(FCPATH . 'assets/css/aegis.css');
+    $css = file_get_contents(FCPATH . 'assets/css/ai_workforce.css');
     // Status pill uses a small CSS dot, not a large text bullet.
     assert_contains('statuspill', $header);
     assert_false(str_contains($header, "● Kill switch"), 'statuspill must not render a text bullet glyph');

@@ -4,7 +4,7 @@
  * domain wiring (kill switch, approval requests, risk-alert transitions,
  * broker disconnects).
  */
-use Aegis\Notifications\Notifier;
+use AIWorkforce\Notifications\Notifier;
 
 test('notifications: repository save/list/unread/markRead round trip', function () {
     $repo = platform()->model->notifications;

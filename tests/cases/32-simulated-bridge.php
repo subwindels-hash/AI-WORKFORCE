@@ -5,12 +5,12 @@
  * bridge itself lives in runtime/server.mjs (dev only) and speaks the same
  * contract as python-services/mt5-bridge (tested in 09 via transport fakes).
  */
-use Aegis\Brokers\DemoBridgeConfig;
-use Aegis\Brokers\Mt5BridgeConnector;
+use AIWorkforce\Brokers\DemoBridgeConfig;
+use AIWorkforce\Brokers\Mt5BridgeConnector;
 
 function sb_marker(): string
 {
-    return sys_get_temp_dir() . '/aegis-mt5-demo-' . uniqid() . '.json';
+    return sys_get_temp_dir() . '/ai_workforce-mt5-demo-' . uniqid() . '.json';
 }
 
 test('demo marker enable/disable round trip', function () {
@@ -32,31 +32,31 @@ test('applyEnv configures loopback bridge env from an enabled marker', function 
     $path = sb_marker();
     DemoBridgeConfig::enable($path, 8791);
     // ensure no explicit real bridge is configured
-    putenv('AEGIS_MT5_BRIDGE_URL');
+    putenv('AI_WORKFORCE_MT5_BRIDGE_URL');
     $desc = DemoBridgeConfig::applyEnv($path);
     assert_not_null($desc);
-    assert_equals('http://127.0.0.1:8791', getenv('AEGIS_MT5_BRIDGE_URL'));
-    assert_equals('1', getenv('AEGIS_MT5_BRIDGE_ENABLED'));
-    assert_equals('1', getenv('AEGIS_MT5_TRADING_ENABLED'));
-    assert_equals('0', getenv('AEGIS_MT5_LIVE_ALLOWED'), 'a simulated bridge can never be live');
-    assert_true(strlen((string) getenv('AEGIS_MT5_BRIDGE_TOKEN')) >= 16);
+    assert_equals('http://127.0.0.1:8791', getenv('AI_WORKFORCE_MT5_BRIDGE_URL'));
+    assert_equals('1', getenv('AI_WORKFORCE_MT5_BRIDGE_ENABLED'));
+    assert_equals('1', getenv('AI_WORKFORCE_MT5_TRADING_ENABLED'));
+    assert_equals('0', getenv('AI_WORKFORCE_MT5_LIVE_ALLOWED'), 'a simulated bridge can never be live');
+    assert_true(strlen((string) getenv('AI_WORKFORCE_MT5_BRIDGE_TOKEN')) >= 16);
     DemoBridgeConfig::disable($path);
     @unlink($path);
-    putenv('AEGIS_MT5_BRIDGE_URL');
-    putenv('AEGIS_MT5_BRIDGE_TOKEN');
-    putenv('AEGIS_MT5_BRIDGE_ENABLED');
-    putenv('AEGIS_MT5_TRADING_ENABLED');
-    putenv('AEGIS_MT5_LIVE_ALLOWED');
+    putenv('AI_WORKFORCE_MT5_BRIDGE_URL');
+    putenv('AI_WORKFORCE_MT5_BRIDGE_TOKEN');
+    putenv('AI_WORKFORCE_MT5_BRIDGE_ENABLED');
+    putenv('AI_WORKFORCE_MT5_TRADING_ENABLED');
+    putenv('AI_WORKFORCE_MT5_LIVE_ALLOWED');
 });
 
 test('applyEnv never overrides an explicitly configured real bridge', function () {
     $path = sb_marker();
     DemoBridgeConfig::enable($path, 8791);
-    putenv('AEGIS_MT5_BRIDGE_URL=https://real-bridge.internal:8787');
+    putenv('AI_WORKFORCE_MT5_BRIDGE_URL=https://real-bridge.internal:8787');
     assert_equals(null, DemoBridgeConfig::applyEnv($path), 'explicit real bridge wins');
-    assert_equals('https://real-bridge.internal:8787', getenv('AEGIS_MT5_BRIDGE_URL'));
+    assert_equals('https://real-bridge.internal:8787', getenv('AI_WORKFORCE_MT5_BRIDGE_URL'));
     @unlink($path);
-    putenv('AEGIS_MT5_BRIDGE_URL');
+    putenv('AI_WORKFORCE_MT5_BRIDGE_URL');
 });
 
 test('applyEnv ignores missing or malformed markers', function () {

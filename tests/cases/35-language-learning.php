@@ -3,8 +3,8 @@
  * AI LANGUAGE LEARNING — Phase 1: registry, profiles, adaptive assessment,
  * level detection, learning paths and real progress storage.
  */
-use Aegis\LangLearn\LangLearnService;
-use Aegis\LangLearn\LanguageRegistry;
+use AIWorkforce\LangLearn\LangLearnService;
+use AIWorkforce\LangLearn\LanguageRegistry;
 
 function ll_user(string $tag): array
 {
@@ -98,11 +98,11 @@ test('assessment: strong answers yield a verifiable level and per-skill detail',
     // Answer correctly using the bank (simulates a capable learner — the engine
     // only sees the answer indexes, exactly like the real UI).
     $result = ll_run_assessment($svc, $u['id'], (int) $profile['id'], function ($item) {
-        $bank = \Aegis\LangLearn\ItemBanks::find('nl', $item['id']);
+        $bank = \AIWorkforce\LangLearn\ItemBanks::find('nl', $item['id']);
         return $bank['answer'];
     });
     // Core Dutch bank covers A1/A2 (+B1 probe): a perfect run must land at/above A1
-    assert_true(\Aegis\LangLearn\LanguageRegistry::levelIndex($result['overallLevel']) >= \Aegis\LangLearn\LanguageRegistry::levelIndex('A1'), 'level from real answers: ' . $result['overallLevel']);
+    assert_true(\AIWorkforce\LangLearn\LanguageRegistry::levelIndex($result['overallLevel']) >= \AIWorkforce\LangLearn\LanguageRegistry::levelIndex('A1'), 'level from real answers: ' . $result['overallLevel']);
     assert_true(isset($result['perSkill']['vocabulary']) || isset($result['perSkill']['grammar']));
     foreach ($result['perSkill'] as $s) {
         assert_true($s['total'] > 0, 'per-skill stats from answered items');
@@ -110,7 +110,7 @@ test('assessment: strong answers yield a verifiable level and per-skill detail',
     // determinism: identical answers → identical level (no randomness)
     $u2 = ll_user('asm-strong-2');
     $p2 = $svc->startLanguage($u2['id'], 'nl');
-    $result2 = ll_run_assessment($svc, $u2['id'], (int) $p2['id'], fn($item) => \Aegis\LangLearn\ItemBanks::find('nl', $item['id'])['answer']);
+    $result2 = ll_run_assessment($svc, $u2['id'], (int) $p2['id'], fn($item) => \AIWorkforce\LangLearn\ItemBanks::find('nl', $item['id'])['answer']);
     assert_equals($result['overallLevel'], $result2['overallLevel'], 'assessment is deterministic');
 });
 
@@ -118,7 +118,7 @@ test('assessment: A1-only banks can never award above A1 (honest ceiling)', func
     $svc = platform()->langlearn;
     $u = ll_user('asm-yo');
     $profile = $svc->startLanguage($u['id'], 'yo');
-    $result = ll_run_assessment($svc, $u['id'], (int) $profile['id'], fn($item) => \Aegis\LangLearn\ItemBanks::find('yo', $item['id'])['answer']);
+    $result = ll_run_assessment($svc, $u['id'], (int) $profile['id'], fn($item) => \AIWorkforce\LangLearn\ItemBanks::find('yo', $item['id'])['answer']);
     assert_equals('A1', $result['overallLevel']);
     assert_equals('A1', $result['bankCeiling']);
     assert_not_null($result['ceilingNote'], 'ceiling disclosed instead of inventing a higher level');
@@ -140,7 +140,7 @@ test('learning path: generated from the assessed level, gated checkpoints, unloc
     $svc = platform()->langlearn;
     $u = ll_user('path');
     $profile = $svc->startLanguage($u['id'], 'pt');
-    ll_run_assessment($svc, $u['id'], (int) $profile['id'], fn($item) => \Aegis\LangLearn\ItemBanks::find('pt', $item['id'])['answer']);
+    ll_run_assessment($svc, $u['id'], (int) $profile['id'], fn($item) => \AIWorkforce\LangLearn\ItemBanks::find('pt', $item['id'])['answer']);
 
     $path = $svc->generatePath($u['id'], (int) $profile['id']);
     assert_true(count($path['modules']) >= 4, 'CEFR modules generated');
@@ -162,7 +162,7 @@ test('learning path: generated from the assessed level, gated checkpoints, unloc
     // pass it with real answers → completes + unlocks the next module
     $cp2 = $svc->startCheckpoint($path['modules'][0]['id'], $u['id']);
     $good = [];
-    foreach ($cp2['quiz'] as $item) $good[$item['id']] = \Aegis\LangLearn\ItemBanks::find('pt', $item['id'])['answer'];
+    foreach ($cp2['quiz'] as $item) $good[$item['id']] = \AIWorkforce\LangLearn\ItemBanks::find('pt', $item['id'])['answer'];
     $res2 = $svc->submitCheckpoint($path['modules'][0]['id'], $u['id'], $good);
     assert_true($res2['passed'], 'correct answers pass');
     $after = $svc->pathFor($u['id'], (int) $profile['id']);
@@ -184,12 +184,12 @@ test('progress: every number traces to real activity (no fake percentages)', fun
     assert_equals(0, $before['studyStreakDays']);
     assert_equals('not_assessed_this_build', $before['skills']['listening']['source']);
 
-    ll_run_assessment($svc, $u['id'], (int) $profile['id'], fn($item) => \Aegis\LangLearn\ItemBanks::find('de', $item['id'])['answer']);
+    ll_run_assessment($svc, $u['id'], (int) $profile['id'], fn($item) => \AIWorkforce\LangLearn\ItemBanks::find('de', $item['id'])['answer']);
     $svc->generatePath($u['id'], (int) $profile['id']);
     $path = $svc->pathFor($u['id'], (int) $profile['id']);
     $cp = $svc->startCheckpoint($path['modules'][0]['id'], $u['id']);
     $good = [];
-    foreach ($cp['quiz'] as $item) $good[$item['id']] = \Aegis\LangLearn\ItemBanks::find('de', $item['id'])['answer'];
+    foreach ($cp['quiz'] as $item) $good[$item['id']] = \AIWorkforce\LangLearn\ItemBanks::find('de', $item['id'])['answer'];
     $svc->submitCheckpoint($path['modules'][0]['id'], $u['id'], $good);
 
     $after = $svc->progressFor($svc->profileOwned((int) $profile['id'], $u['id']));
@@ -200,5 +200,5 @@ test('progress: every number traces to real activity (no fake percentages)', fun
         assert_true(isset($after['skills'][$skill]['level']), "{$skill} level stored from the assessment");
     }
     // level only from assessment — never changed by checkpoints
-    assert_true(\Aegis\LangLearn\LanguageRegistry::levelIndex($after['level']) >= \Aegis\LangLearn\LanguageRegistry::levelIndex('A1'));
+    assert_true(\AIWorkforce\LangLearn\LanguageRegistry::levelIndex($after['level']) >= \AIWorkforce\LangLearn\LanguageRegistry::levelIndex('A1'));
 });

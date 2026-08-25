@@ -1,5 +1,5 @@
 <?php
-use Aegis\Agents\FundamentalsAgent;
+use AIWorkforce\Agents\FundamentalsAgent;
 
 test('fundamentals agent abstains without an attributable licensed feed', function () {
     $agent = new FundamentalsAgent();

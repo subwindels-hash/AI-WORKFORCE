@@ -29,11 +29,11 @@ class Brokers extends App_Controller
         $markerPath = APPPATH . 'data/mt5-demo.json';
         $enable = $this->input->post('enable') === '1';
         if ($enable) {
-            \Aegis\Brokers\DemoBridgeConfig::enable($markerPath, (int) (getenv('AEGIS_SIM_BRIDGE_PORT') ?: 8790));
+            \AIWorkforce\Brokers\DemoBridgeConfig::enable($markerPath, (int) (getenv('AI_WORKFORCE_SIM_BRIDGE_PORT') ?: 8790));
             $this->platform->model->audit->emit('BROKER_SIMULATION_ENABLED', 'SIMULATED MT5 bridge enabled (offline demo) — in-process mock, never a real broker', [], 'user');
             $this->flash('notice', 'SIMULATED MT5 bridge enabled — it speaks the documented bridge contract with in-memory state. Everything it fills is SIMULATION. A real deployment still requires python-services/mt5-bridge on a MetaTrader host.');
         } else {
-            \Aegis\Brokers\DemoBridgeConfig::disable($markerPath);
+            \AIWorkforce\Brokers\DemoBridgeConfig::disable($markerPath);
             $this->platform->model->audit->emit('BROKER_SIMULATION_DISABLED', 'SIMULATED MT5 bridge disabled', [], 'user');
             $this->flash('notice', 'SIMULATED MT5 bridge disabled — routing is blocked again.');
         }
@@ -46,12 +46,12 @@ class Brokers extends App_Controller
         $data['connectors'] = $this->platform->brokers->allStatus();
         $data['planned'] = self::PLANNED;
         $data['routable'] = $this->platform->brokers->tradingConnector() !== null;
-        $data['sim'] = \Aegis\Brokers\DemoBridgeConfig::describe(APPPATH . 'data/mt5-demo.json');
+        $data['sim'] = \AIWorkforce\Brokers\DemoBridgeConfig::describe(APPPATH . 'data/mt5-demo.json');
         $data['account'] = null;
         $data['quote'] = null;
         $data['quoteSymbol'] = strtoupper((string) $this->input->get('symbol'));
         $connector = $this->platform->brokers->get('mt5-bridge');
-        if ($connector instanceof \Aegis\Brokers\Mt5BridgeConnector) {
+        if ($connector instanceof \AIWorkforce\Brokers\Mt5BridgeConnector) {
             try { $data['account'] = $connector->account(); } catch (Throwable $e) { /* stays null */ }
             if ($data['quoteSymbol'] !== '') {
                 try { $data['quote'] = $connector->quote($data['quoteSymbol']); } catch (Throwable $e) { /* stays null */ }

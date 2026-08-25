@@ -7,7 +7,7 @@
  * @param PDO $pdo
  * @param string $driver 'pdo_sqlite' or mysqli-style
  */
-function aegis_ensure_sports_indexes(PDO $pdo, string $driver): void
+function ai_workforce_ensure_sports_indexes(PDO $pdo, string $driver): void
 {
     $sqlite = $driver === 'pdo_sqlite';
     $indexes = [

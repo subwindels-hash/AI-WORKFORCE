@@ -37,13 +37,13 @@ $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
 <title><?= e($pageTitle . ' · Admin · ' . $product) ?></title>
 <meta name="robots" content="noindex,nofollow">
 <link rel="icon" type="image/png" href="/assets/images/windels-mark.png">
-<link rel="stylesheet" href="/assets/css/aegis.css">
+<link rel="stylesheet" href="/assets/css/ai_workforce.css">
 </head>
 <body class="app-shell admin-shell">
 <?php $this->load->view('partials/announcement_bar'); ?>
 <aside class="sidebar" id="app-sidebar" aria-label="Administrator navigation">
   <a class="sidebar-brand" href="/admin">
-    <img src="/assets/images/windels-mark.png" alt="<?= e($product) ?>" onerror="this.onerror=null;this.src='/assets/images/aegis-mark.png'">
+    <img src="/assets/images/windels-mark.png" alt="<?= e($product) ?>" onerror="this.onerror=null;this.src='/assets/images/ai_workforce-mark.png'">
     <span><?= e($product) ?><small>Admin portal</small></span>
   </a>
 
@@ -96,7 +96,7 @@ $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
     </button>
     <div class="brand">
-      <span class="mark"><img src="/assets/images/windels-mark.png" alt="" onerror="this.onerror=null;this.src='/assets/images/aegis-mark.png'"></span>
+      <span class="mark"><img src="/assets/images/windels-mark.png" alt="" onerror="this.onerror=null;this.src='/assets/images/ai_workforce-mark.png'"></span>
       <h1 id="page-title"><?= e($pageTitle) ?></h1>
     </div>
   </div>

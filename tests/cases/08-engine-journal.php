@@ -1,6 +1,6 @@
 <?php
 /** Intelligence engine end-to-end (DB-backed) + journal analytics. */
-use Aegis\Journal\Analytics;
+use AIWorkforce\Journal\Analytics;
 
 test('engine: full analysis run persists + audits + risk vetoes synthetic', function () {
     $p = platform();

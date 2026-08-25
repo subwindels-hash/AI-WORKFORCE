@@ -42,7 +42,7 @@ $nav = [
 <?php $this->load->view('partials/announcement_bar'); ?>
 <header class="pub-nav">
   <a class="pub-brand" href="/">
-    <img src="/assets/images/windels-mark.png" alt="WINDELS AI WORKFORCE logo" onerror="this.onerror=null;this.src='/assets/images/aegis-mark.png'">
+    <img src="/assets/images/windels-mark.png" alt="WINDELS AI WORKFORCE logo" onerror="this.onerror=null;this.src='/assets/images/ai_workforce-mark.png'">
     <span>WINDELS AI WORKFORCE</span>
   </a>
   <button class="pub-toggle" type="button" aria-expanded="false" aria-controls="pub-menu">Menu</button>

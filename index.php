@@ -63,13 +63,13 @@
 	define('ENVIRONMENT', $ciEnvironment);
 
 /*
- * AEGIS dev-runtime adapter: the offline WASM bridge routes every request
+ * AI Workforce dev-runtime adapter: the offline WASM bridge routes every request
  * through this front controller and passes the original request target in
- * X-Aegis-Orig-Uri (mirroring what nginx/Apache give PHP via fastcgi params
+ * X-AIWorkforce-Orig-Uri (mirroring what nginx/Apache give PHP via fastcgi params
  * in production). Restore it so CI3 routes the true URI.
  */
-if (!empty($_SERVER['HTTP_X_AEGIS_ORIG_URI'])) {
-    $_SERVER['REQUEST_URI'] = $_SERVER['HTTP_X_AEGIS_ORIG_URI'];
+if (!empty($_SERVER['HTTP_X_AI_WORKFORCE_ORIG_URI'])) {
+    $_SERVER['REQUEST_URI'] = $_SERVER['HTTP_X_AI_WORKFORCE_ORIG_URI'];
     unset($_SERVER['PATH_INFO'], $_SERVER['PATH_TRANSLATED']);
     // The WASM runtime does not populate REMOTE_ADDR, but the CI3 database
     // session driver writes it into a NOT NULL column — without this every
@@ -79,34 +79,34 @@ if (!empty($_SERVER['HTTP_X_AEGIS_ORIG_URI'])) {
         $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
     }
     // The WASM bridge cannot seed process env per request — select the
-    // pdo_sqlite dev driver here (production hosts set AEGIS_DB_* env vars).
+    // pdo_sqlite dev driver here (production hosts set AI_WORKFORCE_DB_* env vars).
     // The offline WASM bridge has no MySQL. Force sqlite even if a production
     // .env sets VP_DB_DRIVER=mysqli (that file is for cPanel, not this preview).
-    putenv('AEGIS_DB_DRIVER=pdo_sqlite');
+    putenv('AI_WORKFORCE_DB_DRIVER=pdo_sqlite');
     putenv('VP_DB_DRIVER=pdo_sqlite');
     putenv('VP_BASE_URL=');
-    putenv('AEGIS_BASE_URL=');
+    putenv('AI_WORKFORCE_BASE_URL=');
     putenv('VP_COOKIE_SECURE=0');
-    if (getenv('AEGIS_SQLITE_PATH') === false) {
-        putenv('AEGIS_SQLITE_PATH=' . __DIR__ . '/application/data/aegis.sqlite');
+    if (getenv('AI_WORKFORCE_SQLITE_PATH') === false) {
+        putenv('AI_WORKFORCE_SQLITE_PATH=' . __DIR__ . '/application/data/ai_workforce.sqlite');
     }
     // Each request runs in a fresh PHP instance, so CI3 *file* sessions do
     // not reliably carry across requests — route them through the shared
     // database instead (the ci_sessions table ships in both schemas).
-    if (getenv('AEGIS_SESSION_DRIVER') === false) {
-        putenv('AEGIS_SESSION_DRIVER=database');
+    if (getenv('AI_WORKFORCE_SESSION_DRIVER') === false) {
+        putenv('AI_WORKFORCE_SESSION_DRIVER=database');
     }
     // SIMULATED MT5 bridge (offline demo only): translate the demo marker
-    // file into AEGIS_MT5_* env for this request. Never active in production
+    // file into AI_WORKFORCE_MT5_* env for this request. Never active in production
     // (this whole block only runs behind the dev bridge header), never
     // overrides an explicitly configured real bridge, and is locked to
     // loopback with live trading impossible.
-    require_once __DIR__ . '/application/libraries/Aegis/Brokers/DemoBridgeConfig.php';
-    \Aegis\Brokers\DemoBridgeConfig::applyEnv(__DIR__ . '/application/data/mt5-demo.json');
+    require_once __DIR__ . '/application/libraries/AIWorkforce/Brokers/DemoBridgeConfig.php';
+    \AIWorkforce\Brokers\DemoBridgeConfig::applyEnv(__DIR__ . '/application/data/mt5-demo.json');
 
     // php-wasm's handler blanks CGI HTTP_COOKIE — restore the raw Cookie
     // header the bridge forwards and rebuild $_COOKIE before CI3 boots.
-    $bridgeCookie = $_SERVER['HTTP_X_AEGIS_COOKIE'] ?? '';
+    $bridgeCookie = $_SERVER['HTTP_X_AI_WORKFORCE_COOKIE'] ?? '';
     if ($bridgeCookie !== '' && (string) ($_SERVER['HTTP_COOKIE'] ?? '') === '') {
         $_SERVER['HTTP_COOKIE'] = $bridgeCookie;
         foreach (explode(';', $bridgeCookie) as $pair) {

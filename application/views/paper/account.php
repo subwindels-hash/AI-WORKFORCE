@@ -5,7 +5,7 @@ $acc = $summary['account'];
 <div class="page-head">
   <div>
     <h2><?= e($acc['name']) ?></h2>
-    <p>Paper account #<?= e($acc['id']) ?>. Simulated fills with full governance: <?= e(\Aegis\Paper\PaperTradingEngine::DEFAULT_SPREAD_BPS) ?>bps spread + <?= e(\Aegis\Paper\PaperTradingEngine::DEFAULT_SLIPPAGE_BPS) ?>bps slippage + <?= e(\Aegis\Paper\PaperTradingEngine::DEFAULT_FEE_BPS) ?>bps commission per side.</p>
+    <p>Paper account #<?= e($acc['id']) ?>. Simulated fills with full governance: <?= e(\AIWorkforce\Paper\PaperTradingEngine::DEFAULT_SPREAD_BPS) ?>bps spread + <?= e(\AIWorkforce\Paper\PaperTradingEngine::DEFAULT_SLIPPAGE_BPS) ?>bps slippage + <?= e(\AIWorkforce\Paper\PaperTradingEngine::DEFAULT_FEE_BPS) ?>bps commission per side.</p>
   </div>
   <div>
     <a class="btn" href="/paper">← accounts</a>

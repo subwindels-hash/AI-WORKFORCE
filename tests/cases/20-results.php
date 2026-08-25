@@ -1,5 +1,5 @@
 <?php
-use Aegis\Sports\ResultVerificationEngine;
+use AIWorkforce\Sports\ResultVerificationEngine;
 test('sports results do not settle until verified finished score exists', function () {
  $e=new ResultVerificationEngine(); $v=$e->verify(['verified'=>false,'status'=>'FINISHED','homeScore'=>2,'awayScore'=>0]); assert_false($v['verified']); assert_equals('PENDING',$e->settleSelection(['market'=>'TOTAL_GOALS','selection'=>'OVER_1_5'],$v)['status']);
 });

@@ -33,7 +33,7 @@ class Site extends MY_Controller
 
     private function tryMail(string $name, string $email, string $message): void
     {
-        if (!\Aegis\Mailer::enabled()) return;
+        if (!\AIWorkforce\Mailer::enabled()) return;
         $to = (string) (getenv('VP_MAIL_FROM') ?: getenv('MAIL_FROM_ADDRESS') ?: '');
         if ($to === '') return;
         $html = '<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:auto;color:#0f172a">'
@@ -43,7 +43,7 @@ class Site extends MY_Controller
             . '<p style="white-space:pre-wrap">' . htmlspecialchars($message) . '</p>'
             . '</div>';
         $text = "New contact message — WINDELS AI WORKFORCE\n\nFrom: {$name} <{$email}>\n\n{$message}";
-        \Aegis\Mailer::send($this, $to, 'WINDELS AI WORKFORCE contact form', $html, $text, $email, $name);
+        \AIWorkforce\Mailer::send($this, $to, 'WINDELS AI WORKFORCE contact form', $html, $text, $email, $name);
     }
 
     private function page(string $active, string $title, string $view): void

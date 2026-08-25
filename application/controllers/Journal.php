@@ -2,7 +2,7 @@
 defined('BASEPATH') or exit('No direct script access allowed');
 require_once APPPATH . 'core/App_Controller.php';
 
-use Aegis\Journal\Analytics;
+use AIWorkforce\Journal\Analytics;
 
 class Journal extends App_Controller
 {

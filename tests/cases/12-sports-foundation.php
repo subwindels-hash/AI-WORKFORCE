@@ -1,6 +1,6 @@
 <?php
-use Aegis\Sports\DataQualityEngine;
-use Aegis\Sports\SportsDataNormalizer;
+use AIWorkforce\Sports\DataQualityEngine;
+use AIWorkforce\Sports\SportsDataNormalizer;
 
 test('sports fixture normalizer rejects incomplete provider payloads', function () {
     assert_throws(InvalidArgumentException::class, fn() => SportsDataNormalizer::fixture(['externalId' => 'x'], 'provider-a'));

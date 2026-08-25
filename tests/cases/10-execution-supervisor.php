@@ -4,10 +4,10 @@
  * proposals, human approval, automated execution inside limits, and the
  * routing gates. A simulated MT5 connector stands in for a real bridge.
  */
-use Aegis\Brokers\BrokerConnector;
-use Aegis\Brokers\BrokerManager;
-use Aegis\Brokers\TradingConnector;
-use Aegis\ExecutionSupervisor;
+use AIWorkforce\Brokers\BrokerConnector;
+use AIWorkforce\Brokers\BrokerManager;
+use AIWorkforce\Brokers\TradingConnector;
+use AIWorkforce\ExecutionSupervisor;
 
 /** Deterministic Monday 12:00 UTC so session/freshness checks are stable on any host. */
 function es_now(): int
@@ -80,7 +80,7 @@ function es_state(array $patch = []): array
     $state['tradingMode'] = 'HUMAN_APPROVAL';
     $state['killSwitch'] = ['active' => false, 'activatedAt' => null, 'reason' => 'test'];
     $state['automationLimits'] = array_merge(
-        \Aegis\ExecutionSupervisor::automationLimits($state),
+        \AIWorkforce\ExecutionSupervisor::automationLimits($state),
         ['maxTradeNotionalUsd' => 5000.0, 'maxDailyTrades' => 2, 'maxRiskPerTradePct' => 0.01,
          'approvedSymbols' => ['EURUSD', 'BTCUSDT'], 'updatedAt' => gmdate('c')]
     );

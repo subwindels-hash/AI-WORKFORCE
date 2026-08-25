@@ -1,6 +1,6 @@
 <?php
 /** Indicator math — ported fixtures (hand-computed values). */
-use Aegis\Indicators;
+use AIWorkforce\Indicators;
 
 test('sma computes windowed means with leading nulls', function () {
     assert_equals([null, null, 2.0, 3.0, 4.0], Indicators::sma([1, 2, 3, 4, 5], 3));

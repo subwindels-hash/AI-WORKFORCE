@@ -1,6 +1,6 @@
 <?php
 /**
- * AEGIS micro test framework — zero dependencies, runs through CodeIgniter's
+ * AI Workforce micro test framework — zero dependencies, runs through CodeIgniter's
  * CLI so every test exercises the real stack (CI3 + database + domain).
  */
 if (!defined('TESTSPATH')) {
@@ -8,11 +8,11 @@ if (!defined('TESTSPATH')) {
     return;
 }
 
-$GLOBALS['__aegis_tests'] = [];
+$GLOBALS['__ai_workforce_tests'] = [];
 
 function test(string $name, callable $fn): void
 {
-    $GLOBALS['__aegis_tests'][] = ['name' => $name, 'fn' => $fn];
+    $GLOBALS['__ai_workforce_tests'][] = ['name' => $name, 'fn' => $fn];
 }
 
 /** @var CI_Controller $CI — set by the caller (Tools::tests) */
@@ -21,7 +21,7 @@ function ci(): CI_Controller
     return get_instance();
 }
 
-function platform(): \Aegis\Platform
+function platform(): \AIWorkforce\Platform
 {
     return ci()->platform;
 }
@@ -87,9 +87,9 @@ function assert_null($value, string $msg = 'expected null'): void
 
 function run_all_tests(): int
 {
-    $tests = $GLOBALS['__aegis_tests'];
+    $tests = $GLOBALS['__ai_workforce_tests'];
     $pass = 0; $fail = 0;
-    echo "\nAEGIS test suite — " . count($tests) . " tests\n" . str_repeat('=', 60) . "\n";
+    echo "\nAI Workforce test suite — " . count($tests) . " tests\n" . str_repeat('=', 60) . "\n";
     $start = microtime(true);
     foreach ($tests as $t) {
         $t0 = microtime(true);
@@ -110,7 +110,7 @@ function run_all_tests(): int
 
 function fx_candles(int $n, float $drift = 0.0, int $seed = 42, float $noise = 0.4): array
 {
-    $rand = \Aegis\MathUtils::seededRandom($seed);
+    $rand = \AIWorkforce\MathUtils::seededRandom($seed);
     $out = [];
     $price = 100.0;
     $now = 1755000000000;
@@ -133,7 +133,7 @@ function fx_candles(int $n, float $drift = 0.0, int $seed = 42, float $noise = 0
 
 function fx_noise_range(int $n, int $seed = 7, float $amp = 0.8): array
 {
-    $rand = \Aegis\MathUtils::seededRandom($seed);
+    $rand = \AIWorkforce\MathUtils::seededRandom($seed);
     $out = [];
     $price = 100.0;
     $now = 1755000000000;
@@ -179,7 +179,7 @@ function fx_ctx(array $series, int $now = 1755000000000): array
  * In-memory SportsRepository stub for tests (implements the full interface
  * without CI3). Used by sports engine tests that don't need SQL.
  */
-class SportsRepositoryStub implements \Aegis\Persistence\SportsRepository
+class SportsRepositoryStub implements \AIWorkforce\Persistence\SportsRepository
 {
     public array $providers = [];
     public array $health = [];
@@ -410,7 +410,7 @@ function fx_setup(array $over = []): array
 }
 
 /** In-memory LotteryRepository for unit tests (mirrors the CI3 model layer). */
-class LotteryRepositoryStub implements \Aegis\Persistence\LotteryRepository
+class LotteryRepositoryStub implements \AIWorkforce\Persistence\LotteryRepository
 {
     public array $lotteries = [];
     public array $rules = [];

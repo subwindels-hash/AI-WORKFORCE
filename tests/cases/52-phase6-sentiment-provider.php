@@ -7,10 +7,10 @@
  * licensed, attributable, fresh data and abstains with an explained reason
  * otherwise — price action is never relabelled as sentiment.
  */
-use Aegis\Agents\SentimentAgent;
-use Aegis\Providers\SentimentFeed;
-use Aegis\Providers\SentimentSnapshotValidator;
-use Aegis\Providers\UnavailableSentimentFeed;
+use AIWorkforce\Agents\SentimentAgent;
+use AIWorkforce\Providers\SentimentFeed;
+use AIWorkforce\Providers\SentimentSnapshotValidator;
+use AIWorkforce\Providers\UnavailableSentimentFeed;
 
 function fx_sentiment_ctx(): array
 {
@@ -127,11 +127,11 @@ test('phase6 sentiment: unlicensed or unattributable data never votes', function
 });
 
 test('phase6 sentiment: engine accepts a sentiment feed and defaults to honest abstention', function () {
-    $c = file_get_contents(FCPATH . 'application/libraries/Aegis/TradingIntelligenceEngine.php');
+    $c = file_get_contents(FCPATH . 'application/libraries/AIWorkforce/TradingIntelligenceEngine.php');
     assert_contains('?SentimentFeed $sentimentFeed = null', $c);
     assert_contains('new SentimentAgent($sentimentFeed ?? new UnavailableSentimentFeed())', $c);
 
-    $f = file_get_contents(FCPATH . 'application/libraries/Aegis/Providers/SentimentFeed.php');
+    $f = file_get_contents(FCPATH . 'application/libraries/AIWorkforce/Providers/SentimentFeed.php');
     assert_contains('interface SentimentFeed', $f);
     assert_contains('class UnavailableSentimentFeed', $f);
     assert_contains('class SentimentSnapshotValidator', $f);

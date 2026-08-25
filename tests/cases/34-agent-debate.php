@@ -3,7 +3,7 @@
  * PHASE 6 — Multi-agent debate: adversarial review in front of the consensus.
  * The verdict can only reduce a bias, never inflate it.
  */
-use Aegis\Agents\AgentDebate;
+use AIWorkforce\Agents\AgentDebate;
 
 function debate_reports(array $patch = []): array
 {
@@ -35,7 +35,7 @@ test('clean strong case: bias sustained with an auditable transcript', function 
         ['regime' => 'TRENDING_UP', 'confidence' => 0.8],
         null,
         ['synthetic' => false, 'stale' => false],
-        \Aegis\RiskEngine::DEFAULT_LIMITS
+        \AIWorkforce\RiskEngine::DEFAULT_LIMITS
     );
     assert_equals('BULLISH', $debate['verdict']['bias']);
     assert_true($debate['verdict']['confidence'] <= 0.72);
@@ -55,7 +55,7 @@ test('stale data is a sustained CRITICAL objection → NO_TRADE', function () {
         ['regime' => 'TRENDING_UP', 'confidence' => 0.8],
         null,
         ['synthetic' => false, 'stale' => true],
-        \Aegis\RiskEngine::DEFAULT_LIMITS
+        \AIWorkforce\RiskEngine::DEFAULT_LIMITS
     );
     assert_equals('NO_TRADE', $debate['verdict']['bias']);
     assert_true($debate['verdict']['confidence'] < 0.72);
@@ -68,7 +68,7 @@ test('two sustained major objections downgrade the bias to NEUTRAL', function ()
         ['regime' => 'RANGING', 'confidence' => 0.75], // contradicts BULLISH + confident regime
         null,
         ['synthetic' => false, 'stale' => false],
-        \Aegis\RiskEngine::DEFAULT_LIMITS
+        \AIWorkforce\RiskEngine::DEFAULT_LIMITS
     );
     assert_equals('NEUTRAL', $debate['verdict']['bias']);
     assert_contains('downgraded to NEUTRAL', implode(';', $debate['verdict']['reasoning']));
@@ -80,7 +80,7 @@ test('one sustained major objection keeps the bias but cuts confidence by 0.10',
         ['regime' => 'RANGING', 'confidence' => 0.75],
         null,
         ['synthetic' => false, 'stale' => false],
-        \Aegis\RiskEngine::DEFAULT_LIMITS
+        \AIWorkforce\RiskEngine::DEFAULT_LIMITS
     );
     assert_equals('BULLISH', $debate['verdict']['bias']);
     assert_close(0.62, $debate['verdict']['confidence'], 1e-9);
@@ -92,7 +92,7 @@ test('weak conviction is challenged; NO_TRADE-safe thresholds respected', functi
         ['regime' => 'TRENDING_UP', 'confidence' => 0.8],
         null,
         ['synthetic' => false, 'stale' => false],
-        \Aegis\RiskEngine::DEFAULT_LIMITS
+        \AIWorkforce\RiskEngine::DEFAULT_LIMITS
     );
     $skeptical = array_filter($debate['rounds'][2]['objections'], fn($o) => $o['id'] === 'S5');
     assert_equals('major', reset($skeptical)['severity']);
@@ -107,7 +107,7 @@ test('risk critic challenges a poor setup; already-discounted factors do not bit
         ['regime' => 'TRENDING_UP', 'confidence' => 0.8],
         $setup,
         ['synthetic' => true, 'stale' => false], // synthetic: informational only
-        \Aegis\RiskEngine::DEFAULT_LIMITS
+        \AIWorkforce\RiskEngine::DEFAULT_LIMITS
     );
     $critic = $debate['rounds'][3]['objections'];
     $ids = array_map(fn($o) => $o['id'], $critic);

@@ -1,5 +1,5 @@
 """
-Contract tests for the AEGIS MT5 bridge against a FAKE terminal.
+Contract tests for the AI_WORKFORCE MT5 bridge against a FAKE terminal.
 
 These verify the bridge's HTTP contract and its safety gates — they do NOT
 verify MetaTrader integration itself (that requires a Windows host with a

@@ -37,7 +37,7 @@ test('weaknesses: repeated low listening scores are detected with evidence', fun
     $ctx = teacher_profile('adapt-listen', 'fr');
     $res = $t->audiopractice->listeningExercises($ctx['userId'], (int) $ctx['profile']['id']);
     $ex = $res['exercises'][0];
-    $bank = \Aegis\LangLearn\ItemBanks::find('fr', $ex['itemId']);
+    $bank = \AIWorkforce\LangLearn\ItemBanks::find('fr', $ex['itemId']);
     for ($i = 0; $i < 3; $i++) {
         $t->audiopractice->submitListening($ctx['userId'], (int) $ctx['profile']['id'], $ex['itemId'], 'comprehension', ($bank['answer'] + 1) % 4);
     }
@@ -89,7 +89,7 @@ test('strengths: sustained high scores are recognized', function () {
     $ctx = teacher_profile('adapt-strong', 'de');
     $res = $t->audiopractice->listeningExercises($ctx['userId'], (int) $ctx['profile']['id']);
     $ex = $res['exercises'][0];
-    $bank = \Aegis\LangLearn\ItemBanks::find('de', $ex['itemId']);
+    $bank = \AIWorkforce\LangLearn\ItemBanks::find('de', $ex['itemId']);
     for ($i = 0; $i < 3; $i++) {
         $t->audiopractice->submitListening($ctx['userId'], (int) $ctx['profile']['id'], $ex['itemId'], 'comprehension', $bank['answer']);
     }
@@ -139,7 +139,7 @@ test('recommendations cite evidence; engagement nudge from real session days', f
     $ctx = teacher_profile('adapt-reco', 'sw');
     $res = $t->audiopractice->listeningExercises($ctx['userId'], (int) $ctx['profile']['id']);
     $ex = $res['exercises'][0];
-    $bank = \Aegis\LangLearn\ItemBanks::find('sw', $ex['itemId']);
+    $bank = \AIWorkforce\LangLearn\ItemBanks::find('sw', $ex['itemId']);
     for ($i = 0; $i < 3; $i++) {
         $t->audiopractice->submitListening($ctx['userId'], (int) $ctx['profile']['id'], $ex['itemId'], 'comprehension', ($bank['answer'] + 1) % 4);
     }
@@ -166,9 +166,9 @@ test('mastery tracking grades every bank item from real outcomes only', function
 
     // assessment answers create outcomes; mastering: same item correct twice
     ll_run_assessment($t->langlearn, $ctx['userId'], (int) $ctx['profile']['id'],
-        fn($item) => \Aegis\LangLearn\ItemBanks::find('es', $item['id'])['answer']);
+        fn($item) => \AIWorkforce\LangLearn\ItemBanks::find('es', $item['id'])['answer']);
     ll_run_assessment($t->langlearn, $ctx['userId'], (int) $ctx['profile']['id'],
-        fn($item) => \Aegis\LangLearn\ItemBanks::find('es', $item['id'])['answer']);
+        fn($item) => \AIWorkforce\LangLearn\ItemBanks::find('es', $item['id'])['answer']);
     $after = $t->adaptive->mastery($ctx['userId'], (int) $ctx['profile']['id']);
     assert_true($after['counts']['mastered'] >= 2, 'items answered correctly twice are mastered');
     foreach ($after['grammarAndItems'] as $item) {

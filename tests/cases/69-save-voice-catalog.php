@@ -48,9 +48,9 @@ test('account save actions persist username email password and avatar path', fun
 });
 
 test('ISO language catalog searches English, native name and ISO code', function () {
-    $all = \Aegis\LangLearn\LanguageCatalog::all();
+    $all = \AIWorkforce\LangLearn\LanguageCatalog::all();
     assert_true(count($all) >= 180, 'catalog includes the ISO 639-1 set, got ' . count($all));
-    $nl = \Aegis\LangLearn\LanguageCatalog::get('nl');
+    $nl = \AIWorkforce\LangLearn\LanguageCatalog::get('nl');
     assert_not_null($nl);
     assert_equals('Dutch', $nl['name']);
     assert_equals('Nederlands', $nl['native_name']);
@@ -59,32 +59,32 @@ test('ISO language catalog searches English, native name and ISO code', function
     assert_true($nl['tts'], 'Dutch has a known browser TTS locale');
     assert_true($nl['full_ai'], 'Dutch has an authored AI bank');
 
-    $byNative = \Aegis\LangLearn\LanguageCatalog::search('Nederlands', 8);
+    $byNative = \AIWorkforce\LangLearn\LanguageCatalog::search('Nederlands', 8);
     assert_true(count($byNative) > 0);
     assert_equals('nl', $byNative[0]['code']);
-    $byIso = \Aegis\LangLearn\LanguageCatalog::search('nl', 8);
+    $byIso = \AIWorkforce\LangLearn\LanguageCatalog::search('nl', 8);
     assert_equals('nl', $byIso[0]['code']);
-    $byEn = \Aegis\LangLearn\LanguageCatalog::search('Dutch', 8);
+    $byEn = \AIWorkforce\LangLearn\LanguageCatalog::search('Dutch', 8);
     assert_equals('nl', $byEn[0]['code']);
 });
 
 test('catalog capabilities are honest: AI vs translation vs text-only', function () {
-    $nl = \Aegis\LangLearn\LanguageCatalog::capabilities('nl');
+    $nl = \AIWorkforce\LangLearn\LanguageCatalog::capabilities('nl');
     assert_true($nl['full_ai']);
     assert_true($nl['translation']);
     assert_true($nl['tts']);
     assert_equals('Supported for full AI learning', $nl['label']);
 
-    $nv = \Aegis\LangLearn\LanguageCatalog::get('nv');
+    $nv = \AIWorkforce\LangLearn\LanguageCatalog::get('nv');
     assert_not_null($nv, 'Navajo is in the ISO 639-1 seed');
-    $caps = \Aegis\LangLearn\LanguageCatalog::capabilities('nv');
+    $caps = \AIWorkforce\LangLearn\LanguageCatalog::capabilities('nv');
     assert_false($caps['full_ai'], 'Navajo has no authored AI bank');
     assert_false($caps['translation'], 'Navajo is not in the phrasebook');
     assert_true($caps['text_only'] || $caps['label'] === 'Text only' || $caps['label'] === 'Voice available' || $caps['label'] === 'Speech recognition available');
 
-    $unknown = \Aegis\LangLearn\LanguageCatalog::capabilities('qq');
+    $unknown = \AIWorkforce\LangLearn\LanguageCatalog::capabilities('qq');
     assert_true($unknown['text_only']);
-    assert_false(\Aegis\LangLearn\LanguageCatalog::has('qq'));
+    assert_false(\AIWorkforce\LangLearn\LanguageCatalog::has('qq'));
 });
 
 test('official SIL ISO 639-3 table parser reads real rows', function () {
@@ -96,7 +96,7 @@ test('official SIL ISO 639-3 table parser reads real rows', function () {
         "nav\tnav\tnav\tnv\tI\tL\tNavajo\t\n" .
         "aaa\t\t\t\tI\tL\tGhotuo\t\n" .
         "und\tund\tund\t\tS\tS\tUndetermined\t\n");
-    $rows = \Aegis\LangLearn\LanguageCatalog::parseOfficialTable($tab);
+    $rows = \AIWorkforce\LangLearn\LanguageCatalog::parseOfficialTable($tab);
     @unlink($tab);
     $byId = [];
     foreach ($rows as $r) $byId[$r['iso6393']] = $r;
@@ -153,9 +153,9 @@ test('teacher and chat expose Speak and Listen controls wired to SpeechProvider'
     assert_contains('My Language', $teacher);
 
     $chat = file_get_contents(FCPATH . 'application/views/partials/chat_widget.php');
-    assert_contains('aegis-chat-mic', $chat);
+    assert_contains('ai_workforce-chat-mic', $chat);
     assert_contains('🔊 Listen', $chat);
-    $js = file_get_contents(FCPATH . 'assets/js/aegis-chat.js');
+    $js = file_get_contents(FCPATH . 'assets/js/ai_workforce-chat.js');
     assert_contains('bindMic', $js);
     assert_contains('data-listen', $js);
 
@@ -173,7 +173,7 @@ test('save feedback toast script is loaded on the dashboard and admin shells', f
     assert_contains('speech-provider.js', $footer);
     $admin = file_get_contents(FCPATH . 'application/views/admin/layout/footer.php');
     assert_contains('save-feedback.js', $admin);
-    $css = file_get_contents(FCPATH . 'assets/css/aegis.css');
+    $css = file_get_contents(FCPATH . 'assets/css/ai_workforce.css');
     assert_contains('.save-toast--ok', $css);
     assert_contains('.lang-picker-search', $css);
 });

@@ -3,11 +3,11 @@ defined('BASEPATH') or exit('No direct script access allowed');
 
 /*
 |--------------------------------------------------------------------------
-| AEGIS database configuration
+| AI_WORKFORCE database configuration
 |--------------------------------------------------------------------------
 | Production target: MySQL / MariaDB via the mysqli driver (default).
 | Offline dev runtime: the same CodeIgniter application can run on
-| pdo_sqlite by setting AEGIS_DB_DRIVER=pdo_sqlite (used by the sandbox
+| pdo_sqlite by setting AI_WORKFORCE_DB_DRIVER=pdo_sqlite (used by the sandbox
 | demo + tests, where no MySQL server is reachable). The schema is
 | installed by tools/install.php for either driver.
 |
@@ -16,11 +16,11 @@ defined('BASEPATH') or exit('No direct script access allowed');
 $active_group = 'default';
 $query_builder = true;
 
-$driver = getenv('VP_DB_DRIVER') ?: (getenv('AEGIS_DB_DRIVER') ?: 'mysqli');
+$driver = getenv('VP_DB_DRIVER') ?: (getenv('AI_WORKFORCE_DB_DRIVER') ?: 'mysqli');
 
 if ($driver === 'pdo_sqlite') {
     $db['default'] = [
-        'dsn' => 'sqlite:' . (getenv('AEGIS_SQLITE_PATH') ?: dirname(__DIR__) . '/data/aegis.sqlite'),
+        'dsn' => 'sqlite:' . (getenv('AI_WORKFORCE_SQLITE_PATH') ?: dirname(__DIR__) . '/data/ai_workforce.sqlite'),
         'hostname' => '',
         'username' => '',
         'password' => '',
@@ -29,7 +29,7 @@ if ($driver === 'pdo_sqlite') {
         'subdriver' => 'sqlite',
         'dbprefix' => '',
         'pconnect' => false,
-        'db_debug' => (getenv('AEGIS_DB_DEBUG') === '1'),
+        'db_debug' => (getenv('AI_WORKFORCE_DB_DEBUG') === '1'),
         'cache_on' => false,
         'cachedir' => '',
         'char_set' => 'utf8mb4',
@@ -44,11 +44,11 @@ if ($driver === 'pdo_sqlite') {
 } else {
     $db['default'] = [
         'dsn' => '',
-        'hostname' => getenv('VP_DB_HOST') ?: (getenv('AEGIS_DB_HOST') ?: 'localhost'),
-        'port' => (int)(getenv('VP_DB_PORT') ?: (getenv('AEGIS_DB_PORT') ?: 3306)),
-        'username' => getenv('VP_DB_USER') ?: (getenv('AEGIS_DB_USER') ?: ''),
-        'password' => getenv('VP_DB_PASS') ?: (getenv('AEGIS_DB_PASS') ?: ''),
-        'database' => getenv('VP_DB_NAME') ?: (getenv('AEGIS_DB_NAME') ?: ''),
+        'hostname' => getenv('VP_DB_HOST') ?: (getenv('AI_WORKFORCE_DB_HOST') ?: 'localhost'),
+        'port' => (int)(getenv('VP_DB_PORT') ?: (getenv('AI_WORKFORCE_DB_PORT') ?: 3306)),
+        'username' => getenv('VP_DB_USER') ?: (getenv('AI_WORKFORCE_DB_USER') ?: ''),
+        'password' => getenv('VP_DB_PASS') ?: (getenv('AI_WORKFORCE_DB_PASS') ?: ''),
+        'database' => getenv('VP_DB_NAME') ?: (getenv('AI_WORKFORCE_DB_NAME') ?: ''),
         'dbdriver' => 'mysqli',
         'dbprefix' => '',
         'pconnect' => false,

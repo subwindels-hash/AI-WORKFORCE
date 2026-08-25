@@ -1,5 +1,5 @@
 <?php
-use Aegis\Sports\ProviderHealthMonitor;
+use AIWorkforce\Sports\ProviderHealthMonitor;
 
 function fx_provider(): array
 {

@@ -58,8 +58,8 @@
       <?php if (empty($account)): ?>
         <p class="dim">No MT5 account available — deploy the authenticated bridge
           (<span class="mono">python-services/mt5-bridge</span>) and set
-          <span class="mono">AEGIS_MT5_BRIDGE_ENABLED=1</span>, <span class="mono">AEGIS_MT5_BRIDGE_URL</span> and
-          <span class="mono">AEGIS_MT5_BRIDGE_TOKEN</span>. This page can never place an order.</p>
+          <span class="mono">AI_WORKFORCE_MT5_BRIDGE_ENABLED=1</span>, <span class="mono">AI_WORKFORCE_MT5_BRIDGE_URL</span> and
+          <span class="mono">AI_WORKFORCE_MT5_BRIDGE_TOKEN</span>. This page can never place an order.</p>
       <?php else: ?>
         <table class="tbl mono">
           <tr><td class="dim">account</td><td><?= e($account['accountId']) ?></td></tr>

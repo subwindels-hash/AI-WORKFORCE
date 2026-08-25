@@ -8,10 +8,10 @@
  * official prize tier structure (no amounts), idempotent post-draw cron,
  * actual outcomes kept separate from backtests/demo (spec §30).
  */
-use Aegis\Lottery\EuroMillionsRules;
-use Aegis\Lottery\LotteryCronService;
-use Aegis\Lottery\LotteryIntelligence;
-use Aegis\Lottery\SandboxLotteryProvider;
+use AIWorkforce\Lottery\EuroMillionsRules;
+use AIWorkforce\Lottery\LotteryCronService;
+use AIWorkforce\Lottery\LotteryIntelligence;
+use AIWorkforce\Lottery\SandboxLotteryProvider;
 
 /** n numbers (ascending) that are NOT in $drawMains. */
 function fx_lotto_fillers(array $drawMains, int $need): array

@@ -17,7 +17,7 @@ if (!in_array($smtpCrypto, ['tls', 'ssl', ''], true)) {
     $smtpCrypto = 'tls';
 }
 
-$config['useragent'] = 'AEGIS';
+$config['useragent'] = 'AI_WORKFORCE';
 $config['protocol'] = $smtpEnabled && $smtpHost !== '' ? 'smtp' : 'mail';
 $config['mailpath'] = '/usr/sbin/sendmail';
 $config['smtp_host'] = $smtpHost;

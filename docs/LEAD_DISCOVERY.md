@@ -1,9 +1,9 @@
 # WINDELS AI WORKFORCE — Lead Discovery & Sales Intelligence (formerly Scout)
 
-> **User-facing brand:** WINDELS AI WORKFORCE. The internal code name "Scout" and the internal system name "AEGIS" are retained for class names, env vars, and DB identifiers for backward compatibility.
+> **User-facing brand:** WINDELS AI WORKFORCE. The internal code name "Scout" and the internal system name "AI_WORKFORCE" are retained for class names, env vars, and DB identifiers for backward compatibility.
 
 `apps/api` and `apps/web` are the Lead Discovery module inside WINDELS AI WORKFORCE. They do not
-use the CodeIgniter/Aegis trading services directly. The only shared code is the typed
+use the CodeIgniter/AIWorkforce trading services directly. The only shared code is the typed
 contract package at `packages/shared/src/leadDiscovery.ts`.
 
 ## Vertical slice

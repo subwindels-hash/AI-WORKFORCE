@@ -1,6 +1,6 @@
 <?php
 /** Risk engine vetoes + sizing math. */
-use Aegis\RiskEngine;
+use AIWorkforce\RiskEngine;
 
 test('risk: clean setup approved with exact sizing', function () {
     $d = (new RiskEngine())->evaluate(fx_setup(), fx_risk_ctx());

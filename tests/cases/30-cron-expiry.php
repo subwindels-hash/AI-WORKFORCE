@@ -7,9 +7,9 @@
 function cron_supervisor(FakeTradingConnector $connector)
 {
     $p = platform();
-    $brokers = new \Aegis\Brokers\BrokerManager();
+    $brokers = new \AIWorkforce\Brokers\BrokerManager();
     $brokers->register($connector);
-    return new \Aegis\ExecutionSupervisor($p->model->audit, $p->model->state, $p->model->proposals, $p->risk, $brokers, $p->strategies,
+    return new \AIWorkforce\ExecutionSupervisor($p->model->audit, $p->model->state, $p->model->proposals, $p->risk, $brokers, $p->strategies,
         fn(): int => time(), $p->notifications);
 }
 

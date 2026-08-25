@@ -1,5 +1,5 @@
 {
-  "name": "@aegis/runtime-bridge",
+  "name": "@ai-workforce/runtime-bridge",
   "private": true,
   "version": "0.3.0",
   "type": "module",

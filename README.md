@@ -1,17 +1,17 @@
-<!-- User-facing product name: WINDELS AI WORKFORCE. "AEGIS" below is the
-     internal codebase/system identifier (class names, env vars, table prefixes)
-     and is intentionally retained for backward compatibility. -->
-# AEGIS — Standalone AI Trading Intelligence Platform
+<!-- User-facing product name: WINDELS AI WORKFORCE. The internal codebase
+     identifier is "AIWorkforce" (PHP namespace/classes) and "AI_WORKFORCE"
+     (environment variables/constants), kept consistent with the product name. -->
+# WINDELS AI WORKFORCE — Standalone AI Trading Intelligence Platform
 
 > **Product name:** the user-facing application built on this codebase is
 > branded **WINDELS AI WORKFORCE** (AI language teacher, market analysis,
 > sports/lottery research and lead discovery). The internal system name
-> "AEGIS" is kept for class names, environment variables and database
-> identifiers and should not be renamed in code.
+> is `AIWorkforce` / `AI_WORKFORCE`, used for PHP class/namespace names,
+> environment variables and database identifiers.
 
 > **Standalone Lead Discovery update:** the independent Scout platform now lives
 > under `apps/api`, `apps/web` and `packages/shared`. It uses Fastify/TypeScript,
-> Next.js/React/Tailwind, PostgreSQL and Redis, and does not depend on the AEGIS
+> Next.js/React/Tailwind, PostgreSQL and Redis, and does not depend on the AI_WORKFORCE
 > trading services. See [`docs/LEAD_DISCOVERY.md`](docs/LEAD_DISCOVERY.md).
 
 **CodeIgniter 3.1.13 · PHP 8.x · MySQL/MariaDB · Traditional MVC**
@@ -120,7 +120,7 @@ egress** — it cannot run native PHP or MariaDB. The demo therefore runs the
 
 ```bash
 cd runtime && npm install
-AEGIS_ALLOW_SYNTHETIC_PAPER=1 node server.mjs   # CI3 app on :8080
+AI_WORKFORCE_ALLOW_SYNTHETIC_PAPER=1 node server.mjs   # CI3 app on :8080
 node run-tests.mjs                              # full test suite
 ```
 
@@ -144,9 +144,9 @@ application/
                                 Risk_center (limits + monitor), Api_system, Api_analysis,
                                 Api_marketdata, Api_strategies, Api_paper, Api_journal,
                                 Tools (CLI: install/tests)
-  models/Aegis_model.php        THE only place SQL lives — repository interfaces
+  models/AIWorkforce_model.php        THE only place SQL lives — repository interfaces
                                 implemented over CI3's query builder (mysqli/sqlite)
-  libraries/Aegis/              domain layer (no framework dependency):
+  libraries/AIWorkforce/              domain layer (no framework dependency):
     Indicators, MathUtils, CandleNormalizer, Timeframes
     ProviderManager + Providers/ (Binance, Frankfurter, Synthetic)
     Agents/ (Technical, MarketStructure, Forex, Crypto, Sentiment, Intelligence)
@@ -163,11 +163,11 @@ application/
   database/                     schema.mysql.sql (canonical) + schema.sqlite.sql (dev)
 python-services/mt5-bridge/     Phase 4 bridge: FastAPI + MetaTrader5 service,
                                 contract-tested with a simulated terminal
-  helpers/aegis_helper.php      view-safe platform-state access
+  helpers/ai_workforce_helper.php      view-safe platform-state access
 tests/                          framework.php + cases/*.php (63 case files, 351 tests, incl. full UI audit `65-ui-audit.php`)
 tools/install.php               schema installer (mysqli or sqlite by driver)
 runtime/                        offline WASM-PHP bridge (dev only, not production)
-assets/css/aegis.css            dashboard styles (no CDN dependency)
+assets/css/ai_workforce.css            dashboard styles (no CDN dependency)
 ```
 
 ## Phase 3 — Paper Trading (how it works)
@@ -229,9 +229,9 @@ approved symbols) → 11 human approval (HUMAN_APPROVAL mode) → 12 place order
 - **Routing only happens through a connector whose bridge-verified status
   reports effective order submission** — otherwise the attempt is audited as
   `ROUTING_BLOCKED` and no order exists.
-- The MT5 connector refuses orders unless `AEGIS_MT5_TRADING_ENABLED=1` AND
+- The MT5 connector refuses orders unless `AI_WORKFORCE_MT5_TRADING_ENABLED=1` AND
   the deployed bridge reports `tradingEnabled=true` AND the account is
-  **demo** (unless `AEGIS_MT5_LIVE_ALLOWED=1`).
+  **demo** (unless `AI_WORKFORCE_MT5_LIVE_ALLOWED=1`).
 - The **Portfolio Risk Monitor** scans every paper account and connector;
   only alert *transitions* are audited (no spam). Correlation warnings use
   static disclosed groups — explicitly labeled heuristic, not statistical.
@@ -374,7 +374,7 @@ Implemented and tested in this increment:
   correction. Every row carries source, source timestamp and retrieved time.
 - **Historical database**: `lotteries`, `lottery_rules`, `lottery_draws`,
   `lottery_draw_numbers`, `lottery_data_sources`, `lottery_provider_health`,
-  `lottery_sync_runs` (sqlite + mysql), through the existing `Aegis_model`
+  `lottery_sync_runs` (sqlite + mysql), through the existing `AIWorkforce_model`
   repository pattern.
 - **Statistics engine** (pure, tested): per-number and per-star frequency /
   appearance% / last appearance / current gap / avg-min-max gaps / windowed
@@ -477,7 +477,7 @@ To **demo** the full chain, Broker Center has a *Simulated MT5 bridge* toggle:
 - It is activated by a marker file (`application/data/mt5-demo.json`) that
   only the dev bridge's front controller honors — production never reads it,
   it never overrides an explicitly configured real bridge, it is locked to
-  loopback, and `AEGIS_MT5_LIVE_ALLOWED` stays 0.
+  loopback, and `AI_WORKFORCE_MT5_LIVE_ALLOWED` stays 0.
 - `/health` reports `simulated: true`; the connector surfaces the flag, and
   the Broker/Execution consoles show a **SIMULATION** banner. Every fill is a
   simulation — no real broker, no real order.
@@ -505,7 +505,7 @@ To **demo** the full chain, Broker Center has a *Simulated MT5 bridge* toggle:
 | Agents never call brokers | Agents see only `AnalysisContext`; every order path (paper AND broker) runs through the Risk Engine + Execution Supervisor; only the supervisor holds a TradingConnector |
 | Never silently use fake data | `provenance.synthetic` flows end-to-end; paper fills on synthetic prices require the explicit, audited `allowSyntheticPaperData` dev flag |
 | No integration claimed unless tested | `GET /api/system/features` renders the same matrix; unverified integrations are listed as PLANNED (Broker Center) |
-| Live trading disabled by default | Boot state: `ANALYSIS_ONLY` + kill switch ACTIVE; broker routing needs an explicitly deployed bridge + `AEGIS_MT5_TRADING_ENABLED=1` + demo account; automated modes need a configured automation envelope |
+| Live trading disabled by default | Boot state: `ANALYSIS_ONLY` + kill switch ACTIVE; broker routing needs an explicitly deployed bridge + `AI_WORKFORCE_MT5_TRADING_ENABLED=1` + demo account; automated modes need a configured automation envelope |
 | Every trade auditable | `audit_logs` table + UI trail; every order/position/journal row is linked |
 | Risk Engine veto power | `RiskEngine::evaluate()` sits in every order path |
 | Kill switch blocks orders | Checked first in `submitOrder()`, in the supervisor pipeline (step 1) and re-verified at routing time |
@@ -517,7 +517,7 @@ boundaries, but they remain **PLANNED** until their real external contracts
 are verified. Nothing is enabled by default and no missing data is fabricated.
 
 - **Licensed asset market data:** stock, ETF, futures and options adapters in
-  `application/libraries/Aegis/Providers/LicensedAssetMarketDataProvider.php`.
+  `application/libraries/AIWorkforce/Providers/LicensedAssetMarketDataProvider.php`.
   Each requires an explicit enable flag, safe URL, license identifier, token
   where required and a symbol allow-list. It accepts only the documented
   normalized candle/quote contract and reports `NOT_CONFIGURED`/`DOWN` honestly.
@@ -540,7 +540,7 @@ The scaffolds are intentionally not marked as working integrations in
   implemented and contract-tested with a simulated terminal. Remaining
   before any real-money consideration: deploy the bridge on a Windows host
   with a **demo** MT5 account, verify the PHP↔bridge path end-to-end, and
-  only then review `AEGIS_MT5_LIVE_ALLOWED` (default stays off). Crypto
+  only then review `AI_WORKFORCE_MT5_LIVE_ALLOWED` (default stays off). Crypto
   exchanges are added **one at a time** after MT5 is verified.
 - **Phase 5 (core + hardening done)** — supervisor pipeline, human approval,
   automation modes, kill switch, duplicate protection, broker health

@@ -1,7 +1,7 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed'); 
 $profile = $lessonView['module'] ?? null;
 $langCode = $profile['language_code'] ?? 'en';
-$locale = \Aegis\LangLearn\Translator::LOCALES[$langCode] ?? 'en-GB';
+$locale = \AIWorkforce\LangLearn\Translator::LOCALES[$langCode] ?? 'en-GB';
 ?>
 <div class="page-head"><div><h2>Lesson</h2><p>Explanation, examples you can listen to, then practice. Completing the practice at 75% or more finishes the module.</p></div></div>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>

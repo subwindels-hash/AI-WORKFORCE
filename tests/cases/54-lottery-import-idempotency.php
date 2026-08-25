@@ -5,13 +5,13 @@
  * invalid data as official, idempotent imports, verified results never
  * silently overwritten, full source attribution on every row.
  */
-use Aegis\Lottery\LotteryIntelligence;
-use Aegis\Lottery\SandboxLotteryProvider;
-use Aegis\Lottery\UnavailableLotteryProvider;
+use AIWorkforce\Lottery\LotteryIntelligence;
+use AIWorkforce\Lottery\SandboxLotteryProvider;
+use AIWorkforce\Lottery\UnavailableLotteryProvider;
 
-function fx_lotto_audit(): \Aegis\Persistence\AuditRepository
+function fx_lotto_audit(): \AIWorkforce\Persistence\AuditRepository
 {
-    return new class implements \Aegis\Persistence\AuditRepository {
+    return new class implements \AIWorkforce\Persistence\AuditRepository {
         public array $events = [];
         public function emit(string $t, string $s, array $d = [], string $a = 'system'): void { $this->events[] = ['type' => $t, 'actor' => $a, 'detail' => $d]; }
         public function recent(int $l = 100): array { return []; }
@@ -127,7 +127,7 @@ test('lottery sandbox: offline without the env flag, deterministic when enabled'
         $b = (new SandboxLotteryProvider(7))->draws(null, null, 12);
         assert_equals(12, count($a));
         assert_equals($a, $b, 'deterministic per seed');
-        $validator = new \Aegis\Lottery\LotteryResultValidator(new \Aegis\Lottery\EuroMillionsRules());
+        $validator = new \AIWorkforce\Lottery\LotteryResultValidator(new \AIWorkforce\Lottery\EuroMillionsRules());
         foreach ($a as $d) {
             assert_true($validator->validate($d)['valid'], 'every sandbox draw obeys the official rules');
         }
