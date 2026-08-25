@@ -94,6 +94,23 @@ class Api_lang_learning extends Api_controller
         } catch (Throwable $e) { $this->fail($e); }
     }
 
+    /**
+     * Secret-free voice / translation provider status for the teacher UI.
+     * Browser Web Speech remains the default; server credentials stay in API Management.
+     */
+    public function voice_status()
+    {
+        if (!$this->guard(false)) return;
+        $this->json([
+            'translation' => \Aegis\ApiProviders::publicStatus('translation'),
+            'stt' => \Aegis\ApiProviders::publicStatus('stt'),
+            'tts' => \Aegis\ApiProviders::publicStatus('tts'),
+            'languageAi' => \Aegis\ApiProviders::publicStatus('language_ai'),
+            'pronunciation' => \Aegis\ApiProviders::publicStatus('pronunciation'),
+            'unavailable' => \Aegis\ApiProviders::USER_UNAVAILABLE,
+        ]);
+    }
+
     // ---------------------------------------------------------- profiles
 
     public function profiles()

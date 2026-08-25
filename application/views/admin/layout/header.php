@@ -66,6 +66,9 @@ $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
   <?php endif; ?>
 
   <p class="sidebar-label">Administration</p>
+  <?php if (admin_can('admin.api.view')): ?>
+  <a href="/admin/api" class="<?= $active === 'api' ? 'active' : '' ?>"><?= $ic ?><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M7 8h10M7 12h6"/></svg><span>API Management</span></a>
+  <?php endif; ?>
   <?php if (admin_can('admin.settings.manage')): ?>
   <a href="/admin/settings" class="<?= $active === 'settings' ? 'active' : '' ?>"><?= $ic ?><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.3.6.9 1 1.6 1.1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>System Settings</span></a>
   <?php endif; ?>

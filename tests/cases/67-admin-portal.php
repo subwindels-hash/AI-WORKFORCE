@@ -37,14 +37,14 @@ function fx_make_user(string $prefix, string $role = 'platform_member', int $act
 test('admin portal schema, routes and views are installed', function () {
     $portal = fx_admin_portal();
     $db = platform()->model->db;
-    foreach (['admin_activity_logs', 'impersonation_sessions', 'platform_settings'] as $table) {
+    foreach (['admin_activity_logs', 'impersonation_sessions', 'platform_settings', 'api_providers'] as $table) {
         assert_true($db->table_exists($table), "table $table exists");
     }
     $routes = file_get_contents(FCPATH . 'application/config/routes.php');
-    foreach (['admin/users', 'admin/users/(:num)', 'admin/users/(:num)/impersonate', 'admin/impersonation/return', 'admin/admins', 'admin/logs', 'admin/settings', 'admin/security'] as $r) {
+    foreach (['admin/users', 'admin/users/(:num)', 'admin/users/(:num)/impersonate', 'admin/impersonation/return', 'admin/admins', 'admin/logs', 'admin/settings', 'admin/security', 'admin/api', 'admin/api/create', 'admin/api/(:num)'] as $r) {
         assert_contains("\$route['{$r}']", $routes, "route $r");
     }
-    foreach (['index', 'users/index', 'users/show', 'users/create', 'users/edit', 'layout/header', 'layout/footer', 'logs', 'admins', 'settings', 'security'] as $view) {
+    foreach (['index', 'users/index', 'users/show', 'users/create', 'users/edit', 'layout/header', 'layout/footer', 'logs', 'admins', 'settings', 'security', 'api/index', 'api/form'] as $view) {
         assert_true(is_file(FCPATH . "application/views/admin/{$view}.php"), "view admin/{$view}.php");
     }
     $admin = file_get_contents(FCPATH . 'application/controllers/Admin.php');
@@ -61,6 +61,11 @@ test('admin RBAC: Super Admin, Admin and Support Admin have distinct permissions
     assert_in_array('admin.users.impersonate', AEGIS_RBAC_GRANTS['admin']);
     assert_false(in_array('admin.admins.manage', AEGIS_RBAC_GRANTS['admin'], true), 'normal admin cannot manage admins');
     assert_false(in_array('admin.settings.manage', AEGIS_RBAC_GRANTS['admin'], true), 'normal admin cannot change system settings');
+    assert_in_array('admin.api.view', AEGIS_RBAC_GRANTS['admin']);
+    assert_in_array('admin.api.test', AEGIS_RBAC_GRANTS['admin']);
+    assert_false(in_array('admin.api.manage', AEGIS_RBAC_GRANTS['admin'], true), 'normal admin cannot change API providers');
+    assert_false(in_array('admin.api.credentials', AEGIS_RBAC_GRANTS['admin'], true), 'normal admin cannot change API credentials');
+    assert_false(in_array('admin.api.view', AEGIS_RBAC_GRANTS['support_admin'], true), 'support cannot open API Management');
     assert_in_array('admin.users.view', AEGIS_RBAC_GRANTS['support_admin']);
     assert_false(in_array('admin.users.manage', AEGIS_RBAC_GRANTS['support_admin'], true), 'support cannot manage users');
     assert_false(in_array('admin.users.delete', AEGIS_RBAC_GRANTS['support_admin'], true));

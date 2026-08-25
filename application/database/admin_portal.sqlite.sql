@@ -35,3 +35,25 @@ CREATE TABLE IF NOT EXISTS platform_settings (
   updated_at TEXT NOT NULL,
   updated_by INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS api_providers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  service TEXT NOT NULL,
+  driver TEXT NOT NULL,
+  label TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 0,
+  role TEXT NOT NULL DEFAULT 'unused',
+  environment TEXT NOT NULL DEFAULT 'live',
+  base_url TEXT,
+  account_id TEXT,
+  extra_json TEXT,
+  secret_blob TEXT,
+  last_test_at TEXT,
+  last_test_ok INTEGER,
+  last_test_ms INTEGER,
+  last_test_message TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  updated_by INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_api_providers_service ON api_providers(service, enabled, role);

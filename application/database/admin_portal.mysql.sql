@@ -36,3 +36,25 @@ CREATE TABLE IF NOT EXISTS platform_settings (
   updated_at VARCHAR(32) NOT NULL,
   updated_by INT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS api_providers (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  service VARCHAR(64) NOT NULL,
+  driver VARCHAR(64) NOT NULL,
+  label VARCHAR(190) NOT NULL,
+  enabled TINYINT NOT NULL DEFAULT 0,
+  role VARCHAR(16) NOT NULL DEFAULT 'unused',
+  environment VARCHAR(16) NOT NULL DEFAULT 'live',
+  base_url VARCHAR(500) NULL,
+  account_id VARCHAR(190) NULL,
+  extra_json LONGTEXT NULL,
+  secret_blob LONGTEXT NULL,
+  last_test_at VARCHAR(32) NULL,
+  last_test_ok TINYINT NULL,
+  last_test_ms INT NULL,
+  last_test_message VARCHAR(255) NULL,
+  created_at VARCHAR(32) NOT NULL,
+  updated_at VARCHAR(32) NOT NULL,
+  updated_by INT NULL,
+  INDEX idx_api_providers_service (service, enabled, role)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

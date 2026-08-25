@@ -473,6 +473,127 @@ class Admin extends App_Controller
         $this->render('admin/security', $data);
     }
 
+    public function api()
+    {
+        $actor = $this->gate('admin.api.view'); if (!$actor) return;
+        \Aegis\ApiProviders::ensureSchema($this->Aegis_model->db);
+        $data = $this->base('API Management', 'api');
+        $data['dashboard'] = \Aegis\ApiProviders::dashboard($this->Aegis_model->db);
+        $data['canManage'] = $this->platform->identity->can($actor, 'admin.api.manage');
+        $data['canTest'] = $this->platform->identity->can($actor, 'admin.api.test');
+        $this->render('admin/api/index', $data);
+    }
+
+    public function api_create()
+    {
+        $actor = $this->gate('admin.api.manage'); if (!$actor) return;
+        $this->renderApiForm($actor, null);
+    }
+
+    public function api_show($id = 0)
+    {
+        $actor = $this->gate('admin.api.view'); if (!$actor) return;
+        \Aegis\ApiProviders::ensureSchema($this->Aegis_model->db);
+        $row = \Aegis\ApiProviders::find($this->Aegis_model->db, (int) $id);
+        if (!$row) { $this->flash('error', 'Provider not found.'); redirect('/admin/api'); return; }
+        $this->renderApiForm($actor, $row);
+    }
+
+    public function api_save($id = 0)
+    {
+        $actor = $this->gate('admin.api.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/api'); return; }
+        $canSecrets = $this->platform->identity->can($actor, 'admin.api.credentials') || $this->isSuperAdmin($actor);
+        try {
+            $saved = \Aegis\ApiProviders::save($this->Aegis_model->db, $this->input->post() ?: [], $id ? (int) $id : null, (int) $actor['id'], $canSecrets);
+            $this->portal->log($actor, $id ? 'API_PROVIDER_UPDATED' : 'API_PROVIDER_CREATED', 'ok', [
+                'type' => 'api_provider', 'id' => (string) ($saved['id'] ?? ''), 'label' => (string) ($saved['label'] ?? ''),
+            ], ['service' => $saved['service'] ?? '', 'driver' => $saved['driver'] ?? '', 'role' => $saved['role'] ?? ''], $this->ip());
+            $this->flash('notice', '✓ Changes saved successfully');
+            redirect('/admin/api/' . (int) ($saved['id'] ?? 0));
+        } catch (Throwable $e) {
+            log_message('error', 'api_save failed: ' . $e->getMessage());
+            $this->flash('error', $e instanceof InvalidArgumentException ? $e->getMessage() : 'Unable to save your changes. Please try again.');
+            redirect($id ? '/admin/api/' . (int) $id : '/admin/api/create');
+        }
+    }
+
+    public function api_test($id = 0)
+    {
+        $actor = $this->gate('admin.api.test'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/api'); return; }
+        $row = \Aegis\ApiProviders::find($this->Aegis_model->db, (int) $id);
+        if (!$row) { $this->flash('error', 'Provider not found.'); redirect('/admin/api'); return; }
+        $secrets = \Aegis\ApiProviders::findSecrets($this->Aegis_model->db, (int) $id);
+        $result = \Aegis\ApiProviders::test($row, $secrets);
+        \Aegis\ApiProviders::recordTest($this->Aegis_model->db, (int) $id, $result);
+        $this->portal->log($actor, 'API_PROVIDER_TESTED', !empty($result['ok']) ? 'ok' : 'error', [
+            'type' => 'api_provider', 'id' => (string) $id, 'label' => $row['label'],
+        ], ['ok' => !empty($result['ok']), 'ms' => $result['ms'] ?? null], $this->ip());
+        $this->flash(!empty($result['ok']) ? 'notice' : 'error', !empty($result['ok']) ? '✓ Connected' : '✕ Connection failed');
+        redirect('/admin/api/' . (int) $id);
+    }
+
+    public function api_enable($id = 0)
+    {
+        $this->apiToggle((int) $id, true);
+    }
+
+    public function api_disable($id = 0)
+    {
+        $this->apiToggle((int) $id, false);
+    }
+
+    public function api_primary($id = 0)
+    {
+        $actor = $this->gate('admin.api.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/api'); return; }
+        $row = \Aegis\ApiProviders::find($this->Aegis_model->db, (int) $id);
+        if (!$row) { $this->flash('error', 'Provider not found.'); redirect('/admin/api'); return; }
+        \Aegis\ApiProviders::setRole($this->Aegis_model->db, (int) $id, 'primary');
+        $this->portal->log($actor, 'API_PROVIDER_UPDATED', 'ok', ['type' => 'api_provider', 'id' => (string) $id, 'label' => $row['label']], ['role' => 'primary'], $this->ip());
+        $this->flash('notice', '✓ Changes saved successfully');
+        redirect('/admin/api');
+    }
+
+    public function api_delete($id = 0)
+    {
+        $actor = $this->gate('admin.api.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/api'); return; }
+        $row = \Aegis\ApiProviders::find($this->Aegis_model->db, (int) $id);
+        if (!$row) { $this->flash('error', 'Provider not found.'); redirect('/admin/api'); return; }
+        \Aegis\ApiProviders::delete($this->Aegis_model->db, (int) $id);
+        $this->portal->log($actor, 'API_PROVIDER_DELETED', 'ok', ['type' => 'api_provider', 'id' => (string) $id, 'label' => $row['label']], ['service' => $row['service']], $this->ip());
+        $this->flash('notice', '✓ Changes saved successfully');
+        redirect('/admin/api');
+    }
+
+    private function apiToggle(int $id, bool $enabled): void
+    {
+        $actor = $this->gate('admin.api.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/api'); return; }
+        $row = \Aegis\ApiProviders::find($this->Aegis_model->db, $id);
+        if (!$row) { $this->flash('error', 'Provider not found.'); redirect('/admin/api'); return; }
+        \Aegis\ApiProviders::setEnabled($this->Aegis_model->db, $id, $enabled);
+        $this->portal->log($actor, $enabled ? 'API_PROVIDER_ENABLED' : 'API_PROVIDER_DISABLED', 'ok', [
+            'type' => 'api_provider', 'id' => (string) $id, 'label' => $row['label'],
+        ], [], $this->ip());
+        $this->flash('notice', '✓ Changes saved successfully');
+        redirect('/admin/api');
+    }
+
+    private function renderApiForm(array $actor, ?array $row): void
+    {
+        $data = $this->base($row ? 'Manage provider' : 'Add provider', 'api');
+        $data['row'] = $row;
+        $data['services'] = \Aegis\ApiProviders::services();
+        $data['drivers'] = \Aegis\ApiProviders::drivers();
+        $data['canManage'] = $this->platform->identity->can($actor, 'admin.api.manage');
+        $data['canTest'] = $this->platform->identity->can($actor, 'admin.api.test');
+        $data['canSecrets'] = $this->platform->identity->can($actor, 'admin.api.credentials') || $this->isSuperAdmin($actor);
+        $this->render('admin/api/form', $data);
+    }
+
     /** Only administrators with portal access may enter. Super Admin holds system.super_admin. */
     private function requireAdmin(): ?array
     {

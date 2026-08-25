@@ -15,6 +15,11 @@ final class ChatAssistant
     {
         $message = trim($message);
         if ($message === '' || mb_strlen($message) > 1000) throw new \InvalidArgumentException('message must contain 1–1000 characters');
+        $managed = ApiProviders::resolve('llm') ?? ApiProviders::resolve('language_ai');
+        if (is_array($managed)) {
+            $answer = $this->providerAnswer($message, $managed);
+            if ($answer !== null) return ['message' => $answer, 'provider' => 'configured-ai', 'grounded' => true, 'disclaimer' => 'Product guidance only; no private record data was provided to the assistant.'];
+        }
         $configured = getenv('AI_CHAT_ENABLED') === '1' && trim((string) getenv('AI_CHAT_API_URL')) !== '' && trim((string) getenv('AI_CHAT_API_KEY')) !== '' && trim((string) getenv('AI_CHAT_MODEL')) !== '';
         if ($configured) {
             $answer = $this->providerAnswer($message);
@@ -37,8 +42,12 @@ final class ChatAssistant
         return 'I can guide you through the AI Language Teacher, Languages, Dashboard, Lead Discovery, Pipeline, Sports, EuroMillions, Trading and Account. Ask about any area.';
     }
 
-    private function providerAnswer(string $message): ?string
+    private function providerAnswer(string $message, ?array $managed = null): ?string
     {
+        if ($managed) {
+            $answer = ApiProviders::openaiChat($managed, [['role' => 'system', 'content' => self::SYSTEM], ['role' => 'user', 'content' => $message]]);
+            if ($answer !== null) return $answer;
+        }
         $url = trim((string) getenv('AI_CHAT_API_URL')); $key = trim((string) getenv('AI_CHAT_API_KEY')); $model = trim((string) getenv('AI_CHAT_MODEL'));
         $body = json_encode(['model' => $model, 'messages' => [['role' => 'system', 'content' => self::SYSTEM], ['role' => 'user', 'content' => $message]], 'temperature' => 0.2, 'max_tokens' => 260], JSON_UNESCAPED_SLASHES);
         $context = stream_context_create(['http' => ['method' => 'POST', 'timeout' => 8, 'ignore_errors' => true, 'header' => "Accept: application/json\r\nContent-Type: application/json\r\nAuthorization: Bearer {$key}\r\n", 'content' => $body], 'ssl' => ['verify_peer' => true, 'verify_peer_name' => true]]);

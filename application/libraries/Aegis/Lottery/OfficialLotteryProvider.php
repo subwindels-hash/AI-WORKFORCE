@@ -31,6 +31,7 @@ final class OfficialLotteryProvider implements LotteryProvider
     private string $license;
     private string $source;
     private bool $enabled;
+    private string $jackpotUrl;
     /** @var callable(string, ?string): mixed */
     private $request;
 
@@ -45,12 +46,15 @@ final class OfficialLotteryProvider implements LotteryProvider
         ?string $source = null,
         ?callable $request = null,
     ) {
-        $this->url = trim($url ?? (getenv('WINDELS_LOTTERY_OFFICIAL_URL') ?: ''));
-        $this->healthUrl = trim(getenv('WINDELS_LOTTERY_OFFICIAL_HEALTH_URL') ?: '');
-        $this->token = trim($token ?? (getenv('WINDELS_LOTTERY_OFFICIAL_TOKEN') ?: ''));
-        $this->license = trim($license ?? (getenv('WINDELS_LOTTERY_OFFICIAL_LICENSE') ?: ''));
-        $this->source = trim($source ?? (getenv('WINDELS_LOTTERY_OFFICIAL_SOURCE') ?: 'authorized-official-feed'));
-        $this->enabled = $enabled ?? (getenv('WINDELS_LOTTERY_OFFICIAL_ENABLED') === '1');
+        $managed = class_exists(\Aegis\ApiProviders::class) ? \Aegis\ApiProviders::resolve('lottery') : null;
+        $managed = is_array($managed) ? $managed : [];
+        $this->url = trim($url ?? (($managed['base_url'] ?? '') ?: (getenv('WINDELS_LOTTERY_OFFICIAL_URL') ?: '')));
+        $this->healthUrl = trim((string) (($managed['extra']['health_url'] ?? '') ?: (getenv('WINDELS_LOTTERY_OFFICIAL_HEALTH_URL') ?: '')));
+        $this->token = trim($token ?? (($managed['secrets']['token'] ?? $managed['secrets']['api_key'] ?? '') ?: (getenv('WINDELS_LOTTERY_OFFICIAL_TOKEN') ?: '')));
+        $this->license = trim($license ?? (($managed['extra']['license'] ?? $managed['account_id'] ?? '') ?: (getenv('WINDELS_LOTTERY_OFFICIAL_LICENSE') ?: '')));
+        $this->source = trim($source ?? (($managed['extra']['source'] ?? '') ?: (getenv('WINDELS_LOTTERY_OFFICIAL_SOURCE') ?: 'authorized-official-feed')));
+        $this->jackpotUrl = trim((string) (($managed['extra']['jackpot_url'] ?? '') ?: (getenv('WINDELS_LOTTERY_OFFICIAL_JACKPOT_URL') ?: '')));
+        $this->enabled = $enabled ?? ((!empty($managed) && !empty($managed['enabled'])) || getenv('WINDELS_LOTTERY_OFFICIAL_ENABLED') === '1');
         $this->request = $request ?? [$this, 'defaultRequest'];
     }
 
@@ -66,7 +70,7 @@ final class OfficialLotteryProvider implements LotteryProvider
     {
         if (!$this->enabled) {
             return ['state' => 'DISABLED', 'licensed' => false, 'synthetic' => false,
-                'message' => 'Official feed is disabled — set WINDELS_LOTTERY_OFFICIAL_ENABLED=1 only after authorization'];
+                'message' => 'Official feed is disabled until an authorized provider is enabled in API Management'];
         }
         if (!$this->validUrl() || $this->license === '' || $this->source === '') {
             return ['state' => 'UNCONFIGURED', 'licensed' => false, 'synthetic' => false,
@@ -105,9 +109,8 @@ final class OfficialLotteryProvider implements LotteryProvider
     public function jackpotInfo(): ?array
     {
         if (!$this->configured()) return null;
-        $jackpotUrl = trim(getenv('WINDELS_LOTTERY_OFFICIAL_JACKPOT_URL') ?: '');
-        if ($jackpotUrl === '') return null;
-        $payload = ($this->request)($jackpotUrl, $this->token !== '' ? $this->token : null);
+        if ($this->jackpotUrl === '') return null;
+        $payload = ($this->request)($this->jackpotUrl, $this->token !== '' ? $this->token : null);
         if (!is_array($payload)) return null;
         $data = is_array($payload['data'] ?? null) ? $payload['data'] : $payload;
         return [

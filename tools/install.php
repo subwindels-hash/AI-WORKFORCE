@@ -73,7 +73,7 @@ $expected = ['platform_state', 'strategies', 'backtests', 'analysis_runs', 'jour
     'lesson_attempts', 'study_sessions', 'language_progress', 'conversation_sessions', 'writing_attempts',
     'vocabulary', 'user_vocabulary', 'listening_attempts', 'speaking_attempts', 'daily_learning_plans', 'ai_learning_recommendations',
     'users', 'roles', 'permissions', 'user_roles', 'role_permissions', 'auth_events',
-    'admin_activity_logs', 'impersonation_sessions', 'platform_settings',
+    'admin_activity_logs', 'impersonation_sessions', 'platform_settings', 'api_providers',
     'sports_data_sources', 'sports_matches', 'sports_odds', 'sports_sync_runs', 'sports_model_versions',
     'sports_predictions', 'sports_tickets', 'sports_results',
     'sports_configurations', 'sports_calibrations', 'sports_job_runs', 'sports_backtests',

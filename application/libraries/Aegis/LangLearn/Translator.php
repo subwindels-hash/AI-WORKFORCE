@@ -428,11 +428,32 @@ final class Translator
             return $base;
         }
 
+        $remote = $this->tryManagedTranslation($text, $source, $target);
+        if ($remote !== null) {
+            $base['translation'] = $remote;
+            $base['method'] = 'provider';
+            $base['note'] = 'Translated by the configured translation provider.';
+            return $base;
+        }
+
         // Honest fallback — never fabricate.
         $base['translation'] = null;
         $base['method'] = 'none';
         $base['note'] = 'This sentence is not in the authored phrasebook or dictionary yet, so no fluent translation is available. Try a shorter sentence, a common greeting, or single words.';
         return $base;
+    }
+
+    /** Use the admin-managed translation provider only when the phrasebook cannot cover the text. */
+    private function tryManagedTranslation(string $text, string $source, string $target): ?string
+    {
+        if (!class_exists(\Aegis\ApiProviders::class)) return null;
+        try {
+            $cfg = \Aegis\ApiProviders::resolve('translation');
+            if (!is_array($cfg)) return null;
+            return \Aegis\ApiProviders::translateText($cfg, $text, $source, $target);
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     // ------------------------------------------------------------- internals

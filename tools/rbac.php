@@ -42,6 +42,10 @@ if (!defined('AEGIS_RBAC_ROLES')) {
         'admin.logs.view' => 'View administrator activity logs',
         'admin.analytics.view' => 'View platform analytics and reports',
         'admin.security.view' => 'View security controls and login protection',
+        'admin.api.view' => 'View API / provider settings',
+        'admin.api.manage' => 'Add, edit, enable, disable or delete API providers',
+        'admin.api.test' => 'Test API provider connections',
+        'admin.api.credentials' => 'View and change API credentials',
     ]);
     define('AEGIS_RBAC_GRANTS', [
         'super_admin' => array_keys(AEGIS_RBAC_PERMISSIONS), // everything
@@ -55,6 +59,7 @@ if (!defined('AEGIS_RBAC_ROLES')) {
         'admin' => [
             'admin.access', 'admin.users.view', 'admin.users.manage', 'admin.users.delete',
             'admin.users.impersonate', 'admin.logs.view', 'admin.analytics.view', 'admin.security.view',
+            'admin.api.view', 'admin.api.test',
         ],
         'support_admin' => [
             'admin.access', 'admin.users.view', 'admin.users.impersonate', 'admin.logs.view',

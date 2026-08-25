@@ -66,6 +66,7 @@ class AdminPortal
               k VARCHAR(80) NOT NULL PRIMARY KEY, v LONGTEXT NOT NULL, category VARCHAR(32) NOT NULL DEFAULT 'general',
               updated_at VARCHAR(32) NOT NULL, updated_by INT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
         }
+        \Aegis\ApiProviders::ensureSchema($db);
     }
 
     public function setting(string $key, string $default = ''): string

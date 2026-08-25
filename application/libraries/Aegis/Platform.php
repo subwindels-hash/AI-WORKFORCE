@@ -53,8 +53,16 @@ class Platform
 
         $this->providers = new ProviderManager();
         if (!$disableRealProviders) {
-            $this->providers->register(new BinanceProvider());
-            $this->providers->register(new FrankfurterProvider());
+            if (ApiProviders::enabled('crypto_market', true)) {
+                $crypto = ApiProviders::resolve('crypto_market');
+                $cryptoBase = is_array($crypto) ? trim((string) ($crypto['base_url'] ?? '')) : '';
+                $this->providers->register(new BinanceProvider($cryptoBase !== '' ? $cryptoBase : null));
+            }
+            if (ApiProviders::enabled('forex_market', true)) {
+                $fx = ApiProviders::resolve('forex_market');
+                $fxBase = is_array($fx) ? trim((string) ($fx['base_url'] ?? '')) : '';
+                $this->providers->register(new FrankfurterProvider($fxBase !== '' ? $fxBase : null));
+            }
             // These adapters are inert until a licensed feed, explicit
             // ENABLED flag and symbol allow-list are supplied. Registering
             // them here makes capability/health state observable without
