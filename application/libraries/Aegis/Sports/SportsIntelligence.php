@@ -113,6 +113,15 @@ class SportsIntelligence
                 (int) (getenv('WINDELS_SPORTS_HTTP_TIMEOUT') ?: 10)
             ));
         }
+        $managed = \Aegis\ApiProviders::resolve('sports');
+        if (is_array($managed) && !empty($managed['base_url']) && filter_var($managed['base_url'], FILTER_VALIDATE_URL)) {
+            $this->providers->register(new HttpSportsProvider(
+                'managed-sports-' . (int) ($managed['id'] ?? 0),
+                rtrim((string) $managed['base_url'], '/'),
+                (string) ($managed['secrets']['token'] ?? $managed['secrets']['api_key'] ?? ''),
+                (int) ($managed['extra']['timeout'] ?? 10)
+            ));
+        }
     }
 
     public function mode(): string
@@ -152,7 +161,7 @@ class SportsIntelligence
             'liveHealth' => $this->providers->health(),
             'ticketEngine' => $this->providers->configured() ? $this->configuration->active()['engine_mode'] : 'DISABLED_NO_PROVIDER',
             'configuration' => $this->configuration->active(),
-            'message' => $this->providers->configured() ? 'sports data providers available' : 'No sports provider is configured. No fixtures, odds, predictions, or tickets are fabricated.',
+            'message' => $this->providers->configured() ? 'sports data providers available' : 'This feature is temporarily unavailable. Please try again later.',
         ];
     }
 

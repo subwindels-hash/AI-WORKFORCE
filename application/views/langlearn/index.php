@@ -53,36 +53,66 @@
 
 <div class="panel" style="margin-top:16px">
   <h3>Language catalog</h3>
-  <div class="body scroll">
-    <table class="tbl">
-      <thead><tr><th>Language</th><th>Native</th><th>ISO</th><th>Script</th><th>Dir</th><th>Assessment</th><th class="num"></th></tr></thead>
-      <tbody>
-        <?php foreach ($languages as $l): $feat = $l['features']; ?>
-          <tr>
-            <td style="font-weight:700"><?= e($l['name']) ?></td>
-            <td><?= e($l['native_name']) ?></td>
-            <td class="mono dim"><?= e($l['iso_code']) ?></td>
-            <td class="dim"><?= e($l['writing_system']) ?></td>
-            <td class="dim"><?= e(strtoupper($l['direction'])) ?></td>
-            <td>
-              <?php if (!empty($feat['adaptive_assessment'])): ?>
-                <span class="badge b-green">adaptive · ceiling <?= e((string) ($feat['assessment_ceiling'] ?? 'A1')) ?></span>
-              <?php else: ?>
-                <span class="badge b-gray">registered — bank pending</span>
-              <?php endif; ?>
-            </td>
-            <td class="num">
-              <?php if (!empty($user)): ?>
-                <form method="post" action="/app/languages/start" style="display:inline">
-                  <input type="hidden" name="code" value="<?= e($l['code']) ?>">
-                  <button class="btn small">Learn</button>
-                </form>
-              <?php endif; ?>
-            </td>
-          </tr>
-        <?php endforeach; ?>
-      </tbody>
-    </table>
-    <p class="dim" style="font-size:12px;margin-top:12px">Assessment levels stop at each language’s verified bank ceiling. Listening, speaking and writing are not assessed in this build and are never faked.</p>
+  <div class="body">
+    <p class="dim" style="font-size:13px;margin:0 0 12px">Search <?= (int) ($catalogTotal ?? count($languages)) ?> languages by English name, native name or ISO code. Full AI learning, translation and voice are labelled honestly — a language is never shown as spoken if no voice exists.</p>
+    <label class="fld" style="max-width:420px;margin-bottom:14px">Search language…
+      <input class="sel" id="catalog-search" type="search" placeholder="Dutch, Nederlands, nl…" autocomplete="off">
+    </label>
+    <div class="scroll">
+      <table class="tbl" id="catalog-table">
+        <thead><tr><th>Language</th><th>Native</th><th>ISO</th><th>Support</th><th class="num"></th></tr></thead>
+        <tbody id="catalog-body">
+          <?php $preview = $catalogPreview ?? $languages; foreach ($preview as $l): ?>
+            <tr>
+              <td style="font-weight:700"><?= e($l['name']) ?></td>
+              <td><?= e($l['native_name'] ?? '') ?></td>
+              <td class="mono dim"><?= e($l['iso_code'] ?? $l['code']) ?></td>
+              <td><span class="badge <?= !empty($l['full_ai']) || !empty($l['features']['adaptive_assessment']) ? 'b-green' : 'b-gray' ?>"><?= e($l['support_label'] ?? (!empty($l['features']['adaptive_assessment']) ? 'Supported for full AI learning' : 'Text only')) ?></span></td>
+              <td class="num">
+                <?php if (!empty($user)): ?>
+                  <form method="post" action="/app/languages/start" style="display:inline">
+                    <input type="hidden" name="code" value="<?= e($l['code']) ?>">
+                    <button class="btn small">Learn</button>
+                  </form>
+                <?php endif; ?>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+    <p class="dim" style="font-size:12px;margin-top:12px">Drop the official SIL ISO 639-3 table into <span class="mono">application/data/iso639-3.tab</span> to expand the searchable catalog to the full living-language set. Voice buttons stay hidden when a language has no pronunciation engine.</p>
   </div>
 </div>
+<script>
+(function () {
+  var input = document.getElementById('catalog-search');
+  var body = document.getElementById('catalog-body');
+  if (!input || !body) return;
+  var timer = null;
+  var signedIn = <?= !empty($user) ? 'true' : 'false' ?>;
+  function row(lang) {
+    var badge = lang.full_ai ? 'b-green' : 'b-gray';
+    var label = lang.support_label || 'Text only';
+    var learn = signedIn
+      ? '<form method="post" action="/app/languages/start" style="display:inline"><input type="hidden" name="code" value="' + (lang.code || '') + '"><button class="btn small">Learn</button></form>'
+      : '';
+    return '<tr><td style="font-weight:700">' + escapeHtml(lang.name || '') + '</td><td>' + escapeHtml(lang.native_name || '') + '</td><td class="mono dim">' + escapeHtml(lang.iso_code || lang.code || '') + '</td><td><span class="badge ' + badge + '">' + escapeHtml(label) + '</span></td><td class="num">' + learn + '</td></tr>';
+  }
+  function escapeHtml(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+  input.addEventListener('input', function () {
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      fetch('/api/v1/language-learning/catalog?limit=30&q=' + encodeURIComponent(input.value), { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (body) {
+          body.languages = body.languages || [];
+          body.inner = '';
+          body.languages.forEach(function (l) { body.inner += row(l); });
+          document.getElementById('catalog-body').innerHTML = body.inner || '<tr><td colspan="5" class="dim">No matching language.</td></tr>';
+        })
+        .catch(function () {});
+    }, 180);
+  });
+})();
+</script>

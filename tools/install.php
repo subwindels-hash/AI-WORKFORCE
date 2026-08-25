@@ -29,6 +29,7 @@ if ($driver === 'pdo_sqlite') {
         __DIR__ . '/../application/database/sports_intelligence.sqlite.sql',
         __DIR__ . '/../application/database/langlearn.sqlite.sql',
         __DIR__ . '/../application/database/lottery.sqlite.sql',
+        __DIR__ . '/../application/database/admin_portal.sqlite.sql',
     ];
     $sql = implode("\n", array_map(fn($file) => file_get_contents($file), $schemaFiles));
 } else {
@@ -48,6 +49,7 @@ if ($driver === 'pdo_sqlite') {
         __DIR__ . '/../application/database/sports_intelligence.mysql.sql',
         __DIR__ . '/../application/database/langlearn.mysql.sql',
         __DIR__ . '/../application/database/lottery.mysql.sql',
+        __DIR__ . '/../application/database/admin_portal.mysql.sql',
     ];
     $sql = implode("\n", array_map(fn($file) => file_get_contents($file), $schemaFiles));
 }
@@ -71,6 +73,7 @@ $expected = ['platform_state', 'strategies', 'backtests', 'analysis_runs', 'jour
     'lesson_attempts', 'study_sessions', 'language_progress', 'conversation_sessions', 'writing_attempts',
     'vocabulary', 'user_vocabulary', 'listening_attempts', 'speaking_attempts', 'daily_learning_plans', 'ai_learning_recommendations',
     'users', 'roles', 'permissions', 'user_roles', 'role_permissions', 'auth_events',
+    'admin_activity_logs', 'impersonation_sessions', 'platform_settings', 'api_providers',
     'sports_data_sources', 'sports_matches', 'sports_odds', 'sports_sync_runs', 'sports_model_versions',
     'sports_predictions', 'sports_tickets', 'sports_results',
     'sports_configurations', 'sports_calibrations', 'sports_job_runs', 'sports_backtests',

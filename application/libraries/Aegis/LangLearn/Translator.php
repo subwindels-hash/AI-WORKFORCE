@@ -24,6 +24,14 @@ final class Translator
         'zh' => 'zh-CN', 'ja' => 'ja-JP', 'ko' => 'ko-KR', 'ru' => 'ru-RU',
         'hi' => 'hi-IN', 'tr' => 'tr-TR', 'sw' => 'sw-KE', 'yo' => 'yo-NG',
         'ig' => 'ig-NG', 'ha' => 'ha-NG', 'af' => 'af-ZA', 'zu' => 'zu-ZA',
+        'pl' => 'pl-PL', 'sv' => 'sv-SE', 'da' => 'da-DK', 'fi' => 'fi-FI',
+        'no' => 'nb-NO', 'nb' => 'nb-NO', 'cs' => 'cs-CZ', 'el' => 'el-GR',
+        'he' => 'he-IL', 'th' => 'th-TH', 'vi' => 'vi-VN', 'id' => 'id-ID',
+        'uk' => 'uk-UA', 'ro' => 'ro-RO', 'hu' => 'hu-HU', 'bn' => 'bn-IN',
+        'ta' => 'ta-IN', 'te' => 'te-IN', 'mr' => 'mr-IN', 'gu' => 'gu-IN',
+        'kn' => 'kn-IN', 'ml' => 'ml-IN', 'pa' => 'pa-IN', 'ur' => 'ur-PK',
+        'fa' => 'fa-IR', 'ms' => 'ms-MY', 'fil' => 'fil-PH', 'tl' => 'fil-PH',
+        'yue' => 'yue-HK', 'cmn' => 'zh-CN',
     ];
 
     /**
@@ -316,7 +324,9 @@ final class Translator
 
     public function localeFor(string $code): string
     {
-        return self::LOCALES[strtolower(trim($code))] ?? strtolower(trim($code));
+        $code = strtolower(trim($code));
+        if (isset(self::LOCALES[$code])) return self::LOCALES[$code];
+        return LanguageCatalog::localeFor($code);
     }
 
     /** Registry-driven language list for the UI selector. */
@@ -328,7 +338,7 @@ final class Translator
     public function languageName(string $code): string
     {
         $code = strtolower(trim($code));
-        $lang = LanguageRegistry::get($code);
+        $lang = LanguageRegistry::get($code) ?? LanguageCatalog::get($code);
         return $lang['name'] ?? strtoupper($code);
     }
 
@@ -375,7 +385,7 @@ final class Translator
         if ($text === '') {
             throw new \InvalidArgumentException('text must not be empty');
         }
-        if (!LanguageRegistry::get($target)) {
+        if (!LanguageRegistry::get($target) && !LanguageCatalog::get($target)) {
             throw new \InvalidArgumentException("unsupported target language: {$target}");
         }
 
@@ -418,11 +428,32 @@ final class Translator
             return $base;
         }
 
+        $remote = $this->tryManagedTranslation($text, $source, $target);
+        if ($remote !== null) {
+            $base['translation'] = $remote;
+            $base['method'] = 'provider';
+            $base['note'] = 'Translated by the configured translation provider.';
+            return $base;
+        }
+
         // Honest fallback — never fabricate.
         $base['translation'] = null;
         $base['method'] = 'none';
         $base['note'] = 'This sentence is not in the authored phrasebook or dictionary yet, so no fluent translation is available. Try a shorter sentence, a common greeting, or single words.';
         return $base;
+    }
+
+    /** Use the admin-managed translation provider only when the phrasebook cannot cover the text. */
+    private function tryManagedTranslation(string $text, string $source, string $target): ?string
+    {
+        if (!class_exists(\Aegis\ApiProviders::class)) return null;
+        try {
+            $cfg = \Aegis\ApiProviders::resolve('translation');
+            if (!is_array($cfg)) return null;
+            return \Aegis\ApiProviders::translateText($cfg, $text, $source, $target);
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     // ------------------------------------------------------------- internals

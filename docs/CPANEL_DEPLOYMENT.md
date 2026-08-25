@@ -72,7 +72,10 @@ application/cache/
 application/logs/
 runtime/sessions/
 assets/uploads/
+assets/uploads/avatars/
 ```
+
+Profile pictures are stored in `assets/uploads/avatars/`. The application creates that folder on first upload when the web user can write to `assets/uploads/`.
 
 No `chmod`, `chown`, or terminal command is necessary.
 

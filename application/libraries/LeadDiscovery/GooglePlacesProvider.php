@@ -6,10 +6,16 @@ class GooglePlacesProvider implements LeadDiscoveryProvider
 {
     private const URL = 'https://places.googleapis.com/v1/places:searchText';
     public function __construct(private ?string $apiKey = null, private int $timeoutSeconds = 12, private int $maxAttempts = 2)
-    { $this->apiKey ??= (string)getenv('GOOGLE_PLACES_API_KEY'); }
+    {
+        if ($this->apiKey === null || $this->apiKey === '') {
+            $cfg = class_exists(\Aegis\ApiProviders::class) ? \Aegis\ApiProviders::resolve('lead_discovery') : null;
+            $managedKey = is_array($cfg) ? (string) ($cfg['secrets']['api_key'] ?? '') : '';
+            $this->apiKey = $managedKey !== '' ? $managedKey : (string) (getenv('GOOGLE_PLACES_API_KEY') ?: '');
+        }
+    }
     public function name(): string { return 'google_places'; }
     public function healthCheck(): array
-    { return $this->apiKey !== '' ? ['status'=>'IMPLEMENTED','detail'=>'Google Places Text Search configured'] : ['status'=>'DISABLED','detail'=>'GOOGLE_PLACES_API_KEY is not configured']; }
+    { return $this->apiKey !== '' ? ['status'=>'IMPLEMENTED','detail'=>'Google Places Text Search configured'] : ['status'=>'DISABLED','detail'=>'Lead discovery provider is not configured']; }
     public function searchBusinesses(array $input): array
     {
         $health=$this->healthCheck(); if($health['status'] !== 'IMPLEMENTED') throw new ProviderException($health['detail'],503);

@@ -20,8 +20,10 @@
       </span>
       <button type="button" class="aegis-chat-close" aria-label="Close assistant" title="Close">×</button>
     </header>
-    <div class="aegis-chat-messages" aria-live="polite"><div class="aegis-chat-message agent">Hi, I'm the WINDELS Assistant. Ask me how to use the platform.</div></div>
+    <div class="aegis-chat-messages" aria-live="polite"><div class="aegis-chat-message agent">Hi, I'm the WINDELS Assistant. Ask me how to use the platform. <button type="button" class="aegis-chat-listen" data-listen="Hi, I'm the WINDELS Assistant. Ask me how to use the platform.">🔊 Listen</button></div></div>
+    <p class="aegis-chat-voice-status" id="aegis-chat-voice-status" hidden></p>
     <form class="aegis-chat-form">
+      <button type="button" class="aegis-chat-mic" id="aegis-chat-mic" aria-label="Tap to speak">🎤 Speak</button>
       <input name="message" maxlength="1000" required placeholder="Ask about a page or feature…" autocomplete="off" aria-label="Message">
       <button type="submit" aria-label="Send message">Send</button>
     </form>

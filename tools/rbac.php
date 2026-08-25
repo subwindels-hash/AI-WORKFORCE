@@ -18,6 +18,8 @@ if (!defined('AEGIS_RBAC_ROLES')) {
         'lottery_admin' => 'Lottery administrator',
         'lottery_viewer' => 'Lottery viewer',
         'platform_member' => 'Platform member',
+        'admin' => 'Administrator',
+        'support_admin' => 'Support administrator',
     ]);
     define('AEGIS_RBAC_PERMISSIONS', [
         'system.super_admin' => 'Full platform administration',
@@ -30,6 +32,20 @@ if (!defined('AEGIS_RBAC_ROLES')) {
         'trading.execute' => 'Propose, approve and route trades through the Execution Supervisor',
         'lottery.view' => 'View lottery intelligence (draws, statistics, tickets, performance)',
         'lottery.manage' => 'Manage lottery providers, data sync and configuration',
+        'admin.access' => 'Access the administrator portal',
+        'admin.users.view' => 'View user accounts',
+        'admin.users.manage' => 'Create, edit, suspend and reset user accounts',
+        'admin.users.delete' => 'Delete user accounts',
+        'admin.users.impersonate' => 'Sign in as a user without their password',
+        'admin.admins.manage' => 'Manage administrator accounts and roles',
+        'admin.settings.manage' => 'Change platform system settings',
+        'admin.logs.view' => 'View administrator activity logs',
+        'admin.analytics.view' => 'View platform analytics and reports',
+        'admin.security.view' => 'View security controls and login protection',
+        'admin.api.view' => 'View API / provider settings',
+        'admin.api.manage' => 'Add, edit, enable, disable or delete API providers',
+        'admin.api.test' => 'Test API provider connections',
+        'admin.api.credentials' => 'View and change API credentials',
     ]);
     define('AEGIS_RBAC_GRANTS', [
         'super_admin' => array_keys(AEGIS_RBAC_PERMISSIONS), // everything
@@ -40,6 +56,14 @@ if (!defined('AEGIS_RBAC_ROLES')) {
         'lottery_admin' => ['lottery.view', 'lottery.manage'],
         'lottery_viewer' => ['lottery.view'],
         'platform_member' => ['trading.view', 'sports.view', 'lottery.view'],
+        'admin' => [
+            'admin.access', 'admin.users.view', 'admin.users.manage', 'admin.users.delete',
+            'admin.users.impersonate', 'admin.logs.view', 'admin.analytics.view', 'admin.security.view',
+            'admin.api.view', 'admin.api.test',
+        ],
+        'support_admin' => [
+            'admin.access', 'admin.users.view', 'admin.users.impersonate', 'admin.logs.view',
+        ],
     ]);
 }
 

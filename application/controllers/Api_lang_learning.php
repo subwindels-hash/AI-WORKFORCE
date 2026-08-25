@@ -27,7 +27,30 @@ class Api_lang_learning extends Api_controller
     public function languages()
     {
         if (!$this->guard(false)) return;
+        $q = trim((string) $this->input->get('q'));
+        $limit = (int) ($this->input->get('limit') ?: 0);
+        if ($q !== '' || $limit > 0) {
+            $rows = $this->platform->langlearn->searchCatalog($q, $limit > 0 ? $limit : 20);
+            return $this->json([
+                'languages' => $rows,
+                'total' => $this->platform->langlearn->catalogCount(),
+                'query' => $q,
+            ]);
+        }
         $this->json(['languages' => $this->platform->langlearn->languages()]);
+    }
+
+    /** Searchable ISO catalog (does not dump thousands of rows). */
+    public function catalog()
+    {
+        if (!$this->guard(false)) return;
+        $q = trim((string) ($this->input->get('q') ?? ''));
+        $limit = (int) ($this->input->get('limit') ?: 20);
+        $this->json([
+            'languages' => $this->platform->langlearn->searchCatalog($q, $limit),
+            'total' => $this->platform->langlearn->catalogCount(),
+            'query' => $q,
+        ]);
     }
 
     public function show_language(string $code)
@@ -69,6 +92,23 @@ class Api_lang_learning extends Api_controller
         try {
             $this->json(['translation' => $this->platform->translator->translate($text, $target, $source)]);
         } catch (Throwable $e) { $this->fail($e); }
+    }
+
+    /**
+     * Secret-free voice / translation provider status for the teacher UI.
+     * Browser Web Speech remains the default; server credentials stay in API Management.
+     */
+    public function voice_status()
+    {
+        if (!$this->guard(false)) return;
+        $this->json([
+            'translation' => \Aegis\ApiProviders::publicStatus('translation'),
+            'stt' => \Aegis\ApiProviders::publicStatus('stt'),
+            'tts' => \Aegis\ApiProviders::publicStatus('tts'),
+            'languageAi' => \Aegis\ApiProviders::publicStatus('language_ai'),
+            'pronunciation' => \Aegis\ApiProviders::publicStatus('pronunciation'),
+            'unavailable' => \Aegis\ApiProviders::USER_UNAVAILABLE,
+        ]);
     }
 
     // ---------------------------------------------------------- profiles

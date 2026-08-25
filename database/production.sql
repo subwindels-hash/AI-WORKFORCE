@@ -281,7 +281,12 @@ CREATE TABLE IF NOT EXISTS users (
   created_at VARCHAR(32) NOT NULL,
   updated_at VARCHAR(32) NOT NULL,
   last_login_at VARCHAR(32) NULL,
-  INDEX idx_users_active (active)
+  username VARCHAR(64) NULL,
+  user_uid CHAR(6) NULL,
+  profile_image VARCHAR(255) NULL,
+  INDEX idx_users_active (active),
+  UNIQUE KEY uq_users_username (username),
+  UNIQUE KEY uq_users_user_uid (user_uid)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS roles (
   id INT AUTO_INCREMENT PRIMARY KEY, code VARCHAR(64) NOT NULL UNIQUE, name VARCHAR(120) NOT NULL
@@ -548,6 +553,31 @@ CREATE TABLE IF NOT EXISTS lesson_attempts (
   language_code  VARCHAR(8) NOT NULL,
   module_id      VARCHAR(36) NULL,
   kind           VARCHAR(16) NOT NULL,            -- assessment|checkpoint|lesson (Phase 2)
+  score_pct      DECIMAL(5,2) NULL,
+  passed         TINYINT(1) NULL,
+  detail         LONGTEXT NOT NULL,               -- items, answers, explanations (audit-grade)
+  created_at     VARCHAR(32) NOT NULL,
+  KEY idx_attempts_profile (profile_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS study_sessions (
+  id             VARCHAR(36) PRIMARY KEY,
+  profile_id     INT NOT NULL,
+  user_id        INT NOT NULL,
+  language_code  VARCHAR(8) NOT NULL,
+  activity       VARCHAR(24) NOT NULL,            -- assessment|checkpoint|review (Phase 3)…
+  day            VARCHAR(10) NOT NULL,            -- UTC date, for streak math
+  created_at     VARCHAR(32) NOT NULL,
+  KEY idx_sessions_profile_day (profile_id, day)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS language_progress (
+  id                 INT AUTO_INCREMENT PRIMARY KEY,
+  profile_id         INT NOT NULL,
+  user_id            INT NOT NULL,
+  language_code      VARCHAR(8) NOT NULL,
+  skill              VARCHAR(12) NOT NULL,        -- vocabulary|grammar|reading|listening|writing|speaking|overall
+  level              VARCHAR(10) NULL,            -nt|lesson (Phase 2)
   score_pct      DECIMAL(5,2) NULL,
   passed         TINYINT(1) NULL,
   detail         LONGTEXT NOT NULL,               -- items, answers, explanations (audit-grade)

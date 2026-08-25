@@ -43,12 +43,13 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
     </div>
 
     <div class="avatar-actions">
-      <form method="post" action="/account/avatar" enctype="multipart/form-data" class="inline">
+      <form method="post" action="/account/avatar" enctype="multipart/form-data" class="inline" id="avatar-form">
         <input type="hidden" name="csrf_token" value="<?= e($csrf) ?>">
-        <label class="btn small">Upload image
-          <input type="file" name="avatar" accept="image/png,image/jpeg,image/gif,image/webp" class="avatar-file" required>
+        <label class="btn small">Choose image
+          <input type="file" name="avatar" id="avatar-input" accept="image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif" class="avatar-file" required>
         </label>
-        <button class="btn small primary" type="submit">Save image</button>
+        <img id="avatar-preview" class="avatar-lg" alt="Selected image preview" hidden>
+        <button class="btn small primary" type="submit">Upload image</button>
       </form>
       <?php if ($avatar !== ''): ?>
         <form method="post" action="/account/avatar/remove" class="inline">
@@ -194,13 +195,17 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
       if (open) { var f = panel.querySelector('input'); if (f) f.focus(); }
     });
   });
-  // Avatar file name preview
-  var fileInputs = document.querySelectorAll('.avatar-file');
-  fileInputs.forEach(function (input) {
-    input.addEventListener('change', function () {
-      if (input.files && input.files.length) input.value; // browser shows selection
+  var avatarInput = document.getElementById('avatar-input');
+  var preview = document.getElementById('avatar-preview');
+  if (avatarInput && preview) {
+    avatarInput.addEventListener('change', function () {
+      var file = avatarInput.files && avatarInput.files[0];
+      if (!file) { preview.hidden = true; preview.removeAttribute('src'); return; }
+      var url = URL.createObjectURL(file);
+      preview.src = url;
+      preview.hidden = false;
     });
-  });
+  }
   // Password toggles
   document.querySelectorAll('.pw-toggle').forEach(function (btn) {
     btn.addEventListener('click', function () {

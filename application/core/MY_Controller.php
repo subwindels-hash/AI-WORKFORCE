@@ -86,16 +86,45 @@ class MY_Controller extends CI_Controller
 
     public const REMEMBER_COOKIE = 'aegis_remember';
 
-    protected function isAdmin(?array $user = null): bool
+    protected function isSuperAdmin(?array $user = null): bool
     {
         $user = $user ?? $this->currentUser();
         return $user !== null && $this->platform->identity->can($user, 'system.super_admin');
     }
 
+    protected function canAccessAdmin(?array $user = null): bool
+    {
+        $user = $user ?? $this->currentUser();
+        return $user !== null && $this->platform->identity->canAccessAdmin($user);
+    }
+
+    /** Any administrator portal role — used for login routing and chrome. */
+    protected function isAdmin(?array $user = null): bool
+    {
+        return $this->canAccessAdmin($user);
+    }
+
+    protected function impersonator(): ?array
+    {
+        $admin = $this->session->userdata('impersonator');
+        return is_array($admin) && !empty($admin['id']) ? $admin : null;
+    }
+
     protected function requireLogin(): array
     {
         $user = $this->currentUser();
-        if ($user) return $user;
+        if ($user) {
+            if (!$this->impersonator()) {
+                $fresh = $this->Aegis_model->identity->findUserById((int) $user['id']);
+                if (!$fresh || empty($fresh['active'])) {
+                    $this->session->unset_userdata(['identity']);
+                    $this->session->set_flashdata('error', 'Your account is currently unavailable. Please contact support.');
+                    redirect('/login');
+                    exit;
+                }
+            }
+            return $user;
+        }
         $next = '/' . ltrim((string) uri_string(), '/');
         if ($next !== '/' && $next !== '') $this->session->set_userdata('return_to', $next);
         redirect('/login');
@@ -107,12 +136,28 @@ class MY_Controller extends CI_Controller
         $user = $this->currentUser();
         if (!$user) {
             $this->session->set_userdata('return_to', '/admin');
-            redirect('/login');
+            redirect('/admin/login');
             exit;
         }
-        if (!$this->isAdmin($user)) {
+        if ($this->impersonator()) {
+            redirect('/dashboard');
+            exit;
+        }
+        if (!$this->canAccessAdmin($user)) {
             redirect('/access-denied');
             exit;
+        }
+        return $user;
+    }
+
+    /** Server-side permission gate for individual admin actions. */
+    protected function requireAdminPermission(string $permission): ?array
+    {
+        $user = $this->requireAdminPage();
+        if (!$this->platform->identity->can($user, $permission)) {
+            $this->session->set_flashdata('error', 'You do not have permission to perform that action.');
+            redirect('/admin');
+            return null;
         }
         return $user;
     }

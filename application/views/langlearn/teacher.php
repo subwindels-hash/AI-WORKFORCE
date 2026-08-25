@@ -158,11 +158,12 @@ $flagMap = [
     <div class="tt-swapbar">
       <label class="tt-side tt-side-learn">
         <span>Language I'm Learning</span>
-        <select id="tt-target" class="sel" aria-label="Language I'm Learning">
+        <select id="tt-target" class="sel" aria-label="Language I'm Learning" hidden>
           <?php foreach ($langOptions as $code => $label): ?>
             <option value="<?= e($code) ?>" <?= $code === 'nl' ? 'selected' : '' ?>><?= e($flagMap[$code] ?? '') ?> <?= e($label) ?></option>
           <?php endforeach; ?>
         </select>
+        <div id="tt-target-picker"></div>
       </label>
       <div class="tt-swap-wrap">
         <button type="button" class="tt-swap" id="tt-swap" title="Swap languages" aria-label="Swap learning language with my language">
@@ -172,11 +173,12 @@ $flagMap = [
       </div>
       <label class="tt-side tt-side-mine">
         <span>My Language</span>
-        <select id="tt-source" class="sel" aria-label="My language">
+        <select id="tt-source" class="sel" aria-label="My language" hidden>
           <?php foreach ($langOptions as $code => $label): ?>
             <option value="<?= e($code) ?>" <?= $code === 'en' ? 'selected' : '' ?>><?= e($flagMap[$code] ?? '') ?> <?= e($label) ?></option>
           <?php endforeach; ?>
         </select>
+        <div id="tt-source-picker"></div>
       </label>
     </div>
 
@@ -208,9 +210,11 @@ $flagMap = [
 
             <div class="tt-actions">
               <button class="btn primary" type="button" id="tt-play">🔊 Listen</button>
+              <button class="btn" type="button" id="tt-pause" disabled>⏸ Pause</button>
               <button class="btn" type="button" id="tt-stop" disabled>⏹ Stop</button>
               <button class="btn" type="button" id="tt-replay">↻ Replay</button>
             </div>
+            <p class="voice-unavailable" id="tt-learn-voice-note" hidden>Voice pronunciation isn't currently available for this language. You can continue learning with text.</p>
             <div class="tt-voices">
               <label style="display:flex;align-items:center;gap:6px">Voice
                 <select id="tt-voice" disabled></select>
@@ -249,6 +253,7 @@ $flagMap = [
           <textarea id="tt-target-input" class="tt-input" maxlength="500" autocomplete="off" spellcheck="false" placeholder="e.g. Goedemorgen, hoe gaat het?"></textarea>
           <div class="tt-input-row">
             <span class="tt-count" id="tt-target-count">0 / 500</span>
+            <button class="btn" type="button" id="tt-target-mic">🎤 Tap to Speak</button>
             <button class="btn" type="button" id="tt-target-submit">Translate to my language</button>
           </div>
         </div>
@@ -289,6 +294,7 @@ $flagMap = [
             <div id="tt-my-note" class="dim" style="margin-top:8px;font-size:12px"></div>
             <div class="tt-actions">
               <button class="btn primary" type="button" id="tt-my-play">🔊 Listen</button>
+              <button class="btn" type="button" id="tt-my-pause" disabled>⏸ Pause</button>
               <button class="btn" type="button" id="tt-my-stop" disabled>⏹ Stop</button>
             </div>
           </div>
@@ -340,6 +346,7 @@ $flagMap = [
 </section>
 
 <script src="/assets/js/speech-provider.js"></script>
+<script src="/assets/js/language-picker.js"></script>
 <script>
 (function () {
   'use strict';
@@ -545,10 +552,13 @@ $flagMap = [
   var provider = window.windelsSpeech || (window.SpeechProvider ? new window.SpeechProvider() : null);
   var ttsNote = document.getElementById('tts-note');
   var playBtn = document.getElementById('tt-play');
+  var pauseBtn = document.getElementById('tt-pause');
   var stopBtn = document.getElementById('tt-stop');
   var replayBtn = document.getElementById('tt-replay');
   var myPlayBtn = document.getElementById('tt-my-play');
+  var myPauseBtn = document.getElementById('tt-my-pause');
   var myStopBtn = document.getElementById('tt-my-stop');
+  var learnVoiceNote = document.getElementById('tt-learn-voice-note');
   var voiceSel = document.getElementById('tt-voice');
   var rateSel = document.getElementById('tt-rate');
   var rateVal = document.getElementById('tt-rate-val');
@@ -583,12 +593,14 @@ $flagMap = [
       locale: locale,
       voice: voice,
       rate: rate,
-      onEnd: function() { playBtn.disabled = false; stopBtn.disabled = true; myStopBtn.disabled = true; },
-      onError: function() { playBtn.disabled = false; stopBtn.disabled = true; myStopBtn.disabled = true; }
+      onEnd: function() { playBtn.disabled = false; stopBtn.disabled = true; myStopBtn.disabled = true; if (pauseBtn) pauseBtn.disabled = true; if (myPauseBtn) myPauseBtn.disabled = true; },
+      onError: function() { playBtn.disabled = false; stopBtn.disabled = true; myStopBtn.disabled = true; if (pauseBtn) pauseBtn.disabled = true; if (myPauseBtn) myPauseBtn.disabled = true; }
     });
     playBtn.disabled = true;
     stopBtn.disabled = false;
     myStopBtn.disabled = false;
+    if (pauseBtn) pauseBtn.disabled = false;
+    if (myPauseBtn) myPauseBtn.disabled = false;
   }
 
   if (provider) {
@@ -602,17 +614,43 @@ $flagMap = [
       if (provider.synth) {
         provider.synth.onvoiceschanged = function(){ populateVoices(localeFor(targetSel.value)); };
       }
+      function markSpeaking(on) {
+        playBtn.disabled = on;
+        if (pauseBtn) { pauseBtn.disabled = !on; pauseBtn.textContent = '⏸ Pause'; }
+        stopBtn.disabled = !on;
+        if (myPauseBtn) myPauseBtn.disabled = !on;
+        myStopBtn.disabled = !on;
+      }
       playBtn.addEventListener('click', function () {
-        if (currentLearn && currentLearn.translation) speak(currentLearn.translation, currentLearn.targetLocale || localeFor(targetSel.value));
+        if (currentLearn && currentLearn.translation) {
+          speak(currentLearn.translation, currentLearn.targetLocale || localeFor(targetSel.value));
+          markSpeaking(true);
+        }
       });
       replayBtn.addEventListener('click', function () {
-        if (currentLearn && currentLearn.translation) speak(currentLearn.translation, currentLearn.targetLocale || localeFor(targetSel.value));
+        if (currentLearn && currentLearn.translation) {
+          speak(currentLearn.translation, currentLearn.targetLocale || localeFor(targetSel.value));
+          markSpeaking(true);
+        }
       });
       myPlayBtn.addEventListener('click', function () {
-        if (currentMy && currentMy.translation) speak(currentMy.translation, currentMy.targetLocale || localeFor(sourceSel.value));
+        if (currentMy && currentMy.translation) {
+          speak(currentMy.translation, currentMy.targetLocale || localeFor(sourceSel.value));
+          markSpeaking(true);
+        }
       });
-      stopBtn.addEventListener('click', function () { provider.stop(); playBtn.disabled = false; stopBtn.disabled = true; myStopBtn.disabled = true; });
-      myStopBtn.addEventListener('click', function () { provider.stop(); playBtn.disabled = false; stopBtn.disabled = true; myStopBtn.disabled = true; });
+      if (pauseBtn) pauseBtn.addEventListener('click', function () {
+        if (!provider) return;
+        if (provider.isPaused()) { provider.resume(); pauseBtn.textContent = '⏸ Pause'; }
+        else { provider.pause(); pauseBtn.textContent = '▶ Resume'; }
+      });
+      if (myPauseBtn) myPauseBtn.addEventListener('click', function () {
+        if (!provider) return;
+        if (provider.isPaused()) { provider.resume(); myPauseBtn.textContent = '⏸ Pause'; }
+        else { provider.pause(); myPauseBtn.textContent = '▶ Resume'; }
+      });
+      stopBtn.addEventListener('click', function () { provider.stop(); markSpeaking(false); playBtn.disabled = false; });
+      myStopBtn.addEventListener('click', function () { provider.stop(); markSpeaking(false); playBtn.disabled = false; });
       if (lessonListen) {
         lessonListen.addEventListener('click', function(){ speak(lessonAi.textContent, localeFor(targetSel.value)); });
       }
@@ -850,6 +888,43 @@ $flagMap = [
 
   recall();
   refreshChrome();
+
+  if (window.WindelsLanguagePicker) {
+    window.WindelsLanguagePicker({
+      mount: '#tt-target-picker', target: targetSel,
+      value: targetSel.value,
+      initial: { code: targetSel.value, name: langName(targetSel.value), native_name: '' },
+      placeholder: 'Search language…'
+    });
+    window.WindelsLanguagePicker({
+      mount: '#tt-source-picker', target: sourceSel,
+      value: sourceSel.value,
+      initial: { code: sourceSel.value, name: langName(sourceSel.value), native_name: '' },
+      placeholder: 'Search language…'
+    });
+  }
+
+  if (provider) {
+    provider.bindMic(document.getElementById('tt-source-mic'), input, {
+      localeFor: function () { return localeFor(sourceSel.value); },
+      onStatus: function (msg) {
+        var n = document.getElementById('stt-note');
+        if (!n) return;
+        n.style.display = msg ? 'block' : 'none';
+        n.textContent = msg || '';
+      }
+    });
+    provider.bindMic(document.getElementById('tt-target-mic'), targetInput, {
+      localeFor: function () { return localeFor(targetSel.value); },
+      onStatus: function (msg) {
+        var n = document.getElementById('stt-note');
+        if (!n) return;
+        n.style.display = msg ? 'block' : 'none';
+        n.textContent = msg || '';
+      }
+    });
+  }
+
   input.focus();
 })();
 </script>
