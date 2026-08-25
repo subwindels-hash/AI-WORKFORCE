@@ -438,5 +438,3 @@ class Auth extends MY_Controller
     private function flash(string $key, string $value): void { $this->session->set_flashdata($key, $value); }
     private function consumeFlash(string $key): ?string { $value = $this->session->flashdata($key); return is_string($value) && $value !== '' ? $value : null; }
 }
-& $value !== '' ? $value : null; }
-}

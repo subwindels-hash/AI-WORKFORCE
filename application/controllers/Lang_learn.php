@@ -29,7 +29,7 @@ class Lang_learn extends App_Controller
         $featured = $this->platform->langlearn->searchCatalog('', 80);
         $must = [];
         foreach (['nl', 'en', 'fr', 'de', 'es', 'it', 'ja'] as $code) {
-            $hit = \\Aegis\\LangLearn\\LanguageCatalog::get($code);
+            $hit = \Aegis\LangLearn\LanguageCatalog::get($code);
             if ($hit) $must[$hit['code']] = $hit;
         }
         foreach ($featured as $row) $must[$row['code']] = $row;
