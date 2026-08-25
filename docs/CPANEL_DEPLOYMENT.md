@@ -79,7 +79,57 @@ Profile pictures are stored in `assets/uploads/avatars/`. The application create
 
 No `chmod`, `chown`, or terminal command is necessary.
 
-## 6. Open the website
+## 6. Enable cPanel email / SMTP (so the system can send & receive mail)
+
+The contact form and account notifications send mail through a real mailbox on
+your own domain ("cPanel email"). To turn it on:
+
+1. In **cPanel → Email → Email Accounts**, create the mailbox you'll send from
+   (e.g. `noreply@yourdomain.com`). Note its password.
+2. In **cPanel → Email → Email Accounts → Connect Devices** (or the "Configure
+   Email Client" link), read the outgoing (SMTP) server settings. Typical cPanel:
+   * host `mail.yourdomain.com`, port `587`, crypto `TLS`
+   * or port `465`, crypto `SSL`
+3. In `.env` (File Manager), set the mail values:
+   ```ini
+   VP_SMTP_ENABLED=1
+   VP_SMTP_HOST=mail.yourdomain.com
+   VP_SMTP_PORT=587
+   VP_SMTP_CRYPTO=tls
+   VP_SMTP_USER=noreply@yourdomain.com
+   VP_SMTP_PASS=THE_EMAIL_ACCOUNT_PASSWORD
+   VP_MAIL_FROM=noreply@yourdomain.com
+   VP_MAIL_FROM_NAME=WINDELS AI WORKFORCE
+   VP_MAIL_REPLY_TO=noreply@yourdomain.com
+   ```
+   Keep `VP_MAIL_FROM` the same as `VP_SMTP_USER`: the cPanel SMTP server
+   authenticates with that user and many hosts reject a `From:` address that is
+   not a mailbox on your domain.
+4. Set the mailbox that receives contact-form submissions and the public-facing
+   contact details:
+   ```ini
+   VP_CONTACT_EMAIL=noreply@yourdomain.com
+   VP_CONTACT_PHONE=+234 800 000 0000
+   VP_CONTACT_ADDRESS=Suite 10, Example Business Plaza
+   VP_CONTACT_CITY=Abuja, Nigeria
+   VP_CONTACT_LAT=9.05785
+   VP_CONTACT_LON=7.49508
+   VP_CONTACT_MAP_ZOOM=12
+   ```
+
+When `VP_SMTP_ENABLED=1` with a reachable host, submitting the contact form
+emails a copy to `VP_CONTACT_EMAIL` and sends the sender an automatic
+confirmation. Use the **admin control centre → Test email** button to confirm the
+mailbox works end-to-end before relying on it.
+
+## 7. Verify
+
+Open `https://yourdomain.com/contact` — you should see the team photo, contact
+details, the message form, and a map (OpenStreetMap, no API key required). Send
+a test message and confirm the operator receives it and the sender gets the
+confirmation.
+
+## 8. Open the website
 
 Open `https://yourdomain.com/`. Root `.htaccess` is included for CodeIgniter routing and prevents HTTP access to `.env`, database exports, runtime, tests, and tools.
 
