@@ -1,10 +1,10 @@
 <?php
 /** Providers: manager fallback/provenance, breaker, normalizer, synthetic honesty. */
-use Aegis\CandleNormalizer;
-use Aegis\CircuitBreaker;
-use Aegis\ProviderManager;
-use Aegis\Providers\MarketDataProvider;
-use Aegis\Providers\SyntheticProvider;
+use AIWorkforce\CandleNormalizer;
+use AIWorkforce\CircuitBreaker;
+use AIWorkforce\ProviderManager;
+use AIWorkforce\Providers\MarketDataProvider;
+use AIWorkforce\Providers\SyntheticProvider;
 
 class FakeProvider implements MarketDataProvider
 {
@@ -71,27 +71,27 @@ test('circuit breaker opens and half-opens', function () {
 });
 
 test('http rejects binance-style error envelopes', function () {
-    $http = new \Aegis\Http(fn () => json_encode(['code' => -1003, 'msg' => 'Too many requests']));
+    $http = new \AIWorkforce\Http(fn () => json_encode(['code' => -1003, 'msg' => 'Too many requests']));
     assert_throws(RuntimeException::class, fn () => $http->getJson('https://example.invalid/x', 0));
-    assert_true(\Aegis\Http::isProviderErrorPayload(['code' => -1121, 'msg' => 'Invalid symbol.']));
-    assert_false(\Aegis\Http::isProviderErrorPayload([[1, '2', '3', '4', '5', '6']]));
+    assert_true(\AIWorkforce\Http::isProviderErrorPayload(['code' => -1121, 'msg' => 'Invalid symbol.']));
+    assert_false(\AIWorkforce\Http::isProviderErrorPayload([[1, '2', '3', '4', '5', '6']]));
 });
 
 test('http accepts list payloads', function () {
-    $http = new \Aegis\Http(fn () => json_encode([[1, '2', '3', '4', '5', '6']]));
+    $http = new \AIWorkforce\Http(fn () => json_encode([[1, '2', '3', '4', '5', '6']]));
     $json = $http->getJson('https://example.invalid/x', 0);
     assert_true(is_array($json) && isset($json[0][0]));
 });
 
 test('binance rejects error-object klines instead of inventing candles', function () {
-    $http = new \Aegis\Http(fn () => json_encode(['code' => -1121, 'msg' => 'Invalid symbol.']));
-    $p = new \Aegis\Providers\BinanceProvider('https://binance.test', $http);
+    $http = new \AIWorkforce\Http(fn () => json_encode(['code' => -1121, 'msg' => 'Invalid symbol.']));
+    $p = new \AIWorkforce\Providers\BinanceProvider('https://binance.test', $http);
     assert_throws(RuntimeException::class, fn () => $p->getCandles(['symbol' => 'BTCUSDT', 'timeframe' => '1h', 'limit' => 50]));
 });
 
 test('binance rejects zero bid/ask quotes', function () {
-    $http = new \Aegis\Http(fn () => json_encode(['symbol' => 'BTCUSDT', 'bidPrice' => '0', 'askPrice' => '0']));
-    $p = new \Aegis\Providers\BinanceProvider('https://binance.test', $http);
+    $http = new \AIWorkforce\Http(fn () => json_encode(['symbol' => 'BTCUSDT', 'bidPrice' => '0', 'askPrice' => '0']));
+    $p = new \AIWorkforce\Providers\BinanceProvider('https://binance.test', $http);
     assert_throws(RuntimeException::class, fn () => $p->getQuote('BTCUSDT'));
 });
 
@@ -116,8 +116,8 @@ test('frankfurter parses date-keyed time series', function () {
             '2026-08-21' => ['USD' => 1.17],
         ],
     ];
-    $http = new \Aegis\Http(fn () => json_encode($payload));
-    $p = new \Aegis\Providers\FrankfurterProvider('https://frankfurter.test', $http);
+    $http = new \AIWorkforce\Http(fn () => json_encode($payload));
+    $p = new \AIWorkforce\Providers\FrankfurterProvider('https://frankfurter.test', $http);
     $candles = $p->getCandles(['symbol' => 'EURUSD', 'timeframe' => '1d', 'limit' => 10]);
     assert_equals(2, count($candles));
     assert_equals(1.17, $candles[1]['close']);

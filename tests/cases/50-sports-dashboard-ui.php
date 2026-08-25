@@ -1,8 +1,8 @@
 <?php
-use Aegis\Persistence\AuditRepository;
-use Aegis\Sports\FeatureEngineeringEngine;
-use Aegis\Sports\PredictionEngine;
-use Aegis\Sports\SportsIntelligence;
+use AIWorkforce\Persistence\AuditRepository;
+use AIWorkforce\Sports\FeatureEngineeringEngine;
+use AIWorkforce\Sports\PredictionEngine;
+use AIWorkforce\Sports\SportsIntelligence;
 
 function fx_ui_audit(): AuditRepository
 {

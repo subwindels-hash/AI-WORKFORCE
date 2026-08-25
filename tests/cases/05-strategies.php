@@ -1,11 +1,11 @@
 <?php
 /** Strategies + SeriesView look-ahead protection. */
-use Aegis\Strategies\BreakoutStrategy;
-use Aegis\Strategies\LookAheadError;
-use Aegis\Strategies\MeanReversionStrategy;
-use Aegis\Strategies\MomentumStrategy;
-use Aegis\Strategies\SeriesView;
-use Aegis\Strategies\TrendFollowingStrategy;
+use AIWorkforce\Strategies\BreakoutStrategy;
+use AIWorkforce\Strategies\LookAheadError;
+use AIWorkforce\Strategies\MeanReversionStrategy;
+use AIWorkforce\Strategies\MomentumStrategy;
+use AIWorkforce\Strategies\SeriesView;
+use AIWorkforce\Strategies\TrendFollowingStrategy;
 
 test('series view throws on future access', function () {
     $view = new SeriesView(fx_candles(100), SeriesView::precompute(fx_candles(100)), 60, ['symbol' => 'T', 'timeframe' => '1h', 'marketClass' => 'crypto']);
@@ -18,7 +18,7 @@ test('series view throws on future access', function () {
 test('series view indicators are causal (equal to fresh prefix computation)', function () {
     $candles = fx_candles(120);
     $view = new SeriesView($candles, SeriesView::precompute($candles), 100, ['symbol' => 'T', 'timeframe' => '1h', 'marketClass' => 'crypto']);
-    $fresh = \Aegis\Indicators::ema(array_map(fn($c) => $c['close'], array_slice($candles, 0, 101)), 20);
+    $fresh = \AIWorkforce\Indicators::ema(array_map(fn($c) => $c['close'], array_slice($candles, 0, 101)), 20);
     assert_close($fresh[100], $view->ema20(100), 1e-9);
 });
 

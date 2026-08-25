@@ -1,5 +1,5 @@
--- AEGIS — canonical MySQL / MariaDB schema (Phase 3 scope)
--- Install: php tools/install.php  (with AEGIS_DB_* env vars set)
+-- AI_WORKFORCE — canonical MySQL / MariaDB schema (Phase 3 scope)
+-- Install: php tools/install.php  (with AI_WORKFORCE_DB_* env vars set)
 -- Notes: JSON documents are stored as LONGTEXT for MySQL 5.7 / MariaDB 10.x
 -- portability; monetary values use DECIMAL(18,8) to cover crypto units.
 

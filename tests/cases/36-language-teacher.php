@@ -35,7 +35,7 @@ test('lesson: teaches from the bank, then practice completes the module', functi
     // correct answers: completes the module, unlocks the next, records kind=lesson
     $lesson2 = $t->langteacher->startLesson($modules[0]['id'], $ctx['userId']);
     $good = [];
-    foreach ($lesson2['lesson']['practiceItems'] as $item) $good[$item['id']] = \Aegis\LangLearn\ItemBanks::find('nl', $item['id'])['answer'];
+    foreach ($lesson2['lesson']['practiceItems'] as $item) $good[$item['id']] = \AIWorkforce\LangLearn\ItemBanks::find('nl', $item['id'])['answer'];
     $res2 = $t->langteacher->submitLesson($modules[0]['id'], $ctx['userId'], $good);
     assert_true($res2['passed']);
     $after = $t->langlearn->pathFor($ctx['userId'], (int) $ctx['profile']['id'])['modules'];
@@ -153,7 +153,7 @@ test('grammar: rules from the bank + deterministic simpler explanation', functio
     assert_contains('Remember:', $simple['simple']['rule']);
     assert_contains('→', $simple['simple']['correctExample']);
     // non-grammar id refused
-    $vocab = \Aegis\LangLearn\ItemBanks::items('pt');
+    $vocab = \AIWorkforce\LangLearn\ItemBanks::items('pt');
     $vocabId = null;
     foreach ($vocab as $i) if ($i['skill'] === 'vocabulary') $vocabId = $i['id'];
     assert_throws(RuntimeException::class, fn() => $t->langteacher->explainSimply($ctx['userId'], (int) $ctx['profile']['id'], $vocabId));
@@ -161,10 +161,10 @@ test('grammar: rules from the bank + deterministic simpler explanation', functio
 
 test('every language with a bank gets teacher features or an honest refusal', function () {
     $t = platform();
-    foreach (\Aegis\LangLearn\LanguageRegistry::all() as $code => $lang) {
+    foreach (\AIWorkforce\LangLearn\LanguageRegistry::all() as $code => $lang) {
         if ($code === 'xx') continue; // test-registered language
-        $tasks = \Aegis\LangLearn\TeacherContent::writingTasks($code);
-        $convos = \Aegis\LangLearn\TeacherContent::conversations($code);
+        $tasks = \AIWorkforce\LangLearn\TeacherContent::writingTasks($code);
+        $convos = \AIWorkforce\LangLearn\TeacherContent::conversations($code);
         assert_true(count($tasks) >= 2, "{$code} has writing tasks");
         assert_true(count($convos) >= 1, "{$code} has at least the first-meeting drill");
         assert_true(count($lang['features'] ?? []) > 0);

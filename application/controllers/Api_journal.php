@@ -1,7 +1,7 @@
 <?php
 defined('BASEPATH') or exit('No direct script access allowed');
 
-use Aegis\Journal\Analytics;
+use AIWorkforce\Journal\Analytics;
 
 class Api_journal extends Api_controller
 {
@@ -41,7 +41,7 @@ class Api_journal extends Api_controller
             ? $pnl / (abs($entryPrice - $stop) * $size) : null;
 
         $entry = [
-            'id' => \Aegis\Backtest\Backtester::uuid(),
+            'id' => \AIWorkforce\Backtest\Backtester::uuid(),
             'source' => 'manual',
             'symbol' => strtoupper((string)$body['symbol']),
             'market' => (string)($body['market'] ?? 'forex'),

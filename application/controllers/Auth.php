@@ -61,17 +61,17 @@ class Auth extends MY_Controller
             redirect('/register');
             return;
         }
-        if ($this->Aegis_model->identity->findUserByEmail($email)) {
+        if ($this->AIWorkforce_model->identity->findUserByEmail($email)) {
             $this->flash('error', 'An account with that email already exists. Sign in instead.');
             redirect('/login');
             return;
         }
-        if ($this->Aegis_model->identity->usernameTaken($username)) {
+        if ($this->AIWorkforce_model->identity->usernameTaken($username)) {
             $this->flash('error', 'That username is already taken. Try a different one.');
             redirect('/register');
             return;
         }
-        $portal = new \Aegis\AdminPortal($this->Aegis_model);
+        $portal = new \AIWorkforce\AdminPortal($this->AIWorkforce_model);
         $portal->ensureSchema();
         if ($portal->setting('registration_enabled', '1') !== '1') {
             $this->flash('error', 'New account registration is currently closed.');
@@ -79,9 +79,9 @@ class Auth extends MY_Controller
             return;
         }
         try {
-            \Aegis\IdentitySchema::ensure($this->db);
+            \AIWorkforce\IdentitySchema::ensure($this->db);
             $now = gmdate('c');
-            $new = $this->Aegis_model->identity->createUser([
+            $new = $this->AIWorkforce_model->identity->createUser([
                 'username' => $username,
                 'email' => $email,
                 'password_hash' => password_hash($password, PASSWORD_DEFAULT),
@@ -97,13 +97,13 @@ class Auth extends MY_Controller
                 redirect('/register');
                 return;
             }
-            $role = $this->Aegis_model->identity->ensureRole('platform_member', 'Platform member');
+            $role = $this->AIWorkforce_model->identity->ensureRole('platform_member', 'Platform member');
             foreach (['trading.view', 'sports.view', 'lottery.view'] as $code) {
-                $pid = $this->Aegis_model->identity->ensurePermission($code, $code);
-                $this->Aegis_model->identity->grantRolePermission($role, $pid);
+                $pid = $this->AIWorkforce_model->identity->ensurePermission($code, $code);
+                $this->AIWorkforce_model->identity->grantRolePermission($role, $pid);
             }
-            $this->Aegis_model->identity->assignRole((int) $new['id'], $role);
-            $this->Aegis_model->audit->emit('USER_REGISTERED', 'A visitor created a platform member account', ['userId' => (int) $new['id'], 'userUid' => (string) ($new['user_uid'] ?? '')], 'visitor');
+            $this->AIWorkforce_model->identity->assignRole((int) $new['id'], $role);
+            $this->AIWorkforce_model->audit->emit('USER_REGISTERED', 'A visitor created a platform member account', ['userId' => (int) $new['id'], 'userUid' => (string) ($new['user_uid'] ?? '')], 'visitor');
             $portal->notifyAdmins('USER_REGISTERED', 'info', 'New user registration: ' . ($new['username'] ?? $email), [
                 'userUid' => (string) ($new['user_uid'] ?? ''),
                 'username' => (string) ($new['username'] ?? ''),
@@ -158,7 +158,7 @@ class Auth extends MY_Controller
         $remember = $this->input->post('remember') === '1';
         $attempts = (int) $this->session->userdata('login_attempts');
         $until = (int) $this->session->userdata('login_locked_until');
-        $portal = new \Aegis\AdminPortal($this->Aegis_model);
+        $portal = new \AIWorkforce\AdminPortal($this->AIWorkforce_model);
         $portal->ensureSchema();
         $maxAttempts = max(3, min(20, (int) $portal->setting('login_max_attempts', '5')));
         $lockSeconds = max(60, min(86400, (int) $portal->setting('login_lockout_seconds', '900')));
@@ -233,14 +233,14 @@ class Auth extends MY_Controller
             redirect('/account'); return;
         }
         try {
-            \Aegis\IdentitySchema::ensure($this->db);
-            if ($this->Aegis_model->identity->usernameTaken($username, (int) $user['id'])) {
+            \AIWorkforce\IdentitySchema::ensure($this->db);
+            if ($this->AIWorkforce_model->identity->usernameTaken($username, (int) $user['id'])) {
                 $this->flash('error', 'That username is already in use by another account.');
                 redirect('/account'); return;
             }
             $originalUid = (string) ($user['user_uid'] ?? '');
-            $this->Aegis_model->identity->updateUser((int) $user['id'], ['username' => $username, 'display_name' => $username]);
-            $fresh = $this->Aegis_model->identity->findUserById((int) $user['id']);
+            $this->AIWorkforce_model->identity->updateUser((int) $user['id'], ['username' => $username, 'display_name' => $username]);
+            $fresh = $this->AIWorkforce_model->identity->findUserById((int) $user['id']);
             if (!$fresh || strtolower((string) ($fresh['username'] ?? '')) !== $username) {
                 log_message('error', 'update_username: persisted username mismatch for user ' . (int) $user['id']);
                 $this->flash('error', 'Your username could not be saved. Please try again.');
@@ -249,7 +249,7 @@ class Auth extends MY_Controller
             if ($originalUid !== '' && (string) ($fresh['user_uid'] ?? '') !== $originalUid) {
                 log_message('error', 'update_username: User ID changed unexpectedly for user ' . (int) $user['id']);
             }
-            $this->Aegis_model->audit->emit('USER_UPDATED', 'User changed their username', ['userId' => (int) $user['id']], (string) $user['id']);
+            $this->AIWorkforce_model->audit->emit('USER_UPDATED', 'User changed their username', ['userId' => (int) $user['id']], (string) $user['id']);
             $this->reestablishIdentity((int) $user['id']);
             $this->flash('notice', '✓ Changes saved successfully');
         } catch (Throwable $e) {
@@ -269,12 +269,12 @@ class Auth extends MY_Controller
             $this->flash('error', 'Enter a valid email address.');
             redirect('/account'); return;
         }
-        if ($this->Aegis_model->identity->emailTaken($email, (int) $user['id'])) {
+        if ($this->AIWorkforce_model->identity->emailTaken($email, (int) $user['id'])) {
             $this->flash('error', 'That email address is already attached to another account.');
             redirect('/account'); return;
         }
-        $this->Aegis_model->identity->updateUser((int) $user['id'], ['email' => $email]);
-        $this->Aegis_model->audit->emit('USER_UPDATED', 'User changed their email address', ['userId' => (int) $user['id']], (string) $user['id']);
+        $this->AIWorkforce_model->identity->updateUser((int) $user['id'], ['email' => $email]);
+        $this->AIWorkforce_model->audit->emit('USER_UPDATED', 'User changed their email address', ['userId' => (int) $user['id']], (string) $user['id']);
         $this->reestablishIdentity((int) $user['id']);
         $this->flash('notice', 'Your email address has been updated.');
         redirect('/account');
@@ -288,7 +288,7 @@ class Auth extends MY_Controller
         $current = (string) $this->input->post('current_password');
         $password = (string) $this->input->post('new_password');
         $confirm = (string) $this->input->post('new_password_confirm');
-        $stored = $this->Aegis_model->identity->findUserById((int) $user['id']);
+        $stored = $this->AIWorkforce_model->identity->findUserById((int) $user['id']);
         if (!$stored || !password_verify($current, $stored['password_hash'])) {
             $this->flash('error', 'Your current password is not correct.');
             redirect('/account#security'); return;
@@ -296,15 +296,15 @@ class Auth extends MY_Controller
         if (strlen($password) < 12) { $this->flash('error', 'Your new password must be at least 12 characters.'); redirect('/account#security'); return; }
         if ($password !== $confirm) { $this->flash('error', 'The two new passwords do not match.'); redirect('/account#security'); return; }
         try {
-            \Aegis\IdentitySchema::ensure($this->db);
-            $this->Aegis_model->identity->updateUser((int) $user['id'], ['password_hash' => password_hash($password, PASSWORD_DEFAULT)]);
-            $fresh = $this->Aegis_model->identity->findUserById((int) $user['id']);
+            \AIWorkforce\IdentitySchema::ensure($this->db);
+            $this->AIWorkforce_model->identity->updateUser((int) $user['id'], ['password_hash' => password_hash($password, PASSWORD_DEFAULT)]);
+            $fresh = $this->AIWorkforce_model->identity->findUserById((int) $user['id']);
             if (!$fresh || !password_verify($password, (string) ($fresh['password_hash'] ?? ''))) {
                 log_message('error', 'change_password: persisted password mismatch for user ' . (int) $user['id']);
                 $this->flash('error', 'Unable to save your changes. Please try again.');
                 redirect('/account#security'); return;
             }
-            $this->Aegis_model->audit->emit('PASSWORD_CHANGED', 'User changed their password', ['userId' => (int) $user['id']], (string) $user['id']);
+            $this->AIWorkforce_model->audit->emit('PASSWORD_CHANGED', 'User changed their password', ['userId' => (int) $user['id']], (string) $user['id']);
             $this->reestablishIdentity((int) $user['id']);
             $this->flash('notice', '✓ Changes saved successfully');
         } catch (Throwable $e) {
@@ -320,26 +320,26 @@ class Auth extends MY_Controller
         $user = $this->requireLogin();
         if (!$this->validAuthCsrf()) { $this->flash('error', 'Your session expired. Please try again.'); redirect('/account#profile'); return; }
         try {
-            \Aegis\IdentitySchema::ensure($this->db);
-            $stored = \Aegis\ProfileImage::store(is_array($_FILES['avatar'] ?? null) ? $_FILES['avatar'] : [], (int) $user['id']);
+            \AIWorkforce\IdentitySchema::ensure($this->db);
+            $stored = \AIWorkforce\ProfileImage::store(is_array($_FILES['avatar'] ?? null) ? $_FILES['avatar'] : [], (int) $user['id']);
             if (empty($stored['ok'])) {
                 $this->flash('error', (string) ($stored['error'] ?? 'The profile picture could not be uploaded. Please use a JPG, PNG or WebP image under the allowed file size.'));
                 redirect('/account#profile'); return;
             }
             $path = (string) $stored['path'];
             $previous = (string) ($user['profile_image'] ?? '');
-            $this->Aegis_model->identity->updateUser((int) $user['id'], ['profile_image' => $path]);
-            $fresh = $this->Aegis_model->identity->findUserById((int) $user['id']);
+            $this->AIWorkforce_model->identity->updateUser((int) $user['id'], ['profile_image' => $path]);
+            $fresh = $this->AIWorkforce_model->identity->findUserById((int) $user['id']);
             if (!$fresh || (string) ($fresh['profile_image'] ?? '') !== $path) {
-                \Aegis\ProfileImage::deletePublicPath($path);
+                \AIWorkforce\ProfileImage::deletePublicPath($path);
                 log_message('error', 'upload_avatar: database path was not saved for user ' . (int) $user['id']);
                 $this->flash('error', 'Unable to save your changes. Please try again.');
                 redirect('/account#profile'); return;
             }
             if ($previous !== '' && $previous !== $path) {
-                \Aegis\ProfileImage::deletePublicPath($previous);
+                \AIWorkforce\ProfileImage::deletePublicPath($previous);
             }
-            $this->Aegis_model->audit->emit('USER_UPDATED', 'User changed their profile image', ['userId' => (int) $user['id']], (string) $user['id']);
+            $this->AIWorkforce_model->audit->emit('USER_UPDATED', 'User changed their profile image', ['userId' => (int) $user['id']], (string) $user['id']);
             $this->reestablishIdentity((int) $user['id']);
             $this->flash('notice', '✓ Changes saved successfully');
         } catch (Throwable $e) {
@@ -355,10 +355,10 @@ class Auth extends MY_Controller
         $user = $this->requireLogin();
         if (!$this->validAuthCsrf()) { $this->flash('error', 'Your session expired. Please try again.'); redirect('/account'); return; }
         try {
-            \Aegis\IdentitySchema::ensure($this->db);
+            \AIWorkforce\IdentitySchema::ensure($this->db);
             $previous = (string) ($user['profile_image'] ?? '');
-            $this->Aegis_model->identity->updateUser((int) $user['id'], ['profile_image' => null]);
-            \Aegis\ProfileImage::deletePublicPath($previous);
+            $this->AIWorkforce_model->identity->updateUser((int) $user['id'], ['profile_image' => null]);
+            \AIWorkforce\ProfileImage::deletePublicPath($previous);
             $this->reestablishIdentity((int) $user['id']);
             $this->flash('notice', '✓ Changes saved successfully');
         } catch (Throwable $e) {
@@ -371,9 +371,9 @@ class Auth extends MY_Controller
     /** Reload the signed-in user from the DB and refresh the session identity. */
     private function reestablishIdentity(int $userId): void
     {
-        $fresh = $this->Aegis_model->identity->findUserById($userId);
+        $fresh = $this->AIWorkforce_model->identity->findUserById($userId);
         if (!$fresh) return;
-        $fresh['permissions'] = $this->Aegis_model->identity->permissionsForUser($userId);
+        $fresh['permissions'] = $this->AIWorkforce_model->identity->permissionsForUser($userId);
         unset($fresh['password_hash']);
         try { $this->session->sess_regenerate(true); }
         catch (Throwable $e) { log_message('error', 'session regenerate failed: ' . $e->getMessage()); }

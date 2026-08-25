@@ -20,7 +20,7 @@ application/logs/*.log
 __pycache__/
 *.pyc
 .pytest_cache/
-runtime/sessions/aegis_session*
+runtime/sessions/ai_workforce_session*
 
 assets/uploads/avatars/*
 !assets/uploads/avatars/.gitkeep

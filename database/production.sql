@@ -1,4 +1,4 @@
--- AEGIS Portable cPanel production database.
+-- AI_WORKFORCE Portable cPanel production database.
 -- Import this single file into a new MySQL/MariaDB database through phpMyAdmin.
 -- This file contains the complete production schema, indexes, foreign keys,
 -- lookup data, default settings, RBAC and a documented initial administrator.
@@ -10,7 +10,7 @@ SET FOREIGN_KEY_CHECKS=0;
 -- =====================================================================
 -- application/database/schema.mysql.sql (canonical production schema)
 -- =====================================================================
--- AEGIS — canonical MySQL / MariaDB schema (Phase 3 scope)
+-- AI_WORKFORCE — canonical MySQL / MariaDB schema (Phase 3 scope)
 -- Notes: JSON documents are stored as LONGTEXT for MySQL 5.7 / MariaDB 10.x
 -- portability; monetary values use DECIMAL(18,8) to cover crypto units.
 

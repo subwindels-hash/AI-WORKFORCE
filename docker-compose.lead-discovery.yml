@@ -1,5 +1,5 @@
 # Independent Scout Lead Discovery infrastructure.
-# The root docker-compose.yml remains the legacy AEGIS trading stack.
+# The root docker-compose.yml remains the legacy AI_WORKFORCE trading stack.
 services:
   lead-postgres:
     image: postgres:16-alpine

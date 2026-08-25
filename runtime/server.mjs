@@ -1,5 +1,5 @@
 /**
- * AEGIS — offline dev runtime bridge (NOT part of the production stack).
+ * AI_WORKFORCE — offline dev runtime bridge (NOT part of the production stack).
  *
  * The repository is a standard CodeIgniter 3 application targeting PHP 8.x +
  * MySQL/MariaDB. This sandbox cannot run a native PHP process or a MySQL
@@ -51,11 +51,11 @@ async function bootstrapDemoOperator() {
     await php.run({
       code: `<?php
 chdir('/home/user/Africa-Mobility');
-putenv('AEGIS_DB_DRIVER=pdo_sqlite');
-putenv('AEGIS_SQLITE_PATH=/home/user/Africa-Mobility/application/data/aegis.sqlite');
-putenv('AEGIS_BOOTSTRAP_ADMIN_EMAIL=demo-operator@aegis.local');
-putenv('AEGIS_BOOTSTRAP_ADMIN_PASSWORD=demo-only-long-password-123456');
-putenv('AEGIS_BOOTSTRAP_ADMIN_NAME=Demo Operator (dev bridge)');
+putenv('AI_WORKFORCE_DB_DRIVER=pdo_sqlite');
+putenv('AI_WORKFORCE_SQLITE_PATH=/home/user/Africa-Mobility/application/data/ai_workforce.sqlite');
+putenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_EMAIL=demo-operator@aiworkforce.local');
+putenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_PASSWORD=demo-only-long-password-123456');
+putenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_NAME=Demo Operator (dev bridge)');
 define('STDIN', fopen('php://stdin', 'r'));
 define('STDOUT', fopen('php://stdout', 'w'));
 define('STDERR', fopen('php://stderr', 'w'));
@@ -66,7 +66,7 @@ require '/home/user/Africa-Mobility/index.php';
 `,
     });
   } catch (e) {
-    console.error('[aegis] demo operator bootstrap failed:', e?.message ?? e);
+    console.error('[ai_workforce] demo operator bootstrap failed:', e?.message ?? e);
   }
 }
 
@@ -76,14 +76,14 @@ async function installSchema() {
   const result = await php.run({
     code: `<?php
 chdir('${root}');
-putenv('AEGIS_DB_DRIVER=pdo_sqlite');
-putenv('AEGIS_SESSION_DRIVER=database'); // per-request instances share the DB, not the FS session files
-putenv('AEGIS_SQLITE_PATH=${root}/application/data/aegis.sqlite');
-define('AEGIS_NO_EXIT', true);
+putenv('AI_WORKFORCE_DB_DRIVER=pdo_sqlite');
+putenv('AI_WORKFORCE_SESSION_DRIVER=database'); // per-request instances share the DB, not the FS session files
+putenv('AI_WORKFORCE_SQLITE_PATH=${root}/application/data/ai_workforce.sqlite');
+define('AI_WORKFORCE_NO_EXIT', true);
 require '${root}/tools/install.php';
 `,
   }).catch((e) => ({ text: 'INSTALL FAILED: ' + e.message }));
-  console.log('[aegis] schema:', result.text.trim().split('\n').slice(-2).join(' | '));
+  console.log('[ai_workforce] schema:', result.text.trim().split('\n').slice(-2).join(' | '));
 }
 
 const server = http.createServer(async (req, res) => {
@@ -121,29 +121,29 @@ const server = http.createServer(async (req, res) => {
     const response = await handler.request({
       method: req.method,
       // Front-controller pattern: always run index.php; the original request
-      // target travels in X-Aegis-Orig-Uri (the fastcgi-param pattern).
+      // target travels in X-AI-Workforce-Orig-Uri (the fastcgi-param pattern).
       url: '/index.php',
       headers: {
         ...req.headers,
         host: req.headers.host ?? `127.0.0.1:${PORT}`,
-        'x-aegis-orig-uri': req.url ?? '/',
+        'x-ai-workforce-orig-uri': req.url ?? '/',
         // php-wasm's request handler blanks the CGI HTTP_COOKIE value, so the
         // dev bridge carries the raw Cookie header here; index.php restores it.
-        'x-aegis-cookie': req.headers.cookie ?? '',
+        'x-ai-workforce-cookie': req.headers.cookie ?? '',
       },
       body: body.length ? body : undefined,
     });
     if (response.httpStatusCode >= 400) {
-      console.error('[aegis]', req.method, req.url, '->', response.httpStatusCode,
+      console.error('[ai_workforce]', req.method, req.url, '->', response.httpStatusCode,
         '| php errors:', (response.errors || '').slice(0, 400) || '(none)',
         '| body:', Buffer.from(response.bytes ?? []).toString().slice(0, 300));
     }
     res.writeHead(response.httpStatusCode, response.headers);
     res.end(Buffer.from(response.bytes));
   } catch (err) {
-    console.error('[aegis] request failed:', err?.message ?? err);
+    console.error('[ai_workforce] request failed:', err?.message ?? err);
     res.writeHead(500, { 'content-type': 'text/plain' });
-    res.end('AEGIS runtime error: ' + (err?.message ?? err));
+    res.end('AI_WORKFORCE runtime error: ' + (err?.message ?? err));
   }
 });
 
@@ -161,10 +161,10 @@ startSimBridgeMonitor();
  *   - the PHP connector surfaces that flag in its status
  *   - Broker Center / Execution Center show a SIMULATION banner
  * It is enabled by a marker file (application/data/mt5-demo.json) that the
- * front controller translates into AEGIS_MT5_* env vars — and only inside
- * this dev bridge (X-Aegis-Orig-Uri context). Production never reads it.
+ * front controller translates into AI_WORKFORCE_MT5_* env vars — and only inside
+ * this dev bridge (X-AIWorkforce-Orig-Uri context). Production never reads it.
  * ------------------------------------------------------------------------ */
-const SIM_PORT = Number(process.env.AEGIS_SIM_BRIDGE_PORT ?? 8790);
+const SIM_PORT = Number(process.env.AI_WORKFORCE_SIM_BRIDGE_PORT ?? 8790);
 const SIM_MARKER = path.join(APP_ROOT, 'application/data/mt5-demo.json');
 let simServer = null;
 let sim = null;
@@ -210,13 +210,13 @@ function startSimBridgeMonitor() {
       sim = simFreshState();
       simServer = http.createServer(simHandler);
       simServer.listen(SIM_PORT, '127.0.0.1', () =>
-        console.log(`[aegis] SIMULATED MT5 bridge (demo) listening on 127.0.0.1:${SIM_PORT}`)
+        console.log(`[ai_workforce] SIMULATED MT5 bridge (demo) listening on 127.0.0.1:${SIM_PORT}`)
       );
     } else if (!active && simServer) {
       simServer.close();
       simServer = null;
       sim = null;
-      console.log('[aegis] simulated MT5 bridge stopped');
+      console.log('[ai_workforce] simulated MT5 bridge stopped');
     }
   }, 1000).unref();
 }
@@ -374,5 +374,5 @@ function readBody(req) {
 
 await bootstrapDemoOperator();
 server.listen(PORT, HOST, () => {
-  console.log(`[aegis] CodeIgniter 3 app serving on http://${HOST}:${PORT} (WASM PHP ${PHP_VERSION}, sqlite dev driver)`);
+  console.log(`[ai_workforce] CodeIgniter 3 app serving on http://${HOST}:${PORT} (WASM PHP ${PHP_VERSION}, sqlite dev driver)`);
 });

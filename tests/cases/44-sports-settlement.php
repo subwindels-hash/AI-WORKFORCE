@@ -1,7 +1,7 @@
 <?php
-use Aegis\Persistence\AuditRepository;
-use Aegis\Sports\ResultVerificationEngine;
-use Aegis\Sports\TicketSettlementService;
+use AIWorkforce\Persistence\AuditRepository;
+use AIWorkforce\Sports\ResultVerificationEngine;
+use AIWorkforce\Sports\TicketSettlementService;
 
 function fx_settle_audit(): AuditRepository
 {

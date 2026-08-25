@@ -11,14 +11,14 @@ class Tools extends MY_Controller
     public function __construct()
     {
         parent::__construct();
-        if (!is_cli() && getenv('AEGIS_ALLOW_HTTP_TOOLS') !== '1') {
+        if (!is_cli() && getenv('AI_WORKFORCE_ALLOW_HTTP_TOOLS') !== '1') {
             show_404();
         }
     }
 
     public function index()
     {
-        echo "AEGIS tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n  php index.php tools cron              — scheduled operations: portfolio risk scan, broker transitions, proposal expiry\n  php index.php tools sports-cron [job] — sports scheduled jobs (fixtures|odds|results|quality|ticket|settlement|performance|monitoring|cleanup)\n  php index.php tools lottery-cron [job] — lottery scheduled jobs (sync|health|statistics|systems|tickets|backtests|cleanup)\n";
+        echo "AI Workforce tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n  php index.php tools cron              — scheduled operations: portfolio risk scan, broker transitions, proposal expiry\n  php index.php tools sports-cron [job] — sports scheduled jobs (fixtures|odds|results|quality|ticket|settlement|performance|monitoring|cleanup)\n  php index.php tools lottery-cron [job] — lottery scheduled jobs (sync|health|statistics|systems|tickets|backtests|cleanup)\n";
     }
 
     public function install()
@@ -67,28 +67,28 @@ class Tools extends MY_Controller
     /** CLI only: creates the initial super-admin from environment values. */
     public function bootstrap_admin()
     {
-        $email = strtolower(trim((string) getenv('AEGIS_BOOTSTRAP_ADMIN_EMAIL')));
-        $password = (string) getenv('AEGIS_BOOTSTRAP_ADMIN_PASSWORD');
-        $name = trim((string) (getenv('AEGIS_BOOTSTRAP_ADMIN_NAME') ?: 'Platform Administrator'));
+        $email = strtolower(trim((string) getenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_EMAIL')));
+        $password = (string) getenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_PASSWORD');
+        $name = trim((string) (getenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_NAME') ?: 'Platform Administrator'));
         if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 14) {
-            fwrite(STDERR, "Set AEGIS_BOOTSTRAP_ADMIN_EMAIL and a 14+ character AEGIS_BOOTSTRAP_ADMIN_PASSWORD.\n"); return;
+            fwrite(STDERR, "Set AI_WORKFORCE_BOOTSTRAP_ADMIN_EMAIL and a 14+ character AI_WORKFORCE_BOOTSTRAP_ADMIN_PASSWORD.\n"); return;
         }
         $this->seedAccessControls();
-        $user = $this->Aegis_model->identity->findUserByEmail($email);
+        $user = $this->AIWorkforce_model->identity->findUserByEmail($email);
         if ($user) { echo "Admin already exists; no change made.\n"; return; }
         $now = gmdate('c');
-        $user = $this->Aegis_model->identity->createUser(['email' => $email, 'password_hash' => password_hash($password, PASSWORD_DEFAULT), 'display_name' => $name, 'active' => 1, 'created_at' => $now, 'updated_at' => $now, 'last_login_at' => null]);
-        $role = $this->Aegis_model->identity->ensureRole('super_admin', 'Super administrator');
-        $this->Aegis_model->identity->assignRole((int) $user['id'], $role);
-        $this->Aegis_model->audit->emit('ADMIN_BOOTSTRAPPED', 'Initial super administrator created', ['userId' => $user['id']], 'system');
+        $user = $this->AIWorkforce_model->identity->createUser(['email' => $email, 'password_hash' => password_hash($password, PASSWORD_DEFAULT), 'display_name' => $name, 'active' => 1, 'created_at' => $now, 'updated_at' => $now, 'last_login_at' => null]);
+        $role = $this->AIWorkforce_model->identity->ensureRole('super_admin', 'Super administrator');
+        $this->AIWorkforce_model->identity->assignRole((int) $user['id'], $role);
+        $this->AIWorkforce_model->audit->emit('ADMIN_BOOTSTRAPPED', 'Initial super administrator created', ['userId' => $user['id']], 'system');
         echo "Admin created. Remove bootstrap environment variables now.\n";
     }
 
     private function seedAccessControls(): void
     {
         require_once __DIR__ . '/../../tools/rbac.php';
-        $identity = $this->Aegis_model->identity;
-        aegis_seed_rbac(
+        $identity = $this->AIWorkforce_model->identity;
+        ai_workforce_seed_rbac(
             fn(string $code, string $name): int => $identity->ensureRole($code, $name),
             fn(string $code, string $name): int => $identity->ensurePermission($code, $name),
             fn(int $roleId, int $permissionId): bool => (bool) $identity->grantRolePermission($roleId, $permissionId)
@@ -97,7 +97,7 @@ class Tools extends MY_Controller
 
     /**
      * Scheduled operations worker — safe to run every minute from cron:
-     *   * * * * * php /path/to/index.php tools cron >> /var/log/aegis-cron.log 2>&1
+     *   * * * * * php /path/to/index.php tools cron >> /var/log/ai_workforce-cron.log 2>&1
      * Portfolio risk scan (with broker READY/DOWN transition detection and
      * operator notifications) plus stale-proposal expiry (spec §5).
      */
@@ -112,7 +112,7 @@ class Tools extends MY_Controller
             'proposalsExpired' => count($expired),
             'expiredIds' => $expired,
         ];
-        $this->Aegis_model->audit->emit('CRON_RUN', sprintf(
+        $this->AIWorkforce_model->audit->emit('CRON_RUN', sprintf(
             'Scheduled operations: %d account(s) scanned, %d risk alert(s) active, %d proposal(s) expired',
             $summary['accountsScanned'], $summary['riskAlerts'], $summary['proposalsExpired']
         ), $summary, 'system');
@@ -129,10 +129,10 @@ class Tools extends MY_Controller
     public function sports_cron()
     {
         $job = trim((string) ($_SERVER['argv'][3] ?? ''));
-        $service = new \Aegis\Sports\SportsCronService($this->Aegis_model->sports, $this->Aegis_model->audit, $this->platform->sports);
+        $service = new \AIWorkforce\Sports\SportsCronService($this->AIWorkforce_model->sports, $this->AIWorkforce_model->audit, $this->platform->sports);
         if ($job !== '') {
-            if (!in_array($job, \Aegis\Sports\SportsCronService::JOBS, true)) {
-                fwrite(STDERR, 'unknown job. Valid: ' . implode(', ', \Aegis\Sports\SportsCronService::JOBS) . "\n");
+            if (!in_array($job, \AIWorkforce\Sports\SportsCronService::JOBS, true)) {
+                fwrite(STDERR, 'unknown job. Valid: ' . implode(', ', \AIWorkforce\Sports\SportsCronService::JOBS) . "\n");
                 exit(1);
             }
             $summary = $service->run($job);
@@ -150,10 +150,10 @@ class Tools extends MY_Controller
     public function lottery_cron()
     {
         $job = trim((string) ($_SERVER['argv'][3] ?? ''));
-        $service = new \Aegis\Lottery\LotteryCronService($this->Aegis_model->lottery, $this->Aegis_model->audit, $this->platform->lottery);
+        $service = new \AIWorkforce\Lottery\LotteryCronService($this->AIWorkforce_model->lottery, $this->AIWorkforce_model->audit, $this->platform->lottery);
         if ($job !== '') {
-            if (!in_array($job, \Aegis\Lottery\LotteryCronService::JOBS, true)) {
-                fwrite(STDERR, 'unknown job. Valid: ' . implode(', ', \Aegis\Lottery\LotteryCronService::JOBS) . "\n");
+            if (!in_array($job, \AIWorkforce\Lottery\LotteryCronService::JOBS, true)) {
+                fwrite(STDERR, 'unknown job. Valid: ' . implode(', ', \AIWorkforce\Lottery\LotteryCronService::JOBS) . "\n");
                 exit(1);
             }
             $summary = $service->run($job);
@@ -178,7 +178,7 @@ class Tools extends MY_Controller
             @ob_end_flush();
         }
         echo "TESTS-RESULT: {$failures}\n";
-        if (PHP_SAPI === 'cli' && !defined('AEGIS_NO_EXIT')) {
+        if (PHP_SAPI === 'cli' && !defined('AI_WORKFORCE_NO_EXIT')) {
             exit($failures > 0 ? 1 : 0);
         }
     }

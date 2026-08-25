@@ -4,9 +4,9 @@
  * end-to-end wiring. Routes + RBAC + honest feature matrix, real
  * persistence round trip, idempotent cron, provider health.
  */
-use Aegis\Lottery\LotteryCronService;
-use Aegis\Lottery\LotteryIntelligence;
-use Aegis\Lottery\SandboxLotteryProvider;
+use AIWorkforce\Lottery\LotteryCronService;
+use AIWorkforce\Lottery\LotteryIntelligence;
+use AIWorkforce\Lottery\SandboxLotteryProvider;
 
 test('lottery api: routes, RBAC matrix and honest feature matrix', function () {
     $routes = file_get_contents(FCPATH . 'application/config/routes.php');
@@ -95,7 +95,7 @@ test('lottery db: end-to-end import, stats and idempotent cron through real pers
 test('lottery cron: cleanup prunes old runs and health rows', function () {
     $p = platform();
     $model = $p->model;
-    $intel = new LotteryIntelligence($model->lottery, $model->audit, new \Aegis\Lottery\UnavailableLotteryProvider());
+    $intel = new LotteryIntelligence($model->lottery, $model->audit, new \AIWorkforce\Lottery\UnavailableLotteryProvider());
     $cron = new LotteryCronService($model->lottery, $model->audit, $intel);
     $out = $cron->run('cleanup');
     assert_equals('OK', $out['status']);

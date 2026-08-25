@@ -18,7 +18,7 @@ $active = $active ?? '';
 $userName = (string) ($identity['display_name'] ?? $identity['email'] ?? 'Member');
 $userInitials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $userName), 0, 1) ?: 'W');
 $userProfileImage = (string) ($identity['profile_image'] ?? '');
-$unread = Aegis_NotificationsHelper::unreadCount();
+$unread = AIWorkforce_NotificationsHelper::unreadCount();
 
 // Helper to check active for multiple keys
 $isActive = function(array $keys) use ($active): bool {
@@ -33,14 +33,14 @@ $isActive = function(array $keys) use ($active): bool {
 <title><?= e($pageTitle . ($seo['title_suffix'] ?? ' · WINDELS AI WORKFORCE')) ?></title>
 <meta name="robots" content="noindex,nofollow">
 <link rel="icon" type="image/png" href="/assets/images/windels-mark.png">
-<link rel="stylesheet" href="/assets/css/aegis.css">
+<link rel="stylesheet" href="/assets/css/ai_workforce.css">
 </head>
 <body class="app-shell">
 <?php $this->load->view('partials/announcement_bar'); ?>
 <?php $this->load->view('partials/impersonation_banner'); ?>
 <aside class="sidebar" id="app-sidebar" aria-label="Dashboard navigation">
   <a class="sidebar-brand" href="/dashboard">
-    <img src="/assets/images/windels-mark.png" alt="WINDELS AI WORKFORCE" onerror="this.onerror=null;this.src='/assets/images/aegis-mark.png'">
+    <img src="/assets/images/windels-mark.png" alt="WINDELS AI WORKFORCE" onerror="this.onerror=null;this.src='/assets/images/ai_workforce-mark.png'">
     <span>WINDELS<small>AI Workforce</small></span>
   </a>
 
@@ -98,7 +98,7 @@ $isActive = function(array $keys) use ($active): bool {
       <button id="dash-forward" class="btn small ghost" type="button" aria-label="Go forward" disabled title="Forward">Forward <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg></button>
     </div>
     <div class="brand">
-      <span class="mark"><img src="/assets/images/windels-mark.png" alt="" onerror="this.onerror=null;this.src='/assets/images/aegis-mark.png'"></span>
+      <span class="mark"><img src="/assets/images/windels-mark.png" alt="" onerror="this.onerror=null;this.src='/assets/images/ai_workforce-mark.png'"></span>
       <h1 id="page-title"><?= e($pageTitle) ?></h1>
     </div>
   </div>

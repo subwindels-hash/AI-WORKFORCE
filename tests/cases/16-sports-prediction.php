@@ -1,6 +1,6 @@
 <?php
-use Aegis\Sports\FeatureEngineeringEngine;
-use Aegis\Sports\PredictionEngine;
+use AIWorkforce\Sports\FeatureEngineeringEngine;
+use AIWorkforce\Sports\PredictionEngine;
 
 test('sports features require verified recent-form metrics', function () {
     $features = (new FeatureEngineeringEngine())->build(['decision' => 'INTELLIGENCE_READY', 'inputs' => ['recentForm' => ['source' => 'feed']]]);

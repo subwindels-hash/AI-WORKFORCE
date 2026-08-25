@@ -1,20 +1,20 @@
 <?php
-use Aegis\Identity;
+use AIWorkforce\Identity;
 
 require_once FCPATH . 'tools/rbac.php';
 
 test('sports RBAC matrix grants exactly the intended permissions', function () {
-    assert_in_array('sports.view', AEGIS_RBAC_GRANTS['sports_viewer']);
-    assert_equals(['sports.view'], AEGIS_RBAC_GRANTS['sports_viewer'], 'viewer is read-only');
-    $admin = AEGIS_RBAC_GRANTS['sports_admin'];
+    assert_in_array('sports.view', AI_WORKFORCE_RBAC_GRANTS['sports_viewer']);
+    assert_equals(['sports.view'], AI_WORKFORCE_RBAC_GRANTS['sports_viewer'], 'viewer is read-only');
+    $admin = AI_WORKFORCE_RBAC_GRANTS['sports_admin'];
     foreach (['sports.view', 'sports.manage', 'sports.approve', 'sports.settle'] as $p) assert_in_array($p, $admin);
     assert_false(in_array('trading.control', $admin, true), 'sports admin must not gain trading control');
-    assert_equals(array_keys(AEGIS_RBAC_PERMISSIONS), AEGIS_RBAC_GRANTS['super_admin'], 'super admin holds every permission');
+    assert_equals(array_keys(AI_WORKFORCE_RBAC_PERMISSIONS), AI_WORKFORCE_RBAC_GRANTS['super_admin'], 'super admin holds every permission');
 });
 
 function fx_identity_for(array $permissions): Identity
 {
-    $repo = new class($permissions) implements \Aegis\Persistence\IdentityRepository {
+    $repo = new class($permissions) implements \AIWorkforce\Persistence\IdentityRepository {
         public function __construct(private array $p) {}
         public function findUserByEmail(string $e): ?array { return ['id' => 7, 'email' => $e, 'password_hash' => 'x', 'active' => 1]; }
         public function findUserByUsername(string $u): ?array { return ['id' => 7, 'email' => 'a@b.c', 'password_hash' => 'x', 'active' => 1]; }

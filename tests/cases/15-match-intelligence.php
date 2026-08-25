@@ -1,6 +1,6 @@
 <?php
-use Aegis\Sports\MatchIntelligenceEngine;
-use Aegis\Sports\OddsFreshnessEngine;
+use AIWorkforce\Sports\MatchIntelligenceEngine;
+use AIWorkforce\Sports\OddsFreshnessEngine;
 
 test('odds freshness rejects unavailable and stale odds', function () {
     $engine = new OddsFreshnessEngine();

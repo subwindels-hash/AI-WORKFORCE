@@ -2,11 +2,11 @@
 
 ## Host adaptation
 
-The target checkout is the AEGIS CodeIgniter 3 application. It has reusable MVC routing, environment configuration, repository-style persistence, audit logging, a domain-service container, and a custom test runner. It does **not** have authentication, RBAC, admin users, notifications, or scheduled-job infrastructure. Those capabilities must be established before any privileged Sports mutation, provider configuration, approval, or settlement endpoint is exposed.
+The target checkout is the AI_WORKFORCE CodeIgniter 3 application. It has reusable MVC routing, environment configuration, repository-style persistence, audit logging, a domain-service container, and a custom test runner. It does **not** have authentication, RBAC, admin users, notifications, or scheduled-job infrastructure. Those capabilities must be established before any privileged Sports mutation, provider configuration, approval, or settlement endpoint is exposed.
 
 ## First implementation boundary
 
-`Aegis\Sports` is a domain module, not a separate application. Its provider interface is deliberately provider-neutral and all inputs are normalized before use. At boot there are no providers and the module reports `DISABLED_NO_PROVIDER`; it never creates demo fixtures, odds, predictions, results, or tickets.
+`AIWorkforce\Sports` is a domain module, not a separate application. Its provider interface is deliberately provider-neutral and all inputs are normalized before use. At boot there are no providers and the module reports `DISABLED_NO_PROVIDER`; it never creates demo fixtures, odds, predictions, results, or tickets.
 
 ## Delivery order
 

@@ -1,7 +1,7 @@
-# AEGIS MT5 Bridge
+# AI Workforce MT5 Bridge
 
 Deployable Phase 4 broker bridge: exposes a MetaTrader 5 terminal to the
-AEGIS Trade Execution Supervisor (CodeIgniter 3 application) over an
+AI Workforce Trade Execution Supervisor (CodeIgniter 3 application) over an
 authenticated HTTP contract. **PHP cannot talk to MT5 natively** — this
 service runs on the Windows host where the MT5 terminal is installed and uses
 the official `MetaTrader5` python package.
@@ -15,8 +15,8 @@ CodeIgniter app (PHP)  ──HTTP+Bearer──▶  mt5-bridge (FastAPI)  ──�
 **IMPLEMENTED, unit-tested against a simulated terminal; NOT verified against
 a real MetaTrader 5 account yet.** Before trusting it with money: deploy on a
 DEMO account, run the PHP connector tests against it, and only then consider
-`MT5_ALLOW_LIVE=1` (which AEGIS additionally gates behind
-`AEGIS_MT5_LIVE_ALLOWED=1`).
+`MT5_ALLOW_LIVE=1` (which AI Workforce additionally gates behind
+`AI_WORKFORCE_MT5_LIVE_ALLOWED=1`).
 
 ## Deploy
 
@@ -30,17 +30,17 @@ set MT5_ALLOW_LIVE=0             # demo accounts only (default)
 uvicorn app:app --host 0.0.0.0 --port 8787
 ```
 
-Then in the AEGIS environment:
+Then in the AI Workforce environment:
 
 ```
-AEGIS_MT5_BRIDGE_URL=http://<bridge-host>:8787
-AEGIS_MT5_BRIDGE_TOKEN=<same secret>
-AEGIS_MT5_BRIDGE_ENABLED=1
-AEGIS_MT5_TRADING_ENABLED=1     # optional — enables order submission
-AEGIS_MT5_LIVE_ALLOWED=0        # demo only (default)
+AI_WORKFORCE_MT5_BRIDGE_URL=http://<bridge-host>:8787
+AI_WORKFORCE_MT5_BRIDGE_TOKEN=<same secret>
+AI_WORKFORCE_MT5_BRIDGE_ENABLED=1
+AI_WORKFORCE_MT5_TRADING_ENABLED=1     # optional — enables order submission
+AI_WORKFORCE_MT5_LIVE_ALLOWED=0        # demo only (default)
 ```
 
-Use HTTPS or an isolated network between AEGIS and the bridge — the token is
+Use HTTPS or an isolated network between AI Workforce and the bridge — the token is
 a shared secret and quotes/accounts cross the wire.
 
 ## HTTP contract

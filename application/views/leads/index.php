@@ -92,7 +92,7 @@ $pageTitle = $isPipeline ? 'Lead Pipeline' : 'Lead Discovery';
 <body>
 <header>
   <a class="brand" href="/dashboard">
-    <img src="/assets/images/windels-mark.png" alt="WINDELS AI WORKFORCE" onerror="this.onerror=null;this.src='/assets/images/aegis-mark.png'">
+    <img src="/assets/images/windels-mark.png" alt="WINDELS AI WORKFORCE" onerror="this.onerror=null;this.src='/assets/images/ai_workforce-mark.png'">
     <span>WINDELS<small>AI Workforce</small></span>
   </a>
   <nav aria-label="Lead workspace">

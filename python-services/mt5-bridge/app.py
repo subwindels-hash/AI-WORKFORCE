@@ -1,16 +1,16 @@
 """
-AEGIS MT5 Bridge — Phase 4 broker service.
+AI_WORKFORCE MT5 Bridge — Phase 4 broker service.
 
 A small FastAPI service that exposes a MetaTrader 5 terminal (via the
-MetaTrader5 python package) to the AEGIS Trade Execution Supervisor over an
+MetaTrader5 python package) to the AI_WORKFORCE Trade Execution Supervisor over an
 authenticated HTTP contract. Deploy it on the Windows host that runs the MT5
-terminal; point AEGIS at it with:
+terminal; point AI_WORKFORCE at it with:
 
-    AEGIS_MT5_BRIDGE_URL=http://<host>:8787
-    AEGIS_MT5_BRIDGE_TOKEN=<shared secret>
-    AEGIS_MT5_BRIDGE_ENABLED=1
-    AEGIS_MT5_TRADING_ENABLED=1     # only when order submission is wanted
-    AEGIS_MT5_LIVE_ALLOWED=0        # demo accounts only (default)
+    AI_WORKFORCE_MT5_BRIDGE_URL=http://<host>:8787
+    AI_WORKFORCE_MT5_BRIDGE_TOKEN=<shared secret>
+    AI_WORKFORCE_MT5_BRIDGE_ENABLED=1
+    AI_WORKFORCE_MT5_TRADING_ENABLED=1     # only when order submission is wanted
+    AI_WORKFORCE_MT5_LIVE_ALLOWED=0        # demo accounts only (default)
 
 Bridge safety flags (this service):
     MT5_BRIDGE_TOKEN   required — every /v1/* call must carry it as a Bearer token
@@ -34,7 +34,7 @@ TOKEN = os.environ.get("MT5_BRIDGE_TOKEN", "")
 TRADING_ENABLED = os.environ.get("MT5_TRADING_ENABLED", "0") == "1"
 ALLOW_LIVE = os.environ.get("MT5_ALLOW_LIVE", "0") == "1"
 
-app = FastAPI(title="AEGIS MT5 Bridge", version=BRIDGE_VERSION)
+app = FastAPI(title="AI_WORKFORCE MT5 Bridge", version=BRIDGE_VERSION)
 
 _terminal: Any = None  # the MetaTrader5 module (or a test fake)
 
@@ -272,7 +272,7 @@ def place_order(order: OrderIn, authorization: str = Header(default="")) -> dict
         "tp": float(order.takeProfit) if order.takeProfit else 0.0,
         "deviation": 10,
         "magic": 20260823,
-        "comment": "AEGIS supervisor",
+        "comment": "AI_WORKFORCE supervisor",
     }
     if order.type == "MARKET":
         request["price"] = float(tick.ask if order.action == "BUY" else tick.bid)
@@ -350,7 +350,7 @@ def close_position(ticket: int, authorization: str = Header(default="")) -> dict
         "volume": float(position.volume),
         "type": mt5.ORDER_TYPE_SELL if is_long else mt5.ORDER_TYPE_BUY,
         "price": float(tick.bid if is_long else tick.ask),
-        "deviation": 10, "magic": 20260823, "comment": "AEGIS supervisor close",
+        "deviation": 10, "magic": 20260823, "comment": "AI_WORKFORCE supervisor close",
     }
     result = mt5.order_send(request)
     if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:

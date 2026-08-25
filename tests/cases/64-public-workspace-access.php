@@ -36,10 +36,10 @@ test('workspace controllers require App_Controller login gate', function () {
 });
 
 test('member registration role is seeded in the RBAC matrix', function () {
-    assert_true(isset(AEGIS_RBAC_ROLES['platform_member']));
-    assert_in_array('trading.view', AEGIS_RBAC_GRANTS['platform_member']);
-    assert_in_array('sports.view', AEGIS_RBAC_GRANTS['platform_member']);
-    assert_false(in_array('system.super_admin', AEGIS_RBAC_GRANTS['platform_member'], true));
+    assert_true(isset(AI_WORKFORCE_RBAC_ROLES['platform_member']));
+    assert_in_array('trading.view', AI_WORKFORCE_RBAC_GRANTS['platform_member']);
+    assert_in_array('sports.view', AI_WORKFORCE_RBAC_GRANTS['platform_member']);
+    assert_false(in_array('system.super_admin', AI_WORKFORCE_RBAC_GRANTS['platform_member'], true));
 });
 
 test('sitemap lists public pages and robots hide dashboards', function () {

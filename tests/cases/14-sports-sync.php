@@ -1,9 +1,9 @@
 <?php
-use Aegis\Persistence\AuditRepository;
-use Aegis\Persistence\SportsRepository;
-use Aegis\Sports\DataQualityEngine;
-use Aegis\Sports\Providers\SportsDataProvider;
-use Aegis\Sports\SportsSyncService;
+use AIWorkforce\Persistence\AuditRepository;
+use AIWorkforce\Persistence\SportsRepository;
+use AIWorkforce\Sports\DataQualityEngine;
+use AIWorkforce\Sports\Providers\SportsDataProvider;
+use AIWorkforce\Sports\SportsSyncService;
 
 function fx_sports_sync(): array {
     $repo = new SportsRepositoryStub();

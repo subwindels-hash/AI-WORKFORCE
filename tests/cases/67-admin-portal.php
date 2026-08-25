@@ -5,9 +5,9 @@
  */
 require_once FCPATH . 'tools/rbac.php';
 
-function fx_admin_portal(): \Aegis\AdminPortal
+function fx_admin_portal(): \AIWorkforce\AdminPortal
 {
-    $portal = new \Aegis\AdminPortal(platform()->model);
+    $portal = new \AIWorkforce\AdminPortal(platform()->model);
     $portal->ensureSchema();
     return $portal;
 }
@@ -55,21 +55,21 @@ test('admin portal schema, routes and views are installed', function () {
 });
 
 test('admin RBAC: Super Admin, Admin and Support Admin have distinct permissions', function () {
-    assert_in_array('admin', array_keys(AEGIS_RBAC_ROLES));
-    assert_in_array('support_admin', array_keys(AEGIS_RBAC_ROLES));
-    assert_in_array('admin.access', array_keys(AEGIS_RBAC_PERMISSIONS));
-    assert_in_array('admin.users.impersonate', AEGIS_RBAC_GRANTS['admin']);
-    assert_false(in_array('admin.admins.manage', AEGIS_RBAC_GRANTS['admin'], true), 'normal admin cannot manage admins');
-    assert_false(in_array('admin.settings.manage', AEGIS_RBAC_GRANTS['admin'], true), 'normal admin cannot change system settings');
-    assert_in_array('admin.api.view', AEGIS_RBAC_GRANTS['admin']);
-    assert_in_array('admin.api.test', AEGIS_RBAC_GRANTS['admin']);
-    assert_false(in_array('admin.api.manage', AEGIS_RBAC_GRANTS['admin'], true), 'normal admin cannot change API providers');
-    assert_false(in_array('admin.api.credentials', AEGIS_RBAC_GRANTS['admin'], true), 'normal admin cannot change API credentials');
-    assert_false(in_array('admin.api.view', AEGIS_RBAC_GRANTS['support_admin'], true), 'support cannot open API Management');
-    assert_in_array('admin.users.view', AEGIS_RBAC_GRANTS['support_admin']);
-    assert_false(in_array('admin.users.manage', AEGIS_RBAC_GRANTS['support_admin'], true), 'support cannot manage users');
-    assert_false(in_array('admin.users.delete', AEGIS_RBAC_GRANTS['support_admin'], true));
-    assert_equals(array_keys(AEGIS_RBAC_PERMISSIONS), AEGIS_RBAC_GRANTS['super_admin']);
+    assert_in_array('admin', array_keys(AI_WORKFORCE_RBAC_ROLES));
+    assert_in_array('support_admin', array_keys(AI_WORKFORCE_RBAC_ROLES));
+    assert_in_array('admin.access', array_keys(AI_WORKFORCE_RBAC_PERMISSIONS));
+    assert_in_array('admin.users.impersonate', AI_WORKFORCE_RBAC_GRANTS['admin']);
+    assert_false(in_array('admin.admins.manage', AI_WORKFORCE_RBAC_GRANTS['admin'], true), 'normal admin cannot manage admins');
+    assert_false(in_array('admin.settings.manage', AI_WORKFORCE_RBAC_GRANTS['admin'], true), 'normal admin cannot change system settings');
+    assert_in_array('admin.api.view', AI_WORKFORCE_RBAC_GRANTS['admin']);
+    assert_in_array('admin.api.test', AI_WORKFORCE_RBAC_GRANTS['admin']);
+    assert_false(in_array('admin.api.manage', AI_WORKFORCE_RBAC_GRANTS['admin'], true), 'normal admin cannot change API providers');
+    assert_false(in_array('admin.api.credentials', AI_WORKFORCE_RBAC_GRANTS['admin'], true), 'normal admin cannot change API credentials');
+    assert_false(in_array('admin.api.view', AI_WORKFORCE_RBAC_GRANTS['support_admin'], true), 'support cannot open API Management');
+    assert_in_array('admin.users.view', AI_WORKFORCE_RBAC_GRANTS['support_admin']);
+    assert_false(in_array('admin.users.manage', AI_WORKFORCE_RBAC_GRANTS['support_admin'], true), 'support cannot manage users');
+    assert_false(in_array('admin.users.delete', AI_WORKFORCE_RBAC_GRANTS['support_admin'], true));
+    assert_equals(array_keys(AI_WORKFORCE_RBAC_PERMISSIONS), AI_WORKFORCE_RBAC_GRANTS['super_admin']);
 });
 
 test('identity: admin.access is required for the portal and super_admin still overrides', function () {
@@ -201,7 +201,7 @@ test('user dashboard chrome stays intact and does not host admin management', fu
     foreach (['Dashboard', 'Users', 'AI Workforce', 'Language Learning', 'Conversations', 'Analytics', 'Notifications', 'Reports', 'System Settings', 'Admin Accounts', 'Activity Logs', 'Security', 'Logout'] as $item) {
         assert_contains($item, $adminHeader, "admin sidebar has $item");
     }
-    $css = file_get_contents(FCPATH . 'assets/css/aegis.css');
+    $css = file_get_contents(FCPATH . 'assets/css/ai_workforce.css');
     assert_contains('.sidebar a svg { width: 20px; height: 20px;', $css);
 });
 

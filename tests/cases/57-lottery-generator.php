@@ -9,11 +9,11 @@
  * report carries the actual inputs/factors/model, and no banned wording
  * appears anywhere in the generated report.
  */
-use Aegis\Lottery\CombinationAnalyzer;
-use Aegis\Lottery\CombinationGenerator;
-use Aegis\Lottery\EuroMillionsRules;
-use Aegis\Lottery\LotteryIntelligence;
-use Aegis\Lottery\SandboxLotteryProvider;
+use AIWorkforce\Lottery\CombinationAnalyzer;
+use AIWorkforce\Lottery\CombinationGenerator;
+use AIWorkforce\Lottery\EuroMillionsRules;
+use AIWorkforce\Lottery\LotteryIntelligence;
+use AIWorkforce\Lottery\SandboxLotteryProvider;
 
 function fx_lotto4_draws(): array
 {

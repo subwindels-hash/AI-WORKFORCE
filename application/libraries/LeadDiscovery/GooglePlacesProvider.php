@@ -8,7 +8,7 @@ class GooglePlacesProvider implements LeadDiscoveryProvider
     public function __construct(private ?string $apiKey = null, private int $timeoutSeconds = 12, private int $maxAttempts = 2)
     {
         if ($this->apiKey === null || $this->apiKey === '') {
-            $cfg = class_exists(\Aegis\ApiProviders::class) ? \Aegis\ApiProviders::resolve('lead_discovery') : null;
+            $cfg = class_exists(\AIWorkforce\ApiProviders::class) ? \AIWorkforce\ApiProviders::resolve('lead_discovery') : null;
             $managedKey = is_array($cfg) ? (string) ($cfg['secrets']['api_key'] ?? '') : '';
             $this->apiKey = $managedKey !== '' ? $managedKey : (string) (getenv('GOOGLE_PLACES_API_KEY') ?: '');
         }

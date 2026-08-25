@@ -1,22 +1,22 @@
 <?php
 defined('BASEPATH') or exit('No direct script access allowed');
 
-require_once __DIR__ . '/../libraries/Aegis/autoload.php';
+require_once __DIR__ . '/../libraries/AIWorkforce/autoload.php';
 
 /**
- * Base controller: builds the AEGIS Platform (domain services wired to the
+ * Base controller: builds the AI Workforce Platform (domain services wired to the
  * database through CI3's model layer) once per request.
  */
 class MY_Controller extends CI_Controller
 {
-    public \Aegis\Platform $platform;
+    public \AIWorkforce\Platform $platform;
 
     public function __construct()
     {
         parent::__construct();
-        $this->load->model('Aegis_model');
-        $disableReal = getenv('AEGIS_DISABLE_REAL_PROVIDERS') === '1';
-        $this->platform = new \Aegis\Platform($this->Aegis_model, $disableReal);
+        $this->load->model('AIWorkforce_model');
+        $disableReal = getenv('AI_WORKFORCE_DISABLE_REAL_PROVIDERS') === '1';
+        $this->platform = new \AIWorkforce\Platform($this->AIWorkforce_model, $disableReal);
     }
 
     protected function currentUser(): ?array
@@ -84,7 +84,7 @@ class MY_Controller extends CI_Controller
         ]);
     }
 
-    public const REMEMBER_COOKIE = 'aegis_remember';
+    public const REMEMBER_COOKIE = 'ai_workforce_remember';
 
     protected function isSuperAdmin(?array $user = null): bool
     {
@@ -115,7 +115,7 @@ class MY_Controller extends CI_Controller
         $user = $this->currentUser();
         if ($user) {
             if (!$this->impersonator()) {
-                $fresh = $this->Aegis_model->identity->findUserById((int) $user['id']);
+                $fresh = $this->AIWorkforce_model->identity->findUserById((int) $user['id']);
                 if (!$fresh || empty($fresh['active'])) {
                     $this->session->unset_userdata(['identity']);
                     $this->session->set_flashdata('error', 'Your account is currently unavailable. Please contact support.');

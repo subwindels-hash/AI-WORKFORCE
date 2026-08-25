@@ -4,9 +4,9 @@
  * diversification engine (exact overlap math, duplicate detection, scale)
  * and the new API surface (routes, permissions, honest feature matrix).
  */
-use Aegis\Lottery\CombinationGenerator;
-use Aegis\Lottery\DiversificationEngine;
-use Aegis\Lottery\EuroMillionsRules;
+use AIWorkforce\Lottery\CombinationGenerator;
+use AIWorkforce\Lottery\DiversificationEngine;
+use AIWorkforce\Lottery\EuroMillionsRules;
 
 function fx_lotto_div_engine(): DiversificationEngine
 {
@@ -85,7 +85,7 @@ test('lottery diversification: disjoint lines score high', function () {
 });
 
 test('lottery diversification: DIVERSIFIED generator output stays diverse at 50 lines', function () {
-    $g = new CombinationGenerator(new EuroMillionsRules(), new \Aegis\Lottery\CombinationAnalyzer(new EuroMillionsRules()));
+    $g = new CombinationGenerator(new EuroMillionsRules(), new \AIWorkforce\Lottery\CombinationAnalyzer(new EuroMillionsRules()));
     $report = $g->generate(fx_lotto4b_draws(), ['mode' => 'DIVERSIFIED', 'count' => 50, 'seed' => 5]);
     $d = fx_lotto_div_engine();
     $r = $d->score($report['lines']);
@@ -114,9 +114,9 @@ test('lottery api: new routes, permissions and honest feature matrix', function 
 
     // honesty scan of every new/modified lottery file
     foreach ([
-        'application/libraries/Aegis/Lottery/CombinationAnalyzer.php',
-        'application/libraries/Aegis/Lottery/CombinationGenerator.php',
-        'application/libraries/Aegis/Lottery/DiversificationEngine.php',
+        'application/libraries/AIWorkforce/Lottery/CombinationAnalyzer.php',
+        'application/libraries/AIWorkforce/Lottery/CombinationGenerator.php',
+        'application/libraries/AIWorkforce/Lottery/DiversificationEngine.php',
         'application/controllers/Api_lottery.php',
     ] as $file) {
         $src = strtolower(file_get_contents(FCPATH . $file));
@@ -150,7 +150,7 @@ test('lottery schema: combinations + ai_decisions tables exist and are verified 
 
     // the live test database has the columns usable by the repository layer
     $p = platform();
-    $intel = new \Aegis\Lottery\LotteryIntelligence($p->model->lottery, $p->model->audit, new \Aegis\Lottery\UnavailableLotteryProvider());
+    $intel = new \AIWorkforce\Lottery\LotteryIntelligence($p->model->lottery, $p->model->audit, new \AIWorkforce\Lottery\UnavailableLotteryProvider());
     $report = $intel->generate(['mode' => 'RANDOM', 'count' => 2, 'seed' => 777]);
     $saved = $intel->saveGeneration($report, 'system');
     assert_true($saved['combinationId'] > 0, 'real DB round trip');

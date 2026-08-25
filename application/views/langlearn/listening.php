@@ -8,7 +8,7 @@
   <div class="panel"><div class="body"><p class="dim"><?= e($listening['note'] ?? 'Not available yet.') ?></p></div></div>
 <?php else: foreach ($listening['exercises'] as $ex): ?>
   <div class="panel" style="margin-bottom:12px" data-exercise>
-    <h3><?= e($ex['level']) ?> listening · <?= e(str_replace('-', '-', $ex['itemId'])) ?> <span class="badge b-sky"><?= e($langCode ?? 'en') ?> → <?= e(\Aegis\LangLearn\Translator::LOCALES[$langCode ?? 'en'] ?? $langCode) ?></span></h3>
+    <h3><?= e($ex['level']) ?> listening · <?= e(str_replace('-', '-', $ex['itemId'])) ?> <span class="badge b-sky"><?= e($langCode ?? 'en') ?> → <?= e(\AIWorkforce\LangLearn\Translator::LOCALES[$langCode ?? 'en'] ?? $langCode) ?></span></h3>
     <div class="body" style="padding-top:12px">
       <p style="font-size:15px;font-weight:600"><?= e($ex['transcript']) ?> <button class="btn small" type="button" data-listen="<?= e($ex['speakText']) ?>">🔊 Listen</button></p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
@@ -18,8 +18,8 @@
         <button class="btn small" type="button" id="tts-stop-<?= e($ex['itemId']) ?>">⏹ Stop</button>
         <button class="btn small" type="button" onclick="const d=this.closest('.body').querySelector('.transcript');d.style.display=d.style.display==='none'?'block':'none'">show transcript</button>
       </div>
-      <div class="transcript dim" style="display:none;margin-top:8px"><?= e($ex['transcript']) ?> — <span class="dim">Locale: <?= e(\Aegis\LangLearn\Translator::LOCALES[$langCode ?? 'en'] ?? $langCode) ?></span></div>
-      <div style="margin-top:8px;font-size:11px;color:var(--dim)">Voice: <select class="sel tts-voice" data-locale="<?= e(\Aegis\LangLearn\Translator::LOCALES[$langCode ?? 'en'] ?? $langCode) ?>"><option>Loading voices…</option></select> | Speed: <input type="range" min="0.5" max="1.5" step="0.1" value="1" class="tts-rate" style="width:100px"> <span class="tts-rate-val">1.0×</span></div>
+      <div class="transcript dim" style="display:none;margin-top:8px"><?= e($ex['transcript']) ?> — <span class="dim">Locale: <?= e(\AIWorkforce\LangLearn\Translator::LOCALES[$langCode ?? 'en'] ?? $langCode) ?></span></div>
+      <div style="margin-top:8px;font-size:11px;color:var(--dim)">Voice: <select class="sel tts-voice" data-locale="<?= e(\AIWorkforce\LangLearn\Translator::LOCALES[$langCode ?? 'en'] ?? $langCode) ?>"><option>Loading voices…</option></select> | Speed: <input type="range" min="0.5" max="1.5" step="0.1" value="1" class="tts-rate" style="width:100px"> <span class="tts-rate-val">1.0×</span></div>
 
       <form method="post" action="/app/languages/l/<?= (int) $profileId ?>/attempt" style="margin-top:12px">
         <input type="hidden" name="itemId" value="<?= e($ex['itemId']) ?>">
@@ -70,7 +70,7 @@
 <script>
 (function () {
   var LANG = <?= json_encode($langCode ?? 'en') ?>;
-  var LOCALE = <?= json_encode(\Aegis\LangLearn\Translator::LOCALES[$langCode ?? 'en'] ?? 'en-US') ?>;
+  var LOCALE = <?= json_encode(\AIWorkforce\LangLearn\Translator::LOCALES[$langCode ?? 'en'] ?? 'en-US') ?>;
   var provider = window.windelsSpeech || (window.SpeechProvider ? new window.SpeechProvider() : null);
 
   function checkSupport() {

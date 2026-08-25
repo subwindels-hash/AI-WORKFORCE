@@ -1,22 +1,22 @@
 <?php
-use Aegis\Persistence\AuditRepository;
-use Aegis\Sports\ConfidenceEngine;
-use Aegis\Sports\ConfigurationService;
-use Aegis\Sports\CorrelationEngine;
-use Aegis\Sports\DailyTicketService;
-use Aegis\Sports\DataQualityEngine;
-use Aegis\Sports\DecisionRecorder;
-use Aegis\Sports\FeatureEngineeringEngine;
-use Aegis\Sports\MatchIntelligenceEngine;
-use Aegis\Sports\OddsFreshnessEngine;
-use Aegis\Sports\PredictionEngine;
-use Aegis\Sports\PredictionPipeline;
-use Aegis\Sports\Providers\SportsDataProvider;
-use Aegis\Sports\Providers\SportsProviderManager;
-use Aegis\Sports\RiskEngine;
-use Aegis\Sports\TicketGovernance;
-use Aegis\Sports\TicketOptimizer;
-use Aegis\Sports\ValueEngine;
+use AIWorkforce\Persistence\AuditRepository;
+use AIWorkforce\Sports\ConfidenceEngine;
+use AIWorkforce\Sports\ConfigurationService;
+use AIWorkforce\Sports\CorrelationEngine;
+use AIWorkforce\Sports\DailyTicketService;
+use AIWorkforce\Sports\DataQualityEngine;
+use AIWorkforce\Sports\DecisionRecorder;
+use AIWorkforce\Sports\FeatureEngineeringEngine;
+use AIWorkforce\Sports\MatchIntelligenceEngine;
+use AIWorkforce\Sports\OddsFreshnessEngine;
+use AIWorkforce\Sports\PredictionEngine;
+use AIWorkforce\Sports\PredictionPipeline;
+use AIWorkforce\Sports\Providers\SportsDataProvider;
+use AIWorkforce\Sports\Providers\SportsProviderManager;
+use AIWorkforce\Sports\RiskEngine;
+use AIWorkforce\Sports\TicketGovernance;
+use AIWorkforce\Sports\TicketOptimizer;
+use AIWorkforce\Sports\ValueEngine;
 
 function fx_daily_audit(): AuditRepository
 {
@@ -161,7 +161,7 @@ test('daily ticket E2E: provider failure is graceful and reported', function () 
     $broken = new class implements SportsDataProvider {
         public function id(): string { return 'broken'; }
         public function health(): array { return ['status' => 'ONLINE']; }
-        public function fixtures(array $q): array { throw new \Aegis\Sports\Providers\ProviderException('upstream down', \Aegis\Sports\Providers\ProviderException::OFFLINE); }
+        public function fixtures(array $q): array { throw new \AIWorkforce\Sports\Providers\ProviderException('upstream down', \AIWorkforce\Sports\Providers\ProviderException::OFFLINE); }
         public function odds(string $e): array { return []; }
         public function results(string $e): array { return []; }
     };

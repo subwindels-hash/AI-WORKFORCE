@@ -1,6 +1,6 @@
 <?php
-use Aegis\Identity;
-use Aegis\Persistence\IdentityRepository;
+use AIWorkforce\Identity;
+use AIWorkforce\Persistence\IdentityRepository;
 
 function fx_identity(): array {
     $repo = new class implements IdentityRepository {

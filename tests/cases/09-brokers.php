@@ -4,8 +4,8 @@
  * the TradingConnector/BrokerManager contracts. All against a simulated
  * bridge; no real MetaTrader terminal is involved (see README honesty notes).
  */
-use Aegis\Brokers\BrokerManager;
-use Aegis\Brokers\Mt5BridgeConnector;
+use AIWorkforce\Brokers\BrokerManager;
+use AIWorkforce\Brokers\Mt5BridgeConnector;
 
 test('MT5 connector is disabled with no order capability by default', function () {
     $connector = new Mt5BridgeConnector('', false);
@@ -53,7 +53,7 @@ test('MT5 account/quote/candle reads require a token and use read-only bridge pa
 });
 
 test('broker data contracts normalize positions, pending orders and history', function () {
-    $positions = \Aegis\Brokers\BrokerDataNormalizer::positions([
+    $positions = \AIWorkforce\Brokers\BrokerDataNormalizer::positions([
         ['ticket' => 1, 'symbol' => 'eurusd', 'side' => 'long', 'volume' => 0.5, 'entry' => 1.08, 'stopLoss' => 1.075, 'takeProfit' => null, 'profit' => 5.5, 'openedAt' => time() - 60],
         ['ticket' => 2, 'symbol' => 'BTCUSD', 'side' => 'SHORT', 'volume' => 0.1, 'entry' => 60000, 'stopLoss' => null, 'takeProfit' => 55000, 'profit' => -10, 'openedAt' => time() - 90],
     ], 'test');
@@ -63,13 +63,13 @@ test('broker data contracts normalize positions, pending orders and history', fu
     assert_equals(null, $positions[1]['stopLoss']);
     assert_equals(55000.0, $positions[1]['takeProfit']);
 
-    $orders = \Aegis\Brokers\BrokerDataNormalizer::pendingOrders([
+    $orders = \AIWorkforce\Brokers\BrokerDataNormalizer::pendingOrders([
         ['ticket' => 9, 'symbol' => 'XAUUSD', 'side' => 'buy', 'type' => 'limit', 'volume' => 0.1, 'price' => 2350.0, 'stopLoss' => 2340.0, 'takeProfit' => 2400.0, 'placedAt' => time() - 30],
     ], 'test');
     assert_equals('BUY', $orders[0]['side']);
     assert_equals('LIMIT', $orders[0]['type']);
 
-    $history = \Aegis\Brokers\BrokerDataNormalizer::history([
+    $history = \AIWorkforce\Brokers\BrokerDataNormalizer::history([
         ['ticket' => 3, 'symbol' => 'EURUSD', 'side' => 'long', 'volume' => 0.5, 'entry' => 1.080, 'exit' => 1.084, 'profit' => 20.0, 'openedAt' => time() - 7200, 'closedAt' => time() - 3600],
     ], 'test');
     assert_equals(20.0, $history[0]['profit']);
@@ -77,7 +77,7 @@ test('broker data contracts normalize positions, pending orders and history', fu
 
 test('candle normalizer rejects impossible OHLC relationships', function () {
     assert_throws(RuntimeException::class, function () {
-        \Aegis\Brokers\BrokerDataNormalizer::candles([['t' => time(), 'o' => 2, 'h' => 1, 'l' => 0.5, 'c' => 1.5, 'v' => 1]], 'test');
+        \AIWorkforce\Brokers\BrokerDataNormalizer::candles([['t' => time(), 'o' => 2, 'h' => 1, 'l' => 0.5, 'c' => 1.5, 'v' => 1]], 'test');
     });
 });
 

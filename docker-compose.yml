@@ -1,4 +1,4 @@
-# AEGIS — production stack (CodeIgniter 3 + MySQL/MariaDB)
+# AI_WORKFORCE — production stack (CodeIgniter 3 + MySQL/MariaDB)
 #
 # NOTE (honesty per project rules): this compose file targets the documented
 # production stack (PHP-FPM + MySQL). It was NOT exercised in the development
@@ -9,10 +9,10 @@ services:
   db:
     image: mariadb:11
     environment:
-      MARIADB_ROOT_PASSWORD: ${AEGIS_DB_PASS:-aegis}
-      MARIADB_DATABASE: aegis_trading
-      MARIADB_USER: aegis
-      MARIADB_PASSWORD: ${AEGIS_DB_PASS:-aegis}
+      MARIADB_ROOT_PASSWORD: ${AI_WORKFORCE_DB_PASS:-ai_workforce}
+      MARIADB_DATABASE: ai_workforce_trading
+      MARIADB_USER: ai_workforce
+      MARIADB_PASSWORD: ${AI_WORKFORCE_DB_PASS:-ai_workforce}
     volumes:
       - db-data:/var/lib/mysql
     healthcheck:
@@ -24,10 +24,10 @@ services:
     image: php:8.2-apache
     working_dir: /var/www/html
     environment:
-      AEGIS_DB_HOST: db
-      AEGIS_DB_USER: aegis
-      AEGIS_DB_PASS: ${AEGIS_DB_PASS:-aegis}
-      AEGIS_DB_NAME: aegis_trading
+      AI_WORKFORCE_DB_HOST: db
+      AI_WORKFORCE_DB_USER: ai_workforce
+      AI_WORKFORCE_DB_PASS: ${AI_WORKFORCE_DB_PASS:-ai_workforce}
+      AI_WORKFORCE_DB_NAME: ai_workforce_trading
     volumes:
       - .:/var/www/html
     ports:

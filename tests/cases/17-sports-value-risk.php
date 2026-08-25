@@ -1,7 +1,7 @@
 <?php
-use Aegis\Sports\CorrelationEngine;
-use Aegis\Sports\RiskEngine;
-use Aegis\Sports\ValueEngine;
+use AIWorkforce\Sports\CorrelationEngine;
+use AIWorkforce\Sports\RiskEngine;
+use AIWorkforce\Sports\ValueEngine;
 
 test('sports value engine calculates implied probability and rejects negative edge', function () {
     $prediction = ['decision' => 'PREDICTION_READY', 'calibratedProbability' => .60];

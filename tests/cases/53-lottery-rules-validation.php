@@ -4,8 +4,8 @@
  * data validation. EuroMillions format is CONFIGURATION (counts/ranges from
  * the rules object), never hard-coded analysis logic.
  */
-use Aegis\Lottery\EuroMillionsRules;
-use Aegis\Lottery\LotteryResultValidator;
+use AIWorkforce\Lottery\EuroMillionsRules;
+use AIWorkforce\Lottery\LotteryResultValidator;
 
 test('lottery rules: EuroMillions format is configuration, not hard-coding', function () {
     $r = new EuroMillionsRules();

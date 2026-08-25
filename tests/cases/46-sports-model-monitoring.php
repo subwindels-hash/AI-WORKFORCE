@@ -1,9 +1,9 @@
 <?php
-use Aegis\Notifications\Notifier;
-use Aegis\Persistence\AuditRepository;
-use Aegis\Persistence\NotificationRepository;
-use Aegis\Sports\ModelDriftMonitor;
-use Aegis\Sports\ModelPerformanceService;
+use AIWorkforce\Notifications\Notifier;
+use AIWorkforce\Persistence\AuditRepository;
+use AIWorkforce\Persistence\NotificationRepository;
+use AIWorkforce\Sports\ModelDriftMonitor;
+use AIWorkforce\Sports\ModelPerformanceService;
 
 function fx_model_audit(): AuditRepository
 {

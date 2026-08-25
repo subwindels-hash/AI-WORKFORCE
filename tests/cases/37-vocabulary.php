@@ -3,11 +3,11 @@
  * AI LANGUAGE LEARNING — Phase 3 (vocabulary): bank, SRS schedule, daily
  * reviews, quiz determinism, flashcard self-assessment, progress reality.
  */
-use Aegis\LangLearn\VocabularyBank;
-use Aegis\LangLearn\VocabularyService;
+use AIWorkforce\LangLearn\VocabularyBank;
+use AIWorkforce\LangLearn\VocabularyService;
 
 test('vocabulary bank: 10 authored words per registered language', function () {
-    foreach (\Aegis\LangLearn\LanguageRegistry::all() as $code => $lang) {
+    foreach (\AIWorkforce\LangLearn\LanguageRegistry::all() as $code => $lang) {
         if ($code === 'xx') continue;
         $items = VocabularyBank::items($code);
         assert_true(count($items) >= 10, "{$code} has >= 10 words");

@@ -41,10 +41,10 @@ class Api_sports extends Api_controller
         if (!$this->requirePermission('sports.view', false)) return;
         $g = $this->input->get(NULL, true) ?: [];
         $filter = array_intersect_key($g, array_flip(['status', 'from', 'to', 'competition', 'providerId']));
-        $rows = $this->Aegis_model->sports->listMatches($filter, (int) ($g['limit'] ?: 200));
+        $rows = $this->AIWorkforce_model->sports->listMatches($filter, (int) ($g['limit'] ?: 200));
         foreach ($rows as &$row) {
-            $row['latestOdds'] = $this->Aegis_model->sports->latestOdds((int) $row['id'], 'TOTAL_GOALS', 'OVER_1_5');
-            $row['latestQuality'] = $this->Aegis_model->sports->latestQuality((int) $row['id']);
+            $row['latestOdds'] = $this->AIWorkforce_model->sports->latestOdds((int) $row['id'], 'TOTAL_GOALS', 'OVER_1_5');
+            $row['latestQuality'] = $this->AIWorkforce_model->sports->latestQuality((int) $row['id']);
         }
         $this->json(['matches' => $rows]);
     }
@@ -53,13 +53,13 @@ class Api_sports extends Api_controller
     public function show_match(string $id)
     {
         if (!$this->requirePermission('sports.view', false)) return;
-        $match = $this->Aegis_model->sports->findMatchById((int) $id);
+        $match = $this->AIWorkforce_model->sports->findMatchById((int) $id);
         if (!$match) return $this->jsonError('match not found', 404);
-        $odds = $this->Aegis_model->sports->latestOdds((int) $id, 'TOTAL_GOALS', 'OVER_1_5');
+        $odds = $this->AIWorkforce_model->sports->latestOdds((int) $id, 'TOTAL_GOALS', 'OVER_1_5');
         $oddsArr = $odds ? ['market' => $odds['market'], 'selection' => $odds['selection'], 'decimalOdds' => (float) $odds['decimal_odds'], 'observedAt' => $odds['observed_at']] : null;
         $intel = $this->platform->sports->matchIntelligence->analyze($match, $oddsArr);
-        $preds = $this->Aegis_model->sports->listPredictions(['matchId' => (int) $id], 50);
-        $this->json(['match' => $match, 'intelligence' => $intel, 'odds' => $odds, 'predictions' => $preds, 'quality' => $this->Aegis_model->sports->latestQuality((int) $id)]);
+        $preds = $this->AIWorkforce_model->sports->listPredictions(['matchId' => (int) $id], 50);
+        $this->json(['match' => $match, 'intelligence' => $intel, 'odds' => $odds, 'predictions' => $preds, 'quality' => $this->AIWorkforce_model->sports->latestQuality((int) $id)]);
     }
 
     public function odds()
@@ -67,7 +67,7 @@ class Api_sports extends Api_controller
         if (!$this->requirePermission('sports.view', false)) return;
         $g = $this->input->get(NULL, true) ?: [];
         if (empty($g['matchId'])) return $this->jsonError('matchId is required');
-        $rows = $this->Aegis_model->sports->listOdds((int) $g['matchId'], (int) ($g['limit'] ?: 50));
+        $rows = $this->AIWorkforce_model->sports->listOdds((int) $g['matchId'], (int) ($g['limit'] ?: 50));
         $this->json(['odds' => $rows]);
     }
 
@@ -76,21 +76,21 @@ class Api_sports extends Api_controller
         if (!$this->requirePermission('sports.view', false)) return;
         $g = $this->input->get(NULL, true) ?: [];
         $filter = array_intersect_key($g, array_flip(['matchId', 'modelVersionId', 'decision', 'market', 'from', 'to']));
-        $this->json(['predictions' => $this->Aegis_model->sports->listPredictions($filter, (int) ($g['limit'] ?: 200))]);
+        $this->json(['predictions' => $this->AIWorkforce_model->sports->listPredictions($filter, (int) ($g['limit'] ?: 200))]);
     }
 
     /** AI decision report: why the AI selected/rejected this (spec §28/§29). */
     public function decision_report(string $id)
     {
         if (!$this->requirePermission('sports.view', false)) return;
-        $p = $this->Aegis_model->sports->findPrediction($id);
+        $p = $this->AIWorkforce_model->sports->findPrediction($id);
         if (!$p) return $this->jsonError('prediction not found', 404);
-        $match = $this->Aegis_model->sports->findMatchById((int) $p['match_id']);
-        $model = $this->Aegis_model->sports->findModelVersion((int) $p['model_version_id']);
-        $quality = $this->Aegis_model->sports->latestQuality((int) $p['match_id']);
+        $match = $this->AIWorkforce_model->sports->findMatchById((int) $p['match_id']);
+        $model = $this->AIWorkforce_model->sports->findModelVersion((int) $p['model_version_id']);
+        $quality = $this->AIWorkforce_model->sports->latestQuality((int) $p['match_id']);
         $factors = is_array($p['factors']) ? $p['factors'] : [];
         $selection = null;
-        foreach ($this->Aegis_model->sports->settledSelections() as $s) {
+        foreach ($this->AIWorkforce_model->sports->settledSelections() as $s) {
             if (($s['prediction_id'] ?? '') === $id) { $selection = $s; break; }
         }
         $this->json([
@@ -122,19 +122,19 @@ class Api_sports extends Api_controller
         if (!$this->requirePermission('sports.view', false)) return;
         $g = $this->input->get(NULL, true) ?: [];
         $filter = array_intersect_key($g, array_flip(['from', 'to', 'status', 'modelVersionId']));
-        $tickets = $this->Aegis_model->sports->listTickets($filter, (int) ($g['limit'] ?: 200));
-        foreach ($tickets as &$t) $t['selections'] = $this->Aegis_model->sports->ticketSelections((string) $t['id']);
+        $tickets = $this->AIWorkforce_model->sports->listTickets($filter, (int) ($g['limit'] ?: 200));
+        foreach ($tickets as &$t) $t['selections'] = $this->AIWorkforce_model->sports->ticketSelections((string) $t['id']);
         $this->json(['tickets' => $tickets]);
     }
 
     public function show_ticket(string $id)
     {
         if (!$this->requirePermission('sports.view', false)) return;
-        $t = $this->Aegis_model->sports->findTicket($id);
+        $t = $this->AIWorkforce_model->sports->findTicket($id);
         if (!$t) return $this->jsonError('ticket not found', 404);
-        $selections = $this->Aegis_model->sports->ticketSelections($id);
+        $selections = $this->AIWorkforce_model->sports->ticketSelections($id);
         foreach ($selections as &$s) {
-            $match = $this->Aegis_model->sports->findMatchById((int) $s['match_id']);
+            $match = $this->AIWorkforce_model->sports->findMatchById((int) $s['match_id']);
             $s['match'] = $match ? ['homeTeam' => $match['home_team'], 'awayTeam' => $match['away_team'], 'competition' => $match['competition'], 'kickoff' => $match['kickoff_at']] : null;
         }
         $this->json(['ticket' => $t, 'selections' => $selections]);
@@ -143,7 +143,7 @@ class Api_sports extends Api_controller
     public function daily_tickets()
     {
         if (!$this->requirePermission('sports.view', false)) return;
-        $this->json(['dailyTickets' => $this->Aegis_model->sports->listDailyTickets((int) ($this->input->get('limit') ?: 60))]);
+        $this->json(['dailyTickets' => $this->AIWorkforce_model->sports->listDailyTickets((int) ($this->input->get('limit') ?: 60))]);
     }
 
     public function results()
@@ -151,10 +151,10 @@ class Api_sports extends Api_controller
         if (!$this->requirePermission('sports.view', false)) return;
         $g = $this->input->get(NULL, true) ?: [];
         $limit = (int) ($g['limit'] ?: 200);
-        $rows = $this->Aegis_model->sports->listMatches(['from' => $g['from'] ?? null, 'to' => $g['to'] ?? null, 'status' => 'FINISHED'], min(500, max(1, $limit)));
+        $rows = $this->AIWorkforce_model->sports->listMatches(['from' => $g['from'] ?? null, 'to' => $g['to'] ?? null, 'status' => 'FINISHED'], min(500, max(1, $limit)));
         $out = [];
         foreach ($rows as $m) {
-            $r = $this->Aegis_model->sports->findResultByMatch((int) $m['id']);
+            $r = $this->AIWorkforce_model->sports->findResultByMatch((int) $m['id']);
             $out[] = ['match' => ['id' => (int) $m['id'], 'homeTeam' => $m['home_team'], 'awayTeam' => $m['away_team'], 'competition' => $m['competition'], 'kickoff' => $m['kickoff_at']],
                 'result' => $r ? ['homeScore' => $r['home_score'], 'awayScore' => $r['away_score'], 'status' => $r['status'], 'verified' => (bool) $r['verified'], 'verifiedAt' => $r['verified_at'], 'sourceTimestamp' => $r['source_timestamp']] : null];
         }
@@ -171,8 +171,8 @@ class Api_sports extends Api_controller
     {
         if (!$this->requirePermission('sports.view', false)) return;
         $svc = $this->platform->sports->modelPerformance;
-        $calibrations = $this->Aegis_model->sports->listCalibrations(null, null, 50);
-        $this->json(['models' => $svc->listModels(), 'calibrations' => $calibrations, 'metrics' => $this->Aegis_model->sports->listModelMetrics(null, null, null, 100)]);
+        $calibrations = $this->AIWorkforce_model->sports->listCalibrations(null, null, 50);
+        $this->json(['models' => $svc->listModels(), 'calibrations' => $calibrations, 'metrics' => $this->AIWorkforce_model->sports->listModelMetrics(null, null, null, 100)]);
     }
 
     public function model_performance()
@@ -186,19 +186,19 @@ class Api_sports extends Api_controller
     {
         if (!$this->requirePermission('sports.view', false)) return;
         $g = $this->input->get(NULL, true) ?: [];
-        $this->json(['calibrations' => $this->Aegis_model->sports->listCalibrations(!empty($g['modelVersionId']) ? (int) $g['modelVersionId'] : null, $g['status'] ?? null, 50)]);
+        $this->json(['calibrations' => $this->AIWorkforce_model->sports->listCalibrations(!empty($g['modelVersionId']) ? (int) $g['modelVersionId'] : null, $g['status'] ?? null, 50)]);
     }
 
     public function backtests()
     {
         if (!$this->requirePermission('sports.view', false)) return;
-        $this->json(['backtests' => $this->Aegis_model->sports->listBacktests((int) ($this->input->get('limit') ?: 20))]);
+        $this->json(['backtests' => $this->AIWorkforce_model->sports->listBacktests((int) ($this->input->get('limit') ?: 20))]);
     }
 
     public function show_backtest(string $id)
     {
         if (!$this->requirePermission('sports.view', false)) return;
-        $bt = $this->Aegis_model->sports->findBacktest($id);
+        $bt = $this->AIWorkforce_model->sports->findBacktest($id);
         if (!$bt) return $this->jsonError('backtest not found', 404);
         $this->json(['backtest' => $bt]);
     }
@@ -207,7 +207,7 @@ class Api_sports extends Api_controller
     {
         if (!$this->requirePermission('sports.view', false)) return;
         $g = $this->input->get(NULL, true) ?: [];
-        $events = $this->Aegis_model->audit->recent((int) ($g['limit'] ?: 200));
+        $events = $this->AIWorkforce_model->audit->recent((int) ($g['limit'] ?: 200));
         if (!empty($g['type'])) $events = array_values(array_filter($events, fn($e) => str_contains((string) $e['type'], (string) $g['type'])));
         $this->json(['events' => $events]);
     }
@@ -216,13 +216,13 @@ class Api_sports extends Api_controller
     {
         if (!$this->requirePermission('sports.view', false)) return;
         $g = $this->input->get(NULL, true) ?: [];
-        $this->json(['jobs' => $this->Aegis_model->sports->listJobRuns(!empty($g['jobType']) ? (string) $g['jobType'] : null, (int) ($g['limit'] ?: 50))]);
+        $this->json(['jobs' => $this->AIWorkforce_model->sports->listJobRuns(!empty($g['jobType']) ? (string) $g['jobType'] : null, (int) ($g['limit'] ?: 50))]);
     }
 
     public function configuration()
     {
         if (!$this->requirePermission('sports.view', false)) return;
-        $this->json(['active' => $this->platform->sports->configuration->active(), 'history' => $this->Aegis_model->sports->listConfigurations(20)]);
+        $this->json(['active' => $this->platform->sports->configuration->active(), 'history' => $this->AIWorkforce_model->sports->listConfigurations(20)]);
     }
 
     public function risk_monitor()
@@ -230,7 +230,7 @@ class Api_sports extends Api_controller
         if (!$this->requirePermission('sports.view', false)) return;
         $g = $this->input->get(NULL, true) ?: [];
         $since = gmdate('Y-m-d H:i:s', time() - (int) ($g['hours'] ?: 72) * 3600);
-        $preds = $this->Aegis_model->sports->listPredictions(['from' => $since], 1000);
+        $preds = $this->AIWorkforce_model->sports->listPredictions(['from' => $since], 1000);
         $byRisk = ['LOW' => 0, 'MEDIUM' => 0, 'HIGH' => 0, 'REJECTED' => 0];
         $reasons = [];
         $recent = [];
@@ -252,13 +252,13 @@ class Api_sports extends Api_controller
     {
         if (!$this->requirePermission('sports.view', false)) return;
         $eng = $this->platform->sports->correlation;
-        $tickets = $this->Aegis_model->sports->listTickets([], 100);
+        $tickets = $this->AIWorkforce_model->sports->listTickets([], 100);
         $alerts = [];
         foreach ($tickets as $t) {
-            $sels = $this->Aegis_model->sports->ticketSelections((string) $t['id']);
+            $sels = $this->AIWorkforce_model->sports->ticketSelections((string) $t['id']);
             if (count($sels) < 2) continue;
             $rows = array_map(function ($s) use ($eng) {
-                $m = $this->Aegis_model->sports->findMatchById((int) $s['match_id']);
+                $m = $this->AIWorkforce_model->sports->findMatchById((int) $s['match_id']);
                 return ['matchId' => (int) $s['match_id'], 'competition' => $m['competition'] ?? null, 'homeTeam' => $m['home_team'] ?? null, 'awayTeam' => $m['away_team'] ?? null];
             }, $sels);
             $pairwise = $eng->classifySelections($rows);
@@ -300,19 +300,19 @@ class Api_sports extends Api_controller
         if (!$user) return;
         try {
             $svc = $this->platform->sports;
-            $outcomes = $this->Aegis_model->sports->predictionOutcomes();
+            $outcomes = $this->AIWorkforce_model->sports->predictionOutcomes();
             $fit = $svc->calibration->fit($outcomes);
             if (empty($fit['ok'])) return $this->jsonError('calibration cannot be fitted: ' . ($fit['reason'] ?? 'unknown') . ' (samples: ' . ($fit['samples'] ?? 0) . ')', 422);
-            $modelId = $this->Aegis_model->sports->ensureModelVersion(['modelName' => \Aegis\Sports\PredictionEngine::MODEL_NAME, 'modelVersion' => \Aegis\Sports\PredictionEngine::MODEL_VERSION, 'featureVersion' => \Aegis\Sports\FeatureEngineeringEngine::VERSION]);
-            $id = $this->Aegis_model->sports->saveCalibration([
+            $modelId = $this->AIWorkforce_model->sports->ensureModelVersion(['modelName' => \AIWorkforce\Sports\PredictionEngine::MODEL_NAME, 'modelVersion' => \AIWorkforce\Sports\PredictionEngine::MODEL_VERSION, 'featureVersion' => \AIWorkforce\Sports\FeatureEngineeringEngine::VERSION]);
+            $id = $this->AIWorkforce_model->sports->saveCalibration([
                 'model_version_id' => $modelId, 'method' => 'platt',
                 'intercept' => $fit['fit']['intercept'], 'slope' => $fit['fit']['slope'],
                 'brier' => $fit['metrics']['brier'], 'ece' => $fit['metrics']['ece'],
                 'samples' => $fit['fit']['samples'], 'bins' => json_encode($fit['bins']),
                 'status' => 'PENDING', 'created_by' => (string) $user['id'], 'created_at' => gmdate('c'),
             ]);
-            $this->Aegis_model->audit->emit('SPORTS_CALIBRATION_FITTED', 'New calibration version fitted (pending approval)', ['calibrationId' => $id, 'samples' => $fit['fit']['samples'], 'ece' => $fit['metrics']['ece'], 'brier' => $fit['metrics']['brier']], (string) $user['id']);
-            $this->json(['calibration' => $this->Aegis_model->sports->findCalibration($id)]);
+            $this->AIWorkforce_model->audit->emit('SPORTS_CALIBRATION_FITTED', 'New calibration version fitted (pending approval)', ['calibrationId' => $id, 'samples' => $fit['fit']['samples'], 'ece' => $fit['metrics']['ece'], 'brier' => $fit['metrics']['brier']], (string) $user['id']);
+            $this->json(['calibration' => $this->AIWorkforce_model->sports->findCalibration($id)]);
         } catch (\Throwable $e) {
             $this->jsonError($e->getMessage(), 409);
         }
@@ -332,12 +332,12 @@ class Api_sports extends Api_controller
     {
         $user = $this->requirePermission('sports.manage');
         if (!$user) return;
-        $cal = $this->Aegis_model->sports->findCalibration((int) $id);
+        $cal = $this->AIWorkforce_model->sports->findCalibration((int) $id);
         if (!$cal) { $this->jsonError('calibration not found', 404); return; }
         if (($cal['status'] ?? '') !== 'PENDING') { $this->jsonError('calibration already decided', 409); return; }
-        $this->Aegis_model->sports->updateCalibrationStatus((int) $id, $status, (string) $user['id']);
-        $this->Aegis_model->audit->emit('SPORTS_CALIBRATION_' . $status, 'Calibration ' . $status . ' by ' . $user['id'], ['calibrationId' => (int) $id, 'intercept' => $cal['intercept'], 'slope' => $cal['slope'], 'samples' => $cal['samples']], (string) $user['id']);
-        $this->json(['calibration' => $this->Aegis_model->sports->findCalibration((int) $id)]);
+        $this->AIWorkforce_model->sports->updateCalibrationStatus((int) $id, $status, (string) $user['id']);
+        $this->AIWorkforce_model->audit->emit('SPORTS_CALIBRATION_' . $status, 'Calibration ' . $status . ' by ' . $user['id'], ['calibrationId' => (int) $id, 'intercept' => $cal['intercept'], 'slope' => $cal['slope'], 'samples' => $cal['samples']], (string) $user['id']);
+        $this->json(['calibration' => $this->AIWorkforce_model->sports->findCalibration((int) $id)]);
     }
 
     public function run_backtest()
@@ -360,8 +360,8 @@ class Api_sports extends Api_controller
     {
         $user = $this->requirePermission('sports.manage');
         if (!$user) return;
-        if (!in_array($job, \Aegis\Sports\SportsCronService::JOBS, true)) return $this->jsonError('unknown job. Valid: ' . implode(', ', \Aegis\Sports\SportsCronService::JOBS), 422);
-        $service = new \Aegis\Sports\SportsCronService($this->Aegis_model->sports, $this->Aegis_model->audit, $this->platform->sports);
+        if (!in_array($job, \AIWorkforce\Sports\SportsCronService::JOBS, true)) return $this->jsonError('unknown job. Valid: ' . implode(', ', \AIWorkforce\Sports\SportsCronService::JOBS), 422);
+        $service = new \AIWorkforce\Sports\SportsCronService($this->AIWorkforce_model->sports, $this->AIWorkforce_model->audit, $this->platform->sports);
         $this->json(['result' => $service->run($job)], 200);
     }
 
@@ -371,13 +371,13 @@ class Api_sports extends Api_controller
         if (!$user) return;
         $body = $this->jsonBody();
         if (!isset($body['enabled']) || !is_bool($body['enabled'])) return $this->jsonError('body must include enabled: boolean');
-        $providers = $this->Aegis_model->sports->listProviders();
+        $providers = $this->AIWorkforce_model->sports->listProviders();
         $target = null;
         foreach ($providers as $p) if ((int) $p['id'] === (int) $id) { $target = $p; break; }
         if (!$target) return $this->jsonError('provider not found', 404);
-        $this->Aegis_model->sports->setProviderEnabled((int) $id, (bool) $body['enabled']);
-        $this->Aegis_model->audit->emit('SPORTS_PROVIDER_TOGGLED', 'Provider ' . $target['provider_code'] . ' ' . ((bool) $body['enabled'] ? 'enabled' : 'disabled'), ['provider' => $target['provider_code'], 'enabled' => (bool) $body['enabled']], (string) $user['id']);
-        $this->json(['provider' => $this->Aegis_model->sports->listProviders(true)]);
+        $this->AIWorkforce_model->sports->setProviderEnabled((int) $id, (bool) $body['enabled']);
+        $this->AIWorkforce_model->audit->emit('SPORTS_PROVIDER_TOGGLED', 'Provider ' . $target['provider_code'] . ' ' . ((bool) $body['enabled'] ? 'enabled' : 'disabled'), ['provider' => $target['provider_code'], 'enabled' => (bool) $body['enabled']], (string) $user['id']);
+        $this->json(['provider' => $this->AIWorkforce_model->sports->listProviders(true)]);
     }
 
     // ------------------------------------------------------------ governance

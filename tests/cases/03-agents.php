@@ -1,12 +1,12 @@
 <?php
 /** Agents: honesty rules, structure confirmation, consensus. */
-use Aegis\Agents\CryptoAgent;
-use Aegis\Agents\ForexAgent;
-use Aegis\Agents\MarketStructureAgent;
-use Aegis\Agents\SentimentAgent;
-use Aegis\Agents\TechnicalAgent;
-use Aegis\Agents\TradingIntelligenceAgent;
-use Aegis\Providers\SyntheticProvider;
+use AIWorkforce\Agents\CryptoAgent;
+use AIWorkforce\Agents\ForexAgent;
+use AIWorkforce\Agents\MarketStructureAgent;
+use AIWorkforce\Agents\SentimentAgent;
+use AIWorkforce\Agents\TechnicalAgent;
+use AIWorkforce\Agents\TradingIntelligenceAgent;
+use AIWorkforce\Providers\SyntheticProvider;
 
 test('technical agent returns the full structured report', function () {
     $series = fx_series(SyntheticProvider::generate('EURUSD', '1h', 300, 1755000000000));
@@ -30,7 +30,7 @@ test('market structure agent refuses empty candle series', function () {
 
 test('market structure: wick beyond a swing NEVER confirms (close rule)', function () {
     $candles = [];
-    $rand = \Aegis\MathUtils::seededRandom(3);
+    $rand = \AIWorkforce\MathUtils::seededRandom(3);
     for ($i = 0; $i < 60; $i++) {
         $close = 100 + 1.5 * sin($i / 3) + ($rand() - 0.5) * 0.1;
         $prev = $i > 0 ? 100 + 1.5 * sin(($i - 1) / 3) : $close;

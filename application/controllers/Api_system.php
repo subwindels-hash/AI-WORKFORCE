@@ -48,7 +48,7 @@ class Api_system extends Api_controller
         ['name' => 'Lottery data providers (official feeds)', 'category' => 'module', 'status' => 'PLANNED', 'detail' => 'Authorized-feed HTTP adapter is scaffolded with license/source metadata, normalized draws and health checks; production remains PLANNED until an authorized source is verified'],
         // platform
         ['name' => 'MySQL / MariaDB persistence', 'category' => 'module', 'status' => 'IMPLEMENTED', 'detail' => 'Canonical schema + mysqli config (application/database/schema.mysql.sql); the offline sandbox verifies the identical app+SQL through pdo_sqlite'],
-        ['name' => 'SQLite dev driver', 'category' => 'module', 'status' => 'TESTED', 'detail' => 'Same CI3 app on pdo_sqlite for offline demo/tests (AEGIS_DB_DRIVER=pdo_sqlite)'],
+        ['name' => 'SQLite dev driver', 'category' => 'module', 'status' => 'TESTED', 'detail' => 'Same CI3 app on pdo_sqlite for offline demo/tests (AI_WORKFORCE_DB_DRIVER=pdo_sqlite)'],
         ['name' => 'CodeIgniter 3.1.13 MVC', 'category' => 'module', 'status' => 'TESTED', 'detail' => 'Traditional server-rendered MVC + JSON API layer'],
         ['name' => 'ANALYSIS_ONLY mode', 'category' => 'mode', 'status' => 'TESTED', 'detail' => 'Default'],
         ['name' => 'PAPER_TRADING mode', 'category' => 'mode', 'status' => 'TESTED', 'detail' => 'Phase 3 — simulated execution with real prices when reachable'],
@@ -56,7 +56,7 @@ class Api_system extends Api_controller
         ['name' => 'SEMI_AUTONOMOUS mode', 'category' => 'mode', 'status' => 'TESTED', 'detail' => 'Auto-routes inside the automation envelope: max notional, max daily trades, max risk %, approved symbols only'],
         ['name' => 'FULLY_AUTOMATED mode', 'category' => 'mode', 'status' => 'TESTED', 'detail' => 'Same envelope plus: APPROVED strategy mandatory, order-capable READY connector, kill switch released, explicit limits configured'],
         // brokers
-        ['name' => 'MT5 bridge connector (account/quote/candles/positions/orders/history + place/modify/cancel/close)', 'category' => 'broker', 'status' => 'TESTED', 'detail' => 'Full Phase 4 surface against the documented bridge contract, unit-tested with a simulated bridge; order submission needs AEGIS_MT5_TRADING_ENABLED=1 AND bridge-side tradingEnabled AND a demo account unless AEGIS_MT5_LIVE_ALLOWED=1 — NOT yet verified against a real MetaTrader terminal'],
+        ['name' => 'MT5 bridge connector (account/quote/candles/positions/orders/history + place/modify/cancel/close)', 'category' => 'broker', 'status' => 'TESTED', 'detail' => 'Full Phase 4 surface against the documented bridge contract, unit-tested with a simulated bridge; order submission needs AI_WORKFORCE_MT5_TRADING_ENABLED=1 AND bridge-side tradingEnabled AND a demo account unless AI_WORKFORCE_MT5_LIVE_ALLOWED=1 — NOT yet verified against a real MetaTrader terminal'],
         ['name' => 'Python MT5 bridge service', 'category' => 'broker', 'status' => 'IMPLEMENTED', 'detail' => 'python-services/mt5-bridge (FastAPI + MetaTrader5): full contract unit-tested against a simulated terminal; requires deployment on a Windows MT5 host with a demo account before real use'],
         ['name' => 'Broker order routing', 'category' => 'broker', 'status' => 'TESTED', 'detail' => 'Supervisor-owned, connector-verified routing with durable proposals/executions, confirm + audit + post-trade portfolio snapshot; tested against a simulated bridge only'],
         ['name' => 'Simulated MT5 bridge (offline demo)', 'category' => 'broker', 'status' => 'TESTED', 'detail' => 'Broker Center toggle starts an in-process mock that speaks the documented bridge contract (loopback, demo account, health reports simulated:true). Lets the offline demo run propose→approve→route→fill end-to-end. NEVER a real broker; production ignores the marker entirely'],
@@ -67,7 +67,7 @@ class Api_system extends Api_controller
     {
         $state = $this->platform->state();
         $this->json([
-            'platform' => 'AEGIS Trading Intelligence (CodeIgniter 3 / PHP MVC edition)',
+            'platform' => 'AI Workforce Trading Intelligence (CodeIgniter 3 / PHP MVC edition)',
             'phase' => 5,
             'version' => '0.5.0',
             'stack' => 'CodeIgniter ' . CI_VERSION . ' / PHP ' . PHP_VERSION . ' / ' . $this->db->platform(),
@@ -95,7 +95,7 @@ class Api_system extends Api_controller
     public function mt5_account()
     {
         $connector = $this->platform->brokers->get('mt5-bridge');
-        if (!$connector instanceof \Aegis\Brokers\Mt5BridgeConnector) return $this->jsonError('MT5 connector unavailable', 503);
+        if (!$connector instanceof \AIWorkforce\Brokers\Mt5BridgeConnector) return $this->jsonError('MT5 connector unavailable', 503);
         try {
             $this->json(['account' => $connector->account()]);
         } catch (\Throwable $e) {
@@ -108,7 +108,7 @@ class Api_system extends Api_controller
     {
         $symbol = (string) $this->input->get('symbol', true);
         $connector = $this->platform->brokers->get('mt5-bridge');
-        if (!$connector instanceof \Aegis\Brokers\Mt5BridgeConnector) return $this->jsonError('MT5 connector unavailable', 503);
+        if (!$connector instanceof \AIWorkforce\Brokers\Mt5BridgeConnector) return $this->jsonError('MT5 connector unavailable', 503);
         try {
             $this->json(['quote' => $connector->quote($symbol)]);
         } catch (\InvalidArgumentException $e) {
@@ -263,7 +263,7 @@ class Api_system extends Api_controller
     /** Automation envelope for SEMI_AUTONOMOUS / FULLY_AUTOMATED modes. */
     public function automation_limits()
     {
-        $this->json(['limits' => \Aegis\ExecutionSupervisor::automationLimits($this->platform->state())]);
+        $this->json(['limits' => \AIWorkforce\ExecutionSupervisor::automationLimits($this->platform->state())]);
     }
 
     public function update_automation_limits()

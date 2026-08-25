@@ -1,10 +1,10 @@
 <?php
 /** Backtester: fill mechanics, cost model, pessimism, reconciliation. */
-use Aegis\Backtest\Backtester;
-use Aegis\Backtest\Metrics;
-use Aegis\Strategies\LookAheadError;
-use Aegis\Strategies\SeriesView;
-use Aegis\Strategies\TradingStrategy;
+use AIWorkforce\Backtest\Backtester;
+use AIWorkforce\Backtest\Metrics;
+use AIWorkforce\Strategies\LookAheadError;
+use AIWorkforce\Strategies\SeriesView;
+use AIWorkforce\Strategies\TradingStrategy;
 
 class ScriptedStrategy implements TradingStrategy
 {

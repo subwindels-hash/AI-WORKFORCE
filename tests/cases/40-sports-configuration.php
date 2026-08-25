@@ -1,6 +1,6 @@
 <?php
-use Aegis\Persistence\AuditRepository;
-use Aegis\Sports\ConfigurationService;
+use AIWorkforce\Persistence\AuditRepository;
+use AIWorkforce\Sports\ConfigurationService;
 
 function fx_config_audit(): array {
     $audit = new class implements AuditRepository { public array $events = []; public function emit(string $t, string $s, array $d = [], string $a = 'system'): void { $this->events[] = ['type' => $t, 'actor' => $a, 'detail' => $d]; } public function recent(int $l = 100): array { return []; } };

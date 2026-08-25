@@ -16,7 +16,7 @@ class Strategy_lab extends App_Controller
         foreach ($this->platform->model->strategies->all() as $rec) {
             $impl = $this->platform->strategies->implementation($rec['strategy_id'], $rec['version']);
             $rec['supportsShorts'] = $impl?->supportsShorts() ?? false;
-            $rec['nextStage'] = \Aegis\Strategies\StrategyRegistry::nextStage($rec['lifecycle']);
+            $rec['nextStage'] = \AIWorkforce\Strategies\StrategyRegistry::nextStage($rec['lifecycle']);
             $data['strategies'][] = $rec;
         }
         $selId = (string)($this->input->get('strategy') ?: ($data['strategies'][0]['strategy_id'] ?? ''));

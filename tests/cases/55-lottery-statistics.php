@@ -5,7 +5,7 @@
  * independence DISCLAIMER; there is no "due" concept anywhere — long gaps
  * are reported as observations, never as predictions.
  */
-use Aegis\Lottery\LotteryStatisticsEngine;
+use AIWorkforce\Lottery\LotteryStatisticsEngine;
 
 function fx_lotto_draws(): array
 {

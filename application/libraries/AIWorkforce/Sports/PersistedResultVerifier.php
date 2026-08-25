@@ -1,0 +1,4 @@
+<?php
+namespace AIWorkforce\Sports;
+use AIWorkforce\Persistence\AuditRepository; use AIWorkforce\Persistence\SportsRepository;
+class PersistedResultVerifier { public function __construct(private SportsRepository $repo,private AuditRepository $audit){} public function verify(int $matchId,int $providerId,string $actor): array { $r=$this->repo->findResult($matchId,$providerId); if(!$r) throw new \InvalidArgumentException('provider result not found'); $candidate=['verified'=>true,'status'=>$r['status'],'homeScore'=>$r['home_score']===null?null:(int)$r['home_score'],'awayScore'=>$r['away_score']===null?null:(int)$r['away_score']]; $v=(new ResultVerificationEngine())->verify($candidate); if(empty($v['verified'])) throw new \RuntimeException($v['reason']); $this->repo->verifyResult((int)$r['id']); $this->audit->emit('SPORTS_RESULT_VERIFIED','Provider result verified',['resultId'=>$r['id'],'matchId'=>$matchId],$actor); return $v; }}

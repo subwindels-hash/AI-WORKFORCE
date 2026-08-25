@@ -3,12 +3,12 @@
  * PHASE 5 — Portfolio Risk Monitor (spec §14) and the strategy live-approval
  * gate (spec §12 paper-trading evidence).
  */
-use Aegis\Portfolio\PortfolioRiskMonitor;
+use AIWorkforce\Portfolio\PortfolioRiskMonitor;
 
 function prm_monitor_with(array $withBrokers = []): PortfolioRiskMonitor
 {
     $p = platform();
-    $brokers = new \Aegis\Brokers\BrokerManager();
+    $brokers = new \AIWorkforce\Brokers\BrokerManager();
     foreach ($withBrokers as $connector) $brokers->register($connector);
     return new PortfolioRiskMonitor($p->model->paper, $p->paper, $p->risk, $brokers, $p->model->audit, $p->model->state, $p->notifications);
 }
@@ -149,7 +149,7 @@ test('strategy live approval requires paper evidence (≥10 trades, PF > 1, posi
         $win = $i % 4 !== 3; // 9 wins, 3 losses
         $pnl = $win ? 50.0 : -30.0;
         $p->model->journal->save([
-            'id' => Aegis\Backtest\Backtester::uuid(), 'source' => 'paper', 'symbol' => 'EURUSD', 'market' => 'forex',
+            'id' => AIWorkforce\Backtest\Backtester::uuid(), 'source' => 'paper', 'symbol' => 'EURUSD', 'market' => 'forex',
             'strategy' => $sid, 'direction' => 'LONG', 'entry_time' => gmdate('c', time() - 86400 - $i * 60),
             'entry_price' => 1.08, 'exit_time' => gmdate('c', time() - 3600 - $i * 30), 'exit_price' => 1.081,
             'position_size' => 10000, 'stop_loss' => 1.075, 'take_profit' => 1.09, 'fees' => 1, 'slippage' => 0.2,
@@ -178,7 +178,7 @@ test('strategy approval refuses losing paper evidence', function () {
     $p->model->strategies->save($record);
     for ($i = 0; $i < 12; $i++) {
         $p->model->journal->save([
-            'id' => Aegis\Backtest\Backtester::uuid(), 'source' => 'paper', 'symbol' => 'BTCUSDT', 'market' => 'crypto',
+            'id' => AIWorkforce\Backtest\Backtester::uuid(), 'source' => 'paper', 'symbol' => 'BTCUSDT', 'market' => 'crypto',
             'strategy' => $sid, 'direction' => 'LONG', 'entry_time' => gmdate('c', time() - 86400), 'entry_price' => 60000,
             'exit_time' => gmdate('c'), 'exit_price' => 59000, 'position_size' => 0.1, 'stop_loss' => 58000,
             'take_profit' => 64000, 'fees' => 2, 'slippage' => 1, 'pnl' => -40.0, 'pnl_pct' => -0.007, 'r_multiple' => -1,

@@ -6,10 +6,10 @@
  * enumeration, honest cost handling, and the idempotent background build
  * path (execution-key queue + lottery-cron systems) through the real DB.
  */
-use Aegis\Lottery\EuroMillionsRules;
-use Aegis\Lottery\LotteryCronService;
-use Aegis\Lottery\LotteryIntelligence;
-use Aegis\Lottery\SystemBuilder;
+use AIWorkforce\Lottery\EuroMillionsRules;
+use AIWorkforce\Lottery\LotteryCronService;
+use AIWorkforce\Lottery\LotteryIntelligence;
+use AIWorkforce\Lottery\SystemBuilder;
 
 function fx_lotto_system_builder(): SystemBuilder
 {

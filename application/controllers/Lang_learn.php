@@ -29,14 +29,14 @@ class Lang_learn extends App_Controller
         $featured = $this->platform->langlearn->searchCatalog('', 80);
         $must = [];
         foreach (['nl', 'en', 'fr', 'de', 'es', 'it', 'ja'] as $code) {
-            $hit = \Aegis\LangLearn\LanguageCatalog::get($code);
+            $hit = \AIWorkforce\LangLearn\LanguageCatalog::get($code);
             if ($hit) $must[$hit['code']] = $hit;
         }
         foreach ($featured as $row) $must[$row['code']] = $row;
         $data['languages'] = array_values($must);
         $data['catalogTotal'] = $this->platform->langlearn->catalogCount();
         $data['csrfToken'] = (string) $this->session->userdata('csrf_token');
-        $data['locales'] = array_merge(\Aegis\LangLearn\Translator::LOCALES, \Aegis\LangLearn\LanguageCatalog::VOICE_LOCALES);
+        $data['locales'] = array_merge(\AIWorkforce\LangLearn\Translator::LOCALES, \AIWorkforce\LangLearn\LanguageCatalog::VOICE_LOCALES);
         // The user's real learning profile(s) so the "Continue studying"
         // links point somewhere useful instead of a hard-coded profile id.
         try { $data['myProfiles'] = $this->platform->langlearn->profiles((int) $user['id']); }
@@ -87,7 +87,7 @@ class Lang_learn extends App_Controller
         $data = $this->base('Language');
         $profile = $this->platform->langlearn->profileOwned($id, (int) $user['id']);
         $data['profile'] = $profile;
-        $data['language'] = \Aegis\LangLearn\LanguageRegistry::get($profile['language_code']);
+        $data['language'] = \AIWorkforce\LangLearn\LanguageRegistry::get($profile['language_code']);
         $data['progress'] = $this->platform->langlearn->progressFor($profile);
         $data['path'] = $this->platform->langlearn->pathFor((int) $user['id'], $id);
         $data['latest'] = $this->platform->model->langlearn->latestCompletedAssessment($id);
@@ -112,7 +112,7 @@ class Lang_learn extends App_Controller
         $data = $this->base('Assessment');
         $a = $this->platform->langlearn->assessmentOwned($id, (int) $user['id']);
         $data['assessment'] = $a;
-        $data['language'] = \Aegis\LangLearn\LanguageRegistry::get($a['language_code']);
+        $data['language'] = \AIWorkforce\LangLearn\LanguageRegistry::get($a['language_code']);
         $this->render($data, 'langlearn/assessment');
     }
 
@@ -312,7 +312,7 @@ class Lang_learn extends App_Controller
         $data['profileId'] = $profileId;
         $profile = $this->platform->model->langlearn->findProfile($profileId);
         $data['langCode'] = $profile['language_code'] ?? 'en';
-        $data['locale'] = \Aegis\LangLearn\Translator::LOCALES[$data['langCode']] ?? 'en-GB';
+        $data['locale'] = \AIWorkforce\LangLearn\Translator::LOCALES[$data['langCode']] ?? 'en-GB';
         $this->render($data, 'langlearn/vocabulary');
     }
 

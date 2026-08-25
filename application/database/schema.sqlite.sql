@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS ci_sessions (id TEXT PRIMARY KEY, ip_address TEXT NOT NULL, timestamp INTEGER NOT NULL DEFAULT 0, data BLOB NOT NULL);
 
--- AEGIS — SQLite schema for the offline dev runtime (pdo_sqlite).
+-- AI_WORKFORCE — SQLite schema for the offline dev runtime (pdo_sqlite).
 -- The canonical production schema is schema.mysql.sql; both are installed
 -- by tools/install.php which picks by driver. Column sets are identical.
 

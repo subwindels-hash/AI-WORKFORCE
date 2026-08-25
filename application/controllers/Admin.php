@@ -8,12 +8,12 @@ require_once APPPATH . 'core/App_Controller.php';
  */
 class Admin extends App_Controller
 {
-    private \Aegis\AdminPortal $portal;
+    private \AIWorkforce\AdminPortal $portal;
 
     public function __construct()
     {
         parent::__construct();
-        $this->portal = new \Aegis\AdminPortal($this->Aegis_model);
+        $this->portal = new \AIWorkforce\AdminPortal($this->AIWorkforce_model);
         $this->portal->ensureSchema();
     }
 
@@ -25,7 +25,7 @@ class Admin extends App_Controller
         }
         $data = $this->base('Admin Dashboard', 'dashboard');
         $data['stats'] = $this->portal->dashboardStats();
-        $data['smtp'] = \Aegis\Mailer::configSummary();
+        $data['smtp'] = \AIWorkforce\Mailer::configSummary();
         $this->render('admin/index', $data);
     }
 
@@ -37,7 +37,7 @@ class Admin extends App_Controller
         $sort = (string) $this->input->get('sort', true) ?: 'created_at';
         $dir = (string) $this->input->get('dir', true) ?: 'DESC';
         $page = max(1, (int) $this->input->get('page'));
-        $result = $this->Aegis_model->identity->searchUsers(
+        $result = $this->AIWorkforce_model->identity->searchUsers(
             ['q' => $q, 'status' => in_array($status, ['active', 'suspended'], true) ? $status : ''],
             $sort, $dir, $page, 20
         );
@@ -89,19 +89,19 @@ class Admin extends App_Controller
             $this->flash('error', 'That role cannot be assigned from your account.');
             redirect('/admin/users/create'); return;
         }
-        if ($this->Aegis_model->identity->findUserByEmail($email) || $this->Aegis_model->identity->usernameTaken($username)) {
+        if ($this->AIWorkforce_model->identity->findUserByEmail($email) || $this->AIWorkforce_model->identity->usernameTaken($username)) {
             $this->flash('error', 'That username or email is already in use.');
             redirect('/admin/users/create'); return;
         }
         $now = gmdate('c');
-        $new = $this->Aegis_model->identity->createUser([
+        $new = $this->AIWorkforce_model->identity->createUser([
             'username' => $username, 'email' => $email,
             'password_hash' => password_hash($password, PASSWORD_DEFAULT),
             'display_name' => $username, 'active' => 1,
             'created_at' => $now, 'updated_at' => $now, 'last_login_at' => null,
         ]);
-        $role = $this->Aegis_model->identity->ensureRole($roleCode, ucwords(str_replace('_', ' ', $roleCode)));
-        $this->Aegis_model->identity->assignRole((int) $new['id'], $role);
+        $role = $this->AIWorkforce_model->identity->ensureRole($roleCode, ucwords(str_replace('_', ' ', $roleCode)));
+        $this->AIWorkforce_model->identity->assignRole((int) $new['id'], $role);
         $this->portal->log($actor, 'USER_CREATED', 'ok', $this->portal->userTarget($new), ['role' => $roleCode], $this->ip());
         $this->flash('notice', 'User account created. User ID ' . ($new['user_uid'] ?? '') . '. The temporary password is not stored and will not be shown again.');
         redirect('/admin/users/' . (int) $new['id']);
@@ -129,15 +129,15 @@ class Admin extends App_Controller
             $this->flash('error', 'Enter a valid username and email address.');
             redirect('/admin/users/' . (int) $id . '/edit'); return;
         }
-        if ($this->Aegis_model->identity->usernameTaken($username, (int) $id) || $this->Aegis_model->identity->emailTaken($email, (int) $id)) {
+        if ($this->AIWorkforce_model->identity->usernameTaken($username, (int) $id) || $this->AIWorkforce_model->identity->emailTaken($email, (int) $id)) {
             $this->flash('error', 'That username or email is already in use.');
             redirect('/admin/users/' . (int) $id . '/edit'); return;
         }
         $patch = ['username' => $username, 'email' => $email, 'display_name' => $display !== '' ? $display : $username];
-        $this->Aegis_model->identity->updateUser((int) $id, $patch);
+        $this->AIWorkforce_model->identity->updateUser((int) $id, $patch);
         if ($roleCode !== '' && $this->roleAllowed($actor, $roleCode)) {
-            $role = $this->Aegis_model->identity->findRoleByCode($roleCode);
-            if ($role) $this->Aegis_model->identity->replaceUserRoles((int) $id, [(int) $role['id']]);
+            $role = $this->AIWorkforce_model->identity->findRoleByCode($roleCode);
+            if ($role) $this->AIWorkforce_model->identity->replaceUserRoles((int) $id, [(int) $role['id']]);
         }
         $this->handleAvatarUpload((int) $id, $member);
         $fresh = $this->findPublicUser((int) $id);
@@ -162,7 +162,7 @@ class Admin extends App_Controller
     public function toggle_user(int $id)
     {
         $actor = $this->gate('admin.users.manage'); if (!$actor) return;
-        $target = $this->Aegis_model->identity->findUserById($id);
+        $target = $this->AIWorkforce_model->identity->findUserById($id);
         if (!$target) { $this->flash('error', 'User not found.'); redirect('/admin/users'); return; }
         $this->setStatus($id, $actor, empty($target['active']));
     }
@@ -175,11 +175,11 @@ class Admin extends App_Controller
         if ((int) $actor['id'] === $id) { $this->flash('error', 'You cannot delete your own account.'); redirect('/admin/users/' . $id); return; }
         $target = $this->findPublicUser($id);
         if (!$target) { $this->flash('error', 'User not found.'); redirect('/admin/users'); return; }
-        if ($this->Aegis_model->identity->userHasRole($id, 'super_admin') && $this->Aegis_model->identity->countSuperAdmins() <= 1) {
+        if ($this->AIWorkforce_model->identity->userHasRole($id, 'super_admin') && $this->AIWorkforce_model->identity->countSuperAdmins() <= 1) {
             $this->flash('error', 'The last Super Admin account cannot be deleted.');
             redirect('/admin/users/' . $id); return;
         }
-        $ok = $this->Aegis_model->identity->deleteUser($id);
+        $ok = $this->AIWorkforce_model->identity->deleteUser($id);
         $this->portal->log($actor, 'USER_DELETED', $ok ? 'ok' : 'error', $this->portal->userTarget($target), [], $this->ip());
         if (!$ok) {
             $this->flash('error', 'This account could not be deleted because related records still exist. Suspend the account instead.');
@@ -196,7 +196,7 @@ class Admin extends App_Controller
         $target = $this->findPublicUser((int) $id);
         if (!$target) { $this->flash('error', 'User not found.'); redirect('/admin/users'); return; }
         $temporary = $this->randomPassword();
-        $this->Aegis_model->identity->updateUser((int) $id, ['password_hash' => password_hash($temporary, PASSWORD_DEFAULT)]);
+        $this->AIWorkforce_model->identity->updateUser((int) $id, ['password_hash' => password_hash($temporary, PASSWORD_DEFAULT)]);
         $this->portal->log($actor, 'PASSWORD_RESET', 'ok', $this->portal->userTarget($target), [], $this->ip());
         $this->session->set_flashdata('temp_password', $temporary);
         $this->flash('notice', 'Password reset. Give the user the temporary password shown below. It is not stored and will not be shown again.');
@@ -207,11 +207,11 @@ class Admin extends App_Controller
     {
         $actor = $this->gate('admin.users.impersonate'); if (!$actor) return;
         if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/users'); return; }
-        $target = $this->Aegis_model->identity->findUserById((int) $id);
+        $target = $this->AIWorkforce_model->identity->findUserById((int) $id);
         if (!$target) { $this->flash('error', 'User not found.'); redirect('/admin/users'); return; }
         $public = $this->portal->publicUser($target);
-        $public['permissions'] = $this->Aegis_model->identity->permissionsForUser((int) $id);
-        $public['roles'] = $this->Aegis_model->identity->rolesForUser((int) $id);
+        $public['permissions'] = $this->AIWorkforce_model->identity->permissionsForUser((int) $id);
+        $public['roles'] = $this->AIWorkforce_model->identity->rolesForUser((int) $id);
         if (!$this->canImpersonate($actor, $public)) {
             $this->portal->log($actor, 'IMPERSONATION_STARTED', 'denied', $this->portal->userTarget($public), [], $this->ip());
             $this->flash('error', 'You cannot sign in as that account.');
@@ -237,13 +237,13 @@ class Admin extends App_Controller
         if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/dashboard'); return; }
         $sessionId = (int) $this->session->userdata('impersonation_id');
         if ($sessionId > 0) $this->portal->endImpersonation($sessionId, $admin, $current, $this->ip());
-        $fresh = $this->Aegis_model->identity->findUserById((int) $admin['id']);
+        $fresh = $this->AIWorkforce_model->identity->findUserById((int) $admin['id']);
         if (!$fresh || empty($fresh['active'])) {
             $this->session->sess_destroy();
             $this->flash('error', 'The administrator session could not be restored.');
             redirect('/admin/login'); return;
         }
-        $fresh['permissions'] = $this->Aegis_model->identity->permissionsForUser((int) $fresh['id']);
+        $fresh['permissions'] = $this->AIWorkforce_model->identity->permissionsForUser((int) $fresh['id']);
         unset($fresh['password_hash']);
         $this->session->sess_regenerate(true);
         $this->session->unset_userdata(['impersonator', 'impersonation_id']);
@@ -317,7 +317,7 @@ class Admin extends App_Controller
         $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
         $data = $this->base('System Settings', 'settings');
         $data['settings'] = $this->portal->settingsByCategory();
-        $data['smtp'] = \Aegis\Mailer::configSummary();
+        $data['smtp'] = \AIWorkforce\Mailer::configSummary();
         $data['smtpOk'] = $this->session->flashdata('smtpOk');
         $data['smtpError'] = $this->session->flashdata('smtpError');
         $data['session'] = [
@@ -334,11 +334,11 @@ class Admin extends App_Controller
         $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
         if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/settings'); return; }
         $category = (string) $this->input->post('category');
-        if (!isset(\Aegis\AdminPortal::SETTING_DEFAULTS[$category])) {
+        if (!isset(\AIWorkforce\AdminPortal::SETTING_DEFAULTS[$category])) {
             $this->flash('error', 'Unknown settings category.'); redirect('/admin/settings'); return;
         }
         $values = [];
-        foreach (array_keys(\Aegis\AdminPortal::SETTING_DEFAULTS[$category]) as $key) {
+        foreach (array_keys(\AIWorkforce\AdminPortal::SETTING_DEFAULTS[$category]) as $key) {
             $values[$key] = (string) $this->input->post($key);
         }
         if ($category === 'ai' || $category === 'accounts') {
@@ -369,7 +369,7 @@ class Admin extends App_Controller
             $this->flash('error', 'Enter a valid recipient email address.');
             redirect('/admin/settings#email'); return;
         }
-        $res = \Aegis\Mailer::sendTest($this, $to, $variant);
+        $res = \AIWorkforce\Mailer::sendTest($this, $to, $variant);
         $this->portal->log($actor, 'SETTINGS_CHANGED', $res['ok'] ? 'ok' : 'error', ['type' => 'email', 'id' => 'test', 'label' => $to], ['ok' => $res['ok']], $this->ip());
         $this->session->set_flashdata($res['ok'] ? 'smtpOk' : 'smtpError', $res['message']);
         redirect('/admin/settings#email');
@@ -379,10 +379,10 @@ class Admin extends App_Controller
     {
         $actor = $this->gate('admin.admins.manage'); if (!$actor) return;
         $data = $this->base('Admin Accounts', 'admins');
-        $data['admins'] = $this->Aegis_model->identity->listAdminAccounts();
+        $data['admins'] = $this->AIWorkforce_model->identity->listAdminAccounts();
         $data['adminRoles'] = array_values(array_filter(
-            $this->Aegis_model->identity->listRoles(),
-            fn($r) => in_array($r['code'], \Aegis\AdminPortal::ADMIN_ROLES, true)
+            $this->AIWorkforce_model->identity->listRoles(),
+            fn($r) => in_array($r['code'], \AIWorkforce\AdminPortal::ADMIN_ROLES, true)
         ));
         $this->render('admin/admins', $data);
     }
@@ -395,24 +395,24 @@ class Admin extends App_Controller
         $email = strtolower(trim((string) $this->input->post('email')));
         $password = (string) $this->input->post('password');
         $roleCode = trim((string) $this->input->post('role'));
-        if (!in_array($roleCode, \Aegis\AdminPortal::ADMIN_ROLES, true)) $roleCode = 'admin';
+        if (!in_array($roleCode, \AIWorkforce\AdminPortal::ADMIN_ROLES, true)) $roleCode = 'admin';
         if (!$this->validUsername($username) || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 12) {
             $this->flash('error', 'Enter a valid username, email and a password of at least 12 characters.');
             redirect('/admin/admins'); return;
         }
-        if ($this->Aegis_model->identity->findUserByEmail($email) || $this->Aegis_model->identity->usernameTaken($username)) {
+        if ($this->AIWorkforce_model->identity->findUserByEmail($email) || $this->AIWorkforce_model->identity->usernameTaken($username)) {
             $this->flash('error', 'That username or email is already in use.');
             redirect('/admin/admins'); return;
         }
         $now = gmdate('c');
-        $new = $this->Aegis_model->identity->createUser([
+        $new = $this->AIWorkforce_model->identity->createUser([
             'username' => $username, 'email' => $email,
             'password_hash' => password_hash($password, PASSWORD_DEFAULT),
             'display_name' => $username, 'active' => 1,
             'created_at' => $now, 'updated_at' => $now, 'last_login_at' => null,
         ]);
-        $role = $this->Aegis_model->identity->ensureRole($roleCode, ucwords(str_replace('_', ' ', $roleCode)));
-        $this->Aegis_model->identity->assignRole((int) $new['id'], $role);
+        $role = $this->AIWorkforce_model->identity->ensureRole($roleCode, ucwords(str_replace('_', ' ', $roleCode)));
+        $this->AIWorkforce_model->identity->assignRole((int) $new['id'], $role);
         $this->portal->log($actor, 'ADMIN_CREATED', 'ok', $this->portal->userTarget($new), ['role' => $roleCode], $this->ip());
         $this->flash('notice', 'Administrator account created. The temporary password is not stored.');
         redirect('/admin/admins');
@@ -427,18 +427,18 @@ class Admin extends App_Controller
         if (!$target) { $this->flash('error', 'Administrator not found.'); redirect('/admin/admins'); return; }
         $roleCode = trim((string) $this->input->post('role'));
         $status = $this->input->post('active') === '1';
-        if (!in_array($roleCode, \Aegis\AdminPortal::ADMIN_ROLES, true)) {
+        if (!in_array($roleCode, \AIWorkforce\AdminPortal::ADMIN_ROLES, true)) {
             $this->flash('error', 'Choose a valid administrator role.'); redirect('/admin/admins'); return;
         }
         if ((int) $actor['id'] === $id && !$status) {
             $this->flash('error', 'You cannot disable your own administrator account.'); redirect('/admin/admins'); return;
         }
-        if (!$status && $this->Aegis_model->identity->userHasRole($id, 'super_admin') && $this->Aegis_model->identity->countSuperAdmins() <= 1) {
+        if (!$status && $this->AIWorkforce_model->identity->userHasRole($id, 'super_admin') && $this->AIWorkforce_model->identity->countSuperAdmins() <= 1) {
             $this->flash('error', 'The last Super Admin cannot be disabled.'); redirect('/admin/admins'); return;
         }
-        $role = $this->Aegis_model->identity->findRoleByCode($roleCode);
-        if ($role) $this->Aegis_model->identity->replaceUserRoles($id, [(int) $role['id']]);
-        $this->Aegis_model->identity->setActive($id, $status);
+        $role = $this->AIWorkforce_model->identity->findRoleByCode($roleCode);
+        if ($role) $this->AIWorkforce_model->identity->replaceUserRoles($id, [(int) $role['id']]);
+        $this->AIWorkforce_model->identity->setActive($id, $status);
         $this->portal->log($actor, 'ADMIN_PERMISSIONS_CHANGED', 'ok', $this->portal->userTarget($target), ['role' => $roleCode, 'active' => $status], $this->ip());
         $this->flash('notice', 'Administrator account updated.');
         redirect('/admin/admins');
@@ -476,9 +476,9 @@ class Admin extends App_Controller
     public function api()
     {
         $actor = $this->gate('admin.api.view'); if (!$actor) return;
-        \Aegis\ApiProviders::ensureSchema($this->Aegis_model->db);
+        \AIWorkforce\ApiProviders::ensureSchema($this->AIWorkforce_model->db);
         $data = $this->base('API Management', 'api');
-        $data['dashboard'] = \Aegis\ApiProviders::dashboard($this->Aegis_model->db);
+        $data['dashboard'] = \AIWorkforce\ApiProviders::dashboard($this->AIWorkforce_model->db);
         $data['canManage'] = $this->platform->identity->can($actor, 'admin.api.manage');
         $data['canTest'] = $this->platform->identity->can($actor, 'admin.api.test');
         $this->render('admin/api/index', $data);
@@ -493,8 +493,8 @@ class Admin extends App_Controller
     public function api_show($id = 0)
     {
         $actor = $this->gate('admin.api.view'); if (!$actor) return;
-        \Aegis\ApiProviders::ensureSchema($this->Aegis_model->db);
-        $row = \Aegis\ApiProviders::find($this->Aegis_model->db, (int) $id);
+        \AIWorkforce\ApiProviders::ensureSchema($this->AIWorkforce_model->db);
+        $row = \AIWorkforce\ApiProviders::find($this->AIWorkforce_model->db, (int) $id);
         if (!$row) { $this->flash('error', 'Provider not found.'); redirect('/admin/api'); return; }
         $this->renderApiForm($actor, $row);
     }
@@ -505,7 +505,7 @@ class Admin extends App_Controller
         if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/api'); return; }
         $canSecrets = $this->platform->identity->can($actor, 'admin.api.credentials') || $this->isSuperAdmin($actor);
         try {
-            $saved = \Aegis\ApiProviders::save($this->Aegis_model->db, $this->input->post() ?: [], $id ? (int) $id : null, (int) $actor['id'], $canSecrets);
+            $saved = \AIWorkforce\ApiProviders::save($this->AIWorkforce_model->db, $this->input->post() ?: [], $id ? (int) $id : null, (int) $actor['id'], $canSecrets);
             $this->portal->log($actor, $id ? 'API_PROVIDER_UPDATED' : 'API_PROVIDER_CREATED', 'ok', [
                 'type' => 'api_provider', 'id' => (string) ($saved['id'] ?? ''), 'label' => (string) ($saved['label'] ?? ''),
             ], ['service' => $saved['service'] ?? '', 'driver' => $saved['driver'] ?? '', 'role' => $saved['role'] ?? ''], $this->ip());
@@ -522,11 +522,11 @@ class Admin extends App_Controller
     {
         $actor = $this->gate('admin.api.test'); if (!$actor) return;
         if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/api'); return; }
-        $row = \Aegis\ApiProviders::find($this->Aegis_model->db, (int) $id);
+        $row = \AIWorkforce\ApiProviders::find($this->AIWorkforce_model->db, (int) $id);
         if (!$row) { $this->flash('error', 'Provider not found.'); redirect('/admin/api'); return; }
-        $secrets = \Aegis\ApiProviders::findSecrets($this->Aegis_model->db, (int) $id);
-        $result = \Aegis\ApiProviders::test($row, $secrets);
-        \Aegis\ApiProviders::recordTest($this->Aegis_model->db, (int) $id, $result);
+        $secrets = \AIWorkforce\ApiProviders::findSecrets($this->AIWorkforce_model->db, (int) $id);
+        $result = \AIWorkforce\ApiProviders::test($row, $secrets);
+        \AIWorkforce\ApiProviders::recordTest($this->AIWorkforce_model->db, (int) $id, $result);
         $this->portal->log($actor, 'API_PROVIDER_TESTED', !empty($result['ok']) ? 'ok' : 'error', [
             'type' => 'api_provider', 'id' => (string) $id, 'label' => $row['label'],
         ], ['ok' => !empty($result['ok']), 'ms' => $result['ms'] ?? null], $this->ip());
@@ -548,9 +548,9 @@ class Admin extends App_Controller
     {
         $actor = $this->gate('admin.api.manage'); if (!$actor) return;
         if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/api'); return; }
-        $row = \Aegis\ApiProviders::find($this->Aegis_model->db, (int) $id);
+        $row = \AIWorkforce\ApiProviders::find($this->AIWorkforce_model->db, (int) $id);
         if (!$row) { $this->flash('error', 'Provider not found.'); redirect('/admin/api'); return; }
-        \Aegis\ApiProviders::setRole($this->Aegis_model->db, (int) $id, 'primary');
+        \AIWorkforce\ApiProviders::setRole($this->AIWorkforce_model->db, (int) $id, 'primary');
         $this->portal->log($actor, 'API_PROVIDER_UPDATED', 'ok', ['type' => 'api_provider', 'id' => (string) $id, 'label' => $row['label']], ['role' => 'primary'], $this->ip());
         $this->flash('notice', '✓ Changes saved successfully');
         redirect('/admin/api');
@@ -560,9 +560,9 @@ class Admin extends App_Controller
     {
         $actor = $this->gate('admin.api.manage'); if (!$actor) return;
         if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/api'); return; }
-        $row = \Aegis\ApiProviders::find($this->Aegis_model->db, (int) $id);
+        $row = \AIWorkforce\ApiProviders::find($this->AIWorkforce_model->db, (int) $id);
         if (!$row) { $this->flash('error', 'Provider not found.'); redirect('/admin/api'); return; }
-        \Aegis\ApiProviders::delete($this->Aegis_model->db, (int) $id);
+        \AIWorkforce\ApiProviders::delete($this->AIWorkforce_model->db, (int) $id);
         $this->portal->log($actor, 'API_PROVIDER_DELETED', 'ok', ['type' => 'api_provider', 'id' => (string) $id, 'label' => $row['label']], ['service' => $row['service']], $this->ip());
         $this->flash('notice', '✓ Changes saved successfully');
         redirect('/admin/api');
@@ -572,9 +572,9 @@ class Admin extends App_Controller
     {
         $actor = $this->gate('admin.api.manage'); if (!$actor) return;
         if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/api'); return; }
-        $row = \Aegis\ApiProviders::find($this->Aegis_model->db, $id);
+        $row = \AIWorkforce\ApiProviders::find($this->AIWorkforce_model->db, $id);
         if (!$row) { $this->flash('error', 'Provider not found.'); redirect('/admin/api'); return; }
-        \Aegis\ApiProviders::setEnabled($this->Aegis_model->db, $id, $enabled);
+        \AIWorkforce\ApiProviders::setEnabled($this->AIWorkforce_model->db, $id, $enabled);
         $this->portal->log($actor, $enabled ? 'API_PROVIDER_ENABLED' : 'API_PROVIDER_DISABLED', 'ok', [
             'type' => 'api_provider', 'id' => (string) $id, 'label' => $row['label'],
         ], [], $this->ip());
@@ -586,8 +586,8 @@ class Admin extends App_Controller
     {
         $data = $this->base($row ? 'Manage provider' : 'Add provider', 'api');
         $data['row'] = $row;
-        $data['services'] = \Aegis\ApiProviders::services();
-        $data['drivers'] = \Aegis\ApiProviders::drivers();
+        $data['services'] = \AIWorkforce\ApiProviders::services();
+        $data['drivers'] = \AIWorkforce\ApiProviders::drivers();
         $data['canManage'] = $this->platform->identity->can($actor, 'admin.api.manage');
         $data['canTest'] = $this->platform->identity->can($actor, 'admin.api.test');
         $data['canSecrets'] = $this->platform->identity->can($actor, 'admin.api.credentials') || $this->isSuperAdmin($actor);
@@ -614,11 +614,11 @@ class Admin extends App_Controller
         }
         $target = $this->findPublicUser($id);
         if (!$target) { $this->flash('error', 'User not found.'); redirect('/admin/users'); return; }
-        if (!$active && $this->Aegis_model->identity->userHasRole($id, 'super_admin') && $this->Aegis_model->identity->countSuperAdmins() <= 1) {
+        if (!$active && $this->AIWorkforce_model->identity->userHasRole($id, 'super_admin') && $this->AIWorkforce_model->identity->countSuperAdmins() <= 1) {
             $this->flash('error', 'The last Super Admin cannot be suspended.');
             redirect('/admin/users/' . $id); return;
         }
-        $this->Aegis_model->identity->setActive($id, $active);
+        $this->AIWorkforce_model->identity->setActive($id, $active);
         $this->portal->log($actor, $active ? 'USER_ACTIVATED' : 'USER_SUSPENDED', 'ok', $this->portal->userTarget($target), [], $this->ip());
         $this->flash('notice', $active ? 'Account activated.' : 'Account suspended. The user can no longer sign in.');
         redirect('/admin/users/' . $id);
@@ -643,11 +643,11 @@ class Admin extends App_Controller
 
     private function findPublicUser(int $id): ?array
     {
-        $user = $this->Aegis_model->identity->findUserById($id);
+        $user = $this->AIWorkforce_model->identity->findUserById($id);
         if (!$user) return null;
         $user = $this->portal->publicUser($user);
-        $user['permissions'] = $this->Aegis_model->identity->permissionsForUser($id);
-        $user['roles'] = $this->Aegis_model->identity->rolesForUser($id);
+        $user['permissions'] = $this->AIWorkforce_model->identity->permissionsForUser($id);
+        $user['roles'] = $this->AIWorkforce_model->identity->rolesForUser($id);
         return $user;
     }
 
@@ -668,7 +668,7 @@ class Admin extends App_Controller
         $filename = 'u' . $userId . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
         if (!@move_uploaded_file($tmp, $uploadDir . '/' . $filename)) return;
         $path = '/assets/uploads/avatars/' . $filename;
-        $this->Aegis_model->identity->updateUser($userId, ['profile_image' => $path]);
+        $this->AIWorkforce_model->identity->updateUser($userId, ['profile_image' => $path]);
         $previous = (string) ($member['profile_image'] ?? '');
         if ($previous !== '' && str_starts_with($previous, '/assets/uploads/avatars/')) {
             $old = FCPATH . ltrim($previous, '/');

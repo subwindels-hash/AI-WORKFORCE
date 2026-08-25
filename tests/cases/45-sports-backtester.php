@@ -1,6 +1,6 @@
 <?php
-use Aegis\Persistence\AuditRepository;
-use Aegis\Sports\SportsBacktester;
+use AIWorkforce\Persistence\AuditRepository;
+use AIWorkforce\Sports\SportsBacktester;
 
 function fx_bt_audit(): AuditRepository
 {
@@ -39,7 +39,7 @@ function fx_bt_repo(): SportsRepositoryStub
 test('backtester replays point-in-time and flags simulation', function () {
     $repo = fx_bt_repo();
     $audit = fx_bt_audit();
-    $bt = new SportsBacktester($repo, $audit, new \Aegis\Sports\PredictionPipeline(), new \Aegis\Sports\DataQualityEngine(), new \Aegis\Sports\ModelPerformanceService($repo, $audit));
+    $bt = new SportsBacktester($repo, $audit, new \AIWorkforce\Sports\PredictionPipeline(), new \AIWorkforce\Sports\DataQualityEngine(), new \AIWorkforce\Sports\ModelPerformanceService($repo, $audit));
     $report = $bt->run(['from' => '2026-06-10', 'to' => '2026-06-10', 'stake' => 10.0, 'minConfidence' => 60.0], 'tester');
     assert_true($report['simulation'] === true);
     assert_contains('BACKTEST SIMULATION', $report['warning']);
@@ -58,7 +58,7 @@ test('backtester replays point-in-time and flags simulation', function () {
 test('backtester refuses invalid ranges and missing data honestly', function () {
     $repo = new SportsRepositoryStub();
     $audit = fx_bt_audit();
-    $bt = new SportsBacktester($repo, $audit, new \Aegis\Sports\PredictionPipeline(), new \Aegis\Sports\DataQualityEngine(), new \Aegis\Sports\ModelPerformanceService($repo, $audit));
+    $bt = new SportsBacktester($repo, $audit, new \AIWorkforce\Sports\PredictionPipeline(), new \AIWorkforce\Sports\DataQualityEngine(), new \AIWorkforce\Sports\ModelPerformanceService($repo, $audit));
     assert_throws(InvalidArgumentException::class, fn() => $bt->run(['from' => '2026-06-10', 'to' => '2026-06-01']));
     assert_throws(InvalidArgumentException::class, fn() => $bt->run(['from' => '2026-01-01', 'to' => '2026-12-31']));
     $empty = $bt->run(['from' => '2026-06-10', 'to' => '2026-06-12']);
@@ -72,7 +72,7 @@ test('backtester ignores unverified results and post-kickoff-only odds', functio
     $r = $repo->findResult(11, 1);
     $repo->results = array_map(fn($x) => $x['id'] === $r['id'] ? array_merge($x, ['verified' => 0]) : $x, $repo->results);
     $audit = fx_bt_audit();
-    $bt = new SportsBacktester($repo, $audit, new \Aegis\Sports\PredictionPipeline(), new \Aegis\Sports\DataQualityEngine(), new \Aegis\Sports\ModelPerformanceService($repo, $audit));
+    $bt = new SportsBacktester($repo, $audit, new \AIWorkforce\Sports\PredictionPipeline(), new \AIWorkforce\Sports\DataQualityEngine(), new \AIWorkforce\Sports\ModelPerformanceService($repo, $audit));
     $report = $bt->run(['from' => '2026-06-10', 'to' => '2026-06-10', 'minConfidence' => 60.0]);
     assert_equals(1, $report['evaluated']);
 });

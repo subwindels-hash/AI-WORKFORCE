@@ -7,11 +7,11 @@ import { loadNodeRuntime, useHostFilesystem } from '@php-wasm/node';
 import { PHP, ProcessIdAllocator } from '@php-wasm/universal';
 
 const APP_ROOT = path.resolve(new URL('..', import.meta.url).pathname);
-process.env.AEGIS_DB_DRIVER = 'pdo_sqlite';
+process.env.AI_WORKFORCE_DB_DRIVER = 'pdo_sqlite';
 // Tests use a THROWAWAY database so they never pollute the demo data.
 import fs from 'node:fs';
-const TEST_DB = path.join(APP_ROOT, 'application', 'data', 'aegis-test.sqlite');
-process.env.AEGIS_SQLITE_PATH = TEST_DB;
+const TEST_DB = path.join(APP_ROOT, 'application', 'data', 'ai_workforce-test.sqlite');
+process.env.AI_WORKFORCE_SQLITE_PATH = TEST_DB;
 // Tests assume a pristine database — remove the throwaway file so state from
 // a previous run (strategies mid-lifecycle, alert baselines…) cannot leak.
 fs.rmSync(TEST_DB, { force: true });
@@ -26,8 +26,8 @@ useHostFilesystem(php);
 const root = APP_ROOT.replaceAll("'", "\\'");
 const code = `<?php
 chdir('${root}');
-putenv('AEGIS_DB_DRIVER=pdo_sqlite');
-putenv('AEGIS_SQLITE_PATH=${process.env.AEGIS_SQLITE_PATH.replaceAll("'", "\\'")}');
+putenv('AI_WORKFORCE_DB_DRIVER=pdo_sqlite');
+putenv('AI_WORKFORCE_SQLITE_PATH=${process.env.AI_WORKFORCE_SQLITE_PATH.replaceAll("'", "\\'")}');
 ini_set('display_errors', '1');
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE & ~E_WARNING);
 // php-wasm runs with PHP_SAPI='wasm' — defining STDIN makes CI3's is_cli() true.

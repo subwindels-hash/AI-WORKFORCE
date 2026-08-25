@@ -6,9 +6,9 @@
 
 test('identity schema ensure exposes username, user_uid and profile_image', function () {
     $db = platform()->model->db;
-    \Aegis\IdentitySchema::ensure($db);
+    \AIWorkforce\IdentitySchema::ensure($db);
     foreach (['username', 'user_uid', 'profile_image', 'email', 'password_hash'] as $col) {
-        assert_true(\Aegis\IdentitySchema::has($db, $col), "users.$col exists");
+        assert_true(\AIWorkforce\IdentitySchema::has($db, $col), "users.$col exists");
     }
 });
 
@@ -47,12 +47,12 @@ test('usernameTaken rejects a name already used by another account', function ()
 });
 
 test('profile image helper rejects non-images and stores a real jpeg', function () {
-    $dirErr = \Aegis\ProfileImage::prepareDirectory();
+    $dirErr = \AIWorkforce\ProfileImage::prepareDirectory();
     assert_null($dirErr, $dirErr ?? 'upload dir ready');
 
     $junk = tempnam(sys_get_temp_dir(), 'notimg');
     file_put_contents($junk, '<?php echo "nope";');
-    $bad = \Aegis\ProfileImage::store([
+    $bad = \AIWorkforce\ProfileImage::store([
         'error' => UPLOAD_ERR_OK, 'tmp_name' => $junk, 'size' => filesize($junk), 'name' => 'x.php',
     ], 1);
     assert_false($bad['ok']);
@@ -72,14 +72,14 @@ test('profile image helper rejects non-images and stores a real jpeg', function 
         @unlink($jpeg);
         return;
     }
-    $ok = \Aegis\ProfileImage::store([
+    $ok = \AIWorkforce\ProfileImage::store([
         'error' => UPLOAD_ERR_OK, 'tmp_name' => $jpeg, 'size' => filesize($jpeg), 'name' => 'face.jpg',
     ], 42);
     assert_true($ok['ok'], $ok['error'] ?? 'store jpeg');
     assert_true(str_starts_with((string) ($ok['path'] ?? ''), '/assets/uploads/avatars/'));
     $abs = rtrim(FCPATH, '/\\') . str_replace('/', DIRECTORY_SEPARATOR, $ok['path']);
     assert_true(is_file($abs), 'uploaded file exists on disk');
-    \Aegis\ProfileImage::deletePublicPath($ok['path']);
+    \AIWorkforce\ProfileImage::deletePublicPath($ok['path']);
     assert_false(is_file($abs), 'deleted after cleanup');
     @unlink($jpeg);
 });

@@ -6,13 +6,13 @@
   <title><?= e(($title ?? 'Signed out') . ' · WINDELS AI WORKFORCE') ?></title>
   <meta name="robots" content="noindex,nofollow">
   <link rel="icon" href="/assets/images/windels-mark.png">
-  <link rel="stylesheet" href="/assets/css/aegis.css">
+  <link rel="stylesheet" href="/assets/css/ai_workforce.css">
 </head>
 <body class="auth-page">
   <main class="auth-shell auth-shell--goodbye">
     <section class="auth-card auth-card--goodbye">
       <div class="auth-brand">
-        <img src="/assets/images/windels-mark.png" alt="" class="auth-brand-mark" onerror="this.onerror=null;this.src='/assets/images/aegis-mark.png'">
+        <img src="/assets/images/windels-mark.png" alt="" class="auth-brand-mark" onerror="this.onerror=null;this.src='/assets/images/ai_workforce-mark.png'">
         <span class="auth-brand-text">WINDELS AI Workforce</span>
       </div>
       <div class="goodbye-visual">

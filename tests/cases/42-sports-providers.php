@@ -1,9 +1,9 @@
 <?php
-use Aegis\Sports\Providers\HttpSportsProvider;
-use Aegis\Sports\Providers\ProviderException;
-use Aegis\Sports\Providers\SandboxSportsProvider;
-use Aegis\Sports\Providers\SportsDataProvider;
-use Aegis\Sports\Providers\SportsProviderManager;
+use AIWorkforce\Sports\Providers\HttpSportsProvider;
+use AIWorkforce\Sports\Providers\ProviderException;
+use AIWorkforce\Sports\Providers\SandboxSportsProvider;
+use AIWorkforce\Sports\Providers\SportsDataProvider;
+use AIWorkforce\Sports\Providers\SportsProviderManager;
 
 function fx_http(int $status, string $body = '[]'): HttpSportsProvider
 {

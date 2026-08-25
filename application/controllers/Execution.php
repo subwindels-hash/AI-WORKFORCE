@@ -13,14 +13,14 @@ class Execution extends App_Controller
         $data = $this->base('Execution Center');
         $data['proposals'] = $this->platform->execution->proposals(null, 40);
         $data['executions'] = $this->platform->execution->executions(20);
-        $data['limits'] = \Aegis\ExecutionSupervisor::automationLimits($this->platform->state());
+        $data['limits'] = \AIWorkforce\ExecutionSupervisor::automationLimits($this->platform->state());
         $data['gateSemi'] = $this->platform->automationModeGate('SEMI_AUTONOMOUS');
         $data['gateFully'] = $this->platform->automationModeGate('FULLY_AUTOMATED');
         $data['strategies'] = array_filter($this->platform->model->strategies->all(), fn($s) => $s['lifecycle'] === 'APPROVED');
         $data['automatedToday'] = $this->platform->model->proposals->countAutomatedExecutionsToday();
         $data['routable'] = $this->platform->brokers->tradingConnector() !== null;
         $mt5 = $this->platform->brokers->get('mt5-bridge');
-        $data['simBridge'] = $mt5 instanceof \Aegis\Brokers\Mt5BridgeConnector
+        $data['simBridge'] = $mt5 instanceof \AIWorkforce\Brokers\Mt5BridgeConnector
             && (($mt5->status()['simulated'] ?? false) === true);
         // Live quote-aware form defaults (SL −0.4% / TP +1.2% keeps R/R ≥ 3
         // across the demo price wave) — only when a connector is reachable.

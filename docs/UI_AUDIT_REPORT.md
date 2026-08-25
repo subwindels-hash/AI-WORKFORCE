@@ -80,7 +80,7 @@ Legend: ✅ tested & works · ⚠️ tested, issue found and fixed · ❌ tested
 | Non-admin → `/admin` and `/admin/dashboard` | ✅ | ✅ | redirected to `/access-denied` | — |
 | Admin login → `/admin` | ✅ | ✅ | role-checked | — |
 | Admin create user | ✅ | ✅ | "User account created successfully." | — |
-| Admin deactivate / reactivate user | ✅ | ✅ | DISABLED / ACTIVE badges flip; disabled accounts cannot authenticate (code-verified in `Aegis\Identity::authenticate`) | — |
+| Admin deactivate / reactivate user | ✅ | ✅ | DISABLED / ACTIVE badges flip; disabled accounts cannot authenticate (code-verified in `AIWorkforce\Identity::authenticate`) | — |
 | Sports API (`/api/sports/*`) | ✅ | ⚠️ | `decide_calibration()` had `: void` returning a value → **fatal error on PHP 8.1–8.3** (500 on any sports API call loading the controller) | ✅ |
 | **Responsive** — homepage @390px | ✅ | ✅ | no horizontal overflow; mobile menu opens; CTAs sized | — |
 | **Responsive** — dashboard @390px | ✅ | ✅ | sidebar collapses to toggle; menu opens; navigation closes it | — |
@@ -93,7 +93,7 @@ Legend: ✅ tested & works · ⚠️ tested, issue found and fixed · ❌ tested
 ## 4. Fixes applied
 
 1. **Sidebar — Help entry added** (`application/views/layout/header.php`): Account group now reads Settings · Help · Logout, matching the requested structure; uses the same 16px icon set and SPA navigation.
-2. **Top-right status pill** (`header.php` + `assets/css/aegis.css`): the large "●" text glyph was replaced with a 6px CSS dot (`<i class="pill-dot">`); green for normal mode, red for kill-switch-on; tighter padding. Notifications icon (36px button, 17px icon, 8px unread dot) and avatar (28px) unchanged and verified compact.
+2. **Top-right status pill** (`header.php` + `assets/css/ai_workforce.css`): the large "●" text glyph was replaced with a 6px CSS dot (`<i class="pill-dot">`); green for normal mode, red for kill-switch-on; tighter padding. Notifications icon (36px button, 17px icon, 8px unread dot) and avatar (28px) unchanged and verified compact.
 3. **Profile menu — Security item** (`header.php`): menu now Account & settings → Security → Notifications → Sign out; Security navigates to `/account#security`.
 4. **Account page anchor** (`application/views/auth/account.php`): the Security panel now carries `id="security"`.
 5. **SPA navigation hardening** (`assets/js/app-shell.js`):

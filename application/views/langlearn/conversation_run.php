@@ -1,6 +1,6 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed'); 
 $langCode = $view['languageCode'] ?? 'en';
-$locale = \Aegis\LangLearn\Translator::LOCALES[$langCode] ?? 'en-GB';
+$locale = \AIWorkforce\LangLearn\Translator::LOCALES[$langCode] ?? 'en-GB';
 ?>
 <div class="page-head"><div><h2>Conversation — <?= e($view['scenario'] ?? '') ?></h2><p>Correction mode: <?= e(str_replace('_', ' ', $view['correctionMode'] ?? '')) ?>. Listen to any turn in <?= e($locale) ?>.</p></div></div>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
