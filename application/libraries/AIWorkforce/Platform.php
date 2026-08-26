@@ -45,6 +45,7 @@ class Platform
     public \AIWorkforce\LangLearn\VocabularyService $vocabulary;
     public \AIWorkforce\LangLearn\AudioPracticeService $audiopractice;
     public \AIWorkforce\LangLearn\AdaptiveLearningService $adaptive;
+    public \AIWorkforce\LangLearn\TeacherCoach $langcoach;
     public \AIWorkforce\LangLearn\Translator $translator;
 
     public function __construct(\AIWorkforce_model $model, bool $disableRealProviders = false)
@@ -117,6 +118,7 @@ class Platform
         $this->vocabulary = new \AIWorkforce\LangLearn\VocabularyService($model->langlearn, $this->langlearn);
         $this->audiopractice = new \AIWorkforce\LangLearn\AudioPracticeService($model->langlearn, $this->langlearn);
         $this->adaptive = new \AIWorkforce\LangLearn\AdaptiveLearningService($model->langlearn, $this->langlearn);
+        $this->langcoach = new \AIWorkforce\LangLearn\TeacherCoach($this->langlearn, $this->langteacher);
         $this->translator = new \AIWorkforce\LangLearn\Translator();
         $this->execution = new ExecutionSupervisor(
             $model->audit, $model->state, $model->proposals,

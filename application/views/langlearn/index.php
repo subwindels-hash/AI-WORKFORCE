@@ -2,14 +2,27 @@
 <div class="page-head">
   <div>
     <h2>Language Learning</h2>
-    <p>The AI teacher translates, listens and coaches from authored banks. Levels come from your answers — never invented scores.</p>
+    <p>Your personal AI language teacher. Choose a language, set a goal, take a real assessment, then learn — every number comes from stored activity.</p>
   </div>
   <div class="page-actions">
-    <a class="btn primary" href="/app/languages/teacher">Start learning</a>
+    <a class="btn primary" href="/app/languages/teacher">Ask the AI teacher</a>
   </div>
 </div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
+
+<?php if (!empty($user)): ?>
+  <div class="panel" style="margin-bottom:16px">
+    <h3>Ask the AI teacher</h3>
+    <div class="body">
+      <form method="post" action="/app/languages/teacher/ask" class="inline" style="flex-wrap:wrap;gap:8px;width:100%">
+        <input class="sel" type="text" name="message" required maxlength="400" placeholder="Teach me Dutch from the beginning." style="flex:1;min-width:220px">
+        <button class="btn primary">Ask</button>
+      </form>
+      <p class="dim" style="font-size:12px;margin-top:8px">Try: “I want to learn Spanish.” · “Practice Italian conversation with me.” · “Correct my German.” · “Test my French level.”</p>
+    </div>
+  </div>
+<?php endif; ?>
 
 <?php if (empty($user)): ?>
   <div class="panel">
@@ -70,10 +83,7 @@
               <td><span class="badge <?= !empty($l['full_ai']) || !empty($l['features']['adaptive_assessment']) ? 'b-green' : 'b-gray' ?>"><?= e($l['support_label'] ?? (!empty($l['features']['adaptive_assessment']) ? 'Supported for full AI learning' : 'Text only')) ?></span></td>
               <td class="num">
                 <?php if (!empty($user)): ?>
-                  <form method="post" action="/app/languages/start" style="display:inline">
-                    <input type="hidden" name="code" value="<?= e($l['code']) ?>">
-                    <button class="btn small">Learn</button>
-                  </form>
+                  <a class="btn small" href="/app/languages/begin?code=<?= e($l['code']) ?>">Learn</a>
                 <?php endif; ?>
               </td>
             </tr>

@@ -76,18 +76,57 @@ class LangLearnService
 
     // ------------------------------------------------------------ profiles
 
-    public function startLanguage(int $userId, string $code, ?string $goal = null, string $explanationLanguage = 'en'): array
+    public function startLanguage(int $userId, string $code, ?string $goal = null, string $explanationLanguage = 'en', ?int $dailyMinutes = null): array
     {
         $lang = $this->language($code); // validates against registry OR catalog
         $code = (string) ($lang['code'] ?? strtolower(trim($code)));
         $this->ensureLanguageRow($lang);
         $existing = $this->repo->findProfileByUserLanguage($userId, $code);
-        if ($existing) return $existing; // idempotent: one profile per (user, language)
+        if ($existing) {
+            $changed = false;
+            if ($goal !== null && trim($goal) !== '' && (string) ($existing['goal'] ?? '') === '') {
+                $existing['goal'] = mb_substr(trim($goal), 0, 300);
+                $changed = true;
+            }
+            if ($dailyMinutes !== null) {
+                $existing['daily_minutes'] = max(5, min(120, $dailyMinutes));
+                $changed = true;
+            }
+            if ($explanationLanguage !== '' && $explanationLanguage !== ($existing['explanation_language'] ?? 'en')) {
+                $existing['explanation_language'] = substr($explanationLanguage, 0, 8);
+                $changed = true;
+            }
+            if ($changed) {
+                $existing['updated_at'] = gmdate('c');
+                return $this->repo->saveProfile($existing);
+            }
+            return $existing; // idempotent: one profile per (user, language)
+        }
         return $this->repo->saveProfile([
             'user_id' => $userId, 'language_code' => $code, 'level' => 'Beginner',
-            'goal' => mb_substr((string) $goal, 0, 300), 'explanation_language' => substr($explanationLanguage, 0, 8),
+            'goal' => mb_substr((string) $goal, 0, 300),
+            'explanation_language' => substr($explanationLanguage !== '' ? $explanationLanguage : 'en', 0, 8),
+            'daily_minutes' => max(5, min(120, $dailyMinutes ?? 20)),
             'status' => 'ACTIVE', 'created_at' => gmdate('c'), 'updated_at' => gmdate('c'),
         ]);
+    }
+
+    /** Update goal / explanation language / daily minutes. Never changes level. */
+    public function updateProfile(int $userId, int $profileId, array $patch): array
+    {
+        $profile = $this->profileOwned($profileId, $userId);
+        if (array_key_exists('goal', $patch)) {
+            $profile['goal'] = mb_substr(trim((string) $patch['goal']), 0, 300);
+        }
+        if (isset($patch['explanationLanguage']) || isset($patch['explanation_language'])) {
+            $ex = (string) ($patch['explanationLanguage'] ?? $patch['explanation_language']);
+            $profile['explanation_language'] = substr($ex !== '' ? $ex : 'en', 0, 8);
+        }
+        if (isset($patch['dailyMinutes']) || isset($patch['daily_minutes'])) {
+            $profile['daily_minutes'] = max(5, min(120, (int) ($patch['dailyMinutes'] ?? $patch['daily_minutes'])));
+        }
+        $profile['updated_at'] = gmdate('c');
+        return $this->repo->saveProfile($profile);
     }
 
     /** Persist a catalog language so FK-backed profiles can reference it. */
@@ -308,14 +347,25 @@ class LangLearnService
         $this->recordAttempt($a['profile_id'], $userId, $a['language_code'], null, 'assessment',
             (int) round(100 * count(array_filter($result['answers'], fn($x) => $x['correct'])) / max(1, count($result['answers']))), null, $result);
         $this->recordSession($a['profile_id'], $userId, $a['language_code'], 'assessment');
-        return ['status' => 'COMPLETED', 'assessmentId' => $a['id'], 'result' => $result];
+        $path = null;
+        if (!$this->repo->activePath((int) $a['profile_id'])) {
+            try { $path = $this->generatePath($userId, (int) $a['profile_id']); }
+            catch (\Throwable $e) { $path = null; }
+        }
+        return ['status' => 'COMPLETED', 'assessmentId' => $a['id'], 'result' => $result, 'path' => $path];
     }
 
     // -------------------------------------------------------- learning path
 
-    public function generatePath(int $userId, int $profileId): array
+    public function generatePath(int $userId, int $profileId, bool $replace = false): array
     {
         $profile = $this->profileOwned($profileId, $userId);
+        $existing = $this->repo->activePath($profileId);
+        if ($existing && !$replace) return $this->pathFor($userId, $profileId);
+        if ($existing && $replace) {
+            $existing['status'] = 'SUPERSEDED';
+            $this->repo->savePath($existing);
+        }
         $code = $profile['language_code'];
         $ceiling = ItemBanks::ceiling($code);
         $from = $profile['level'] === 'Beginner' ? 'A1' : $profile['level'];
@@ -436,11 +486,26 @@ class LangLearnService
         $rows = $this->repo->listProgress($pid);
         $skills = [];
         foreach ($rows as $r) {
-            if ($r['source'] === 'assessment') $skills[$r['skill']] = ['level' => $r['level'], 'source' => 'assessment'];
+            if ($r['source'] === 'assessment') $skills[$r['skill']] = ['level' => $r['level'], 'pct' => null, 'source' => 'assessment'];
         }
         $pathPct = null;
         foreach ($rows as $r) {
             if ($r['source'] === 'path_completion') $pathPct = (float) $r['value_pct'];
+        }
+        $practice = $this->practiceScores($pid);
+        foreach ($practice as $skill => $s) {
+            $skills[$skill] = array_merge($skills[$skill] ?? ['level' => null, 'source' => 'practice'], [
+                'pct' => $s['pct'],
+                'attempts' => $s['attempts'],
+                'source' => ($skills[$skill]['source'] ?? null) === 'assessment' ? 'assessment+practice' : 'practice',
+            ]);
+        }
+        foreach (['vocabulary', 'grammar', 'reading', 'listening', 'speaking', 'writing'] as $skill) {
+            if (!isset($skills[$skill])) {
+                $skills[$skill] = ['level' => null, 'pct' => null, 'source' => 'not_enough_data'];
+            } elseif (!array_key_exists('pct', $skills[$skill])) {
+                $skills[$skill]['pct'] = null;
+            }
         }
         $days = $this->repo->sessionDays($pid);
         $streak = 0;
@@ -454,18 +519,91 @@ class LangLearnService
                 $cursor = gmdate('Y-m-d', strtotime($cursor . ' -1 day'));
             }
         }
+        $assessed = $this->repo->latestCompletedAssessment($pid) !== null;
+        $vocabWords = count($this->repo->listUserVocabulary($pid, false, 200));
+        $nextLevel = $this->nextLevel((string) $profile['level']);
+        $progressToNext = $this->progressToNextLevelPct($pid, $nextLevel);
         return [
             'level' => $profile['level'],
-            'levelSource' => $profile['level'] === 'Beginner' ? 'default (no assessment yet)' : 'assessment',
-            'skills' => $skills + [
-                'listening' => ['level' => null, 'source' => 'not_assessed_this_build'],
-                'speaking' => ['level' => null, 'source' => 'not_assessed_this_build'],
-                'writing' => ['level' => null, 'source' => 'not_assessed_this_build'],
-            ],
+            'levelSource' => $assessed ? 'assessment' : 'default (no assessment yet)',
+            'nextLevel' => $nextLevel,
+            'progressToNextLevelPct' => $progressToNext,
+            'vocabularyWords' => $vocabWords,
+            'skills' => $skills,
             'pathCompletionPct' => $pathPct,
             'studyStreakDays' => $streak,
             'activeDays' => count($days),
+            'goal' => $profile['goal'] ?? null,
+            'dailyMinutes' => (int) ($profile['daily_minutes'] ?? 20),
+            'onboarding' => $this->onboardingFor($profile),
         ];
+    }
+
+    /**
+     * Where the learner is in CHOOSE → GOAL → ASSESS → PATH → LEARN.
+     * Driven only by stored profile/assessment/path rows.
+     *
+     * @return array{hasGoal:bool, hasAssessment:bool, hasPath:bool, next:string}
+     */
+    public function onboardingFor(array $profile): array
+    {
+        $pid = (int) $profile['id'];
+        $hasGoal = trim((string) ($profile['goal'] ?? '')) !== '';
+        $hasAssessment = $this->repo->latestCompletedAssessment($pid) !== null;
+        $hasPath = $this->repo->activePath($pid) !== null;
+        $next = 'learn';
+        if (!$hasGoal) $next = 'set_goal';
+        elseif (!$hasAssessment && ItemBanks::count($profile['language_code']) > 0) $next = 'assess';
+        elseif (!$hasPath) $next = 'path';
+        return ['hasGoal' => $hasGoal, 'hasAssessment' => $hasAssessment, 'hasPath' => $hasPath, 'next' => $next];
+    }
+
+    private function nextLevel(string $current): ?string
+    {
+        $idx = LanguageRegistry::levelIndex($current);
+        $levels = LanguageRegistry::LEVELS;
+        return $levels[$idx + 1] ?? null;
+    }
+
+    /** Share of modules at the next CEFR level that are COMPLETED. Null if no such modules. */
+    private function progressToNextLevelPct(int $profileId, ?string $nextLevel): ?float
+    {
+        if ($nextLevel === null) return null;
+        $path = $this->repo->activePath($profileId);
+        if (!$path) return null;
+        $at = array_values(array_filter($this->repo->listModules($path['id']), fn($m) => $m['level'] === $nextLevel));
+        if (!$at) return null;
+        $done = count(array_filter($at, fn($m) => $m['status'] === 'COMPLETED'));
+        return round(100 * $done / count($at), 1);
+    }
+
+    /** Per-skill averages from REAL stored attempts. Empty skills are omitted. */
+    private function practiceScores(int $profileId): array
+    {
+        $stats = [];
+        $add = function (string $skill, $score) use (&$stats): void {
+            if ($score === null || $skill === '') return;
+            $stats[$skill] ??= ['count' => 0, 'sum' => 0.0];
+            $stats[$skill]['count']++;
+            $stats[$skill]['sum'] += (float) $score;
+        };
+        $modules = [];
+        foreach ($this->repo->listAttemptsForProfile($profileId, 200) as $a) {
+            if ($a['score_pct'] === null) continue;
+            if ($a['kind'] === 'vocab_review') $add('vocabulary', $a['score_pct']);
+            elseif (in_array($a['kind'], ['checkpoint', 'lesson'], true) && $a['module_id']) {
+                if (!isset($modules[$a['module_id']])) $modules[$a['module_id']] = $this->repo->findModule($a['module_id']);
+                $add($modules[$a['module_id']]['focus_skill'] ?? '', $a['score_pct']);
+            }
+        }
+        foreach ($this->repo->listListeningAttempts($profileId, 80) as $a) $add('listening', $a['score_pct']);
+        foreach ($this->repo->listSpeakingAttempts($profileId, 80) as $a) $add('speaking', $a['word_accuracy_pct']);
+        foreach ($this->repo->listWriting($profileId, 80) as $a) $add('writing', $a['score_pct']);
+        $out = [];
+        foreach ($stats as $skill => $s) {
+            $out[$skill] = ['attempts' => $s['count'], 'pct' => round($s['sum'] / $s['count'], 1)];
+        }
+        return $out;
     }
 
     // -------------------------------------------------------------- helpers

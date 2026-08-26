@@ -272,16 +272,34 @@ class TeacherService
         $wordCount = count(preg_split('/\s+/u', $text) ?: []);
         $score = $task['required'] ? (int) round(100 * $metRequired / count($task['required'])) : 0;
 
+        $reconstructed = [];
+        foreach ($task['required'] as $req) {
+            $hit = $check($req['patterns']);
+            $reconstructed[] = $hit ?? ($req['patterns'][0] ?? '');
+        }
+        $correctedVersion = trim(implode('. ', array_filter($reconstructed)));
+        if ($correctedVersion !== '' && !str_ends_with($correctedVersion, '.')) $correctedVersion .= '.';
+        $mistakes = [];
+        foreach ($elements as $el) {
+            if (!$el['met']) {
+                $mistakes[] = 'Missing ' . $el['element'] . ' — try one of: ' . implode(', ', array_slice($el['targetPatterns'], 0, 3));
+            }
+        }
+
         $feedback = [
             'task' => $task['title'],
+            'originalText' => $text,
+            'correctedVersion' => $correctedVersion,
+            'nativeVersion' => (string) ($task['nativeModel'] ?? $correctedVersion),
+            'explanationOfMistakes' => $mistakes,
             'elements' => $elements,
             'bonusMet' => $bonusMet,
             'wordCount' => $wordCount,
             'scorePct' => $score,
             'whatWasChecked' => $task['checkedNote'],
             'suggestion' => $metRequired === count($task['required'])
-                ? 'All required elements are present. Try the bonus element next, or another task.'
-                : 'Missing element(s) above — the target patterns show exactly what to aim for. Your original text is stored unchanged.',
+                ? 'All required elements are present. Compare your original with the more natural / native version below.'
+                : 'Missing element(s) above — the corrected version is a reconstruction from the required phrases, not a full grammar rewrite. Your original text is stored unchanged.',
         ];
         $attempt = $this->repo->saveWriting([
             'id' => bin2hex(random_bytes(16)), 'profile_id' => $profileId, 'user_id' => $userId,

@@ -129,6 +129,11 @@ test('writing: element checks with the original text preserved', function () {
     assert_equals(100, $res2['attempt']['feedback']['scorePct']);
     assert_contains('from', implode(',', $res2['attempt']['feedback']['bonusMet']) === '' ? 'Nigeria' : implode(',', $res2['attempt']['feedback']['bonusMet']), 'bonus element detected');
 
+    assert_equals('Hallo!', $res['attempt']['feedback']['originalText']);
+    assert_true($res['attempt']['feedback']['correctedVersion'] !== '');
+    assert_true($res2['attempt']['feedback']['nativeVersion'] !== '');
+    assert_true(count($res['attempt']['feedback']['explanationOfMistakes']) >= 1, 'missing elements explained');
+
     // original text ALWAYS preserved verbatim
     $history = $t->langteacher->writingHistory($ctx['userId'], (int) $ctx['profile']['id']);
     $originals = array_map(fn($w) => $w['original_text'], $history);
@@ -168,5 +173,17 @@ test('every language with a bank gets teacher features or an honest refusal', fu
         assert_true(count($tasks) >= 2, "{$code} has writing tasks");
         assert_true(count($convos) >= 1, "{$code} has at least the first-meeting drill");
         assert_true(count($lang['features'] ?? []) > 0);
+    }
+});
+
+test('conversation catalog includes travel, shopping, hotel, business and emergency where authored', function () {
+    $scenarios = \AIWorkforce\LangLearn\TeacherContent::conversations('nl');
+    $codes = array_map(fn($s) => $s['code'], $scenarios);
+    foreach (['first-meeting', 'travel', 'shopping', 'hotel', 'business', 'job-interview', 'emergency', 'social'] as $need) {
+        assert_true(in_array($need, $codes, true), "Dutch has {$need}");
+    }
+    $modes = array_map(fn($s) => $s['mode'], $scenarios);
+    foreach (['beginner', 'travel', 'shopping', 'hotel', 'business', 'emergency'] as $mode) {
+        assert_true(in_array($mode, $modes, true), "mode {$mode} present");
     }
 });

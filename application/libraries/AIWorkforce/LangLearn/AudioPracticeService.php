@@ -55,7 +55,7 @@ class AudioPracticeService
             ];
         }
         return ['available' => true, 'exercises' => $exercises,
-            'speeds' => ['slow' => 0.7, 'normal' => 1.0], 'replay' => true];
+            'speeds' => ['slow' => 0.7, 'normal' => 1.0, 'native' => 1.15], 'replay' => true, 'transcriptToggle' => true];
     }
 
     /** Grade a listening attempt (real answer vs the bank). */

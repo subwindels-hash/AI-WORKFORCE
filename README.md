@@ -258,15 +258,22 @@ approved symbols) → 11 human approval (HUMAN_APPROVAL mode) → 12 place order
   undecided proposals after `proposalExpiryMinutes` (default 240, spec §5
   invalidation) and audits a `CRON_RUN` summary.
 
-### AI Language Learning (Phase 1 complete)
+### AI Language Learning (Phases 1–5 complete)
 
-`/app/languages` (console) · `/api/v1/language-learning` (API)
+`/app/languages` (console) · `/app/languages/teacher` (AI teacher) · `/api/v1/language-learning` (API)
 
-- **Language registry** — 20 languages (Dutch, Spanish, Italian, French,
+- **AI teacher coach** — understands “Teach me Dutch from the beginning”,
+  “I want to learn Spanish”, “Practice Italian conversation”, “Correct my
+  German”, “Test my French level”. It creates a real profile, asks for a
+  goal, then routes to assessment / path / lesson from stored state. Unknown
+  languages are refused instead of invented.
+- **Language registry** — 20 featured languages (Dutch, Spanish, Italian, French,
   German, English, Portuguese, Arabic, Chinese, Japanese, Korean, Russian,
-  Hindi, Turkish, Swahili, Yoruba, Igbo, Hausa, Afrikaans, Zulu) with native
-  names, script, LTR/RTL and an honest per-language feature table. Nothing
-  hard-codes languages; `LanguageRegistry::register()` extends the catalog.
+  Hindi, Turkish, Swahili, Yoruba, Igbo, Hausa, Afrikaans, Zulu) plus a
+  searchable ISO catalog. Native names, script, LTR/RTL and an honest
+  per-language feature table (lessons, conversation, writing, SRS, listening,
+  speaking) derived from authored content. Pronunciation scores are never
+  claimed. Nothing hard-codes languages; `LanguageRegistry::register()` extends the catalog.
 - **Profiles** — one per (user, language), fully independent progress; strict
   ownership isolation on every endpoint.
 - **Adaptive AI level assessment** — staircase difficulty per skill
