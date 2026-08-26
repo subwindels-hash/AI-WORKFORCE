@@ -41,8 +41,25 @@ class Lang_learn extends App_Controller
         // links point somewhere useful instead of a hard-coded profile id.
         try { $data['myProfiles'] = $this->platform->langlearn->profiles((int) $user['id']); }
         catch (Throwable $e) { $data['myProfiles'] = []; }
+        // Determine the user's active learning language and native language
+        // from their profile so the teacher has proper context.
+        $data['learningLanguage'] = null;
+        $data['nativeLanguage'] = 'en';
+        $data['proficiencyLevel'] = 'Beginner';
+        if (!empty($data['myProfiles'])) {
+            foreach ($data['myProfiles'] as $profile) {
+                $lc = $profile['language_code'] ?? null;
+                if ($lc) {
+                    $data['learningLanguage'] = $lc;
+                    $data['nativeLanguage'] = $profile['explanation_language'] ?? 'en';
+                    $data['proficiencyLevel'] = $profile['level'] ?? 'Beginner';
+                    break;
+                }
+            }
+        }
         // Each example pins an explicit source→target pair so learners see
         // both directions working (e.g. Dutch→English and English→Dutch).
+        // These are overridden by the user's actual languages when available.
         $data['examplePairs'] = [
             ['text' => 'Good morning, how are you?', 'source' => 'en', 'target' => 'nl'],
             ['text' => 'Goedemorgen, hoe gaat het?', 'source' => 'nl', 'target' => 'en'],
@@ -51,6 +68,18 @@ class Lang_learn extends App_Controller
             ['text' => 'Gracias', 'source' => 'es', 'target' => 'en'],
             ['text' => 'Thank you very much', 'source' => 'en', 'target' => 'de'],
         ];
+        // If we have a user profile, adapt examplePairs to use their languages
+        if (!empty($data['myProfiles']) && $data['learningLanguage']) {
+            $learnLang = $data['learningLanguage'];
+            $nativeLang = $data['nativeLanguage'];
+            // Replace with pairs that involve the user's actual languages
+            $data['examplePairs'] = [
+                ['text' => 'Good morning, how are you?', 'source' => $nativeLang, 'target' => $learnLang],
+                ['text' => ucfirst($learnLang) . ': Goedemorgen, hoe gaat het?', 'source' => $learnLang, 'target' => $nativeLang],
+            ];
+            // Filter out empty ones
+            $data['examplePairs'] = array_filter($data['examplePairs'], fn($p) => !empty($p['text']));
+        }
         $this->render($data, 'langlearn/teacher');
     }
 
@@ -219,123 +248,97 @@ class Lang_learn extends App_Controller
     {
         $user = $this->requireUser();
         $answers = $this->input->post('answers');
+
+        // Normalise answers to an associative array keyed on item id
+        $normalised = [];
+        if (is_array($answers)) {
+            foreach ($answers as $itemId => $index) {
+                $normalised[(string) $itemId] = (int) $index;
+            }
+        }
+
         try {
-            $result = $this->platform->langlearn->submitCheckpoint($moduleId, (int) $user['id'], is_array($answers) ? $answers : []);
-            $this->session->set_flashdata('llNotice', sprintf('Checkpoint %s — %d%% (%d/%d correct).',
-                $result['passed'] ? 'PASSED' : 'not passed', $result['scorePct'], $result['correct'], $result['total']));
+            $this->platform->langlearn->submitCheckpoint($moduleId, (int) $user['id'], $normalised);
         } catch (Throwable $e) {
             $this->session->set_flashdata('llError', $e->getMessage());
         }
-        $module = $this->platform->model->langlearn->findModule($moduleId);
-        redirect('/app/languages/p/' . ($module['profile_id'] ?? 0));
+        redirect('/app/languages/checkpoint/' . $moduleId);
     }
 
-    // ================= PHASE 2: AI TEACHER PAGES =================
-
-    public function lesson(string $moduleId)
+    public function save_goal_legacy(int $profileId)
     {
         $user = $this->requireUser();
-        $data = $this->base('Lesson');
         try {
-            $data['lessonView'] = $this->platform->langteacher->startLesson($moduleId, (int) $user['id']);
-            $data['error'] = null;
-        } catch (Throwable $e) {
-            $data['lessonView'] = null;
-            $data['error'] = $e->getMessage();
-        }
-        $this->render($data, 'langlearn/lesson');
-    }
-
-    public function lesson_answer(string $moduleId)
-    {
-        $user = $this->requireUser();
-        $answers = $this->input->post('answers');
-        try {
-            $res = $this->platform->langteacher->submitLesson($moduleId, (int) $user['id'], is_array($answers) ? $answers : []);
-            $this->session->set_flashdata('llNotice', sprintf('Lesson %s — %d%% (%d/%d). %s',
-                $res['passed'] ? 'COMPLETED' : 'not passed yet — review and try again', $res['scorePct'], $res['correct'], $res['total'],
-                $res['passed'] ? 'Next module unlocked.' : ''));
-            $module = $this->platform->model->langlearn->findModule($moduleId);
-            redirect('/app/languages/p/' . ($module['profile_id'] ?? 0));
+            $this->platform->langlearn->updateProfile((int) $user['id'], $profileId, [
+                'goal' => (string) $this->input->post('goal'),
+                'explanationLanguage' => (string) ($this->input->post('explanationLanguage') ?: 'en'),
+                'dailyMinutes' => (int) ($this->input->post('dailyMinutes') ?: 20),
+            ]);
+            $this->session->set_flashdata('llNotice', 'Goal saved. Next: take the level assessment.');
         } catch (Throwable $e) {
             $this->session->set_flashdata('llError', $e->getMessage());
-            redirect('/app/languages');
         }
+        redirect('/app/languages/p/' . $profileId);
     }
 
-    public function conversation(int $profileId)
+    public function assessment_start(string $assessmentId)
     {
-        $user = $this->requireUser();
-        $data = $this->base('AI Conversations');
-        try { $data['scenarios'] = $this->platform->langteacher->conversations((int) $user['id'], $profileId); }
-        catch (Throwable $e) { $data['scenarios'] = []; }
-        $data['profileId'] = $profileId;
-        $this->render($data, 'langlearn/conversation');
-    }
-
-    public function conversation_go(int $profileId)
-    {
+        // Alias for start_assessment
         $user = $this->requireUser();
         try {
-            $res = $this->platform->langteacher->startConversation((int) $user['id'], $profileId, (string) $this->input->post('scenario'), (string) $this->input->post('correction', true) ?: 'important');
-            redirect('/app/languages/c/' . $res['sessionId']);
+            $res = $this->platform->langlearn->startAssessment((int) $user['id'], (int) strval($assessmentId));
+            redirect('/app/languages/a/' . $res['assessmentId']);
         } catch (Throwable $e) {
             $this->session->set_flashdata('llError', $e->getMessage());
             redirect('/app/languages/p/' . $profileId);
         }
     }
 
-    public function conversation_show(string $id)
+    public function checkpoint_go(string $moduleId)
     {
+        // Alias for checkpoint
         $user = $this->requireUser();
-        $data = $this->base('Conversation');
-        $data['view'] = $this->platform->langteacher->conversationStateForPage($id, (int) $user['id']);
-        $this->render($data, 'langlearn/conversation_run');
+        $data = $this->base('Module checkpoint');
+        try {
+            $data['checkpoint'] = $this->platform->langlearn->startCheckpoint($moduleId, (int) $user['id']);
+            $data['error'] = null;
+        } catch (Throwable $e) {
+            $data['checkpoint'] = null;
+            $data['error'] = $e->getMessage();
+        }
+        $this->render($data, 'langlearn/checkpoint');
     }
 
-    public function conversation_say(string $id)
+    public function checkpoint_answer(string $moduleId)
     {
+        // Alias for answer_checkpoint
         $user = $this->requireUser();
+        $answers = $this->input->post('answers');
+        $normalised = [];
+        if (is_array($answers)) {
+            foreach ($answers as $itemId => $index) {
+                $normalised[(string) $itemId] = (int) $index;
+            }
+        }
         try {
-            $this->platform->langteacher->conversationTurn($id, (int) $user['id'], (string) $this->input->post('text'));
+            $this->platform->langlearn->submitCheckpoint($moduleId, (int) $user['id'], $normalised);
         } catch (Throwable $e) {
             $this->session->set_flashdata('llError', $e->getMessage());
         }
-        redirect('/app/languages/c/' . $id);
+        redirect('/app/languages/checkpoint/' . $moduleId);
     }
 
-    public function writing(int $profileId)
+    public function path_generate(int $profileId)
     {
-        $user = $this->requireUser();
-        $data = $this->base('Writing practice');
-        try { $data['tasks'] = $this->platform->langteacher->writingTasks((int) $user['id'], $profileId); }
-        catch (Throwable $e) { $data['tasks'] = []; }
-        $data['history'] = $this->platform->langteacher->writingHistory((int) $user['id'], $profileId);
-        $data['profileId'] = $profileId;
-        $this->render($data, 'langlearn/writing');
-    }
-
-    public function writing_submit(int $profileId)
-    {
+        // Alias for generate_path
         $user = $this->requireUser();
         try {
-            $res = $this->platform->langteacher->submitWriting((int) $user['id'], $profileId, (string) $this->input->post('taskCode'), (string) $this->input->post('text'));
-            $f = $res['attempt']['feedback'];
-            $this->session->set_flashdata('llNotice', sprintf('Writing checked — %d%% (%s).', $f['scorePct'], implode('; ', array_map(fn($e) => $e['element'] . ': ' . ($e['met'] ? '✓' : '✗'), $f['elements']))));
+            $this->platform->langlearn->generatePath((int) $user['id'], $profileId);
+            $this->session->set_flashdata('llNotice', 'Personalized learning path generated from your level.');
         } catch (Throwable $e) {
             $this->session->set_flashdata('llError', $e->getMessage());
         }
-        redirect('/app/languages/w/' . $profileId);
-    }
-
-    public function grammar(int $profileId)
-    {
-        $user = $this->requireUser();
-        $data = $this->base('Grammar');
-        try { $data['rules'] = $this->platform->langteacher->grammarRules((int) $user['id'], $profileId); }
-        catch (Throwable $e) { $data['rules'] = []; }
-        $data['profileId'] = $profileId;
-        $this->render($data, 'langlearn/grammar');
+        redirect('/app/languages/p/' . $profileId);
     }
 
     public function grammar_simple(int $profileId, string $ruleId)
@@ -356,7 +359,136 @@ class Lang_learn extends App_Controller
         $data = $this->base('History');
         try { $data['history'] = $this->platform->langteacher->history((int) $user['id'], $profileId); }
         catch (Throwable $e) { $data['history'] = ['attempts' => [], 'conversations' => [], 'writing' => []]; }
-        $this->render($data, 'langlearn/history');
+$this->render($data, 'langlearn/history');
+    }
+
+    // ================= PHASE 2: STRUCTURED LESSON PAGES =================
+
+    public function lesson(string $moduleId)
+    {
+        $user = $this->requireUser();
+        try {
+            $module = $this->platform->langteacher->moduleOwned($moduleId, (int) $user['id']);
+            $lesson = $this->platform->langteacher->startLesson($moduleId, (int) $user['id']);
+            $data = $this->base('Lesson');
+            $data['module'] = $module;
+            $data['lesson'] = $lesson;
+            $this->render($data, 'langlearn/lesson');
+        } catch (Throwable $e) {
+            $this->session->set_flashdata('llError', $e->getMessage());
+            redirect('/app/languages/p/' . $user['id']);
+        }
+    }
+
+    public function lesson_answer(string $moduleId)
+    {
+        $user = $this->requireUser();
+        $answers = $this->input->post('answers');
+        try {
+            $result = $this->platform->langteacher->submitLesson($moduleId, (int) $user['id'], $answers ?? []);
+            $this->session->set_flashdata('llNotice', sprintf('Practice graded — %s %d%%', $result['passed'] ? 'passed' : 'not passed', $result['scorePct']));
+            // Module completion and next module unlock are handled by submitCheckpoint()
+            // $result['moduleStatus'] will be 'COMPLETED' when passed >= 75%
+            if ($result['passed']) {
+                // Module is now COMPLETED; redirect to daily plan or profile
+                // The next module will be available in the learning path
+                redirect('/app/languages/p/' . $user['id']);
+            }
+            redirect('/app/languages/m/' . $moduleId . '/lesson');
+        } catch (Throwable $e) {
+            $this->session->set_flashdata('llError', $e->getMessage());
+            redirect('/app/languages/m/' . $moduleId . '/lesson');
+        }
+    }
+
+    // ================= CONVERSATION PAGES =================
+
+    public function conversation(int $profileId)
+    {
+        $user = $this->requireUser();
+        // Verify the profile belongs to the user
+        $profile = $this->platform->langlearn->profileOwned($profileId, (int) $user['id']);
+        $data = $this->base('Conversation');
+        $data['profileId'] = $profileId;
+        $data['language'] = \AIWorkforce\LangLearn\LanguageRegistry::get($profile['language_code']);
+        // Load conversation scenarios appropriate for the user's level
+        try {
+            $scenarios = $this->platform->langteacher->conversations((int) $user['id'], $profileId);
+            $data['scenarios'] = $scenarios;
+        } catch (Throwable $e) {
+            $data['scenarios'] = ['code' => 'greeting', 'title' => 'Greetings', 'turns' => 3];
+        }
+        $this->render($data, 'langlearn/conversation');
+    }
+
+    public function conversation_start(int $profileId)
+    {
+        $user = $this->requireUser();
+        $scenario = (string) $this->input->post('scenario');
+        $correction = (string) ($this->input->post('correction') ?: 'important');
+        try {
+            $result = $this->platform->langteacher->startConversation((int) $user['id'], $profileId, $scenario, $correction);
+            $this->session->set_flashdata('llNotice', 'Conversation started: ' . ($result['scenario'] ?? $scenario));
+            // Redirect to the conversation page to continue
+            redirect('/app/languages/conv/' . $profileId);
+        } catch (Throwable $e) {
+            $this->session->set_flashdata('llError', $e->getMessage());
+            redirect('/app/languages/conv/' . $profileId);
+        }
+    }
+
+    public function conversation_turn(string $sessionId)
+    {
+        $user = $this->requireUser();
+        $body = $this->jsonBody();
+        if (!isset($body['text']) || !is_string($body['text'])) {
+            $this->jsonError('body must be {text: string}');
+            return;
+        }
+        try {
+            $result = $this->platform->langteacher->conversationTurn($sessionId, (int) $user['id'], $body['text']);
+            $this->json($result);
+        } catch (Throwable $e) {
+            $this->jsonError($e->getMessage());
+        }
+    }
+
+    public function conversation_show(string $sessionId)
+    {
+        $user = $this->requireUser();
+        try {
+            $session = $this->platform->langteacher->findConversation($sessionId);
+            if (!$session || (int) $session['user_id'] !== (int) $user['id']) {
+                throw new \RuntimeException('conversation not found', 404);
+            }
+            $data = $this->base('Conversation session');
+            $data['session'] = $session;
+            $this->render($data, 'langlearn/conversation_show');
+        } catch (Throwable $e) {
+            $this->session->set_flashdata('llError', $e->getMessage());
+            redirect('/app/languages/conv/' . (int) $user['id']);
+        }
+    }
+
+    public function conversation_say(string $sessionId)
+    {
+        $user = $this->requireUser();
+        $body = $this->jsonBody();
+        if (!isset($body['text']) || !is_string($body['text'])) {
+            return $this->jsonError('body must be {text: string}');
+        }
+        try {
+            $result = $this->platform->langteacher->conversationTurn($sessionId, (int) $user['id'], $body['text']);
+            $this->json($result);
+        } catch (Throwable $e) {
+            $this->jsonError($e->getMessage());
+        }
+    }
+
+    public function conversation_go(int $profileId)
+    {
+        // Alias for conversation_start
+        $this->conversation_start($profileId);
     }
 
     // ================= PHASE 3: VOCABULARY PAGES =================
@@ -478,7 +610,7 @@ class Lang_learn extends App_Controller
     public function daily_plan(int $profileId)
     {
         $user = $this->requireUser();
-        $data = $this->base('Today\'s plan & AI insights');
+        $data = $this->base("Today's plan & AI insights");
         try { $data['plan'] = $this->platform->adaptive->dailyPlan((int) $user['id'], $profileId); }
         catch (Throwable $e) { $data['plan'] = null; }
         try { $data['weaknesses'] = $this->platform->adaptive->weaknesses((int) $user['id'], $profileId); }
