@@ -40,13 +40,7 @@ final class LanguageRegistry
         $language['code'] = $code;
         $language['direction'] = in_array($language['direction'] ?? 'ltr', ['ltr', 'rtl'], true) ? $language['direction'] : 'ltr';
         $language['assessment_bank'] = ItemBanks::count($code);
-        $language['features'] = [
-            'registry' => true,
-            'adaptive_assessment' => $language['assessment_bank'] > 0,
-            'assessment_ceiling' => ItemBanks::ceiling($code),
-            'lessons' => false, 'conversation' => false, 'writing_correction' => false,
-            'vocabulary_srs' => false, 'listening' => false, 'speaking' => false,
-        ];
+        $language['features'] = self::featuresFor($code);
         $language['active'] = (bool) ($language['active'] ?? true);
         self::$catalog ??= self::build();
         self::$catalog[$code] = $language;
@@ -61,6 +55,40 @@ final class LanguageRegistry
     {
         $i = array_search($level, self::LEVELS, true);
         return $i === false ? 0 : (int) $i;
+    }
+
+    /**
+     * Honest capability table for one language — every flag is derived from
+     * authored content that actually exists. Pronunciation scores are never
+     * claimed: no pronunciation-assessment provider is configured.
+     */
+    public static function featuresFor(string $code): array
+    {
+        $code = strtolower(trim($code));
+        $bank = ItemBanks::count($code);
+        $hasReading = false;
+        $hasGrammar = false;
+        if ($bank > 0) {
+            foreach (ItemBanks::items($code) as $item) {
+                if ($item['skill'] === 'reading') $hasReading = true;
+                if ($item['skill'] === 'grammar') $hasGrammar = true;
+            }
+        }
+        $hasVocab = VocabularyBank::count($code) > 0;
+        $hasTeacher = TeacherContent::writingTasks($code) !== [];
+        return [
+            'registry' => true,
+            'adaptive_assessment' => $bank > 0,
+            'assessment_ceiling' => ItemBanks::ceiling($code),
+            'lessons' => $bank > 0,
+            'conversation' => $hasTeacher,
+            'writing_correction' => $hasTeacher,
+            'vocabulary_srs' => $hasVocab,
+            'listening' => $hasReading,
+            'speaking' => $hasReading,
+            'grammar' => $hasGrammar,
+            'pronunciation_scores' => false,
+        ];
     }
 
     private static function build(): array
@@ -94,20 +122,7 @@ final class LanguageRegistry
         $catalog = [];
         foreach ($langs as $l) {
             $l['assessment_bank'] = ItemBanks::count($l['code']);
-            // Feature truth table for the CURRENT build: adaptive assessment
-            // runs wherever a bank exists; listening/speaking/writing practice
-            // arrive in later phases and must not be claimed yet.
-            $l['features'] = [
-                'registry' => true,
-                'adaptive_assessment' => $l['assessment_bank'] > 0,
-                'assessment_ceiling' => ItemBanks::ceiling($l['code']), // highest verifiable level
-                'lessons' => false,            // Phase 2 (AI Teacher)
-                'conversation' => false,       // Phase 2
-                'writing_correction' => false, // Phase 2
-                'vocabulary_srs' => false,     // Phase 3
-                'listening' => false,          // Phase 4 (needs an audio provider)
-                'speaking' => false,           // Phase 4 (needs a speech provider — scores never invented)
-            ];
+            $l['features'] = self::featuresFor($l['code']);
             $l['active'] = true;
             $catalog[$l['code']] = $l;
         }

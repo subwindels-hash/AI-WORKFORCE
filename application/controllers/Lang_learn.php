@@ -68,16 +68,78 @@ class Lang_learn extends App_Controller
         redirect('/app/languages');
     }
 
+    public function begin()
+    {
+        $user = $this->requireUser();
+        $code = strtolower(trim((string) ($this->input->get('code') ?: $this->input->post('code'))));
+        $data = $this->base('Start learning');
+        try { $data['language'] = $this->platform->langlearn->language($code); }
+        catch (Throwable $e) {
+            $this->session->set_flashdata('llError', $e->getMessage());
+            return redirect('/app/languages');
+        }
+        $data['goals'] = \AIWorkforce\LangLearn\TeacherCoach::goalOptions();
+        $data['explanationLanguages'] = $this->platform->langlearn->searchCatalog('', 40);
+        $existing = $this->platform->model->langlearn->findProfileByUserLanguage((int) $user['id'], $code);
+        $data['existing'] = $existing;
+        $this->render($data, 'langlearn/begin');
+    }
+
     public function start()
     {
         $user = $this->requireUser();
         try {
-            $profile = $this->platform->langlearn->startLanguage((int) $user['id'], (string) $this->input->post('code'), (string) $this->input->post('goal'));
-            $this->session->set_flashdata('llNotice', 'Added to My Languages. Take the AI level assessment to set your starting level.');
+            $minutes = $this->input->post('dailyMinutes');
+            $profile = $this->platform->langlearn->startLanguage(
+                (int) $user['id'],
+                (string) $this->input->post('code'),
+                (string) $this->input->post('goal'),
+                (string) ($this->input->post('explanationLanguage') ?: 'en'),
+                $minutes !== null && $minutes !== '' ? (int) $minutes : null
+            );
+            $this->session->set_flashdata('llNotice', 'Added to My Languages. Take the AI level assessment so we can set your starting level from real answers.');
             redirect('/app/languages/p/' . $profile['id']);
         } catch (Throwable $e) {
             $this->session->set_flashdata('llError', $e->getMessage());
             redirect('/app/languages');
+        }
+    }
+
+    public function save_goal(int $profileId)
+    {
+        $user = $this->requireUser();
+        try {
+            $this->platform->langlearn->updateProfile((int) $user['id'], $profileId, [
+                'goal' => (string) $this->input->post('goal'),
+                'explanationLanguage' => (string) ($this->input->post('explanationLanguage') ?: 'en'),
+                'dailyMinutes' => (int) ($this->input->post('dailyMinutes') ?: 20),
+            ]);
+            $this->session->set_flashdata('llNotice', 'Goal saved. Next: take the level assessment.');
+        } catch (Throwable $e) {
+            $this->session->set_flashdata('llError', $e->getMessage());
+        }
+        redirect('/app/languages/p/' . $profileId);
+    }
+
+    public function teacher_ask()
+    {
+        $user = $this->requireUser();
+        $message = trim((string) $this->input->post('message'));
+        try {
+            $coach = $this->platform->langcoach->interpret((int) $user['id'], $message);
+            $this->session->set_flashdata('llNotice', $coach['reply']);
+            $href = $coach['actions'][0]['href'] ?? '/app/languages';
+            $method = strtoupper($coach['actions'][0]['method'] ?? 'GET');
+            if ($method === 'POST' && !empty($coach['profile']['id'])) {
+                // POST actions (start assessment / generate path) stay on a GET page
+                // that already has the form — send the learner to the profile.
+                redirect('/app/languages/p/' . (int) $coach['profile']['id']);
+                return;
+            }
+            redirect($href);
+        } catch (Throwable $e) {
+            $this->session->set_flashdata('llError', $e->getMessage());
+            redirect('/app/languages/teacher');
         }
     }
 

@@ -41,10 +41,15 @@ test('registry: 20 languages with metadata, no hard-coding needed elsewhere', fu
     LanguageRegistry::register(['code' => 'xx', 'name' => 'Test Language', 'native_name' => 'Test', 'iso_code' => 'xx', 'writing_system' => 'latin', 'direction' => 'ltr']);
     assert_not_null(LanguageRegistry::get('xx'));
     // every registered language exposes an honest feature table
-    foreach (LanguageRegistry::all() as $lang) {
+    foreach (LanguageRegistry::all() as $code => $lang) {
         assert_true(is_array($lang['features']));
-        assert_false($lang['features']['listening'], 'no language may claim listening in Phase 1');
-        assert_false($lang['features']['speaking'], 'no language may claim speaking in Phase 1');
+        assert_false($lang['features']['pronunciation_scores'], 'pronunciation scores are never claimed');
+        $hasReading = false;
+        foreach (\AIWorkforce\LangLearn\ItemBanks::items($code) as $item) {
+            if ($item['skill'] === 'reading') $hasReading = true;
+        }
+        assert_equals($hasReading, (bool) $lang['features']['listening'], "listening flag matches reading bank for {$code}");
+        assert_equals($hasReading, (bool) $lang['features']['speaking'], "speaking flag matches reading bank for {$code}");
     }
 });
 
@@ -182,7 +187,9 @@ test('progress: every number traces to real activity (no fake percentages)', fun
     assert_equals('Beginner', $before['level']);
     assert_equals(null, $before['pathCompletionPct']);
     assert_equals(0, $before['studyStreakDays']);
-    assert_equals('not_assessed_this_build', $before['skills']['listening']['source']);
+    assert_equals('not_enough_data', $before['skills']['listening']['source']);
+    assert_equals(0, $before['vocabularyWords']);
+    assert_equals('set_goal', $before['onboarding']['next']);
 
     ll_run_assessment($svc, $u['id'], (int) $profile['id'], fn($item) => \AIWorkforce\LangLearn\ItemBanks::find('de', $item['id'])['answer']);
     $svc->generatePath($u['id'], (int) $profile['id']);
@@ -201,4 +208,36 @@ test('progress: every number traces to real activity (no fake percentages)', fun
     }
     // level only from assessment — never changed by checkpoints
     assert_true(\AIWorkforce\LangLearn\LanguageRegistry::levelIndex($after['level']) >= \AIWorkforce\LangLearn\LanguageRegistry::levelIndex('A1'));
+    assert_equals('assessment', $after['levelSource']);
+    assert_true($after['onboarding']['hasAssessment']);
+    assert_true($after['onboarding']['hasPath']);
+});
+
+test('startLanguage stores goal, explanation language and daily minutes', function () {
+    $svc = platform()->langlearn;
+    $u = ll_user('goal');
+    $p = $svc->startLanguage($u['id'], 'it', 'Travel', 'en', 30);
+    assert_equals('Travel', $p['goal']);
+    assert_equals('en', $p['explanation_language']);
+    assert_equals(30, (int) $p['daily_minutes']);
+    $again = $svc->startLanguage($u['id'], 'it', 'Work / business');
+    assert_equals($p['id'], $again['id']);
+    assert_equals('Travel', $again['goal'], 'existing goal is not overwritten by a later start');
+    $updated = $svc->updateProfile($u['id'], (int) $p['id'], ['goal' => 'Work / business', 'dailyMinutes' => 45]);
+    assert_equals('Work / business', $updated['goal']);
+    assert_equals(45, (int) $updated['daily_minutes']);
+    assert_equals('Beginner', $updated['level'], 'settings updates never change level');
+});
+
+test('assessment completion auto-creates a path from the assessed level', function () {
+    $svc = platform()->langlearn;
+    $u = ll_user('autopath');
+    $profile = $svc->startLanguage($u['id'], 'es', 'Daily conversation');
+    $result = ll_run_assessment($svc, $u['id'], (int) $profile['id'], fn($item) => \AIWorkforce\LangLearn\ItemBanks::find('es', $item['id'])['answer']);
+    assert_true(\AIWorkforce\LangLearn\LanguageRegistry::levelIndex($result['overallLevel']) >= \AIWorkforce\LangLearn\LanguageRegistry::levelIndex('A1'));
+    $path = $svc->pathFor($u['id'], (int) $profile['id']);
+    assert_true($path['path'] !== null, 'path created from the assessment, not invented later');
+    assert_true(count($path['modules']) >= 4);
+    $again = $svc->generatePath($u['id'], (int) $profile['id']);
+    assert_equals($path['path']['id'], $again['path']['id'], 'generatePath is idempotent while a path is active');
 });

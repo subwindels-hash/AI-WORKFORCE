@@ -113,6 +113,17 @@ $flagMap = [
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 <div class="notice warnbox" id="tts-note" style="display:none"></div>
 
+<section class="panel" style="margin-bottom:16px">
+  <h3>Talk to the teacher</h3>
+  <div class="body">
+    <form method="post" action="/app/languages/teacher/ask" class="inline" style="flex-wrap:wrap;gap:8px;width:100%">
+      <input class="sel" type="text" name="message" required maxlength="400" placeholder="Teach me Dutch from the beginning." style="flex:1;min-width:240px">
+      <button class="btn primary">Ask</button>
+    </form>
+    <p class="dim" style="font-size:12px;margin-top:8px">The teacher understands: teach / learn, test my level, conversation practice, writing correction, grammar, vocabulary. It uses your stored progress — it never invents a level.</p>
+  </div>
+</section>
+
 <section class="panel">
   <h3>Session</h3>
   <div class="body">

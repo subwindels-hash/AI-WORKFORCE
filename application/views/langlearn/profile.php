@@ -8,23 +8,52 @@
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 
+<?php $ob = $progress['onboarding'] ?? ['next' => 'learn']; ?>
+<?php if (($ob['next'] ?? 'learn') !== 'learn'): ?>
+  <div class="notice warnbox" style="margin-bottom:14px">
+    <?php if ($ob['next'] === 'set_goal'): ?>
+      <b>Next:</b> tell the teacher your goal.
+      <form method="post" action="/app/languages/p/<?= (int) $profile['id'] ?>/goal" class="inline" style="margin-top:8px;flex-wrap:wrap">
+        <select class="sel" name="goal" required>
+          <?php foreach (\AIWorkforce\LangLearn\TeacherCoach::goalOptions() as $label): ?>
+            <option value="<?= e($label) ?>"><?= e($label) ?></option>
+          <?php endforeach; ?>
+        </select>
+        <input type="hidden" name="explanationLanguage" value="<?= e($profile['explanation_language'] ?? 'en') ?>">
+        <input type="hidden" name="dailyMinutes" value="<?= (int) ($profile['daily_minutes'] ?? 20) ?>">
+        <button class="btn primary small">Save goal</button>
+      </form>
+    <?php elseif ($ob['next'] === 'assess'): ?>
+      <b>Next:</b> take the AI level assessment. Your starting level will be computed from your answers.
+      <form method="post" action="/app/languages/p/<?= (int) $profile['id'] ?>/assessment/start" style="margin-top:8px"><button class="btn primary">Start assessment</button></form>
+    <?php elseif ($ob['next'] === 'path'): ?>
+      <b>Next:</b> generate a personalized learning path from your assessed level.
+      <form method="post" action="/app/languages/p/<?= (int) $profile['id'] ?>/path/generate" style="margin-top:8px"><button class="btn primary">Generate learning path</button></form>
+    <?php endif; ?>
+  </div>
+<?php endif; ?>
+
 <div class="grid cols-main">
   <div class="panel">
-    <h3>Progress <span class="dim" style="font-weight:400">(from real activity only)</span></h3>
+    <h3><?= e(strtoupper($language['name'])) ?> <span class="dim" style="font-weight:400">(from real activity only)</span></h3>
     <div class="body" style="padding-top:12px">
       <table class="tbl">
         <tr><td class="dim">Current level</td><td><span class="badge big b-sky"><?= e($progress['level']) ?></span> <span class="dim" style="font-size:10px"><?= e($progress['levelSource']) ?></span></td></tr>
+        <tr><td class="dim">Progress to <?= e($progress['nextLevel'] ?? 'next level') ?></td><td><?= $progress['progressToNextLevelPct'] !== null ? e(rtrim(rtrim(number_format((float) $progress['progressToNextLevelPct'], 1), '0'), '.')) . '%' : '<span class="dim">no modules at that level yet</span>' ?></td></tr>
+        <tr><td class="dim">Vocabulary</td><td><?= (int) ($progress['vocabularyWords'] ?? 0) ?> words in your list</td></tr>
         <?php foreach ($progress['skills'] as $skill => $s): ?>
           <tr>
-            <td class="dim"><?= e($skill) ?></td>
+            <td class="dim"><?= e(ucfirst($skill)) ?></td>
             <td>
-              <?php if ($s['level'] !== null): ?><span class="badge b-green"><?= e($s['level']) ?></span> <span class="dim" style="font-size:10px">from assessment</span>
-              <?php else: ?><span class="dim">— <?= e(str_replace('_', ' ', $s['source'])) ?></span><?php endif; ?>
+              <?php if (!empty($s['level'])): ?><span class="badge b-green"><?= e($s['level']) ?></span><?php endif; ?>
+              <?php if ($s['pct'] !== null): ?> <?= e(rtrim(rtrim(number_format((float) $s['pct'], 1), '0'), '.')) ?>% <span class="dim" style="font-size:10px"><?= (int) ($s['attempts'] ?? 0) ?> attempts</span>
+              <?php elseif (empty($s['level'])): ?><span class="dim">— <?= e(str_replace('_', ' ', $s['source'])) ?></span><?php endif; ?>
             </td>
           </tr>
         <?php endforeach; ?>
         <tr><td class="dim">Path completion</td><td><?= $progress['pathCompletionPct'] !== null ? e(rtrim(rtrim(number_format($progress['pathCompletionPct'], 1), '0'), '.')) . '%' : '<span class="dim">no path yet</span>' ?></td></tr>
-        <tr><td class="dim">Study streak / active days</td><td class="num"><?= (int) $progress['studyStreakDays'] ?> days / <?= (int) $progress['activeDays'] ?> days</td></tr>
+        <tr><td class="dim">Study streak</td><td class="num"><?= (int) $progress['studyStreakDays'] ?> days · <?= (int) $progress['activeDays'] ?> active days</td></tr>
+        <tr><td class="dim">Goal</td><td><?php $g = trim((string) ($progress['goal'] ?? $profile['goal'] ?? '')); echo $g !== '' ? e($g) : '<span class="dim">not set</span>'; ?></td></tr>
       </table>
     </div>
   </div>

@@ -12,11 +12,11 @@
     <div class="body" style="padding-top:12px">
       <p style="font-size:15px;font-weight:600"><?= e($ex['transcript']) ?> <button class="btn small" type="button" data-listen="<?= e($ex['speakText']) ?>">🔊 Listen</button></p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-        <button class="btn small primary tts-play" data-say="<?= e($ex['speakText']) ?>" data-rate="1">▶ play (normal 1x)</button>
-        <button class="btn small tts-play" data-say="<?= e($ex['speakText']) ?>" data-rate="0.7">▶ slow 0.75x</button>
-        <button class="btn small tts-play" data-say="<?= e($ex['speakText']) ?>" data-rate="1.25">▶ fast 1.25x</button>
+        <button class="btn small tts-play" data-say="<?= e($ex['speakText']) ?>" data-rate="0.7">▶ Slow</button>
+        <button class="btn small primary tts-play" data-say="<?= e($ex['speakText']) ?>" data-rate="1">▶ Normal</button>
+        <button class="btn small tts-play" data-say="<?= e($ex['speakText']) ?>" data-rate="1.15">▶ Native</button>
         <button class="btn small" type="button" id="tts-stop-<?= e($ex['itemId']) ?>">⏹ Stop</button>
-        <button class="btn small" type="button" onclick="const d=this.closest('.body').querySelector('.transcript');d.style.display=d.style.display==='none'?'block':'none'">show transcript</button>
+        <button class="btn small" type="button" onclick="const d=this.closest('.body').querySelector('.transcript');var on=d.style.display!=='none';d.style.display=on?'none':'block';this.textContent=on?'Show transcript':'Hide transcript'">Show transcript</button>
       </div>
       <div class="transcript dim" style="display:none;margin-top:8px"><?= e($ex['transcript']) ?> — <span class="dim">Locale: <?= e(\AIWorkforce\LangLearn\Translator::LOCALES[$langCode ?? 'en'] ?? $langCode) ?></span></div>
       <div style="margin-top:8px;font-size:11px;color:var(--dim)">Voice: <select class="sel tts-voice" data-locale="<?= e(\AIWorkforce\LangLearn\Translator::LOCALES[$langCode ?? 'en'] ?? $langCode) ?>"><option>Loading voices…</option></select> | Speed: <input type="range" min="0.5" max="1.5" step="0.1" value="1" class="tts-rate" style="width:100px"> <span class="tts-rate-val">1.0×</span></div>

@@ -28,6 +28,7 @@ const code = `<?php
 chdir('${root}');
 putenv('AI_WORKFORCE_DB_DRIVER=pdo_sqlite');
 putenv('AI_WORKFORCE_SQLITE_PATH=${process.env.AI_WORKFORCE_SQLITE_PATH.replaceAll("'", "\\'")}');
+putenv('AI_WORKFORCE_TEST_FILTER=${(process.env.AI_WORKFORCE_TEST_FILTER || '').replaceAll("'", "\\'")}');
 ini_set('display_errors', '1');
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE & ~E_WARNING);
 // php-wasm runs with PHP_SAPI='wasm' — defining STDIN makes CI3's is_cli() true.

@@ -49,6 +49,8 @@ final class TeacherContent
     {
         $ph = self::PHRASES[$lang] ?? null;
         if (!$ph) return [];
+        $introNative = trim(($ph['greet'][0] ?? '') . '. ' . ($ph['name'][0] ?? '') . ' … ' . ($ph['origin'][0] ?? '') . '.');
+        $thanksNative = trim(($ph['thanks'][0] ?? '') . '. ' . ($ph['bye'][0] ?? '') . '.');
         return [
             [
                 'code' => 'self-introduction',
@@ -56,7 +58,8 @@ final class TeacherContent
                 'instruction' => 'Write 1–3 sentences introducing yourself: greet the reader and say your name. (Bonus: say where you are from.)',
                 'required' => [['element' => 'a greeting', 'patterns' => $ph['greet']], ['element' => 'your name (e.g. a "my name is" phrase)', 'patterns' => $ph['name']]],
                 'bonus' => [['element' => 'where you are from / live', 'patterns' => $ph['origin']]],
-                'checkedNote' => 'Structured feedback covers the required elements above (real pattern checks). Full free-form grammar correction needs the writing-correction provider (not configured) — it is never simulated.',
+                'nativeModel' => $introNative,
+                'checkedNote' => 'Structured feedback covers the required elements above (real pattern checks). The native version is an authored model sentence — full free-form grammar correction is not simulated.',
             ],
             [
                 'code' => 'thank-you-note',
@@ -64,9 +67,37 @@ final class TeacherContent
                 'instruction' => 'Write a short thank-you note: thank the person and say goodbye.',
                 'required' => [['element' => 'a thank-you phrase', 'patterns' => $ph['thanks']], ['element' => 'a goodbye phrase', 'patterns' => $ph['bye']]],
                 'bonus' => [],
-                'checkedNote' => 'Checked elements: thanking + goodbye. Free-form style comments are not invented.',
+                'nativeModel' => $thanksNative,
+                'checkedNote' => 'Checked elements: thanking + goodbye. The native version is an authored model. Free-form style comments are not invented.',
             ],
         ];
+    }
+
+    /**
+     * Extra phrase packs used by travel / shopping / hotel / work / emergency
+     * drills. Only real, commonly taught phrases — a language without a pack
+     * simply does not get those scenarios.
+     */
+    private static function extraPhrases(string $lang): array
+    {
+        return [
+            'nl' => ['help' => ['help', 'kunt u helpen', 'ik heb hulp'], 'where' => ['waar is', 'waar ligt'], 'howmuch' => ['hoeveel kost', 'hoeveel is'], 'room' => ['een kamer'], 'work' => ['ik werk']],
+            'es' => ['help' => ['ayuda', 'ayúdame', 'necesito ayuda'], 'where' => ['dónde está', 'donde esta', 'dónde queda'], 'howmuch' => ['cuánto cuesta', 'cuanto cuesta'], 'room' => ['una habitación', 'una habitacion'], 'work' => ['trabajo']],
+            'fr' => ['help' => ['aidez-moi', 'au secours', 'aide'], 'where' => ['où est', 'ou est'], 'howmuch' => ['combien coûte', 'combien coute'], 'room' => ['une chambre'], 'work' => ['je travaille']],
+            'de' => ['help' => ['hilfe', 'helfen sie'], 'where' => ['wo ist'], 'howmuch' => ['wie viel kostet', 'wieviel kostet'], 'room' => ['ein zimmer'], 'work' => ['ich arbeite']],
+            'it' => ['help' => ['aiuto', 'aiutami'], 'where' => ['dovè', "dov'è", 'dove è'], 'howmuch' => ['quanto costa'], 'room' => ['una camera'], 'work' => ['lavoro']],
+            'pt' => ['help' => ['ajuda', 'socorro'], 'where' => ['onde fica', 'onde está', 'onde esta'], 'howmuch' => ['quanto custa'], 'room' => ['um quarto'], 'work' => ['trabalho']],
+            'en' => ['help' => ['help', 'i need help'], 'where' => ['where is'], 'howmuch' => ['how much'], 'room' => ['a room'], 'work' => ['i work']],
+            'sw' => ['help' => ['nisaidie', 'msaada'], 'where' => ['iko wapi'], 'howmuch' => ['bei gani'], 'room' => ['chumba'], 'work' => ['ninafanya kazi']],
+            'af' => ['help' => ['help', 'ek het hulp'], 'where' => ['waar is'], 'howmuch' => ['hoeveel kos'], 'room' => ['kamer'], 'work' => ['ek werk']],
+            'tr' => ['help' => ['imdat', 'yardım'], 'where' => ['nerede'], 'howmuch' => ['ne kadar'], 'room' => ['bir oda'], 'work' => ['çalışıyorum']],
+            'ar' => ['help' => ['مساعدة', 'ساعدني'], 'where' => ['أين', 'وين'], 'howmuch' => ['كم'], 'room' => ['غرفة'], 'work' => ['أعمل']],
+            'zh' => ['help' => ['帮帮我', '救命'], 'where' => ['在哪里', '在哪儿'], 'howmuch' => ['多少钱'], 'room' => ['一个房间'], 'work' => ['我工作']],
+            'ja' => ['help' => ['助けて', 'たすけて'], 'where' => ['どこ'], 'howmuch' => ['いくら'], 'room' => ['部屋'], 'work' => ['働いて']],
+            'ko' => ['help' => ['도와주세요'], 'where' => ['어디에'], 'howmuch' => ['얼마예요', '얼마'], 'room' => ['방'], 'work' => ['일해요']],
+            'ru' => ['help' => ['помогите', 'помощь'], 'where' => ['где'], 'howmuch' => ['сколько стоит', 'сколько'], 'room' => ['номер'], 'work' => ['я работаю']],
+            'hi' => ['help' => ['मदद', 'बचाओ'], 'where' => ['कहाँ'], 'howmuch' => ['कितना'], 'room' => ['कमरा'], 'work' => ['मैं काम']],
+        ][$lang] ?? [];
     }
 
     /** Structured conversation drills (turn = instruction + accepted patterns). */
@@ -74,6 +105,7 @@ final class TeacherContent
     {
         $ph = self::PHRASES[$lang] ?? null;
         if (!$ph) return [];
+        $ph = array_merge($ph, self::extraPhrases($lang));
         $scenarios = [
             [
                 'code' => 'first-meeting', 'title' => 'First meeting (A1)', 'mode' => 'beginner',
@@ -85,6 +117,15 @@ final class TeacherContent
                     ['instruction' => 'Thank them and say goodbye (use both a thank-you and a goodbye).', 'element' => 'thank-you AND goodbye', 'patterns' => array_merge($ph['thanks'], $ph['bye']), 'requireAll' => ['thanks' => $ph['thanks'], 'bye' => $ph['bye']], 'example' => ($ph['thanks'][0] ?? '') . ' … ' . ($ph['bye'][0] ?? '')],
                 ],
             ],
+            [
+                'code' => 'social', 'title' => 'Social conversation (A1)', 'mode' => 'social',
+                'aiOpeners' => [self::aiLine($lang, 'greet'), ''],
+                'turns' => [
+                    ['instruction' => 'Greet a friend.', 'element' => 'a greeting', 'patterns' => $ph['greet'], 'example' => $ph['greet'][0] ?? ''],
+                    ['instruction' => 'Say how you are.', 'element' => 'a well-being phrase', 'patterns' => $ph['well'], 'example' => $ph['well'][0] ?? ''],
+                    ['instruction' => 'Thank them.', 'element' => 'a thank-you phrase', 'patterns' => $ph['thanks'], 'example' => $ph['thanks'][0] ?? ''],
+                ],
+            ],
         ];
         if (isset(self::DRINKS[$lang])) {
             $scenarios[] = [
@@ -94,6 +135,69 @@ final class TeacherContent
                     ['instruction' => 'Greet the barista.', 'element' => 'a greeting', 'patterns' => $ph['greet'], 'example' => $ph['greet'][0] ?? ''],
                     ['instruction' => 'Order a coffee or a tea — politely (include a please-word).', 'element' => 'drink + polite word', 'patterns' => array_merge(self::DRINKS[$lang], $ph['please']), 'requireAll' => ['drink' => self::DRINKS[$lang], 'please' => $ph['please']], 'example' => self::DRINKS[$lang][0] . ' + ' . $ph['please'][0]],
                     ['instruction' => 'Thank them.', 'element' => 'a thank-you phrase', 'patterns' => $ph['thanks'], 'example' => $ph['thanks'][0] ?? ''],
+                ],
+            ];
+        }
+        if (!empty($ph['where'])) {
+            $scenarios[] = [
+                'code' => 'travel', 'title' => 'Travel / asking the way (A1)', 'mode' => 'travel',
+                'aiOpeners' => [self::aiLine($lang, 'greet'), ''],
+                'turns' => [
+                    ['instruction' => 'Greet the person you are asking.', 'element' => 'a greeting', 'patterns' => $ph['greet'], 'example' => $ph['greet'][0] ?? ''],
+                    ['instruction' => 'Ask where something is.', 'element' => 'a "where is" phrase', 'patterns' => $ph['where'], 'example' => $ph['where'][0] ?? ''],
+                    ['instruction' => 'Thank them.', 'element' => 'a thank-you phrase', 'patterns' => $ph['thanks'], 'example' => $ph['thanks'][0] ?? ''],
+                ],
+            ];
+        }
+        if (!empty($ph['howmuch'])) {
+            $scenarios[] = [
+                'code' => 'shopping', 'title' => 'Shopping (A1)', 'mode' => 'shopping',
+                'aiOpeners' => [self::aiLine($lang, 'greet'), ''],
+                'turns' => [
+                    ['instruction' => 'Greet the shopkeeper.', 'element' => 'a greeting', 'patterns' => $ph['greet'], 'example' => $ph['greet'][0] ?? ''],
+                    ['instruction' => 'Ask how much something costs.', 'element' => 'a "how much" phrase', 'patterns' => $ph['howmuch'], 'example' => $ph['howmuch'][0] ?? ''],
+                    ['instruction' => 'Thank them.', 'element' => 'a thank-you phrase', 'patterns' => $ph['thanks'], 'example' => $ph['thanks'][0] ?? ''],
+                ],
+            ];
+        }
+        if (!empty($ph['room'])) {
+            $scenarios[] = [
+                'code' => 'hotel', 'title' => 'At the hotel (A1)', 'mode' => 'hotel',
+                'aiOpeners' => [self::aiLine($lang, 'greet'), ''],
+                'turns' => [
+                    ['instruction' => 'Greet reception.', 'element' => 'a greeting', 'patterns' => $ph['greet'], 'example' => $ph['greet'][0] ?? ''],
+                    ['instruction' => 'Ask for a room (include a room-word).', 'element' => 'a room phrase', 'patterns' => $ph['room'], 'example' => $ph['room'][0] ?? ''],
+                    ['instruction' => 'Add a please-word.', 'element' => 'a please-word', 'patterns' => $ph['please'], 'example' => $ph['please'][0] ?? ''],
+                ],
+            ];
+        }
+        if (!empty($ph['work'])) {
+            $scenarios[] = [
+                'code' => 'business', 'title' => 'Business introduction (A2)', 'mode' => 'business',
+                'aiOpeners' => [self::aiLine($lang, 'greet'), ''],
+                'turns' => [
+                    ['instruction' => 'Greet your counterpart.', 'element' => 'a greeting', 'patterns' => $ph['greet'], 'example' => $ph['greet'][0] ?? ''],
+                    ['instruction' => 'Give your name.', 'element' => 'a name phrase', 'patterns' => $ph['name'], 'example' => $ph['name'][0] ?? ''],
+                    ['instruction' => 'Say that you work (use a work phrase).', 'element' => 'a work phrase', 'patterns' => $ph['work'], 'example' => $ph['work'][0] ?? ''],
+                ],
+            ];
+            $scenarios[] = [
+                'code' => 'job-interview', 'title' => 'Job interview opening (A2)', 'mode' => 'job_interview',
+                'aiOpeners' => [self::aiLine($lang, 'greet'), ''],
+                'turns' => [
+                    ['instruction' => 'Greet the interviewer.', 'element' => 'a greeting', 'patterns' => $ph['greet'], 'example' => $ph['greet'][0] ?? ''],
+                    ['instruction' => 'Introduce yourself by name.', 'element' => 'a name phrase', 'patterns' => $ph['name'], 'example' => $ph['name'][0] ?? ''],
+                    ['instruction' => 'Mention your work.', 'element' => 'a work phrase', 'patterns' => $ph['work'], 'example' => $ph['work'][0] ?? ''],
+                ],
+            ];
+        }
+        if (!empty($ph['help'])) {
+            $scenarios[] = [
+                'code' => 'emergency', 'title' => 'Emergency (A1)', 'mode' => 'emergency',
+                'aiOpeners' => [''],
+                'turns' => [
+                    ['instruction' => 'Call for help.', 'element' => 'a help phrase', 'patterns' => $ph['help'], 'example' => $ph['help'][0] ?? ''],
+                    ['instruction' => 'Thank the person who helps.', 'element' => 'a thank-you phrase', 'patterns' => $ph['thanks'], 'example' => $ph['thanks'][0] ?? ''],
                 ],
             ];
         }

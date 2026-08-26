@@ -141,6 +141,27 @@ class Api_lang_learning extends Api_controller
         catch (Throwable $e) { $this->fail($e); }
     }
 
+    public function update_profile(int $id)
+    {
+        $user = $this->guard();
+        if (!$user) return;
+        try { $this->json(['profile' => $this->platform->langlearn->updateProfile((int) $user['id'], $id, $this->jsonBody())]); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
+    /** Natural-language AI teacher: "Teach me Dutch", "Test my French level", … */
+    public function interpret()
+    {
+        $user = $this->guard();
+        if (!$user) return;
+        $body = $this->jsonBody();
+        $message = trim((string) ($body['message'] ?? ''));
+        if ($message === '') return $this->jsonError('body must be {message: string, profileId?: int}');
+        $profileId = isset($body['profileId']) && is_numeric($body['profileId']) ? (int) $body['profileId'] : null;
+        try { $this->json(['coach' => $this->platform->langcoach->interpret((int) $user['id'], $message, $profileId)]); }
+        catch (Throwable $e) { $this->fail($e); }
+    }
+
     // -------------------------------------------------------- assessment
 
     public function start_assessment(int $profileId)

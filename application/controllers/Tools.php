@@ -168,6 +168,17 @@ class Tools extends MY_Controller
         require_once TESTSPATH . 'framework.php';
         $suites = glob(TESTSPATH . 'cases/*.php') ?: [];
         sort($suites);
+        $filter = trim((string) (getenv('AI_WORKFORCE_TEST_FILTER') ?: ($_SERVER['argv'][3] ?? '')));
+        if ($filter !== '') {
+            $needles = array_filter(array_map('trim', explode(',', $filter)));
+            $suites = array_values(array_filter($suites, function (string $file) use ($needles): bool {
+                $base = basename($file);
+                foreach ($needles as $n) {
+                    if ($n !== '' && str_contains($base, $n)) return true;
+                }
+                return false;
+            }));
+        }
         foreach ($suites as $file) {
             require_once $file;
         }
