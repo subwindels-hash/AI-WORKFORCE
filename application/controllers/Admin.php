@@ -568,6 +568,68 @@ class Admin extends App_Controller
         redirect('/admin/api');
     }
 
+    public function add_language()
+    {
+        $actor = $this->isSuperAdmin($this->currentUser());
+        if (!$actor) {
+            $this->flash('error', 'Super admin access required.');
+            redirect('/admin');
+            return;
+        }
+
+        $code = strtolower(trim((string) $this->input->post('code')));
+        $name = trim((string) $this->input->post('name'));
+        $native_name = trim((string) ($this->input->post('native_name') ?: ''));
+        $writing_system = trim((string) $this->input->post('writing_system'));
+        $direction = strtolower(trim((string) $this->input->post('direction')));
+
+        // Validate language code format (ISO 639-1/3: 2-3 lowercase letters)
+        if (!preg_match('/^[a-z]{2,3}$/', $code)) {
+            $this->flash('error', 'Language code must be 2-3 lowercase letters (ISO 639-1/3 format).');
+            redirect('/admin/languages');
+            return;
+        }
+
+        // Validate required fields
+        if ($name === '') {
+            $this->flash('error', 'English name is required.');
+            redirect('/admin/languages');
+            return;
+        }
+
+        if (!in_array($writing_system, ['latin', 'cyrillic', 'devanagari', 'arabic', 'han', 'kana', 'hangul'])) {
+            $this->flash('error', 'Invalid writing system.');
+            redirect('/admin/languages');
+            return;
+        }
+
+        if (!in_array($direction, ['ltr', 'rtl'])) {
+            $this->flash('error', 'Invalid direction.');
+            redirect('/admin/languages');
+            return;
+        }
+
+        // Register the language using the LanguageRegistry
+        try {
+            \AIWorkforce\LangLearn\LanguageRegistry::register([
+                'code' => $code,
+                'name' => $name,
+                'native_name' => $native_name !== '' ? $native_name : $name,
+                'iso_code' => $code,
+                'writing_system' => $writing_system,
+                'direction' => $direction,
+                'active' => true,
+            ]);
+            $this->flash('notice', "Language '{$name}' ({$code}) registered successfully.");
+        } catch (\InvalidArgumentException $e) {
+            $this->flash('error', $e->getMessage());
+        } catch (\Throwable $e) {
+            $this->flash('error', 'Failed to register language: ' . $e->getMessage());
+        }
+
+        redirect('/admin/languages');
+    }
+
     private function apiToggle(int $id, bool $enabled): void
     {
         $actor = $this->gate('admin.api.manage'); if (!$actor) return;
