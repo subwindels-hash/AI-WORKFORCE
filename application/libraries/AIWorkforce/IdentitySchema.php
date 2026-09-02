@@ -150,20 +150,22 @@ final class IdentitySchema
 
     /**
      * Security question + answer from signup / account (PIN is assigned separately).
+     * Only the preset questions in SECURITY_QUESTIONS are accepted — the
+     * "Write your own question" option was removed.
      *
      * @return array{security_question:string,security_answer:string}|null
      */
-    public static function fromPostedQuestion(string $question, string $customQuestion, string $answer): ?array
+    public static function fromPostedQuestion(string $question, string $answer): ?array
     {
-        if ($question === '__custom__') $question = $customQuestion;
-        $row = [
-            'security_question' => self::normalizeQuestion($question),
-            'security_answer' => self::normalizeAnswer($answer),
-        ];
-        if (!self::validQuestion($row['security_question']) || !self::validAnswer($row['security_answer'])) {
+        $presets = array_map([self::class, 'normalizeQuestion'], self::SECURITY_QUESTIONS);
+        $question = self::normalizeQuestion($question);
+        if (!in_array($question, $presets, true) || !self::validAnswer($answer)) {
             return null;
         }
-        return $row;
+        return [
+            'security_question' => $question,
+            'security_answer' => self::normalizeAnswer($answer),
+        ];
     }
 
     /**
@@ -172,9 +174,9 @@ final class IdentitySchema
      *
      * @return array{security_pin:string,security_question:string,security_answer:string}|null
      */
-    public static function fromPostedRecovery(string $pin, string $question, string $customQuestion, string $answer): ?array
+    public static function fromPostedRecovery(string $pin, string $question, string $answer): ?array
     {
-        $q = self::fromPostedQuestion($question, $customQuestion, $answer);
+        $q = self::fromPostedQuestion($question, $answer);
         if (!$q) return null;
         $pin = self::normalizePin($pin);
         if (!self::validPin($pin)) return null;

@@ -23,20 +23,20 @@ test('PIN, question and answer validation', function () {
     assert_false(\AIWorkforce\IdentitySchema::validQuestion('short'));
     assert_true(\AIWorkforce\IdentitySchema::validAnswer('Lagos'));
     assert_false(\AIWorkforce\IdentitySchema::validAnswer('x'));
-    $ok = \AIWorkforce\IdentitySchema::fromPostedRecovery('4242', 'What city were you born in?', '', 'Lagos');
+    $ok = \AIWorkforce\IdentitySchema::fromPostedRecovery('4242', 'What city were you born in?', 'Lagos');
     assert_not_null($ok);
     assert_equals('4242', $ok['security_pin']);
-    $custom = \AIWorkforce\IdentitySchema::fromPostedRecovery('9876', '__custom__', 'What street did you grow up on?', 'Broad Street');
-    assert_not_null($custom);
-    assert_equals('What street did you grow up on?', $custom['security_question']);
-    assert_null(\AIWorkforce\IdentitySchema::fromPostedRecovery('12', 'What city were you born in?', '', 'Lagos'));
+    assert_null(\AIWorkforce\IdentitySchema::fromPostedRecovery('9876', '__custom__', 'Broad Street'), 'write-your-own questions are no longer accepted');
+    assert_null(\AIWorkforce\IdentitySchema::fromPostedRecovery('9876', 'What street did you grow up on?', 'Broad Street'), 'non-preset questions are rejected');
+    assert_null(\AIWorkforce\IdentitySchema::fromPostedRecovery('12', 'What city were you born in?', 'Lagos'));
     $pin = \AIWorkforce\IdentitySchema::generatePin();
     assert_true(\AIWorkforce\IdentitySchema::validPin($pin), 'generatePin returns a 4-digit PIN');
-    $q = \AIWorkforce\IdentitySchema::fromPostedQuestion('What city were you born in?', '', 'Lagos');
+    $q = \AIWorkforce\IdentitySchema::fromPostedQuestion('What city were you born in?', 'Lagos');
     assert_not_null($q);
     assert_false(isset($q['security_pin']), 'signup helper does not take a PIN');
     assert_equals('What city were you born in?', $q['security_question']);
-    assert_null(\AIWorkforce\IdentitySchema::fromPostedQuestion('short', '', 'Lagos'));
+    assert_null(\AIWorkforce\IdentitySchema::fromPostedQuestion('short', 'Lagos'));
+    assert_null(\AIWorkforce\IdentitySchema::fromPostedQuestion('What street did you grow up on?', 'Lagos'), 'preset questions only');
 });
 
 test('createUser assigns a 4-digit PIN when none is provided', function () {
@@ -131,11 +131,15 @@ test('register, account and admin profile collect or reveal recovery fields', fu
     assert_false(str_contains($register, 'id="reg-pin"'));
     assert_contains('name="security_question"', $register);
     assert_contains('name="security_answer"', $register);
+    assert_false(str_contains($register, '__custom__'), 'register no longer offers write-your-own questions');
+    assert_false(str_contains($register, 'security_question_custom'), 'register has no custom question field');
     assert_contains('assigned automatically', $register);
     $account = file_get_contents(FCPATH . 'application/views/auth/account.php');
     assert_contains('action="/account/recovery"', $account);
     assert_false(str_contains($account, 'name="security_pin"'), 'account does not let the user change the PIN');
     assert_false(str_contains($account, 'id="rec-pin"'));
+    assert_false(str_contains($account, '__custom__'), 'account no longer offers write-your-own questions');
+    assert_false(str_contains($account, 'security_question_custom'), 'account has no custom question field');
     assert_contains('cannot be changed', $account);
     $routes = file_get_contents(FCPATH . 'application/config/routes.php');
     assert_contains("\$route['account/recovery'] = 'auth/update_recovery';", $routes);
@@ -149,6 +153,8 @@ test('register, account and admin profile collect or reveal recovery fields', fu
     assert_contains('generatePin()', $model);
     $create = file_get_contents(FCPATH . 'application/views/admin/users/create.php');
     assert_false(str_contains($create, 'name="security_pin"'), 'admin create does not collect a PIN');
+    assert_false(str_contains($create, '__custom__'), 'admin create no longer offers write-your-own questions');
+    assert_false(str_contains($create, 'security_question_custom'), 'admin create has no custom question field');
     $admin = file_get_contents(FCPATH . 'application/controllers/Admin.php');
     assert_contains('fromPostedQuestion', $admin);
     assert_contains('findPublicUser((int) $id, $this->isSuperAdmin($actor))', $admin);

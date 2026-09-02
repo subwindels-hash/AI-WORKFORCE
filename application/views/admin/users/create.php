@@ -20,10 +20,8 @@
           <?php foreach (($securityQuestions ?? []) as $q): ?>
             <option value="<?= e($q) ?>"><?= e($q) ?></option>
           <?php endforeach; ?>
-          <option value="__custom__">Write your own question</option>
         </select>
       </label>
-      <label id="create-question-custom-wrap" hidden>Your security question<input name="security_question_custom" id="create-question-custom" maxlength="255" minlength="8"></label>
       <label>Security answer<input name="security_answer" maxlength="120" minlength="2" placeholder="Optional" autocomplete="off"></label>
       <label>Role
         <select name="role">
@@ -36,13 +34,3 @@
     </form>
   </div>
 </section>
-<script>
-(function () {
-  var q = document.getElementById('create-question');
-  var wrap = document.getElementById('create-question-custom-wrap');
-  if (!q || !wrap) return;
-  function sync() { wrap.hidden = q.value !== '__custom__'; }
-  q.addEventListener('change', sync);
-  sync();
-})();
-</script>

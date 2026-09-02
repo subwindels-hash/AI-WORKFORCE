@@ -119,7 +119,6 @@ $this->load->view('auth/layout/header', ['title' => $title, 'active' => $active,
                     <?php foreach (($securityQuestions ?? []) as $q): ?>
                       <option value="<?= e($q) ?>"><?= e($q) ?></option>
                     <?php endforeach; ?>
-                    <option value="__custom__">Write your own question</option>
                   </select>
                 </span>
               </label>
@@ -132,13 +131,6 @@ $this->load->view('auth/layout/header', ['title' => $title, 'active' => $active,
                 <span class="auth-hint">At least 2 characters.</span>
               </label>
             </div>
-
-            <label class="auth-field auth-field--full" id="reg-question-custom-wrap" hidden>
-              <span>Your security question</span>
-              <span class="auth-control">
-                <input name="security_question_custom" id="reg-question-custom" maxlength="255" minlength="8" placeholder="At least 8 characters">
-              </span>
-            </label>
           </fieldset>
 
           <!-- Step 5 — Confirm and submit -->
@@ -206,17 +198,6 @@ $this->load->view('auth/layout/header', ['title' => $title, 'active' => $active,
     });
   });
 
-  var question = document.getElementById('reg-question');
-  var customWrap = document.getElementById('reg-question-custom-wrap');
-  var customInput = document.getElementById('reg-question-custom');
-  function syncCustomQuestion() {
-    var custom = question.value === '__custom__';
-    customWrap.hidden = !custom;
-    customInput.required = custom;
-  }
-  question.addEventListener('change', syncCustomQuestion);
-  syncCustomQuestion();
-
   // Live feedback for the password section.
   var password = document.getElementById('reg-password');
   var confirmInput = document.getElementById('reg-confirm');
@@ -247,7 +228,6 @@ $this->load->view('auth/layout/header', ['title' => $title, 'active' => $active,
     var phone = document.getElementById('reg-phone');
     var address = document.getElementById('reg-address');
     var q = document.getElementById('reg-question');
-    var customQ = document.getElementById('reg-question-custom');
     var answer = document.getElementById('reg-answer');
     var terms = document.getElementById('reg-terms');
     inlineError.hidden = true;
@@ -260,7 +240,6 @@ $this->load->view('auth/layout/header', ['title' => $title, 'active' => $active,
     else if (password.value.length < 12) ok = fail('Your password must be at least 12 characters.', password);
     else if (password.value !== confirmInput.value) ok = fail('The two passwords do not match.', confirmInput);
     else if (!q.value) ok = fail('Choose a security question.', q);
-    else if (q.value === '__custom__' && (customQ.value || '').trim().length < 8) ok = fail('Write a security question of at least 8 characters.', customQ);
     else if ((answer.value || '').trim().length < 2) ok = fail('Enter an answer of at least 2 characters.', answer);
     else if (!terms.checked) ok = fail('Please accept the Terms and Privacy Policy.', terms);
     if (!ok) { event.preventDefault(); return; }
