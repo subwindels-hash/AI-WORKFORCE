@@ -105,7 +105,7 @@
     var badge = lang.full_ai ? 'b-green' : 'b-gray';
     var label = lang.support_label || 'Text only';
     var learn = signedIn
-      ? '<form method="post" action="/app/languages/start" style="display:inline"><input type="hidden" name="code" value="' + (lang.code || '') + '"><button class="btn small">Learn</button></form>'
+      ? '<a class="btn small" href="/app/languages/begin?code=' + encodeURIComponent(lang.code || '') + '">Learn</a>'
       : '';
     return '<tr><td style="font-weight:700">' + escapeHtml(lang.name || '') + '</td><td>' + escapeHtml(lang.native_name || '') + '</td><td class="mono dim">' + escapeHtml(lang.iso_code || lang.code || '') + '</td><td><span class="badge ' + badge + '">' + escapeHtml(label) + '</span></td><td class="num">' + learn + '</td></tr>';
   }

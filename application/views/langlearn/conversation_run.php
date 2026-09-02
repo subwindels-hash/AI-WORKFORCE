@@ -41,7 +41,8 @@ $locale = \AIWorkforce\LangLearn\Translator::LOCALES[$langCode] ?? 'en-GB';
       <?php foreach ($s['history'] as $h): ?>
         <div class="dim" style="margin:4px 0"><b>You:</b> <?= e($h['text']) ?> <button class="btn small" type="button" data-conv-listen="<?= e($h['text']) ?>">🔊</button> <?= $h['ok'] ? '✓' : '✗' ?></div>
       <?php endforeach; ?>
-      <a class="btn primary" href="/app/languages" style="margin-top:10px">Back to My Languages</a>
+      <a class="btn primary" href="/app/languages/conv/<?= (int) ($view['profileId'] ?? 0) ?>" style="margin-top:10px">Back to conversations</a>
+      <a class="btn" href="/app/languages/p/<?= (int) ($view['profileId'] ?? 0) ?>">Language profile</a>
     </div>
   </div>
 <?php endif; ?>

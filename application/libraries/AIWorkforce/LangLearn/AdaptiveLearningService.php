@@ -196,26 +196,29 @@ class AdaptiveLearningService
         if ($dueCount > 0) {
             $n = min($dueCount, max(5, (int) round($dueCount * 0.6)));
             $blocks[] = ['block' => 'vocabulary', 'title' => "Review {$n} due vocabulary words", 'minutes' => 5,
-                'why' => "{$dueCount} word(s) scheduled for today by your spaced-repetition plan", 'target' => $n];
+                'why' => "{$dueCount} word(s) scheduled for today by your spaced-repetition plan", 'target' => $n,
+                'href' => '/app/languages/vr/' . $profileId . '/flashcard'];
         }
         if ($currentModule) {
             $blocks[] = ['block' => 'module', 'title' => "Continue: {$currentModule['title']}", 'minutes' => 10,
-                'why' => 'your next module in the learning path (focus: ' . $currentModule['focus_skill'] . ')', 'target' => $currentModule['id']];
+                'why' => 'your next module in the learning path (focus: ' . $currentModule['focus_skill'] . ')', 'target' => $currentModule['id'],
+                'href' => '/app/languages/m/' . $currentModule['id'] . '/lesson'];
         }
         // weak-skill practice, strongest weakness first
         $practiceMap = [
-            'listening' => ['title' => 'Complete one listening exercise', 'minutes' => 5, 'why' => 'listening is your weakest measured skill'],
-            'speaking' => ['title' => 'Practice speaking for 5 minutes', 'minutes' => 5, 'why' => 'speaking is your weakest measured skill'],
-            'writing' => ['title' => 'One writing practice task', 'minutes' => 8, 'why' => 'writing is your weakest measured skill'],
-            'grammar' => ['title' => 'Review the grammar rules you missed', 'minutes' => 5, 'why' => 'grammar is your weakest measured skill'],
-            'vocabulary' => ['title' => 'Extra vocabulary quiz', 'minutes' => 5, 'why' => 'vocabulary quiz scores are low'],
+            'listening' => ['title' => 'Complete one listening exercise', 'minutes' => 5, 'why' => 'listening is your weakest measured skill', 'href' => '/app/languages/l/' . $profileId],
+            'speaking' => ['title' => 'Practice speaking for 5 minutes', 'minutes' => 5, 'why' => 'speaking is your weakest measured skill', 'href' => '/app/languages/s/' . $profileId],
+            'writing' => ['title' => 'One writing practice task', 'minutes' => 8, 'why' => 'writing is your weakest measured skill', 'href' => '/app/languages/w/' . $profileId],
+            'grammar' => ['title' => 'Review the grammar rules you missed', 'minutes' => 5, 'why' => 'grammar is your weakest measured skill', 'href' => '/app/languages/g/' . $profileId],
+            'vocabulary' => ['title' => 'Extra vocabulary quiz', 'minutes' => 5, 'why' => 'vocabulary quiz scores are low', 'href' => '/app/languages/vr/' . $profileId . '/quiz'],
         ];
         foreach ($weakSkills as $skill) {
             if (isset($practiceMap[$skill])) $blocks[] = ['block' => 'practice-' . $skill] + $practiceMap[$skill];
         }
         if (!$blocks) {
             $blocks[] = ['block' => 'start', 'title' => 'Take the level assessment to calibrate your path', 'minutes' => 5,
-                'why' => 'no assessment on this profile yet', 'target' => null];
+                'why' => 'no assessment on this profile yet', 'target' => null,
+                'href' => '/app/languages/p/' . $profileId];
         }
 
         // fit the budget in priority order

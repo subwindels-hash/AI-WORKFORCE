@@ -295,7 +295,7 @@ $route['api/v1/language-learning/modules/(:any)/checkpoint/answer'] = 'api_lang_
 // pages
 $route['app/languages'] = 'lang_learn';
 $route['app/languages/teacher'] = 'lang_learn/teacher';
-$route['app/languages/login'] = 'lang_learn/login';
+$route['app/languages/teacher/ask'] = 'lang_learn/teacher_ask';
 $route['app/languages/start'] = 'lang_learn/start';
 $route['app/languages/begin'] = 'lang_learn/begin';
 $route['app/languages/p/(:num)'] = 'lang_learn/profile/$1';

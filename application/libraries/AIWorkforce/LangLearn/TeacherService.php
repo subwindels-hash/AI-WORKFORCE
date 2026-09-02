@@ -101,13 +101,21 @@ class TeacherService
         $state = $session['state'];
         if ($session['status'] === 'COMPLETED') {
             $good = count(array_filter($state['history'] ?? [], fn($h) => $h['ok']));
-            return ['status' => 'COMPLETED', 'summary' => [
-                'turns' => count($state['history'] ?? []), 'unassisted' => $good,
-                'scorePct' => (int) round(100 * $good / max(1, count($state['history'] ?? [1]))),
-                'history' => $state['history'] ?? [],
-            ]];
+            return [
+                'status' => 'COMPLETED',
+                'sessionId' => $session['id'],
+                'profileId' => (int) $session['profile_id'],
+                'scenario' => $scenario['title'],
+                'languageCode' => $session['language_code'],
+                'correctionMode' => $session['correction'],
+                'summary' => [
+                    'turns' => count($state['history'] ?? []), 'unassisted' => $good,
+                    'scorePct' => (int) round(100 * $good / max(1, count($state['history'] ?? [1]))),
+                    'history' => $state['history'] ?? [],
+                ],
+            ];
         }
-        return $this->conversationView($session, $scenario) + ['history' => array_slice($state['history'] ?? [], -4)];
+        return $this->conversationView($session, $scenario);
     }
 
     public function conversationTurn(string $sessionId, int $userId, string $text): array
@@ -141,15 +149,6 @@ class TeacherService
             $state['attemptsThisTurn'] = $attemptNo;
         }
 
-        $finished = $state['turnIdx'] >= count($scenario['turns']);
-        $session['state'] = $state;
-        $session['turn_count'] = count($state['history']);
-        if ($finished) {
-            $session['status'] = 'COMPLETED';
-            $session['completed_at'] = gmdate('c');
-        }
-        $this->repo->saveConversation($session);
-
         $correction = $session['correction'];
         $feedback = null;
         if ($correction === 'immediate' || ($correction === 'important' && !$ok)) {
@@ -159,6 +158,16 @@ class TeacherService
                 'example' => $ok || $assisted || ($state['attemptsThisTurn'] ?? 0) >= 1 ? $turn['example'] : null,
             ];
         }
+        $state['lastFeedback'] = $feedback;
+        $state['assistedAdvance'] = $assisted;
+        $finished = $state['turnIdx'] >= count($scenario['turns']);
+        $session['state'] = $state;
+        $session['turn_count'] = count($state['history']);
+        if ($finished) {
+            $session['status'] = 'COMPLETED';
+            $session['completed_at'] = gmdate('c');
+        }
+        $this->repo->saveConversation($session);
         if ($finished) {
             $good = count(array_filter($state['history'], fn($h) => $h['ok']));
             $score = (int) round(100 * $good / max(1, count($state['history'])));
@@ -205,14 +214,19 @@ class TeacherService
 
     private function conversationView(array $session, array $scenario): array
     {
-        $turn = $scenario['turns'][(int) $session['state']['turnIdx']] ?? null;
+        $state = $session['state'] ?? [];
+        $turn = $scenario['turns'][(int) ($state['turnIdx'] ?? 0)] ?? null;
         return [
             'status' => 'ACTIVE', 'sessionId' => $session['id'],
+            'profileId' => (int) $session['profile_id'],
             'scenario' => $scenario['title'], 'languageCode' => $session['language_code'],
             'correctionMode' => $session['correction'],
             'aiOpens' => $scenario['aiOpeners'][0] ?? '',
-            'turn' => $turn === null ? null : ['index' => (int) $session['state']['turnIdx'] + 1, 'total' => count($scenario['turns']), 'instruction' => $turn['instruction']],
-            'attemptsThisTurn' => (int) ($session['state']['attemptsThisTurn'] ?? 0),
+            'turn' => $turn === null ? null : ['index' => (int) ($state['turnIdx'] ?? 0) + 1, 'total' => count($scenario['turns']), 'instruction' => $turn['instruction']],
+            'attemptsThisTurn' => (int) ($state['attemptsThisTurn'] ?? 0),
+            'history' => array_slice($state['history'] ?? [], -8),
+            'lastFeedback' => $state['lastFeedback'] ?? null,
+            'assistedAdvance' => !empty($state['assistedAdvance']),
         ];
     }
 
