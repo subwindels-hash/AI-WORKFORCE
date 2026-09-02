@@ -129,7 +129,7 @@ test('homepage CTAs and site footer links all point at routed destinations', fun
     $fm[1] = array_values(array_filter($fm[1], fn ($h) => $h !== '#'));
     assert_true(count($fm[1]) > 4, 'footer must expose its links');
     foreach (array_unique($fm[1]) as $href) {
-        if (preg_match('#^(https?://|mailto:)#', $href)) continue; // real external destinations are fine
+        if (preg_match('#^(https?://|mailto:|tel:)#', $href)) continue; // real external destinations (web, email, phone dialer) are fine
         $segments = trim($href, '/');
         assert_true(
             str_contains($routes, "\$route['" . $segments . "']") || str_contains($routes, "\$route['" . $segments . "']"),
