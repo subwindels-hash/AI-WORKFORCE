@@ -53,6 +53,26 @@
  *
  * NOTE: If you change these, also change the error_reporting() code below
  */
+	/*
+	 * PHP version guard (cPanel shared hosting): the application uses PHP 8.1+
+	 * syntax (readonly properties), so on PHP 8.0 or older it dies with an
+	 * empty 500 page. Show an actionable message instead so the host's PHP
+	 * version can be fixed in cPanel (Select PHP Version → 8.2).
+	 */
+	if (PHP_VERSION_ID < 80100) {
+		header('HTTP/1.1 500 Internal Server Error', TRUE, 500);
+		header('Content-Type: text/html; charset=utf-8');
+		echo '<!doctype html><html><head><meta charset="utf-8"><title>PHP version too old</title></head>'
+			. '<body style="font-family:system-ui,sans-serif;max-width:640px;margin:60px auto;color:#0f172a">'
+			. '<h1>WINDELS AI WORKFORCE cannot start</h1>'
+			. '<p>This server is running <b>PHP ' . PHP_VERSION . '</b>, but this application requires <b>PHP 8.1 or newer</b> (8.2 recommended).</p>'
+			. '<p>Fix: open <b>cPanel → Select PHP Version</b> (or MultiPHP Manager) for this domain and choose <b>PHP 8.2</b>, then reload the page. '
+			. 'Make sure the <b>mysqli</b> and <b>mbstring</b> extensions stay enabled.</p>'
+			. '<p>After that, if the site still fails, check <b>cPanel → Metrics → Errors</b> for the PHP error message.</p>'
+			. '</body></html>';
+		exit(1);
+	}
+
 	// cPanel deployments configure this application by editing a root .env file.
 	// The lightweight loader is bundled so Composer and terminal commands are never required.
 	if (is_file(__DIR__ . '/application/config/env.php')) {

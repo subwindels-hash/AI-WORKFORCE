@@ -135,6 +135,31 @@ confirmation.
 
 Open `https://yourdomain.com/`. Root `.htaccess` is included for CodeIgniter routing and prevents HTTP access to `.env`, database exports, runtime, tests, and tools.
 
+## Troubleshooting a blank page after upload
+
+The most common cause of a **completely empty page** (white screen, empty
+body, HTTP 500) on cPanel shared hosting is the **PHP version**: this
+application requires **PHP 8.1–8.3** (it uses `readonly` properties, which
+are a compile-time fatal on PHP 8.0 or older). Shared hosting often boots
+with an older PHP (7.4/8.0) until you pick a version.
+
+Symptom that points to PHP version: static files and SEO documents
+(`robots.txt`, `sitemap.xml`) load fine, but every app page (`/`,
+`/contact`, `/login`) and `/api/*` route returns an empty body.
+
+Fix in cPanel:
+
+1. **Select PHP Version** (or **MultiPHP Manager**) → select **PHP 8.2** for
+   the domain.
+2. In **MultiPHP INI Editor** / the extension list, confirm `mysqli` and
+   `mbstring` are enabled.
+3. Reload the page. `index.php` now shows a readable "PHP version too old"
+   notice instead of a blank page when this is the problem.
+4. If it still fails, open **Metrics → Errors** in cPanel and read the PHP
+   error line; the other usual suspects are a missing/misnamed `.env`
+   database value, an unimported `production.sql`, or read-only folders
+   (`application/cache/`, `application/logs/`, `runtime/sessions/`).
+
 ## Initial administrator
 
 The complete production database includes this initial account so CLI bootstrapping is never required:
