@@ -415,6 +415,104 @@ final class ApiProviders
         return self::activeConfig($db, $service) !== null;
     }
 
+    /**
+     * Market-data services whose live provider registration is gated on this
+     * store (see Platform::registerMarketDataProviders).
+     */
+    public const MARKET_DATA_SERVICES = ['crypto_market', 'forex_market'];
+
+    /**
+     * Public, no-API-key market-data drivers. These are safe to switch on
+     * programmatically because they need no credential and no license.
+     */
+    public const KEYLESS_MARKET_DRIVERS = [
+        'crypto_market' => 'binance_public',
+        'forex_market' => 'frankfurter',
+    ];
+
+    /**
+     * Full connection state for one service — the single source of truth used
+     * by the admin dashboard, the market-data report and the live chart badge.
+     *
+     * 'configured' → at least one row exists for the service
+     * 'live'       → an enabled row is actually serving (activeConfig !== null)
+     *
+     * The gap between those two is exactly the "connected but dark" state that
+     * keeps market data off; activateKeylessFeed() closes it for public feeds.
+     *
+     * @return array{service:string,label:string,configured:bool,live:bool,driver:?string,base_url:?string,rows:int,enabled_rows:int,last_test_ok:?int}
+     */
+    public static function serviceState(object $db, string $service): array
+    {
+        self::ensureSchema($db);
+        $meta = self::services()[$service] ?? ['label' => $service];
+        $rows = 0;
+        $enabledRows = 0;
+        try {
+            $rows = (int) $db->where('service', $service)->count_all_results('api_providers');
+            $enabledRows = (int) $db->where('service', $service)->where('enabled', 1)
+                ->count_all_results('api_providers');
+        } catch (\Throwable $e) { /* schema unavailable — report as unconfigured */ }
+        $active = null;
+        try { $active = self::activeConfig($db, $service); } catch (\Throwable $e) { $active = null; }
+        return [
+            'service' => $service,
+            'label' => (string) $meta['label'],
+            'configured' => $rows > 0,
+            'live' => $active !== null,
+            'driver' => $active['driver'] ?? null,
+            'base_url' => $active['base_url'] ?? null,
+            'rows' => $rows,
+            'enabled_rows' => $enabledRows,
+            'last_test_ok' => $active['last_test_ok'] ?? null,
+        ];
+    }
+
+    /**
+     * Switch a connected-but-not-yet-serving public market-data feed to LIVE.
+     *
+     * Why this exists: adding a provider row for crypto_market / forex_market
+     * makes serviceEnabled() stop defaulting to true, so a row saved with the
+     * Enable box unticked silently drops the live feed back to the labelled
+     * synthetic provider. This promotes the keyless public feed instead.
+     *
+     * Deliberately conservative — it never:
+     *   • touches a service that is already live (operator intent wins),
+     *   • enables custom_http or any licensed/credentialed driver,
+     *   • creates rows; it only promotes one the operator already saved.
+     *
+     * @return array{ok:bool,service:string,action:string,detail:string,id?:int,label?:string,driver?:string}
+     */
+    public static function activateKeylessFeed(object $db, string $service): array
+    {
+        $keyless = self::KEYLESS_MARKET_DRIVERS[$service] ?? null;
+        if ($keyless === null) {
+            return ['ok' => false, 'service' => $service, 'action' => 'skipped',
+                'detail' => 'Not a keyless public market-data service; enable it from Admin → API.'];
+        }
+        self::ensureSchema($db);
+        $active = self::activeConfig($db, $service);
+        if ($active !== null) {
+            return ['ok' => true, 'service' => $service, 'action' => 'already_live',
+                'detail' => 'Already serving live data.', 'id' => (int) ($active['id'] ?? 0),
+                'label' => (string) ($active['label'] ?? ''), 'driver' => (string) ($active['driver'] ?? '')];
+        }
+        try {
+            $row = $db->where('service', $service)->where('driver', $keyless)
+                ->order_by('id', 'ASC')->limit(1)->get('api_providers')->row_array();
+        } catch (\Throwable $e) { $row = null; }
+        if (!$row) {
+            return ['ok' => false, 'service' => $service, 'action' => 'not_connected',
+                'detail' => 'No ' . $keyless . ' provider saved yet — add it in Admin → API first.'];
+        }
+        $id = (int) $row['id'];
+        self::setEnabled($db, $id, true);
+        self::setRole($db, $id, 'primary');
+        return ['ok' => true, 'service' => $service, 'action' => 'activated',
+            'detail' => 'Enabled and promoted to primary — market data is now live.',
+            'id' => $id, 'label' => (string) ($row['label'] ?? ''), 'driver' => (string) ($row['driver'] ?? '')];
+    }
+
     public static function save(object $db, array $input, ?int $id, ?int $actorId, bool $canSecrets): array
     {
         self::ensureSchema($db);

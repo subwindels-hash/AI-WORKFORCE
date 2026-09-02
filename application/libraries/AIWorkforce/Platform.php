@@ -49,39 +49,16 @@ class Platform
     public \AIWorkforce\LangLearn\TeacherCoach $langcoach;
     public \AIWorkforce\LangLearn\Translator $translator;
 
+    /** True when AI_WORKFORCE_DISABLE_REAL_PROVIDERS=1 forces the simulated feed. */
+    private bool $disableRealProviders = false;
+
     public function __construct(\AIWorkforce_model $model, bool $disableRealProviders = false)
     {
         $this->model = $model;
 
         $this->providers = new ProviderManager();
-        if (!$disableRealProviders) {
-            if (ApiProviders::enabled('crypto_market', true)) {
-                $crypto = ApiProviders::resolve('crypto_market');
-                $cryptoBase = is_array($crypto) ? trim((string) ($crypto['base_url'] ?? '')) : '';
-                $this->providers->register(new BinanceProvider($cryptoBase !== '' ? $cryptoBase : null));
-            }
-            if (ApiProviders::enabled('forex_market', true)) {
-                $fx = ApiProviders::resolve('forex_market');
-                $fxBase = is_array($fx) ? trim((string) ($fx['base_url'] ?? '')) : '';
-                $this->providers->register(new FrankfurterProvider($fxBase !== '' ? $fxBase : null));
-            }
-            // These adapters are inert until a licensed feed, explicit
-            // ENABLED flag and symbol allow-list are supplied. Registering
-            // them here makes capability/health state observable without
-            // allowing a missing integration to fabricate data.
-            $this->providers->register(new LicensedAssetMarketDataProvider('stock', 'stock-licensed', 'Licensed stock data', 'AI_WORKFORCE_STOCK_DATA', null, null, null, null, null, null, 12));
-            $this->providers->register(new LicensedAssetMarketDataProvider('etf', 'etf-licensed', 'Licensed ETF data', 'AI_WORKFORCE_ETF_DATA', null, null, null, null, null, null, 13));
-            $this->providers->register(new LicensedAssetMarketDataProvider('futures', 'futures-licensed', 'Licensed futures data', 'AI_WORKFORCE_FUTURES_DATA', null, null, null, null, null, null, 14));
-            $this->providers->register(new LicensedAssetMarketDataProvider('options', 'options-licensed', 'Licensed options data', 'AI_WORKFORCE_OPTIONS_DATA', null, null, null, null, null, null, 15));
-            // Delayed public Yahoo chart for allow-listed stocks/ETFs/futures.
-            // Disabled with AI_WORKFORCE_YAHOO_CHART_ENABLED=0. Not licensed.
-            if (getenv('AI_WORKFORCE_YAHOO_CHART_ENABLED') !== '0') {
-                $this->providers->register(new YahooChartProvider('stock'));
-                $this->providers->register(new YahooChartProvider('etf'));
-                $this->providers->register(new YahooChartProvider('futures'));
-            }
-        }
-        $this->providers->register(new SyntheticProvider()); // ALWAYS last
+        $this->disableRealProviders = $disableRealProviders;
+        $this->registerMarketDataProviders();
         $this->brokers = new BrokerManager();
         $this->brokers->register(new Mt5BridgeConnector());
         $this->brokers->register(new \AIWorkforce\Brokers\Mt4BridgeConnector());
@@ -137,6 +114,90 @@ class Platform
             $model->paper, $this->paper, $this->risk, $this->brokers, $model->audit, $model->state,
             $this->notifications
         );
+    }
+
+    /**
+     * Register every market-data provider this host is allowed to use.
+     *
+     * Order matters: ProviderManager sorts by priority() and the synthetic
+     * provider is ALWAYS registered last as the labelled fallback of last
+     * resort, so a live feed can never be silently replaced by simulation.
+     *
+     * Crypto and forex are gated on the Admin → API store: once an operator
+     * saves a row for that service, only an ENABLED row keeps the real feed
+     * registered (see ApiProviders::serviceEnabled). Call
+     * refreshMarketDataProviders() after changing those flags in-process.
+     */
+    private function registerMarketDataProviders(): void
+    {
+        if (!$this->disableRealProviders) {
+            if (ApiProviders::enabled('crypto_market', true)) {
+                $crypto = ApiProviders::resolve('crypto_market');
+                $cryptoBase = is_array($crypto) ? trim((string) ($crypto['base_url'] ?? '')) : '';
+                $this->providers->register(new BinanceProvider($cryptoBase !== '' ? $cryptoBase : null));
+            }
+            if (ApiProviders::enabled('forex_market', true)) {
+                $fx = ApiProviders::resolve('forex_market');
+                $fxBase = is_array($fx) ? trim((string) ($fx['base_url'] ?? '')) : '';
+                $this->providers->register(new FrankfurterProvider($fxBase !== '' ? $fxBase : null));
+            }
+            // These adapters are inert until a licensed feed, explicit
+            // ENABLED flag and symbol allow-list are supplied. Registering
+            // them here makes capability/health state observable without
+            // allowing a missing integration to fabricate data.
+            $this->providers->register(new LicensedAssetMarketDataProvider('stock', 'stock-licensed', 'Licensed stock data', 'AI_WORKFORCE_STOCK_DATA', null, null, null, null, null, null, 12));
+            $this->providers->register(new LicensedAssetMarketDataProvider('etf', 'etf-licensed', 'Licensed ETF data', 'AI_WORKFORCE_ETF_DATA', null, null, null, null, null, null, 13));
+            $this->providers->register(new LicensedAssetMarketDataProvider('futures', 'futures-licensed', 'Licensed futures data', 'AI_WORKFORCE_FUTURES_DATA', null, null, null, null, null, null, 14));
+            $this->providers->register(new LicensedAssetMarketDataProvider('options', 'options-licensed', 'Licensed options data', 'AI_WORKFORCE_OPTIONS_DATA', null, null, null, null, null, null, 15));
+            // Delayed public Yahoo chart for allow-listed stocks/ETFs/futures.
+            // Disabled with AI_WORKFORCE_YAHOO_CHART_ENABLED=0. Not licensed.
+            if (getenv('AI_WORKFORCE_YAHOO_CHART_ENABLED') !== '0') {
+                $this->providers->register(new YahooChartProvider('stock'));
+                $this->providers->register(new YahooChartProvider('etf'));
+                $this->providers->register(new YahooChartProvider('futures'));
+            }
+        }
+        $this->providers->register(new SyntheticProvider()); // ALWAYS last
+    }
+
+    /**
+     * Re-read the Admin → API store and rebuild the market-data chain in the
+     * current process. This is what makes the chart go LIVE immediately after
+     * an operator connects/enables a provider, without waiting for the next
+     * page load to rebuild the Platform.
+     *
+     * Only the provider registry is rebuilt — brokers, repositories, engines,
+     * risk and the execution supervisor are untouched, so nothing about the
+     * trading governance chain changes. The fallback audit handler is
+     * re-attached because it lives on the registry being replaced.
+     *
+     * @return array{refreshed:bool,realProvidersAllowed:bool,registered:list<string>,syntheticOnly:bool}
+     */
+    public function refreshMarketDataProviders(): array
+    {
+        $model = $this->model;
+        // $this->providers is readonly — rebuild the registry in place instead
+        // of reassigning it. reset() also clears the health/failure caches so a
+        // just-connected provider is probed fresh rather than inheriting a
+        // stale DOWN/DEGRADED verdict.
+        $this->providers->reset();
+        $this->registerMarketDataProviders();
+        $this->providers->setFallbackHandler(function (array $info) use ($model) {
+            $model->audit->emit('PROVIDER_FALLBACK', "{$info['symbol']}: providers [" . implode(', ', $info['failed']) . "] failed — falling back to {$info['used']}", $info);
+        });
+
+        $registered = [];
+        $syntheticOnly = true;
+        foreach ($this->providers->listProviders() as $p) {
+            $registered[] = $p->name();
+            if (!$p->synthetic()) $syntheticOnly = false;
+        }
+        return [
+            'refreshed' => true,
+            'realProvidersAllowed' => !$this->disableRealProviders,
+            'registered' => $registered,
+            'syntheticOnly' => $syntheticOnly,
+        ];
     }
 
     /**

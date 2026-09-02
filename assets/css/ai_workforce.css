@@ -1074,3 +1074,60 @@ pre.raw {
   .auth-reg-head h1 { font-size: 24px; }
   .auth-foot-grid { grid-template-columns: 1fr; gap: 20px; }
 }
+
+/* ------------------------------------------------------------------ *
+ * Live market-data chart (assets/js/market-chart.js)
+ * Streams real bars from /api/market-data/live. Synthetic data is never
+ * animated as live — it keeps the SIMULATION badge and auto-refresh off.
+ * ------------------------------------------------------------------ */
+.livechart { margin-top: 12px; }
+.livechart-bar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 8px 10px; margin-bottom: 8px;
+  background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius-sm);
+}
+.livechart-price { font-size: 15px; font-weight: 700; color: var(--text); }
+.livechart-price.up { color: var(--green); }
+.livechart-price.down { color: var(--red); }
+.livechart-source { font-size: 11px; }
+.livechart-updated { font-size: 10px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.livechart-controls { margin-left: auto; display: flex; gap: 8px; }
+.livechart-canvas { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.livechart-svg { min-width: 760px; width: 100%; display: block; }
+.livechart-notice {
+  font-size: 11px; margin-top: 8px; padding: 8px 10px;
+  border-left: 2px solid var(--line-strong); background: #131c2c66; border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.livechart-notice.livechart-error { border-left-color: var(--red); color: #ffc9ce; background: #fb5d6b12; }
+@media (prefers-reduced-motion: no-preference) {
+  .livechart-price { transition: color .25s ease; }
+}
+@media (max-width: 860px) {
+  .livechart-controls { margin-left: 0; width: 100%; }
+  .livechart-controls .btn { flex: 1; }
+}
+
+/* Symbol / timeframe switcher for the standalone live chart */
+.livechart-controls-row {
+  display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line);
+}
+/* .livechart-fld is a label.fld, so it already gets the standard stacked,
+   uppercase field styling — only the width needs constraining. */
+.livechart-fld { min-width: 132px; }
+.livechart-fld .sel { text-transform: none; letter-spacing: 0; font-weight: 600; }
+.livechart-streamnote { font-size: 10.5px; margin-left: auto; max-width: 340px; }
+
+/* Market-data connection strip (welcome/partials/live_market_panel.php) */
+.livemarket-state {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 12px; padding: 10px 12px;
+  background: var(--panel2); border: 1px solid var(--line); border-radius: var(--radius-sm);
+}
+.livemarket-chip { display: inline-flex; align-items: center; gap: 8px; }
+.livemarket-label { font-size: 12px; font-weight: 600; color: var(--text); }
+.livemarket-hint { font-size: 10.5px; margin-left: auto; max-width: 420px; }
+.livemarket-hint a { color: var(--brand); }
+@media (max-width: 860px) {
+  .livechart-streamnote, .livemarket-hint { margin-left: 0; max-width: none; width: 100%; }
+}
