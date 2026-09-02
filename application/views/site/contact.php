@@ -20,12 +20,13 @@ $formAddress = (string) ($visitor['address'] ?? '');
   <p class="lede">Send a message and a member of the WINDELS AI WORKFORCE team will get back to you — usually within one business day.</p>
 </section>
 
+<figure class="contact-hero">
+  <img src="/assets/images/contact-office.jpg" alt="WINDELS AI WORKFORCE office in Abuja" width="1600" height="900" loading="eager">
+</figure>
+
 <section class="band">
   <div class="contact-grid">
     <div class="contact-side">
-      <figure class="contact-media">
-        <img src="/assets/images/contact-support.jpg" alt="WINDELS AI WORKFORCE support team" loading="lazy" width="800" height="550">
-      </figure>
       <h2>Reach us directly</h2>
       <p class="contact-desc">Questions about the platform, your account or a service? Use the form or any of the contact details.</p>
       <div class="contact-details">

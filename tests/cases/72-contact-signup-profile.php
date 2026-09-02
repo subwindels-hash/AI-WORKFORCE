@@ -56,6 +56,8 @@ test('register form collects phone and address', function () {
 
 test('contact page shows office phone, address, visitor fields and a map', function () {
     $view = file_get_contents(FCPATH . 'application/views/site/contact.php');
+    assert_contains('/assets/images/contact-office.jpg', $view);
+    assert_true(is_file(FCPATH . 'assets/images/contact-office.jpg'), 'contact office image is present');
     assert_contains('name="phone"', $view);
     assert_contains('name="address"', $view);
     assert_contains('openstreetmap.org/export/embed.html', file_get_contents(FCPATH . 'application/controllers/Site.php'));
