@@ -62,7 +62,9 @@ test('contact page shows office phone, address, visitor fields and a map', funct
     assert_contains('name="address"', $view);
     assert_contains('openstreetmap.org/export/embed.html', file_get_contents(FCPATH . 'application/controllers/Site.php'));
     assert_contains('mapSrc', $view);
-    assert_contains('map-frame--side', $view);
+    // Exactly one map on the page: the full-width "Where to find us" section.
+    assert_contains('map-frame', $view);
+    assert_true(substr_count($view, '<iframe') === 1, 'contact page renders exactly one map iframe');
     assert_contains('formPhone', $view);
     assert_contains('formAddress', $view);
     $site = file_get_contents(FCPATH . 'application/controllers/Site.php');

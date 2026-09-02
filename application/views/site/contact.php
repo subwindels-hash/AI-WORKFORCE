@@ -51,19 +51,6 @@ $formAddress = (string) ($visitor['address'] ?? '');
           <span><?= e($contactCity) ?></span>
         </div>
       </div>
-      <?php if ($mapSrc !== ''): ?>
-        <div class="map-frame map-frame--side">
-          <iframe
-            title="Map showing <?= e($contactCity) ?>"
-            src="<?= e($mapSrc) ?>"
-            loading="lazy"
-            referrerpolicy="no-referrer-when-downgrade"
-            allowfullscreen></iframe>
-        </div>
-        <p class="map-actions map-actions--side">
-          <a class="btn ghost" href="<?= e($mapLink) ?>" target="_blank" rel="noopener">View larger map</a>
-        </p>
-      <?php endif; ?>
     </div>
 
     <div class="contact-main">
