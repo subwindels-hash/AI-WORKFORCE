@@ -12,7 +12,6 @@ $question = (string) ($u['security_question'] ?? '');
 $answer = (string) ($u['security_answer'] ?? '');
 $impersonating = !empty($impersonating);
 $questions = $securityQuestions ?? [];
-$questionIsCustom = $question !== '' && !in_array($question, $questions, true);
 $displayName = (string) ($u['display_name'] ?? $username ?: 'Platform user');
 $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayName), 0, 1) ?: 'W');
 ?>
@@ -213,13 +212,8 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
               <?php foreach ($questions as $q): ?>
                 <option value="<?= e($q) ?>" <?= $question === $q ? 'selected' : '' ?>><?= e($q) ?></option>
               <?php endforeach; ?>
-              <option value="__custom__" <?= $questionIsCustom ? 'selected' : '' ?>>Write your own question</option>
             </select>
           </span>
-        </label>
-        <label class="auth-field" id="rec-question-custom-wrap" <?= $questionIsCustom ? '' : 'hidden' ?>>
-          <span>Your security question</span>
-          <span class="auth-control"><input name="security_question_custom" id="rec-question-custom" maxlength="255" minlength="8" value="<?= $questionIsCustom ? e($question) : '' ?>"></span>
         </label>
         <label class="auth-field">
           <span>Security answer</span>
@@ -317,17 +311,6 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
       errEl.hidden = true;
     });
   }
-  var recQ = document.getElementById('rec-question');
-  var recWrap = document.getElementById('rec-question-custom-wrap');
-  var recCustom = document.getElementById('rec-question-custom');
-  function syncRecQ() {
-    if (!recQ || !recWrap) return;
-    var custom = recQ.value === '__custom__';
-    recWrap.hidden = !custom;
-    if (recCustom) recCustom.required = custom;
-  }
-  if (recQ) recQ.addEventListener('change', syncRecQ);
-  syncRecQ();
   var recForm = document.getElementById('change-recovery-form');
   if (recForm) {
     var recErr = document.getElementById('recovery-inline-error');
@@ -338,7 +321,6 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
       var ok = true, msg = '';
       if (!cur.value) { msg = 'Enter your current password.'; ok = false; }
       else if (!q.value) { msg = 'Choose a security question.'; ok = false; }
-      else if (q.value === '__custom__' && (recCustom.value || '').trim().length < 8) { msg = 'Write a security question of at least 8 characters.'; ok = false; }
       else if ((ans.value || '').trim().length < 2) { msg = 'Enter an answer of at least 2 characters.'; ok = false; }
       if (!ok) { e.preventDefault(); recErr.hidden = false; recErr.textContent = msg; return; }
       recErr.hidden = true;

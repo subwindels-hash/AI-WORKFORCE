@@ -71,7 +71,6 @@ class Auth extends MY_Controller
         }
         $recovery = \AIWorkforce\IdentitySchema::fromPostedQuestion(
             (string) $this->input->post('security_question'),
-            (string) $this->input->post('security_question_custom'),
             (string) $this->input->post('security_answer')
         );
         if (!$recovery) {
@@ -360,7 +359,6 @@ class Auth extends MY_Controller
         }
         $recovery = \AIWorkforce\IdentitySchema::fromPostedQuestion(
             (string) $this->input->post('security_question'),
-            (string) $this->input->post('security_question_custom'),
             (string) $this->input->post('security_answer')
         );
         if (!$recovery) {

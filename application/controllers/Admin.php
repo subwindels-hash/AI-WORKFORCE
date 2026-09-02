@@ -100,7 +100,6 @@ class Admin extends App_Controller
         if ($questionPosted !== '') {
             $recovery = \AIWorkforce\IdentitySchema::fromPostedQuestion(
                 (string) $this->input->post('security_question'),
-                (string) $this->input->post('security_question_custom'),
                 (string) $this->input->post('security_answer')
             );
             if (!$recovery) {
