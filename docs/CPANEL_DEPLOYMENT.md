@@ -171,6 +171,13 @@ Password: V4k7!WjtDvG9RQgg9CqD
 
 Log in immediately and change/restrict this account before allowing public access. For a private migration, retain the existing user rows and credentials by importing a database export from the working installation instead.
 
+**If the import failed or was partial** (the `users` table is empty or the
+administrator row is missing), opening `/admin/login` shows a one-time
+"Create the platform administrator" setup form. Complete it in the browser to
+create the first administrator — no terminal, CLI or re-import required. The
+form disappears automatically as soon as an administrator exists; after that,
+administrators are created and managed from the Admin Portal.
+
 ## Release packaging (maintainers only)
 
 This is **not** a cPanel deployment step. When changing a file that belongs in

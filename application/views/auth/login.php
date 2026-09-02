@@ -63,6 +63,13 @@ $this->load->view('auth/layout/header', ['title' => ($admin ?? false) ? 'Adminis
         <button class="btn primary auth-submit" type="submit" id="login-submit"><?= $admin ? 'Enter' : 'Sign In' ?></button>
       </form>
 
+      <?php if (!empty($demoHint)): ?>
+      <div class="notice ok auth-notice" role="note" style="margin-top:14px">
+        <b>Offline demo runtime</b> — demo operator:<br>
+        <?= e((string) $demoHint['email']) ?> &nbsp;·&nbsp; <?= e((string) $demoHint['password']) ?>
+      </div>
+      <?php endif; ?>
+
       <div class="auth-foot">
         Don't have an account? <a href="/register"><b>Create an account</b></a>
       </div>

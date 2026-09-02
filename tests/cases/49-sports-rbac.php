@@ -33,6 +33,7 @@ function fx_identity_for(array $permissions): Identity
         public function assignRole(int $u, int $r): void {}
         public function permissionsForUser(int $u): array { return $this->p; }
         public function recordAuthEvent(int $u, string $t, array $d = []): void {}
+        public function superAdminExists(): ?bool { return false; }
     };
     return new Identity($repo);
 }
