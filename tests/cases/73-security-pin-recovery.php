@@ -1,8 +1,8 @@
 <?php
 /**
- * 4-digit Security PIN is assigned automatically at signup. The security
- * question is collected on the form. Super Admin can read both from the
- * user profile; other roles cannot.
+ * 4-digit Security PIN is assigned automatically at signup and cannot be
+ * changed by the user. The security question is collected on the form.
+ * Super Admin can read both from the user profile; other roles cannot.
  */
 
 test('identity schema ensure exposes recovery columns', function () {
@@ -134,13 +134,17 @@ test('register, account and admin profile collect or reveal recovery fields', fu
     assert_contains('assigned automatically', $register);
     $account = file_get_contents(FCPATH . 'application/views/auth/account.php');
     assert_contains('action="/account/recovery"', $account);
-    assert_contains('name="security_pin"', $account);
+    assert_false(str_contains($account, 'name="security_pin"'), 'account does not let the user change the PIN');
+    assert_false(str_contains($account, 'id="rec-pin"'));
+    assert_contains('cannot be changed', $account);
     $routes = file_get_contents(FCPATH . 'application/config/routes.php');
     assert_contains("\$route['account/recovery'] = 'auth/update_recovery';", $routes);
     $auth = file_get_contents(FCPATH . 'application/controllers/Auth.php');
     assert_contains('public function update_recovery()', $auth);
     assert_contains('fromPostedQuestion', $auth);
+    assert_contains('Security PIN changed unexpectedly', $auth);
     assert_false(str_contains($auth, "'security_pin' => \$recovery['security_pin']"), 'register does not take a posted PIN');
+    assert_false(str_contains($auth, 'fromPostedRecovery'), 'account recovery no longer posts a PIN');
     $model = file_get_contents(FCPATH . 'application/models/AIWorkforce_model.php');
     assert_contains('generatePin()', $model);
     $create = file_get_contents(FCPATH . 'application/views/admin/users/create.php');
@@ -151,6 +155,7 @@ test('register, account and admin profile collect or reveal recovery fields', fu
     $show = file_get_contents(FCPATH . 'application/views/admin/users/show.php');
     assert_contains('id="identity-recovery"', $show);
     assert_contains('4-digit Security PIN', $show);
+    assert_contains('cannot be changed by the user', $show);
     assert_contains('6-digit Identification Code', $show);
     assert_contains('Security question', $show);
     $index = file_get_contents(FCPATH . 'application/views/admin/users/index.php');

@@ -343,7 +343,7 @@ class Auth extends MY_Controller
         redirect('/account');
     }
 
-    /** Dashboard → My Account → Security: set or change PIN and security question. */
+    /** Dashboard → My Account → Security: change security question. PIN is assigned automatically and cannot be changed. */
     public function update_recovery()
     {
         $user = $this->requireLogin();
@@ -358,26 +358,29 @@ class Auth extends MY_Controller
             $this->flash('error', 'Your current password is not correct.');
             redirect('/account#security'); return;
         }
-        $recovery = \AIWorkforce\IdentitySchema::fromPostedRecovery(
-            (string) $this->input->post('security_pin'),
+        $recovery = \AIWorkforce\IdentitySchema::fromPostedQuestion(
             (string) $this->input->post('security_question'),
             (string) $this->input->post('security_question_custom'),
             (string) $this->input->post('security_answer')
         );
         if (!$recovery) {
-            $this->flash('error', 'Choose a 4-digit Security PIN, a security question, and an answer of at least 2 characters.');
+            $this->flash('error', 'Choose a security question and an answer of at least 2 characters.');
             redirect('/account#security'); return;
         }
         try {
             \AIWorkforce\IdentitySchema::ensure($this->db);
+            $originalPin = (string) ($stored['security_pin'] ?? '');
             $this->AIWorkforce_model->identity->updateUser((int) $user['id'], $recovery);
             $fresh = $this->AIWorkforce_model->identity->findUserById((int) $user['id']);
-            if (!$fresh || (string) ($fresh['security_pin'] ?? '') !== $recovery['security_pin']) {
-                log_message('error', 'update_recovery: persisted PIN mismatch for user ' . (int) $user['id']);
+            if (!$fresh || (string) ($fresh['security_question'] ?? '') !== $recovery['security_question']) {
+                log_message('error', 'update_recovery: persisted question mismatch for user ' . (int) $user['id']);
                 $this->flash('error', 'Unable to save your changes. Please try again.');
                 redirect('/account#security'); return;
             }
-            $this->AIWorkforce_model->audit->emit('USER_UPDATED', 'User changed their security PIN and question', ['userId' => (int) $user['id']], (string) $user['id']);
+            if ($originalPin !== '' && (string) ($fresh['security_pin'] ?? '') !== $originalPin) {
+                log_message('error', 'update_recovery: Security PIN changed unexpectedly for user ' . (int) $user['id']);
+            }
+            $this->AIWorkforce_model->audit->emit('USER_UPDATED', 'User changed their security question', ['userId' => (int) $user['id']], (string) $user['id']);
             $this->reestablishIdentity((int) $user['id']);
             $this->flash('notice', '✓ Changes saved successfully');
         } catch (Throwable $e) {

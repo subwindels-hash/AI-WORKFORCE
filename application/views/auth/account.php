@@ -20,7 +20,7 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
   <div>
     <p class="eyebrow">Account</p>
     <h2>My Account</h2>
-    <p>Manage your profile image, username, email, phone, address, password, Security PIN and account details.</p>
+    <p>Manage your profile image, username, email, phone, address, password and account details. Your Security PIN is assigned automatically and cannot be changed.</p>
   </div>
   <div class="page-actions">
     <form method="post" action="/logout">
@@ -190,9 +190,9 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
       <?php if (!$impersonating): ?>
       <hr style="border:0;border-top:1px solid var(--line, #e2e8f0);margin:22px 0">
       <h4 style="margin:0 0 6px">Security PIN and question</h4>
-      <p class="dim" style="font-size:12px;margin:0 0 10px">Your 4-digit PIN is assigned automatically at signup. Super Admin can read it from the dashboard. Confirm your password to change the PIN or question.</p>
+      <p class="dim" style="font-size:12px;margin:0 0 10px">Your 4-digit PIN is assigned automatically and cannot be changed. Super Admin can read it from the dashboard. Confirm your password to change the security question.</p>
       <table class="tbl" style="margin-bottom:14px">
-        <tr><td class="dim">Current PIN</td><td class="mono"><?= $pin !== '' ? e($pin) : '<span class="dim">Not set</span>' ?></td></tr>
+        <tr><td class="dim">Current PIN</td><td class="mono"><?= $pin !== '' ? e($pin) : '<span class="dim">Not set</span>' ?> <span class="dim" style="font-size:11px">permanent — cannot be changed</span></td></tr>
         <tr><td class="dim">Security question</td><td><?= $question !== '' ? e($question) : '<span class="dim">Not set</span>' ?></td></tr>
         <tr><td class="dim">Security answer</td><td><?= $answer !== '' ? e($answer) : '<span class="dim">Not set</span>' ?></td></tr>
       </table>
@@ -203,13 +203,6 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
           <span class="auth-control has-toggle">
             <input type="password" name="current_password" id="rec-current" required autocomplete="current-password" placeholder="********">
             <button type="button" class="pw-toggle" data-toggle="rec-current" aria-label="Show password"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/></svg></button>
-          </span>
-        </label>
-        <label class="auth-field">
-          <span>New 4-digit Security PIN</span>
-          <span class="auth-control has-toggle">
-            <input type="password" name="security_pin" id="rec-pin" required maxlength="4" minlength="4" inputmode="numeric" pattern="[0-9]{4}" autocomplete="off" placeholder="••••">
-            <button type="button" class="pw-toggle" data-toggle="rec-pin" aria-label="Show PIN"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/></svg></button>
           </span>
         </label>
         <label class="auth-field">
@@ -233,7 +226,7 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
           <span class="auth-control"><input name="security_answer" id="rec-answer" required maxlength="120" minlength="2" autocomplete="off" value="<?= e($answer) ?>"></span>
         </label>
         <div id="recovery-inline-error" class="notice err" role="alert" hidden></div>
-        <div><button class="btn primary" type="submit">Save PIN and question</button></div>
+        <div><button class="btn primary" type="submit">Save security question</button></div>
       </form>
       <?php endif; ?>
     </div>
@@ -250,7 +243,7 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
         <tr><td class="dim">Phone</td><td><?= $phone !== '' ? e($phone) : 'Not set' ?></td></tr>
         <tr><td class="dim">Address</td><td><?= $address !== '' ? e($address) : 'Not set' ?></td></tr>
         <?php if (!$impersonating): ?>
-        <tr><td class="dim">Security PIN</td><td class="mono"><?= $pin !== '' ? e($pin) : 'Not set' ?></td></tr>
+        <tr><td class="dim">Security PIN</td><td class="mono"><?= $pin !== '' ? e($pin) : 'Not set' ?> <span class="dim" style="font-size:11px">cannot be changed</span></td></tr>
         <tr><td class="dim">Security question</td><td><?= $question !== '' ? e($question) : 'Not set' ?></td></tr>
         <?php endif; ?>
         <tr><td class="dim">Account created</td><td><?= e(substr((string) ($u['created_at'] ?? ''), 0, 16)) ?></td></tr>
@@ -303,10 +296,10 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
   document.querySelectorAll('.pw-toggle').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var input = document.getElementById(btn.getAttribute('data-toggle'));
+      if (!input) return;
       var show = input.type === 'password';
       input.type = show ? 'text' : 'password';
-      var noun = (input.id === 'rec-pin') ? 'PIN' : 'password';
-      btn.setAttribute('aria-label', show ? 'Hide ' + noun : 'Show ' + noun);
+      btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
     });
   });
   var form = document.getElementById('change-password-form');
@@ -340,12 +333,10 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
     var recErr = document.getElementById('recovery-inline-error');
     recForm.addEventListener('submit', function (e) {
       var cur = document.getElementById('rec-current');
-      var pin = document.getElementById('rec-pin');
       var q = document.getElementById('rec-question');
       var ans = document.getElementById('rec-answer');
       var ok = true, msg = '';
       if (!cur.value) { msg = 'Enter your current password.'; ok = false; }
-      else if (!/^\d{4}$/.test((pin.value || '').replace(/\D/g, ''))) { msg = 'Enter a 4-digit Security PIN.'; ok = false; }
       else if (!q.value) { msg = 'Choose a security question.'; ok = false; }
       else if (q.value === '__custom__' && (recCustom.value || '').trim().length < 8) { msg = 'Write a security question of at least 8 characters.'; ok = false; }
       else if ((ans.value || '').trim().length < 2) { msg = 'Enter an answer of at least 2 characters.'; ok = false; }
@@ -355,3 +346,4 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
   }
 })();
 </script>
+

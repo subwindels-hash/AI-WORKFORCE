@@ -55,7 +55,7 @@ $initial = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', (string) ($m
     <?php if (!empty($isSuperAdmin)): ?>
       <div class="recovery-box" id="identity-recovery" style="margin-top:18px">
         <h4 style="margin:0 0 8px">Identity &amp; recovery</h4>
-        <p class="dim" style="font-size:12px;margin:0 0 10px">Visible only to Super Admin. The account password is never displayed.</p>
+        <p class="dim" style="font-size:12px;margin:0 0 10px">Visible only to Super Admin. The PIN is assigned automatically and cannot be changed by the user. The account password is never displayed.</p>
         <table class="tbl">
           <tbody>
             <tr>
