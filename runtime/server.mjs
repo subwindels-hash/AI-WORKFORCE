@@ -47,12 +47,13 @@ async function createPhp() {
  */
 async function bootstrapDemoOperator() {
   const php = await createPhp();
+  const root = APP_ROOT.replaceAll("'", "\\'");
   try {
     await php.run({
       code: `<?php
-chdir('/home/user/Africa-Mobility');
+chdir('${root}');
 putenv('AI_WORKFORCE_DB_DRIVER=pdo_sqlite');
-putenv('AI_WORKFORCE_SQLITE_PATH=/home/user/Africa-Mobility/application/data/ai_workforce.sqlite');
+putenv('AI_WORKFORCE_SQLITE_PATH=${root}/application/data/ai_workforce.sqlite');
 putenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_EMAIL=demo-operator@aiworkforce.local');
 putenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_PASSWORD=demo-only-long-password-123456');
 putenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_NAME=Demo Operator (dev bridge)');
@@ -62,7 +63,7 @@ define('STDERR', fopen('php://stderr', 'w'));
 $_SERVER['argv'] = ['index.php', 'tools', 'bootstrap_admin'];
 $_SERVER['argc'] = 3;
 $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
-require '/home/user/Africa-Mobility/index.php';
+require '${root}/index.php';
 `,
     });
   } catch (e) {
