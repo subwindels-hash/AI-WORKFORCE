@@ -32,6 +32,7 @@ class AIWorkforce_model extends CI_Model
         parent::__construct();
         $this->load->database();
         $db = $this->db;
+        \AIWorkforce\SchemaInstaller::ensure($db);
         \AIWorkforce\IdentitySchema::ensure($db);
 
         $this->strategies = new class($db) implements AIWorkforce\Persistence\StrategyRepository {

@@ -172,6 +172,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE TABLE IF NOT EXISTS leads (
  id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, source TEXT NOT NULL, source_id TEXT NOT NULL,
  name TEXT NOT NULL, category TEXT, address TEXT, city TEXT, region TEXT, country TEXT, phone TEXT, website TEXT,
+ email TEXT, job_title TEXT, company_name TEXT, linkedin_url TEXT, lead_kind TEXT NOT NULL DEFAULT 'business',
  latitude REAL, longitude REAL, status TEXT NOT NULL DEFAULT 'new', owner_id INTEGER, metadata TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
  UNIQUE(organization_id, source, source_id)
 );
@@ -186,6 +187,8 @@ CREATE TABLE IF NOT EXISTS search_history (id TEXT PRIMARY KEY, organization_id 
 CREATE TABLE IF NOT EXISTS duplicate_candidates (id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, lead_a_id TEXT NOT NULL, lead_b_id TEXT NOT NULL, rule_name TEXT NOT NULL, confidence REAL NOT NULL, status TEXT NOT NULL DEFAULT 'open', created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS duplicate_resolutions (id TEXT PRIMARY KEY, candidate_id TEXT NOT NULL, organization_id TEXT NOT NULL, resolver_id INTEGER NOT NULL, action TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS export_history (id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, user_id INTEGER NOT NULL, format TEXT NOT NULL, filters TEXT NOT NULL, lead_count INTEGER NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS lead_outreach (id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, lead_id TEXT NOT NULL, actor_id INTEGER, channel TEXT NOT NULL, subject TEXT, body TEXT NOT NULL, status TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_outreach_lead ON lead_outreach(organization_id, lead_id, created_at);
 
 -- Lead Discovery tenancy: a user may belong to several workspaces; all lead records use one selected membership.
 CREATE TABLE IF NOT EXISTS lead_organizations (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL);
