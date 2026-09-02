@@ -19,6 +19,22 @@ class Auth extends MY_Controller
             redirect($this->isAdmin($user) ? '/admin' : '/access-denied');
             return;
         }
+        // First-run setup: when the database has no administrator at all
+        // (e.g. a cPanel import that lost the seeded admin row), offer the
+        // one-time browser setup form instead of a login that can never succeed.
+        $exists = $this->AIWorkforce_model->identity->superAdminExists();
+        if ($exists === false) {
+            $this->load->view('auth/admin_setup', [
+                'title' => 'Create the platform administrator',
+                'error' => $this->consumeFlash('error'),
+                'notice' => $this->consumeFlash('notice'),
+                'csrfToken' => $this->ensureVisitorCsrf(),
+            ]);
+            return;
+        }
+        if ($exists === null) {
+            $this->flash('error', 'The administrator database could not be verified. Import database/production.sql in phpMyAdmin and check the VP_DB_* values in .env.');
+        }
         $this->renderAuth(true);
     }
 
@@ -171,6 +187,7 @@ class Auth extends MY_Controller
     public function login()
     {
         $admin = $this->input->post('admin') === '1';
+        if ($admin && $this->input->post('setup') === '1') { $this->handleFirstRunSetup(); return; }
         if (!$this->validAuthCsrf()) { $this->flash('error', 'Your session expired. Please try again.'); $this->redirectLogin($admin); return; }
         // Single sign-in identifier — username, email address OR six-digit User ID.
         $identifier = trim((string) $this->input->post('identifier'));
@@ -200,7 +217,11 @@ class Auth extends MY_Controller
                     'adminForm' => $admin,
                 ], 'lockout:' . md5(strtolower($identifier)));
             }
-            $this->flash('error', $admin ? 'Administrator access was not granted.' : 'Invalid username, email or User ID, or password.');
+            if ($admin && $this->AIWorkforce_model->identity->superAdminExists() === false) {
+                $this->flash('error', 'No administrator account exists in the database yet. Open the administrator login page — it now offers a one-time setup form to create the first administrator (no terminal required).');
+            } else {
+                $this->flash('error', $admin ? 'Administrator access was not granted.' : 'Invalid username, email or User ID, or password.');
+            }
             $this->redirectLogin($admin); return;
         }
         $this->establishSession($user);
@@ -218,6 +239,77 @@ class Auth extends MY_Controller
             redirect($next); return;
         }
         redirect('/dashboard');
+    }
+
+    /**
+     * One-time first-run setup (POST /login/submit with admin=1&setup=1):
+     * create the platform's first super administrator from the browser.
+     * Shown only while NO administrator exists; fail-closed afterwards.
+     */
+    private function handleFirstRunSetup(): void
+    {
+        if (!$this->validAuthCsrf()) {
+            $this->flash('error', 'Your session expired. Please try again.');
+            redirect('/admin/login');
+            return;
+        }
+        $exists = $this->AIWorkforce_model->identity->superAdminExists();
+        if ($exists === true) {
+            $this->flash('notice', 'An administrator already exists — sign in below.');
+            redirect('/admin/login');
+            return;
+        }
+        $name = trim((string) $this->input->post('display_name'));
+        $email = strtolower(trim((string) $this->input->post('email')));
+        $password = (string) $this->input->post('password');
+        $confirm = (string) $this->input->post('password_confirm');
+        if ($name === '') $name = 'Platform Administrator';
+        if ($exists === null) {
+            $this->flash('error', 'The database could not be verified. Import database/production.sql in phpMyAdmin and check the VP_DB_* values in .env, then try again.');
+            redirect('/admin/login');
+            return;
+        }
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $this->flash('error', 'Enter a valid email address for the administrator account.');
+            redirect('/admin/login');
+            return;
+        }
+        if (strlen($password) < 12 || $password !== $confirm) {
+            $this->flash('error', 'Use a password of at least 12 characters and confirm it exactly.');
+            redirect('/admin/login');
+            return;
+        }
+        if ($this->AIWorkforce_model->identity->emailTaken($email)) {
+            $this->flash('error', 'An account with that email already exists. Sign in instead.');
+            redirect('/login');
+            return;
+        }
+        try {
+            \AIWorkforce\IdentitySchema::ensure($this->db);
+            $this->seedAccessControls();
+            $user = $this->platform->identity->createFirstSuperAdmin($email, $password, $name);
+            $this->AIWorkforce_model->audit->emit('ADMIN_BOOTSTRAPPED', 'First platform administrator created through the one-time web setup', [
+                'userId' => (int) $user['id'],
+                'userUid' => (string) ($user['user_uid'] ?? ''),
+            ], 'web-setup');
+            $this->flash('notice', 'Platform administrator created. Sign in now with your new credentials.');
+        } catch (Throwable $e) {
+            log_message('error', 'first-run admin setup failed: ' . $e->getMessage());
+            $this->flash('error', 'The administrator account could not be created. Check that database/production.sql was imported and the database user has ALL PRIVILEGES (cPanel → MySQL Databases).');
+        }
+        redirect('/admin/login');
+    }
+
+    /** Same RBAC defaults as Tools::seedAccessControls (shared matrix in tools/rbac.php). */
+    private function seedAccessControls(): void
+    {
+        require_once FCPATH . 'tools/rbac.php';
+        $identity = $this->AIWorkforce_model->identity;
+        ai_workforce_seed_rbac(
+            fn(string $code, string $name): int => $identity->ensureRole($code, $name),
+            fn(string $code, string $name): int => $identity->ensurePermission($code, $name),
+            fn(int $roleId, int $permissionId): bool => (bool) $identity->grantRolePermission($roleId, $permissionId)
+        );
     }
 
     public function logout()
@@ -502,12 +594,22 @@ class Auth extends MY_Controller
 
     private function renderAuth(bool $admin): void
     {
+        // Offline dev preview only: the WASM bridge injects the demo operator's
+        // credentials (index.php bridge block) so the preview is always usable.
+        // Production never sets these variables, so the hint never renders there.
+        $demoHint = null;
+        $demoEmail = getenv('AI_WORKFORCE_DEMO_ADMIN_EMAIL');
+        $demoPassword = getenv('AI_WORKFORCE_DEMO_ADMIN_PASSWORD');
+        if (is_string($demoEmail) && $demoEmail !== '' && is_string($demoPassword) && $demoPassword !== '') {
+            $demoHint = ['email' => $demoEmail, 'password' => $demoPassword];
+        }
         $this->load->view('auth/login', [
             'title' => $admin ? 'Administrator sign in' : 'User sign in',
             'admin' => $admin,
             'error' => $this->consumeFlash('error'),
             'notice' => $this->consumeFlash('notice'),
             'csrfToken' => $this->ensureVisitorCsrf(),
+            'demoHint' => $demoHint,
         ]);
     }
 

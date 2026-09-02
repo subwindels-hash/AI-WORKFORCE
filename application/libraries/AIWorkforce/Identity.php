@@ -65,4 +65,39 @@ class Identity
     {
         return $this->can($user, 'admin.access') || $this->can($user, 'system.super_admin');
     }
+
+    /**
+     * One-time first-run setup: create the platform's FIRST super administrator
+     * when no administrator exists yet (the cPanel deployment has no terminal,
+     * so this is the no-CLI way to recover a deployment whose import lost the
+     * seeded admin). Fail-closed: throws RuntimeException when an administrator
+     * already exists or the database cannot be queried.
+     *
+     * @return array the created identity (secrets stripped, permissions loaded)
+     */
+    public function createFirstSuperAdmin(string $email, string $password, string $displayName): array
+    {
+        $exists = $this->users->superAdminExists();
+        if ($exists === null) throw new \RuntimeException('ADMIN_SETUP_DATABASE_UNAVAILABLE');
+        if ($exists === true) throw new \RuntimeException('ADMIN_ALREADY_EXISTS');
+        $now = gmdate('c');
+        $user = $this->users->createUser([
+            'email' => strtolower(trim($email)),
+            'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+            'display_name' => $displayName,
+            'active' => 1,
+            'created_at' => $now,
+            'updated_at' => $now,
+            'last_login_at' => null,
+        ]);
+        if (empty($user['id'])) throw new \RuntimeException('ADMIN_SETUP_CREATE_FAILED');
+        $role = $this->users->ensureRole('super_admin', 'Super administrator');
+        // Guarantee the essentials even if role grants are missing from a partial import.
+        foreach (['system.super_admin' => 'Full platform administration', 'admin.access' => 'Access the administrator portal'] as $code => $name) {
+            $this->users->grantRolePermission($role, $this->users->ensurePermission($code, $name));
+        }
+        $this->users->assignRole((int) $user['id'], $role);
+        $user['permissions'] = $this->users->permissionsForUser((int) $user['id']);
+        return IdentitySchema::stripSecrets($user);
+    }
 }

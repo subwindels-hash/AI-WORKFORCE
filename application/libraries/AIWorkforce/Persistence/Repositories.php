@@ -207,6 +207,11 @@ interface IdentityRepository
     /** @return array<int,string> */
     public function permissionsForUser(int $userId): array;
     public function recordAuthEvent(int $userId, string $type, array $detail = []): void;
+    /**
+     * @return bool|null true = at least one account holds the super_admin role;
+     *                   false = none; null = the database could not be queried.
+     */
+    public function superAdminExists(): ?bool;
 }
 
 /** Operator notifications: risk alerts, approval requests, execution outcomes. */

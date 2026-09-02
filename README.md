@@ -103,6 +103,13 @@ The supported production flow is entirely browser-based:
    values, and preserve the existing `VP_ENCRYPTION_KEY` / `VP_AUTH_SECRET`.
 5. Open the domain. No install, seed, migration, Composer, Node, npm, Docker or
    CLI admin-creation command is required.
+6. **First sign-in** — open `https://yourdomain.com/admin/login`:
+   * The SQL import contains the initial administrator — sign in with
+     `admin@example.com` / `V4k7!WjtDvG9RQgg9CqD`, then **immediately change
+     this password** (My Account → Security) before making the site public.
+   * If the page instead shows the one-time **"Create the platform administrator"**
+     form (the import failed or was partial), complete it in the browser — it
+     creates the first administrator. Still no terminal.
 
 The complete cPanel guide is [`docs/CPANEL_DEPLOYMENT.md`](docs/CPANEL_DEPLOYMENT.md).
 The SQL import contains all application tables, indexes, foreign keys, defaults,
@@ -129,6 +136,11 @@ stack. Every honesty rule still applies: synthetic market prices are labeled
 `SIMULATION` everywhere, and the `allowSyntheticPaperData` switch (which the
 demo sets) is a persisted, audited platform-state flag that production leaves
 off — with it off, the Risk Engine vetoes any synthetic-data trade.
+
+The preview bootstraps a clearly-labeled demo operator into the gitignored dev
+database so the admin portal is always usable in the sandbox:
+`admin@windels.com` / `Admin12345678!` (also shown on the preview's admin
+login page). Production deployments never auto-create accounts.
 
 ---
 

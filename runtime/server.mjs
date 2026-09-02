@@ -25,6 +25,10 @@ const HOST = process.env.HOST ?? '0.0.0.0';
 const APP_ROOT = path.resolve(new URL('..', import.meta.url).pathname);
 const PHP_VERSION = process.env.PHP_VERSION ?? '8.2';
 
+/** Demo operator for the offline preview (gitignored sqlite DB only). */
+const DEMO_ADMIN_EMAIL = 'admin@windels.com';
+const DEMO_ADMIN_PASSWORD = 'Admin12345678!';
+
 const allocator = new ProcessIdAllocator();
 let warming = null;
 
@@ -54,8 +58,8 @@ async function bootstrapDemoOperator() {
 chdir('${root}');
 putenv('AI_WORKFORCE_DB_DRIVER=pdo_sqlite');
 putenv('AI_WORKFORCE_SQLITE_PATH=${root}/application/data/ai_workforce.sqlite');
-putenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_EMAIL=admin@windels.com');
-putenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_PASSWORD=Admin12345678!');
+putenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_EMAIL=${DEMO_ADMIN_EMAIL}');
+putenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_PASSWORD=${DEMO_ADMIN_PASSWORD}');
 putenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_NAME=Platform Administrator');
 define('STDIN', fopen('php://stdin', 'r'));
 define('STDOUT', fopen('php://stdout', 'w'));
@@ -131,6 +135,8 @@ const server = http.createServer(async (req, res) => {
         // php-wasm's request handler blanks the CGI HTTP_COOKIE value, so the
         // dev bridge carries the raw Cookie header here; index.php restores it.
         'x-ai-workforce-cookie': req.headers.cookie ?? '',
+        // The preview's login page displays the demo operator's credentials.
+        'x-ai-workforce-demo-admin': JSON.stringify({ email: DEMO_ADMIN_EMAIL, password: DEMO_ADMIN_PASSWORD }),
       },
       body: body.length ? body : undefined,
     });

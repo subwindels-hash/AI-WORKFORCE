@@ -276,7 +276,8 @@ check('Administrator account exists in the database', function () {
         $hint = $seeded > 0
             ? 'admin@example.com exists but has no admin role — re-import database/production.sql so the roles, role_permissions and user_roles rows are present.'
             : "Import database/production.sql into '{$name}' (it creates the documented initial administrator), or have an existing administrator grant your account an admin role.";
-        throw new \RuntimeException("{$users} user(s) found but NONE with admin permission — this is why login says \"Administrator access was not granted.\". {$hint}");
+        $setup = ' Alternatively, open /admin/login: when NO administrator exists it shows a one-time setup form that creates the first administrator from the browser (no terminal required).';
+        throw new \RuntimeException("{$users} user(s) found but NONE with admin permission — this is why login says \"Administrator access was not granted.\". {$hint} {$setup}");
     }
     return $admins . ' admin-capable account(s) out of ' . $users . ' user(s)'
         . ($seeded > 0 ? ' — production.sql administrator (admin@example.com) is present' : '');

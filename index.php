@@ -116,6 +116,17 @@ if (!empty($_SERVER['HTTP_X_AI_WORKFORCE_ORIG_URI'])) {
     if (getenv('AI_WORKFORCE_SESSION_DRIVER') === false) {
         putenv('AI_WORKFORCE_SESSION_DRIVER=database');
     }
+    // Dev bridge only: the bridge advertises the demo operator it bootstrapped
+    // so the preview's login page can display those credentials. Strict shape
+    // check — display-only values, production never receives this header.
+    $demoAdmin = json_decode((string) ($_SERVER['HTTP_X_AI_WORKFORCE_DEMO_ADMIN'] ?? ''), true);
+    if (is_array($demoAdmin)
+        && is_string($demoAdmin['email'] ?? null) && filter_var($demoAdmin['email'], FILTER_VALIDATE_EMAIL)
+        && is_string($demoAdmin['password'] ?? null) && strlen($demoAdmin['password']) >= 8
+    ) {
+        putenv('AI_WORKFORCE_DEMO_ADMIN_EMAIL=' . $demoAdmin['email']);
+        putenv('AI_WORKFORCE_DEMO_ADMIN_PASSWORD=' . $demoAdmin['password']);
+    }
     // SIMULATED MT5 bridge (offline demo only): translate the demo marker
     // file into AI_WORKFORCE_MT5_* env for this request. Never active in production
     // (this whole block only runs behind the dev bridge header), never

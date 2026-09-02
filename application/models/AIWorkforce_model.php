@@ -606,6 +606,16 @@ class AIWorkforce_model extends CI_Model
             public function recordAuthEvent(int $userId, string $type, array $detail = []): void {
                 $this->db->insert('auth_events', ['user_id' => $userId, 'type' => $type, 'detail' => json_encode($detail), 'at' => gmdate('c')]);
             }
+            /**
+             * @return bool|null true = an account with the super_admin role exists;
+             *                   false = no administrator; null = database unavailable.
+             */
+            public function superAdminExists(): ?bool {
+                $q = $this->db->from('user_roles ur')->join('roles r', 'r.id = ur.role_id')
+                    ->where('r.code', 'super_admin')->limit(1)->get();
+                if ($q === false || !is_object($q)) return null;
+                return $q->row_array() !== null;
+            }
             /** Browser admin console read/manage helpers (kept in the model so SQL stays out of controllers). */
             public function listUsers(): array {
                 $rows = $this->db->select('id,email,display_name,username,user_uid,profile_image,active,created_at,updated_at,last_login_at')->order_by('created_at', 'ASC')->get('users')->result_array();

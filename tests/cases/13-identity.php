@@ -28,6 +28,7 @@ function fx_identity(): array {
         public function assignRole(int $userId, int $roleId): void {}
         public function permissionsForUser(int $userId): array { return ['sports.manage']; }
         public function recordAuthEvent(int $userId, string $type, array $detail = []): void { $this->events[] = $type; }
+        public function superAdminExists(): ?bool { return false; }
     };
     return [new Identity($repo), $repo];
 }
