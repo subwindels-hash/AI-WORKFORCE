@@ -255,7 +255,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 
 -- Lead Discovery module (organization-scoped permanent PostgreSQL-compatible design).
-CREATE TABLE IF NOT EXISTS leads (id VARCHAR(36) PRIMARY KEY, organization_id VARCHAR(80) NOT NULL, source VARCHAR(40) NOT NULL, source_id VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, category VARCHAR(255), address TEXT, city VARCHAR(120), region VARCHAR(120), country VARCHAR(120), phone VARCHAR(80), website TEXT, latitude DECIMAL(10,7), longitude DECIMAL(10,7), status VARCHAR(20) NOT NULL DEFAULT 'new', owner_id INT NULL, metadata LONGTEXT NOT NULL, created_at VARCHAR(32) NOT NULL, updated_at VARCHAR(32) NOT NULL, UNIQUE KEY uq_lead_source (organization_id,source,source_id), KEY idx_leads_org_status(organization_id,status), KEY idx_leads_owner(organization_id,owner_id), KEY idx_leads_created(organization_id,created_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS leads (id VARCHAR(36) PRIMARY KEY, organization_id VARCHAR(80) NOT NULL, source VARCHAR(40) NOT NULL, source_id VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, category VARCHAR(255), address TEXT, city VARCHAR(120), region VARCHAR(120), country VARCHAR(120), phone VARCHAR(80), website TEXT, email VARCHAR(255), job_title VARCHAR(255), company_name VARCHAR(255), linkedin_url TEXT, lead_kind VARCHAR(20) NOT NULL DEFAULT 'business', latitude DECIMAL(10,7), longitude DECIMAL(10,7), status VARCHAR(20) NOT NULL DEFAULT 'new', owner_id INT NULL, metadata LONGTEXT NOT NULL, created_at VARCHAR(32) NOT NULL, updated_at VARCHAR(32) NOT NULL, UNIQUE KEY uq_lead_source (organization_id,source,source_id), KEY idx_leads_org_status(organization_id,status), KEY idx_leads_owner(organization_id,owner_id), KEY idx_leads_created(organization_id,created_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS lead_notes (id VARCHAR(36) PRIMARY KEY, lead_id VARCHAR(36) NOT NULL, organization_id VARCHAR(80) NOT NULL, author_id INT NOT NULL, body TEXT NOT NULL, created_at VARCHAR(32) NOT NULL, KEY idx_notes_lead(organization_id,lead_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS lead_activities (id VARCHAR(36) PRIMARY KEY, lead_id VARCHAR(36) NULL, organization_id VARCHAR(80) NOT NULL, actor_id INT NULL, type VARCHAR(50) NOT NULL, detail LONGTEXT NOT NULL, created_at VARCHAR(32) NOT NULL, KEY idx_activity_lead(organization_id,lead_id,created_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS collections (id VARCHAR(36) PRIMARY KEY, organization_id VARCHAR(80) NOT NULL, name VARCHAR(150) NOT NULL, created_at VARCHAR(32) NOT NULL, updated_at VARCHAR(32) NOT NULL, UNIQUE KEY uq_collection(organization_id,name)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -264,6 +264,7 @@ CREATE TABLE IF NOT EXISTS search_history (id VARCHAR(36) PRIMARY KEY, organizat
 CREATE TABLE IF NOT EXISTS duplicate_candidates (id VARCHAR(36) PRIMARY KEY, organization_id VARCHAR(80) NOT NULL, lead_a_id VARCHAR(36) NOT NULL, lead_b_id VARCHAR(36) NOT NULL, rule_name VARCHAR(80) NOT NULL, confidence DECIMAL(4,3) NOT NULL, status VARCHAR(20) NOT NULL DEFAULT 'open', created_at VARCHAR(32) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS duplicate_resolutions (id VARCHAR(36) PRIMARY KEY, candidate_id VARCHAR(36) NOT NULL, organization_id VARCHAR(80) NOT NULL, resolver_id INT NOT NULL, action VARCHAR(30) NOT NULL, created_at VARCHAR(32) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS export_history (id VARCHAR(36) PRIMARY KEY, organization_id VARCHAR(80) NOT NULL, user_id INT NOT NULL, format VARCHAR(10) NOT NULL, filters LONGTEXT NOT NULL, lead_count INT NOT NULL, created_at VARCHAR(32) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS lead_outreach (id VARCHAR(36) PRIMARY KEY, organization_id VARCHAR(80) NOT NULL, lead_id VARCHAR(36) NOT NULL, actor_id INT NULL, channel VARCHAR(20) NOT NULL, subject VARCHAR(200) NULL, body TEXT NOT NULL, status VARCHAR(20) NOT NULL, detail LONGTEXT NOT NULL, created_at VARCHAR(32) NOT NULL, KEY idx_outreach_lead(organization_id,lead_id,created_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS lead_organizations (id VARCHAR(80) PRIMARY KEY, name VARCHAR(160) NOT NULL, created_at VARCHAR(32) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS lead_organization_members (organization_id VARCHAR(80) NOT NULL, user_id INT NOT NULL, role VARCHAR(20) NOT NULL DEFAULT 'member', created_at VARCHAR(32) NOT NULL, PRIMARY KEY(organization_id,user_id), KEY idx_lead_org_members_user(user_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -284,6 +285,8 @@ CREATE TABLE IF NOT EXISTS users (
   username VARCHAR(64) NULL,
   user_uid CHAR(6) NULL,
   profile_image VARCHAR(255) NULL,
+  phone VARCHAR(40) NULL,
+  address VARCHAR(255) NULL,
   INDEX idx_users_active (active),
   UNIQUE KEY uq_users_username (username),
   UNIQUE KEY uq_users_user_uid (user_uid)

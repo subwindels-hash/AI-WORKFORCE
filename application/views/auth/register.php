@@ -55,6 +55,22 @@
         </label>
 
         <label class="auth-field">
+          <span>Phone number</span>
+          <span class="auth-control">
+            <input type="tel" name="phone" id="reg-phone" required maxlength="40" autocomplete="tel" inputmode="tel" placeholder="+234 800 000 0000">
+          </span>
+          <span class="auth-hint">Include the country code. Used on the contact form.</span>
+        </label>
+
+        <label class="auth-field">
+          <span>Address</span>
+          <span class="auth-control">
+            <textarea name="address" id="reg-address" required minlength="5" maxlength="255" rows="2" autocomplete="street-address" placeholder="Street, city, country"></textarea>
+          </span>
+          <span class="auth-hint">Street address carried into the contact page when you are signed in.</span>
+        </label>
+
+        <label class="auth-field">
           <span>Password</span>
           <span class="auth-control has-toggle">
             <input type="password" name="password" id="reg-password" required minlength="12" autocomplete="new-password" placeholder="At least 12 characters">
@@ -118,13 +134,18 @@
     form.addEventListener('submit', function (event) {
       var username = document.getElementById('reg-username');
       var email = document.getElementById('reg-email');
+      var phone = document.getElementById('reg-phone');
+      var address = document.getElementById('reg-address');
       var password = document.getElementById('reg-password');
       var confirm = document.getElementById('reg-confirm');
       var terms = document.getElementById('reg-terms');
       inlineError.hidden = true;
       var ok = true;
+      var phoneDigits = (phone.value || '').replace(/\D/g, '');
       if (!/^[a-z][a-z0-9_]{2,19}$/i.test(username.value.trim())) ok = fail('Username must be 3–20 characters, start with a letter, and use only letters, numbers or underscores.', username);
       else if (!email.value.trim()) ok = fail('Enter your email address.', email);
+      else if (phoneDigits.length < 7 || phoneDigits.length > 15) ok = fail('Enter a valid phone number with country code.', phone);
+      else if ((address.value || '').trim().length < 5) ok = fail('Enter your street address.', address);
       else if (password.value.length < 12) ok = fail('Your password must be at least 12 characters.', password);
       else if (password.value !== confirm.value) ok = fail('The two passwords do not match.', confirm);
       else if (!terms.checked) ok = fail('Please accept the Terms and Privacy Policy.', terms);

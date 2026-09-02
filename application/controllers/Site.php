@@ -17,17 +17,40 @@ class Site extends MY_Controller
     {
         $name = trim((string) $this->input->post('name'));
         $email = strtolower(trim((string) $this->input->post('email')));
+        $phone = \AIWorkforce\IdentitySchema::normalizePhone((string) $this->input->post('phone'));
+        $address = \AIWorkforce\IdentitySchema::normalizeAddress((string) $this->input->post('address'));
         $message = trim((string) $this->input->post('message'));
         if ($name === '' || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($message) < 10) {
             $this->session->set_flashdata('error', 'Enter your name, a valid email, and a message of at least 10 characters.');
             redirect('/contact');
             return;
         }
+        if (!\AIWorkforce\IdentitySchema::validPhone($phone) || !\AIWorkforce\IdentitySchema::validAddress($address)) {
+            $this->session->set_flashdata('error', 'Enter a valid phone number and a street address (at least 5 characters).');
+            redirect('/contact');
+            return;
+        }
+        $actor = 'visitor';
+        if ($signedIn = $this->currentUser()) {
+            $actor = (string) $signedIn['id'];
+            try {
+                \AIWorkforce\IdentitySchema::ensure($this->db);
+                $this->AIWorkforce_model->identity->updateUser((int) $signedIn['id'], ['phone' => $phone, 'address' => $address]);
+                $fresh = $this->AIWorkforce_model->identity->findUserById((int) $signedIn['id']);
+                if ($fresh) {
+                    $fresh['permissions'] = $signedIn['permissions'] ?? $this->AIWorkforce_model->identity->permissionsForUser((int) $signedIn['id']);
+                    unset($fresh['password_hash']);
+                    $this->session->set_userdata(['identity' => $fresh]);
+                }
+            } catch (Throwable $e) {
+                log_message('error', 'contact_submit profile sync failed: ' . $e->getMessage());
+            }
+        }
         $this->platform->model->audit->emit('CONTACT_INQUIRY', 'Public contact form received from ' . $name, [
-            'name' => $name, 'email' => $email, 'message' => mb_substr($message, 0, 2000),
-        ], 'visitor');
-        $notified = $this->notifyOperator($name, $email, $message);
-        $autoreplied = $this->sendAutoReply($name, $email, $message);
+            'name' => $name, 'email' => $email, 'phone' => $phone, 'address' => $address, 'message' => mb_substr($message, 0, 2000),
+        ], $actor);
+        $notified = $this->notifyOperator($name, $email, $phone, $address, $message);
+        $autoreplied = $this->sendAutoReply($name, $email, $phone, $address, $message);
 
         if ($notified && $autoreplied) {
             $this->session->set_flashdata('notice', 'Thank you. Your message was received and a copy sent to the site operator. A confirmation email is on its way to ' . $email . '.');
@@ -58,8 +81,8 @@ class Site extends MY_Controller
         ];
         return [
             'email' => (string) (getenv('VP_CONTACT_EMAIL') ?: getenv('VP_MAIL_FROM') ?: getenv('MAIL_FROM_ADDRESS') ?: 'noreply@yourdomain.com'),
-            'phone' => (string) (getenv('VP_CONTACT_PHONE') ?: ''),
-            'address' => (string) (getenv('VP_CONTACT_ADDRESS') ?: ''),
+            'phone' => (string) (getenv('VP_CONTACT_PHONE') ?: '+234 800 000 0000'),
+            'address' => (string) (getenv('VP_CONTACT_ADDRESS') ?: 'Suite 10, Example Business Plaza'),
             'city' => (string) (getenv('VP_CONTACT_CITY') ?: 'Abuja, Nigeria'),
             'mapSrc' => 'https://www.openstreetmap.org/export/embed.html?bbox='
                 . implode('%2C', $bbox)
@@ -71,7 +94,7 @@ class Site extends MY_Controller
     }
 
     /** Email the site operator that a contact form was submitted. */
-    private function notifyOperator(string $name, string $email, string $message): bool
+    private function notifyOperator(string $name, string $email, string $phone, string $address, string $message): bool
     {
         if (!\AIWorkforce\Mailer::enabled()) return false;
         $to = (string) (getenv('VP_CONTACT_EMAIL') ?: getenv('VP_CONTACT_TO') ?: getenv('VP_MAIL_FROM') ?: getenv('MAIL_FROM_ADDRESS') ?: '');
@@ -79,15 +102,17 @@ class Site extends MY_Controller
         $html = '<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:auto;color:#0f172a">'
             . '<h2 style="color:#2563eb">New contact message — WINDELS AI WORKFORCE</h2>'
             . '<p><b>From:</b> ' . htmlspecialchars($name) . ' &lt;' . htmlspecialchars($email) . '&gt;</p>'
+            . '<p><b>Phone:</b> ' . htmlspecialchars($phone) . '</p>'
+            . '<p><b>Address:</b> ' . htmlspecialchars($address) . '</p>'
             . '<hr style="border:0;border-top:1px solid #e2e8f0">'
             . '<p style="white-space:pre-wrap">' . htmlspecialchars($message) . '</p>'
             . '</div>';
-        $text = "New contact message — WINDELS AI WORKFORCE\n\nFrom: {$name} <{$email}>\n\n{$message}";
+        $text = "New contact message — WINDELS AI WORKFORCE\n\nFrom: {$name} <{$email}>\nPhone: {$phone}\nAddress: {$address}\n\n{$message}";
         return \AIWorkforce\Mailer::send($this, $to, 'WINDELS AI WORKFORCE contact form', $html, $text, $email, $name)['ok'];
     }
 
     /** Email the sender a confirmation that their message was received. */
-    private function sendAutoReply(string $name, string $email, string $message): bool
+    private function sendAutoReply(string $name, string $email, string $phone, string $address, string $message): bool
     {
         if (!\AIWorkforce\Mailer::enabled()) return false;
         $config = $this->contactConfig();
@@ -96,6 +121,7 @@ class Site extends MY_Controller
             . '<h2 style="color:#2563eb">We received your message</h2>'
             . '<p>Hi ' . htmlspecialchars($name) . ',</p>'
             . '<p>Thank you for contacting ' . htmlspecialchars($site) . '. Your message has been received and a member of the team will reply shortly.</p>'
+            . '<p style="color:#64748b;font-size:13px">Phone: ' . htmlspecialchars($phone) . '<br>Address: ' . htmlspecialchars($address) . '</p>'
             . '<hr style="border:0;border-top:1px solid #e2e8f0">'
             . '<p style="color:#64748b;font-size:13px">Your message:</p>'
             . '<p style="white-space:pre-wrap">' . htmlspecialchars(mb_substr($message, 0, 2000)) . '</p>'
@@ -104,6 +130,7 @@ class Site extends MY_Controller
             . '</div>';
         $text = "We received your message\n\nHi {$name},\n\n"
             . "Thank you for contacting {$site}. Your message has been received and a member of the team will reply shortly.\n\n"
+            . "Phone: {$phone}\nAddress: {$address}\n\n"
             . "Your message:\n{$message}\n\n"
             . "This is an automated confirmation. Replies to this address may not be monitored — please use the contact page or {$config['email']}.";
         return \AIWorkforce\Mailer::send($this, $email, 'We received your message — ' . $site, $html, $text)['ok'];

@@ -8,6 +8,11 @@ $contactCity = (string) ($contact['city'] ?? 'Abuja, Nigeria');
 $mapSrc = (string) ($contact['mapSrc'] ?? '');
 $mapLink = (string) ($contact['mapLink'] ?? '');
 $mailEnabled = !empty($contact['mailEnabled']);
+$visitor = is_array($user ?? null) ? $user : [];
+$formName = (string) ($visitor['display_name'] ?? $visitor['username'] ?? '');
+$formEmail = (string) ($visitor['email'] ?? '');
+$formPhone = (string) ($visitor['phone'] ?? '');
+$formAddress = (string) ($visitor['address'] ?? '');
 ?>
 <section class="page-hero">
   <p class="kicker">Contact</p>
@@ -28,18 +33,18 @@ $mailEnabled = !empty($contact['mailEnabled']);
           <span class="contact-label">Email</span>
           <a href="mailto:<?= e($contactEmail) ?>"><?= e($contactEmail) ?></a>
         </div>
-        <?php if ($contactPhone !== ''): ?>
-          <div class="contact-detail">
-            <span class="contact-label">Phone</span>
+        <div class="contact-detail">
+          <span class="contact-label">Phone</span>
+          <?php if ($contactPhone !== ''): ?>
             <a href="tel:<?= e(preg_replace('/[^0-9+\-() ]/', '', $contactPhone)) ?>"><?= e($contactPhone) ?></a>
-          </div>
-        <?php endif; ?>
-        <?php if ($contactAddress !== ''): ?>
-          <div class="contact-detail">
-            <span class="contact-label">Office</span>
-            <span><?= e($contactAddress) ?></span>
-          </div>
-        <?php endif; ?>
+          <?php else: ?>
+            <span>Not published</span>
+          <?php endif; ?>
+        </div>
+        <div class="contact-detail">
+          <span class="contact-label">Office</span>
+          <span><?= e($contactAddress !== '' ? $contactAddress : $contactCity) ?></span>
+        </div>
         <div class="contact-detail">
           <span class="contact-label">Location</span>
           <span><?= e($contactCity) ?></span>
@@ -51,8 +56,10 @@ $mailEnabled = !empty($contact['mailEnabled']);
       <?php if (!empty($notice)): ?><div class="flash ok"><?= e($notice) ?></div><?php endif; ?>
       <?php if (!empty($error)): ?><div class="flash err"><?= e($error) ?></div><?php endif; ?>
       <form class="contact-form" method="post" action="/contact/submit">
-        <label>Name<input name="name" required maxlength="120"></label>
-        <label>Email<input type="email" name="email" required maxlength="190"></label>
+        <label>Name<input name="name" required maxlength="120" autocomplete="name" value="<?= e($formName) ?>"></label>
+        <label>Email<input type="email" name="email" required maxlength="190" autocomplete="email" value="<?= e($formEmail) ?>"></label>
+        <label>Phone number<input type="tel" name="phone" required maxlength="40" autocomplete="tel" inputmode="tel" placeholder="+234 800 000 0000" value="<?= e($formPhone) ?>"></label>
+        <label>Address<textarea name="address" required minlength="5" maxlength="255" rows="3" autocomplete="street-address" placeholder="Street, city, country"><?= e($formAddress) ?></textarea></label>
         <label>Message<textarea name="message" required minlength="10" rows="8" maxlength="2000"></textarea></label>
         <button class="btn solid" type="submit">Send message</button>
       </form>

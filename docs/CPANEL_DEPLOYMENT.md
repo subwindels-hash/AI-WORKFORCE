@@ -124,9 +124,11 @@ mailbox works end-to-end before relying on it.
 
 ## 7. Verify
 
-Open `https://yourdomain.com/contact` — you should see the team photo, contact
-details, the message form, and a map (OpenStreetMap, no API key required). Send
-a test message and confirm the operator receives it and the sender gets the
+Open `https://yourdomain.com/contact` — you should see the team photo, office
+phone and address, the message form (name, email, phone, address, message),
+and a map (OpenStreetMap, no API key required). Registration collects the same
+phone and address so a signed-in visitor has those fields pre-filled. Send a
+test message and confirm the operator receives it and the sender gets the
 confirmation.
 
 ## 8. Open the website

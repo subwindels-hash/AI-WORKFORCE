@@ -5,6 +5,8 @@ $uid = (string) ($u['user_uid'] ?? '');
 $username = (string) ($u['username'] ?? '');
 $email = (string) ($u['email'] ?? '');
 $avatar = (string) ($u['profile_image'] ?? '');
+$phone = (string) ($u['phone'] ?? '');
+$address = (string) ($u['address'] ?? '');
 $displayName = (string) ($u['display_name'] ?? $username ?: 'Platform user');
 $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayName), 0, 1) ?: 'W');
 ?>
@@ -12,7 +14,7 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
   <div>
     <p class="eyebrow">Account</p>
     <h2>My Account</h2>
-    <p>Manage your profile image, username, email, password and account details.</p>
+    <p>Manage your profile image, username, email, phone, address, password and account details.</p>
   </div>
   <div class="page-actions">
     <form method="post" action="/logout">
@@ -76,6 +78,20 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
         </td>
       </tr>
       <tr>
+        <td class="dim">Phone</td>
+        <td><?= $phone !== '' ? e($phone) : '<span class="dim">Not set</span>' ?></td>
+        <td class="num">
+          <button class="btn small" type="button" data-toggle-panel="edit-contact" aria-expanded="false">Edit</button>
+        </td>
+      </tr>
+      <tr>
+        <td class="dim">Address</td>
+        <td><?= $address !== '' ? e($address) : '<span class="dim">Not set</span>' ?></td>
+        <td class="num">
+          <button class="btn small" type="button" data-toggle-panel="edit-contact" aria-expanded="false">Edit</button>
+        </td>
+      </tr>
+      <tr>
         <td class="dim">User ID</td>
         <td><span class="mono badge b-sky"><?= e($uid) ?></span> <span class="dim" style="font-size:11px">permanent — cannot be changed</span></td>
         <td class="num"></td>
@@ -109,6 +125,23 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
           <span class="auth-hint">Must not already be attached to another account.</span>
         </label>
         <div><button class="btn primary" type="submit">Change email</button></div>
+      </form>
+    </div>
+
+    <div id="edit-contact" class="account-edit" hidden>
+      <h4>Change phone and address</h4>
+      <form method="post" action="/account/contact" class="auth-form" style="margin-top:12px">
+        <input type="hidden" name="csrf_token" value="<?= e($csrf) ?>">
+        <label class="auth-field">
+          <span>Phone number</span>
+          <span class="auth-control"><input type="tel" name="phone" id="new-phone" required maxlength="40" value="<?= e($phone) ?>" placeholder="+234 800 000 0000" autocomplete="tel" inputmode="tel"></span>
+          <span class="auth-hint">Include the country code. This pre-fills the public contact form.</span>
+        </label>
+        <label class="auth-field">
+          <span>Address</span>
+          <span class="auth-control"><textarea name="address" id="new-address" required minlength="5" maxlength="255" rows="3" placeholder="Street, city, country" autocomplete="street-address"><?= e($address) ?></textarea></span>
+        </label>
+        <div><button class="btn primary" type="submit">Save contact details</button></div>
       </form>
     </div>
   </div>
@@ -158,6 +191,8 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
         <tr><td class="dim">User ID</td><td><span class="mono badge b-sky"><?= e($uid) ?></span></td></tr>
         <tr><td class="dim">Username</td><td>@<?= e($username) ?></td></tr>
         <tr><td class="dim">Email</td><td><?= e($email) ?></td></tr>
+        <tr><td class="dim">Phone</td><td><?= $phone !== '' ? e($phone) : 'Not set' ?></td></tr>
+        <tr><td class="dim">Address</td><td><?= $address !== '' ? e($address) : 'Not set' ?></td></tr>
         <tr><td class="dim">Account created</td><td><?= e(substr((string) ($u['created_at'] ?? ''), 0, 16)) ?></td></tr>
         <tr><td class="dim">Last login</td><td><?= e(substr((string) ($u['last_login_at'] ?? 'Not recorded'), 0, 16)) ?></td></tr>
         <tr><td class="dim">Account status</td><td><span class="badge <?= empty($u['active']) ? 'b-red' : 'b-green' ?>"><?= empty($u['active']) ? 'INACTIVE' : 'ACTIVE' ?></span></td></tr>

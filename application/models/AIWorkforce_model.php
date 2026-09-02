@@ -544,7 +544,7 @@ class AIWorkforce_model extends CI_Model
             }
             public function updateUser(int $id, array $patch): void {
                 unset($patch['id'], $patch['user_uid']);
-                $allowed = ['email', 'password_hash', 'display_name', 'active', 'last_login_at', 'username', 'profile_image', 'updated_at'];
+                $allowed = ['email', 'password_hash', 'display_name', 'active', 'last_login_at', 'username', 'profile_image', 'phone', 'address', 'updated_at'];
                 $clean = [];
                 foreach ($allowed as $key) {
                     if (array_key_exists($key, $patch)) $clean[$key] = $patch[$key];

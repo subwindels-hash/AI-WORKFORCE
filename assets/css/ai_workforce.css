@@ -691,6 +691,22 @@ pre.raw {
 }
 .auth-control input::placeholder { color: var(--dim); }
 .auth-control input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+.auth-control textarea {
+  width: 100%;
+  border: 1px solid var(--line2);
+  border-radius: var(--radius-sm);
+  background: #0b1119;
+  color: #fff;
+  padding: 11px 12px;
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+  resize: vertical;
+  min-height: 72px;
+  line-height: 1.45;
+}
+.auth-control textarea::placeholder { color: var(--dim); }
+.auth-control textarea:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
 .auth-control.has-toggle input { padding-right: 44px; }
 .pw-toggle {
   position: absolute;
