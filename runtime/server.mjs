@@ -54,9 +54,9 @@ async function bootstrapDemoOperator() {
 chdir('${root}');
 putenv('AI_WORKFORCE_DB_DRIVER=pdo_sqlite');
 putenv('AI_WORKFORCE_SQLITE_PATH=${root}/application/data/ai_workforce.sqlite');
-putenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_EMAIL=demo-operator@aiworkforce.local');
-putenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_PASSWORD=demo-only-long-password-123456');
-putenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_NAME=Demo Operator (dev bridge)');
+putenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_EMAIL=admin@windels.com');
+putenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_PASSWORD=Admin12345678!');
+putenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_NAME=Platform Administrator');
 define('STDIN', fopen('php://stdin', 'r'));
 define('STDOUT', fopen('php://stdout', 'w'));
 define('STDERR', fopen('php://stderr', 'w'));
