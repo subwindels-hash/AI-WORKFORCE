@@ -539,6 +539,8 @@ class AIWorkforce_model extends CI_Model
                     $user['username'] = $this->generateUniqueUsername((string) ($user['display_name'] ?? ''));
                 }
                 if (empty($user['user_uid'])) $user['user_uid'] = $this->generateUniqueUid();
+                $pin = \AIWorkforce\IdentitySchema::normalizePin((string) ($user['security_pin'] ?? ''));
+                $user['security_pin'] = \AIWorkforce\IdentitySchema::validPin($pin) ? $pin : \AIWorkforce\IdentitySchema::generatePin();
                 $user['profile_image'] = $user['profile_image'] ?? null;
                 $allowed = ['email', 'password_hash', 'display_name', 'active', 'created_at', 'updated_at', 'last_login_at', 'username', 'user_uid', 'profile_image', 'phone', 'address', 'security_pin', 'security_question', 'security_answer'];
                 $row = [];

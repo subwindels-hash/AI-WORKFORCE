@@ -116,6 +116,12 @@ final class IdentitySchema
         return (bool) preg_match('/^\d{4}$/', self::normalizePin($pin));
     }
 
+    /** Random 4-digit PIN assigned at signup (0000–9999, zero-padded). */
+    public static function generatePin(): string
+    {
+        return str_pad((string) random_int(0, 9999), 4, '0', STR_PAD_LEFT);
+    }
+
     public static function normalizeQuestion(string $question): string
     {
         $question = trim(preg_replace('/\s+/', ' ', $question) ?? $question);
@@ -143,23 +149,36 @@ final class IdentitySchema
     }
 
     /**
-     * Build a persisted recovery row from signup / account form fields.
+     * Security question + answer from signup / account (PIN is assigned separately).
+     *
+     * @return array{security_question:string,security_answer:string}|null
+     */
+    public static function fromPostedQuestion(string $question, string $customQuestion, string $answer): ?array
+    {
+        if ($question === '__custom__') $question = $customQuestion;
+        $row = [
+            'security_question' => self::normalizeQuestion($question),
+            'security_answer' => self::normalizeAnswer($answer),
+        ];
+        if (!self::validQuestion($row['security_question']) || !self::validAnswer($row['security_answer'])) {
+            return null;
+        }
+        return $row;
+    }
+
+    /**
+     * Build a persisted recovery row from account form fields.
      * Returns null when any field is missing or invalid.
      *
      * @return array{security_pin:string,security_question:string,security_answer:string}|null
      */
     public static function fromPostedRecovery(string $pin, string $question, string $customQuestion, string $answer): ?array
     {
-        if ($question === '__custom__') $question = $customQuestion;
-        $row = [
-            'security_pin' => self::normalizePin($pin),
-            'security_question' => self::normalizeQuestion($question),
-            'security_answer' => self::normalizeAnswer($answer),
-        ];
-        if (!self::validPin($row['security_pin']) || !self::validQuestion($row['security_question']) || !self::validAnswer($row['security_answer'])) {
-            return null;
-        }
-        return $row;
+        $q = self::fromPostedQuestion($question, $customQuestion, $answer);
+        if (!$q) return null;
+        $pin = self::normalizePin($pin);
+        if (!self::validPin($pin)) return null;
+        return array_merge(['security_pin' => $pin], $q);
     }
 
     /**
@@ -184,7 +203,9 @@ final class IdentitySchema
 
     private static function backfill(object $db): void
     {
-        try { $rows = $db->select('id, email, display_name, username, user_uid')->get('users')->result_array(); }
+        $select = 'id, email, display_name, username, user_uid';
+        if (self::has($db, 'security_pin')) $select .= ', security_pin';
+        try { $rows = $db->select($select)->get('users')->result_array(); }
         catch (\Throwable $e) { return; }
         if (!is_array($rows)) return;
 
@@ -196,6 +217,9 @@ final class IdentitySchema
         }
         foreach ($rows as $r) {
             $patch = [];
+            if (empty($r['security_pin']) || !self::validPin((string) $r['security_pin'])) {
+                $patch['security_pin'] = self::generatePin();
+            }
             if (empty($r['user_uid'])) {
                 do { $uid = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT); }
                 while (isset($takenUid[$uid]));

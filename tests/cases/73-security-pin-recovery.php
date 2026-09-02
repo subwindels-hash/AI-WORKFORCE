@@ -1,7 +1,8 @@
 <?php
 /**
- * 4-digit Security PIN + security question: stored on the user, collected at
- * signup, and readable from the Super Admin user profile only.
+ * 4-digit Security PIN is assigned automatically at signup. The security
+ * question is collected on the form. Super Admin can read both from the
+ * user profile; other roles cannot.
  */
 
 test('identity schema ensure exposes recovery columns', function () {
@@ -29,6 +30,37 @@ test('PIN, question and answer validation', function () {
     assert_not_null($custom);
     assert_equals('What street did you grow up on?', $custom['security_question']);
     assert_null(\AIWorkforce\IdentitySchema::fromPostedRecovery('12', 'What city were you born in?', '', 'Lagos'));
+    $pin = \AIWorkforce\IdentitySchema::generatePin();
+    assert_true(\AIWorkforce\IdentitySchema::validPin($pin), 'generatePin returns a 4-digit PIN');
+    $q = \AIWorkforce\IdentitySchema::fromPostedQuestion('What city were you born in?', '', 'Lagos');
+    assert_not_null($q);
+    assert_false(isset($q['security_pin']), 'signup helper does not take a PIN');
+    assert_equals('What city were you born in?', $q['security_question']);
+    assert_null(\AIWorkforce\IdentitySchema::fromPostedQuestion('short', '', 'Lagos'));
+});
+
+test('createUser assigns a 4-digit PIN when none is provided', function () {
+    $repo = platform()->model->identity;
+    $now = gmdate('c');
+    $user = $repo->createUser([
+        'email' => 'autopin-' . uniqid() . '@example.com',
+        'password_hash' => password_hash('long-password-123456', PASSWORD_DEFAULT),
+        'display_name' => 'Auto Pin',
+        'active' => 1, 'created_at' => $now, 'updated_at' => $now,
+    ]);
+    assert_true((bool) preg_match('/^\d{4}$/', (string) ($user['security_pin'] ?? '')), 'createUser return includes a 4-digit PIN');
+    $fresh = $repo->findUserById((int) $user['id']);
+    assert_equals($user['security_pin'], (string) ($fresh['security_pin'] ?? ''));
+    assert_true(\AIWorkforce\IdentitySchema::validPin((string) $fresh['security_pin']));
+    $invalid = $repo->createUser([
+        'email' => 'badpin-' . uniqid() . '@example.com',
+        'password_hash' => password_hash('long-password-123456', PASSWORD_DEFAULT),
+        'display_name' => 'Bad Pin',
+        'security_pin' => '12',
+        'active' => 1, 'created_at' => $now, 'updated_at' => $now,
+    ]);
+    assert_true(\AIWorkforce\IdentitySchema::validPin((string) ($invalid['security_pin'] ?? '')));
+    assert_false((string) $invalid['security_pin'] === '12');
 });
 
 test('createUser and updateUser persist PIN, question and answer', function () {
@@ -95,10 +127,11 @@ test('authenticate and publicUser strip recovery secrets unless Super Admin asks
 
 test('register, account and admin profile collect or reveal recovery fields', function () {
     $register = file_get_contents(FCPATH . 'application/views/auth/register.php');
-    assert_contains('name="security_pin"', $register);
-    assert_contains('id="reg-pin"', $register);
+    assert_false(str_contains($register, 'name="security_pin"'), 'signup does not ask for a PIN');
+    assert_false(str_contains($register, 'id="reg-pin"'));
     assert_contains('name="security_question"', $register);
     assert_contains('name="security_answer"', $register);
+    assert_contains('assigned automatically', $register);
     $account = file_get_contents(FCPATH . 'application/views/auth/account.php');
     assert_contains('action="/account/recovery"', $account);
     assert_contains('name="security_pin"', $account);
@@ -106,8 +139,14 @@ test('register, account and admin profile collect or reveal recovery fields', fu
     assert_contains("\$route['account/recovery'] = 'auth/update_recovery';", $routes);
     $auth = file_get_contents(FCPATH . 'application/controllers/Auth.php');
     assert_contains('public function update_recovery()', $auth);
-    assert_contains("'security_pin' => \$recovery['security_pin']", $auth);
+    assert_contains('fromPostedQuestion', $auth);
+    assert_false(str_contains($auth, "'security_pin' => \$recovery['security_pin']"), 'register does not take a posted PIN');
+    $model = file_get_contents(FCPATH . 'application/models/AIWorkforce_model.php');
+    assert_contains('generatePin()', $model);
+    $create = file_get_contents(FCPATH . 'application/views/admin/users/create.php');
+    assert_false(str_contains($create, 'name="security_pin"'), 'admin create does not collect a PIN');
     $admin = file_get_contents(FCPATH . 'application/controllers/Admin.php');
+    assert_contains('fromPostedQuestion', $admin);
     assert_contains('findPublicUser((int) $id, $this->isSuperAdmin($actor))', $admin);
     $show = file_get_contents(FCPATH . 'application/views/admin/users/show.php');
     assert_contains('id="identity-recovery"', $show);

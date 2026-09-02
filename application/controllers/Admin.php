@@ -95,18 +95,16 @@ class Admin extends App_Controller
             $this->flash('error', 'That username or email is already in use.');
             redirect('/admin/users/create'); return;
         }
-        $pinPosted = trim((string) $this->input->post('security_pin'));
         $questionPosted = trim((string) $this->input->post('security_question'));
         $recovery = null;
-        if ($pinPosted !== '' || $questionPosted !== '') {
-            $recovery = \AIWorkforce\IdentitySchema::fromPostedRecovery(
-                (string) $this->input->post('security_pin'),
+        if ($questionPosted !== '') {
+            $recovery = \AIWorkforce\IdentitySchema::fromPostedQuestion(
                 (string) $this->input->post('security_question'),
                 (string) $this->input->post('security_question_custom'),
                 (string) $this->input->post('security_answer')
             );
             if (!$recovery) {
-                $this->flash('error', 'Enter a 4-digit Security PIN, a security question, and an answer of at least 2 characters — or leave all three blank.');
+                $this->flash('error', 'Enter a security question and an answer of at least 2 characters — or leave both blank.');
                 redirect('/admin/users/create'); return;
             }
         }
@@ -122,7 +120,7 @@ class Admin extends App_Controller
         $role = $this->AIWorkforce_model->identity->ensureRole($roleCode, ucwords(str_replace('_', ' ', $roleCode)));
         $this->AIWorkforce_model->identity->assignRole((int) $new['id'], $role);
         $this->portal->log($actor, 'USER_CREATED', 'ok', $this->portal->userTarget($new), ['role' => $roleCode], $this->ip());
-        $this->flash('notice', 'User account created. User ID ' . ($new['user_uid'] ?? '') . '. The temporary password is not stored and will not be shown again.');
+        $this->flash('notice', 'User account created. User ID ' . ($new['user_uid'] ?? '') . '. A 4-digit Security PIN was assigned automatically. The temporary password is not stored and will not be shown again.');
         redirect('/admin/users/' . (int) $new['id']);
     }
 

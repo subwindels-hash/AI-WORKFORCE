@@ -190,7 +190,7 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
       <?php if (!$impersonating): ?>
       <hr style="border:0;border-top:1px solid var(--line, #e2e8f0);margin:22px 0">
       <h4 style="margin:0 0 6px">Security PIN and question</h4>
-      <p class="dim" style="font-size:12px;margin:0 0 10px">Your 4-digit PIN and security question can be read by Super Admin from the dashboard. Confirm your password to change them.</p>
+      <p class="dim" style="font-size:12px;margin:0 0 10px">Your 4-digit PIN is assigned automatically at signup. Super Admin can read it from the dashboard. Confirm your password to change the PIN or question.</p>
       <table class="tbl" style="margin-bottom:14px">
         <tr><td class="dim">Current PIN</td><td class="mono"><?= $pin !== '' ? e($pin) : '<span class="dim">Not set</span>' ?></td></tr>
         <tr><td class="dim">Security question</td><td><?= $question !== '' ? e($question) : '<span class="dim">Not set</span>' ?></td></tr>

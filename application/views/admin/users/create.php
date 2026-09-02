@@ -3,7 +3,7 @@
   <div>
     <p class="eyebrow">Directory</p>
     <h2>Create user</h2>
-    <p>A unique six-digit User ID is assigned automatically and never reused. The password is hashed immediately and is not shown again.</p>
+    <p>A unique six-digit User ID and a 4-digit Security PIN are assigned automatically. The password is hashed immediately and is not shown again.</p>
   </div>
   <a class="btn" href="/admin/users">Cancel</a>
 </div>
@@ -14,7 +14,6 @@
       <label>Username<input name="username" required maxlength="20" pattern="[a-z][a-z0-9_]{2,19}" placeholder="jane_doe"></label>
       <label>Email<input type="email" name="email" required maxlength="190" placeholder="person@example.com"></label>
       <label>Temporary password<input type="password" name="password" required minlength="12" autocomplete="new-password"></label>
-      <label>4-digit Security PIN<input name="security_pin" maxlength="4" minlength="4" inputmode="numeric" pattern="[0-9]{4}" placeholder="Optional · 1234" autocomplete="off"></label>
       <label>Security question
         <select name="security_question" id="create-question">
           <option value="">Optional — choose a question</option>

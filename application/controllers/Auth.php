@@ -69,14 +69,13 @@ class Auth extends MY_Controller
             redirect('/register');
             return;
         }
-        $recovery = \AIWorkforce\IdentitySchema::fromPostedRecovery(
-            (string) $this->input->post('security_pin'),
+        $recovery = \AIWorkforce\IdentitySchema::fromPostedQuestion(
             (string) $this->input->post('security_question'),
             (string) $this->input->post('security_question_custom'),
             (string) $this->input->post('security_answer')
         );
         if (!$recovery) {
-            $this->flash('error', 'Choose a 4-digit Security PIN, a security question, and an answer of at least 2 characters.');
+            $this->flash('error', 'Choose a security question and an answer of at least 2 characters.');
             redirect('/register');
             return;
         }
@@ -105,7 +104,6 @@ class Auth extends MY_Controller
                 'email' => $email,
                 'phone' => $phone,
                 'address' => $address,
-                'security_pin' => $recovery['security_pin'],
                 'security_question' => $recovery['security_question'],
                 'security_answer' => $recovery['security_answer'],
                 'password_hash' => password_hash($password, PASSWORD_DEFAULT),
