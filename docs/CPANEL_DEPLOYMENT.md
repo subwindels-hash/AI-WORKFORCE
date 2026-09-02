@@ -166,7 +166,7 @@ The complete production database includes this initial account so CLI bootstrapp
 
 ```text
 Email:    admin@example.com
-Password: ChangeMe!2026
+Password: V4k7!WjtDvG9RQgg9CqD
 ```
 
 Log in immediately and change/restrict this account before allowing public access. For a private migration, retain the existing user rows and credentials by importing a database export from the working installation instead.
