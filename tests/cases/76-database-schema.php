@@ -82,6 +82,43 @@ test('lead discovery SQL includes contact fields and outreach storage', function
     }
 });
 
+test('production language-progress DDL and the cPanel archive use the corrected schema', function () {
+    $source = file_get_contents(FCPATH . 'database/production.sql');
+    assert_equals(1, substr_count($source, 'CREATE TABLE IF NOT EXISTS language_progress'), 'one language_progress table');
+    assert_true((bool) preg_match('/CREATE TABLE IF NOT EXISTS language_progress\\s*\\((.*?)\\) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;/s', $source, $match), 'language_progress DDL');
+    $ddl = $match[0];
+    foreach ([
+        'value_pct          DECIMAL(5,2) NULL',
+        'source             VARCHAR(24) NOT NULL',
+        'updated_at         VARCHAR(32) NOT NULL',
+        'UNIQUE KEY uq_progress (profile_id, skill, source)',
+        'KEY idx_progress_user (user_id)',
+    ] as $expected) {
+        assert_contains($expected, $ddl, 'language_progress: ' . $expected);
+    }
+    foreach ([
+        '-nt|lesson (Phase 2)',
+        'score_pct      DECIMAL(5,2) NULL',
+        'KEY idx_attempts_profile (profile_id, created_at)',
+    ] as $invalid) {
+        assert_false(str_contains($ddl, $invalid), 'language_progress must not contain stale lesson_attempts SQL: ' . $invalid);
+    }
+
+    // ZipArchive is not compiled into every supported PHP runtime (including
+    // some offline test builds), so retain source validation above everywhere
+    // and verify the shipped release artifact whenever ZIP support is present.
+    if (!class_exists('ZipArchive')) return;
+    $zip = new ZipArchive();
+    assert_equals(true, $zip->open(FCPATH . 'application-deployment.zip'), 'open deployment archive');
+    try {
+        $bundled = $zip->getFromName('database/production.sql');
+        assert_true(is_string($bundled), 'deployment archive contains production.sql');
+        assert_equals($source, $bundled, 'deployment archive must contain the current production SQL');
+    } finally {
+        $zip->close();
+    }
+});
+
 test('runtime database has every core table and identity/lead columns', function () {
     $db = platform()->model->db;
     \AIWorkforce\SchemaInstaller::ensure($db);

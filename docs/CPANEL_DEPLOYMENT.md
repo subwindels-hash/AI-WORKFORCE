@@ -146,6 +146,22 @@ Password: ChangeMe!2026
 
 Log in immediately and change/restrict this account before allowing public access. For a private migration, retain the existing user rows and credentials by importing a database export from the working installation instead.
 
+## Release packaging (maintainers only)
+
+This is **not** a cPanel deployment step. When changing a file that belongs in
+this release (especially `database/production.sql`), regenerate and verify the
+tracked archive before publishing it:
+
+```bash
+python3 tools/build_deployment_zip.py
+python3 tools/build_deployment_zip.py --check
+```
+
+The builder includes the PHP/CodeIgniter release files and excludes development
+projects, tests, local SQLite databases, logs, sessions, and uploaded avatars.
+The check confirms the archive is readable and its contents exactly match the
+release source, including the corrected `language_progress` DDL.
+
 ## cPanel-only acceptance checklist
 
 - [ ] Files uploaded and extracted through File Manager
