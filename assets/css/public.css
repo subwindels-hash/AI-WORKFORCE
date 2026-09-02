@@ -316,7 +316,10 @@ img { max-width: 100%; height: auto; display: block; object-fit: cover; object-p
   height: 420px;
   border: 0;
 }
+.map-frame--side { margin: 18px 0 0; max-width: none; }
+.map-frame--side iframe { height: 240px; }
 .map-actions { text-align: center; margin: 18px 0 0; }
+.map-actions--side { text-align: left; margin-top: 12px; }
 .flash { max-width: 560px; padding: 12px 14px; border-radius: 10px; margin-bottom: 16px; }
 .flash.ok { background: #e7f6ea; color: #1b5e20; }
 .flash.err { background: #fdecea; color: #8a1c13; }
