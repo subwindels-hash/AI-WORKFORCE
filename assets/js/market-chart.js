@@ -55,6 +55,23 @@
 
   const MAX_ERRORS = 4;
 
+  const TIMEFRAMES = ['15m', '1h', '4h', '1d'];
+
+  /**
+   * Watchable symbols. Mirrors Welcome::symbols() — these are exactly the
+   * allow-listed symbols the real providers serve (Binance crypto, Frankfurter
+   * ECB forex, Yahoo delayed equities/ETFs/futures). Anything off these lists
+   * can only be served by the labelled simulation, so it is not offered here.
+   */
+  const SYMBOL_GROUPS = [
+    { label: 'Crypto', symbols: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'] },
+    { label: 'Forex & Metals', symbols: ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD'] },
+    { label: 'Stocks (delayed)', symbols: ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'JPM'] },
+    { label: 'ETFs (delayed)', symbols: ['SPY', 'QQQ', 'IWM', 'DIA', 'VTI', 'GLD'] },
+    { label: 'Futures (delayed)', symbols: ['ES=F', 'NQ=F', 'CL=F', 'GC=F'] },
+  ];
+  const SYMBOL_LIST = SYMBOL_GROUPS.reduce((acc, g) => acc.concat(g.symbols), []);
+
   function el(tag, attrs, text) {
     const node = document.createElementNS(SVGNS, tag);
     if (attrs) Object.keys(attrs).forEach((k) => node.setAttribute(k, attrs[k]));
@@ -177,6 +194,72 @@
       m.appendChild(this.bar);
       m.appendChild(this.wrap);
       m.appendChild(this.notice);
+
+      // Opt-in symbol/timeframe switcher. Only the standalone dashboard chart
+      // asks for it (data-controls="1"); the analysis chart leaves it off so it
+      // stays in sync with the run that produced its S/R + setup overlays.
+      if (m.dataset.controls === '1') {
+        this.buildControls(m);
+      }
+    }
+
+    buildControls(m) {
+      const row = document.createElement('div');
+      row.className = 'livechart-controls-row';
+
+      const symbolLabel = document.createElement('label');
+      symbolLabel.className = 'fld livechart-fld';
+      const symbolText = document.createElement('span');
+      symbolText.textContent = 'Symbol';
+      this.symbolSel = document.createElement('select');
+      this.symbolSel.className = 'sel';
+      SYMBOL_GROUPS.forEach((group) => {
+        const og = document.createElement('optgroup');
+        og.label = group.label;
+        group.symbols.forEach((sym) => {
+          const opt = document.createElement('option');
+          opt.value = sym;
+          opt.textContent = sym;
+          if (sym === this.symbol) opt.selected = true;
+          og.appendChild(opt);
+        });
+        this.symbolSel.appendChild(og);
+      });
+      // A symbol outside the allow-list (e.g. deep-linked) must still be selectable.
+      if (!SYMBOL_LIST.includes(this.symbol)) {
+        const opt = document.createElement('option');
+        opt.value = this.symbol;
+        opt.textContent = this.symbol;
+        opt.selected = true;
+        this.symbolSel.insertBefore(opt, this.symbolSel.firstChild);
+      }
+      symbolLabel.appendChild(symbolText);
+      symbolLabel.appendChild(this.symbolSel);
+
+      const tfLabel = document.createElement('label');
+      tfLabel.className = 'fld livechart-fld';
+      const tfText = document.createElement('span');
+      tfText.textContent = 'Timeframe';
+      this.tfSel = document.createElement('select');
+      this.tfSel.className = 'sel';
+      TIMEFRAMES.forEach((tf) => {
+        const opt = document.createElement('option');
+        opt.value = tf;
+        opt.textContent = tf;
+        if (tf === this.timeframe) opt.selected = true;
+        this.tfSel.appendChild(opt);
+      });
+      tfLabel.appendChild(tfText);
+      tfLabel.appendChild(this.tfSel);
+
+      this.streamNote = document.createElement('span');
+      this.streamNote.className = 'dim livechart-streamnote';
+      this.streamNote.textContent = 'Switching re-polls the live feed — it does not re-run the multi-agent analysis.';
+
+      row.appendChild(symbolLabel);
+      row.appendChild(tfLabel);
+      row.appendChild(this.streamNote);
+      m.appendChild(row);
     }
 
     bind() {
@@ -208,10 +291,38 @@
         this.start();
       });
 
+      if (this.symbolSel) {
+        this.symbolSel.addEventListener('change', () => this.switchTo(this.symbolSel.value, this.timeframe));
+      }
+      if (this.tfSel) {
+        this.tfSel.addEventListener('change', () => this.switchTo(this.symbol, this.tfSel.value));
+      }
+
       // Never poll a hidden tab.
       document.addEventListener('visibilitychange', () => {
         if (document.hidden) this.clearTimers();
         else if (this.running) this.arm();
+      });
+    }
+
+    /**
+     * Change symbol and/or timeframe and re-poll immediately. Resets the error
+     * backoff because a different symbol is a different question — a symbol no
+     * provider serves must not be silenced by the previous symbol's failures.
+     */
+    switchTo(symbol, timeframe) {
+      this.symbol = String(symbol || this.symbol).toUpperCase();
+      this.timeframe = String(timeframe || this.timeframe);
+      this.errors = 0;
+      this.lastPayload = null;
+      this.mount.dataset.symbol = this.symbol;
+      this.mount.dataset.timeframe = this.timeframe;
+      // marketClass is inferred server-side from the symbol.
+      this.marketClass = '';
+      this.mount.dataset.marketClass = '';
+      this.setNotice('');
+      this.fetchOnce().then((body) => {
+        if (body) this.armIfAllowed();
       });
     }
 

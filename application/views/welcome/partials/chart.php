@@ -1,14 +1,29 @@
 <?php
 defined('BASEPATH') or exit('No direct script access allowed');
 /**
- * Server-rendered SVG candlestick chart with EMA overlays, S/R lines and
- * setup overlay. No client-side chart library — pure traditional MVC.
- * @var array $candles @var array $run
+ * Server-rendered SVG candlestick chart with EMA overlays, optional S/R lines
+ * and optional setup overlay. No client-side chart library — pure traditional
+ * MVC. Doubles as the no-JS first paint for the live stream mount below.
+ *
+ * Required:
+ *   $candles  array  normalized candle rows (timestamp/open/high/low/close/volume)
+ *   $prov     array  provenance from ProviderManager::getCandleSeries()
+ * Optional (analysis-run overlays; omit for a standalone live chart):
+ *   $run      array  a TradingIntelligenceEngine run
+ *   $chartSymbol / $chartTimeframe  string  labels when there is no $run
+ *
+ * @var array $candles @var array $prov @var array|null $run
  */
-$visible = array_slice($candles, -140);
+$run = isset($run) && is_array($run) ? $run : null;
+$prov = isset($prov) && is_array($prov) ? $prov : ($run['provenance'] ?? []);
+
+$chartSymbol = strtoupper((string) ($chartSymbol ?? ($run['symbol'] ?? '')));
+$chartTimeframe = (string) ($chartTimeframe ?? ($run['timeframe'] ?? ''));
+$chartMarketClass = (string) ($chartMarketClass ?? ($run['request']['marketClass'] ?? ''));
+
 $setup = $run['tradeSetup'] ?? null;
 $technical = null;
-foreach ($run['agents'] as $a) { if ($a['agent'] === 'technical') $technical = $a; }
+foreach (($run['agents'] ?? []) as $a) { if (($a['agent'] ?? '') === 'technical') $technical = $a; }
 $support = $technical['structure']['support'] ?? [];
 $resistance = $technical['structure']['resistance'] ?? [];
 
@@ -23,6 +38,7 @@ $emaSeries = function (array $values, int $period) {
     }
     return $out;
 };
+$visible = array_slice($candles, -140);
 $offset = count($candles) - count($visible);
 $ema20 = array_slice($emaSeries($closes, 20), $offset);
 $ema50 = array_slice($emaSeries($closes, 50), $offset);
@@ -46,9 +62,8 @@ $line = function (array $series) use ($x, $y, $offset, $n) {
 };
 
 // Provenance drives the badge. LIVE requires a real (non-synthetic), fresh,
-// non-delayed feed — exactly the rule the live API endpoint applies, so the
+// non-delayed feed — exactly the rule /api/market-data/live applies, so the
 // first paint and the streamed updates can never disagree.
-$prov = $run['provenance'] ?? [];
 $isSynthetic = !empty($prov['synthetic']);
 $isStale = !empty($prov['stale']);
 $isDelayed = !empty($prov['delayed']);
@@ -56,7 +71,7 @@ $liveReason = $isSynthetic ? 'SYNTHETIC' : ($isStale ? 'STALE' : ($isDelayed ? '
 $liveBadgeClass = $liveReason === 'LIVE' ? 'b-green' : ($liveReason === 'SYNTHETIC' ? 'b-red' : 'b-gray');
 $liveBadgeText = $liveReason === 'SYNTHETIC' ? 'SIMULATION' : $liveReason;
 
-// Support/resistance + setup overlays are a snapshot of THIS analysis run, not
+// Support/resistance + setup overlays are a snapshot of the analysis run, not
 // tick data. They are handed to the live renderer so switching symbol or
 // timeframe keeps the same visual grammar instead of losing the structure.
 $overlaysJson = json_encode([
@@ -74,7 +89,7 @@ $overlaysJson = json_encode([
 ], JSON_UNESCAPED_SLASHES);
 ?>
 <div class="panel" style="margin-bottom:12px">
-  <h3><?= e($run['symbol']) ?> · <?= e($run['timeframe']) ?> — candles · EMA · structure · setup</h3>
+  <h3><?= e($chartSymbol) ?><?= $chartTimeframe !== '' ? ' · ' . e($chartTimeframe) : '' ?> — candles · EMA<?= $run ? ' · structure · setup' : '' ?></h3>
   <div class="body scroll" style="padding-top:12px">
     <svg viewBox="0 0 <?= $W ?> <?= $H ?>" style="min-width:760px;width:100%" role="img" aria-label="candlestick chart">
       <?php for ($g = 0; $g <= 4; $g++): $gp = $lo + ($hi - $lo) * $g / 4; ?>
@@ -109,8 +124,8 @@ $overlaysJson = json_encode([
       <polyline points="<?= $line($ema50) ?>" fill="none" stroke="#a78bfa" stroke-width="1.3" opacity="0.9"><title>EMA50</title></polyline>
     </svg>
     <div class="dim" style="font-size:10px;display:flex;gap:14px;flex-wrap:wrap;align-items:center">
-      <span class="badge <?= $liveBadgeClass ?>" id="chart-live-badge"><?= e($liveBadgeText) ?></span>
-      <span>— EMA20</span><span>— EMA50</span><span>— support/resistance (dashed)</span><?php if ($setup): ?><span>entry zone · SL · TP ladder</span><?php endif; ?>
+      <span class="badge <?= $liveBadgeClass ?>"><?= e($liveBadgeText) ?></span>
+      <span>— EMA20</span><span>— EMA50</span><?php if ($support || $resistance): ?><span>— support/resistance (dashed)</span><?php endif; ?><?php if ($setup): ?><span>entry zone · SL · TP ladder</span><?php endif; ?>
       <span style="margin-left:auto"><?= count($visible) ?> of <?= count($candles) ?> bars · source: <?= e($prov['source'] ?? 'none') ?><?= $isSynthetic ? ' (SYNTHETIC)' : '' ?></span>
     </div>
 
@@ -118,15 +133,16 @@ $overlaysJson = json_encode([
       Live stream mount. The server SVG above stays as the first paint (works
       with JS off and for crawlers); market-chart.js takes over this mount to
       poll /api/market-data/live and redraw with real bars. Auto-start only
-      when this run is already on a real, fresh, non-delayed feed.
+      when this snapshot is already on a real, fresh, non-delayed feed.
     */ ?>
     <div class="livechart"
          data-live-chart
-         data-symbol="<?= e($run['symbol']) ?>"
-         data-timeframe="<?= e($run['timeframe']) ?>"
-         data-market-class="<?= e($run['request']['marketClass'] ?? '') ?>"
+         data-symbol="<?= e($chartSymbol) ?>"
+         data-timeframe="<?= e($chartTimeframe) ?>"
+         data-market-class="<?= e($chartMarketClass) ?>"
          data-limit="200"
          data-autostart="<?= $liveReason === 'LIVE' ? '1' : '0' ?>"
+         data-controls="<?= !empty($chartControls) ? '1' : '0' ?>"
          data-overlays="<?= e((string) $overlaysJson) ?>">
       <noscript><div class="dim" style="font-size:11px">Live refresh needs JavaScript — the chart above is the latest server-rendered snapshot.</div></noscript>
     </div>

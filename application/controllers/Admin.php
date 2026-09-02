@@ -530,7 +530,7 @@ class Admin extends App_Controller
             $this->portal->log($actor, $id ? 'API_PROVIDER_UPDATED' : 'API_PROVIDER_CREATED', 'ok', [
                 'type' => 'api_provider', 'id' => (string) ($saved['id'] ?? ''), 'label' => (string) ($saved['label'] ?? ''),
             ], ['service' => $saved['service'] ?? '', 'driver' => $saved['driver'] ?? '', 'role' => $saved['role'] ?? ''], $this->ip());
-            $this->flash('notice', '✓ Changes saved successfully');
+            $this->syncMarketData((string) ($saved['service'] ?? ''), $actor);
             redirect('/admin/api/' . (int) ($saved['id'] ?? 0));
         } catch (Throwable $e) {
             log_message('error', 'api_save failed: ' . $e->getMessage());
@@ -573,7 +573,7 @@ class Admin extends App_Controller
         if (!$row) { $this->flash('error', 'Provider not found.'); redirect('/admin/api'); return; }
         \AIWorkforce\ApiProviders::setRole($this->AIWorkforce_model->db, (int) $id, 'primary');
         $this->portal->log($actor, 'API_PROVIDER_UPDATED', 'ok', ['type' => 'api_provider', 'id' => (string) $id, 'label' => $row['label']], ['role' => 'primary'], $this->ip());
-        $this->flash('notice', '✓ Changes saved successfully');
+        $this->syncMarketData((string) ($row['service'] ?? ''), $actor);
         redirect('/admin/api');
     }
 
@@ -585,7 +585,7 @@ class Admin extends App_Controller
         if (!$row) { $this->flash('error', 'Provider not found.'); redirect('/admin/api'); return; }
         \AIWorkforce\ApiProviders::delete($this->AIWorkforce_model->db, (int) $id);
         $this->portal->log($actor, 'API_PROVIDER_DELETED', 'ok', ['type' => 'api_provider', 'id' => (string) $id, 'label' => $row['label']], ['service' => $row['service']], $this->ip());
-        $this->flash('notice', '✓ Changes saved successfully');
+        $this->syncMarketData((string) ($row['service'] ?? ''), $actor);
         redirect('/admin/api');
     }
 
@@ -660,9 +660,42 @@ class Admin extends App_Controller
         \AIWorkforce\ApiProviders::setEnabled($this->AIWorkforce_model->db, $id, $enabled);
         $this->portal->log($actor, $enabled ? 'API_PROVIDER_ENABLED' : 'API_PROVIDER_DISABLED', 'ok', [
             'type' => 'api_provider', 'id' => (string) $id, 'label' => $row['label'],
-        ], [], $this->ip());
-        $this->flash('notice', '✓ Changes saved successfully');
+        ], ['service' => $row['service']], $this->ip());
+        $this->syncMarketData((string) ($row['service'] ?? ''), $actor);
         redirect('/admin/api');
+    }
+
+    /**
+     * Make a market-data provider change take effect immediately, and tell the
+     * operator the truth about what it did.
+     *
+     * Rebuilds the provider chain in this process (next request rebuilds from
+     * the store anyway) and replaces the generic "saved" flash with the actual
+     * outcome: LIVE, or CONNECTED·NOT ENABLED — the dark state that otherwise
+     * leaves the chart silently streaming the labelled simulation.
+     */
+    private function syncMarketData(string $service, ?array $actor = null): void
+    {
+        if (!in_array($service, \AIWorkforce\ApiProviders::MARKET_DATA_SERVICES, true)) {
+            $this->flash('notice', '✓ Changes saved successfully');
+            return;
+        }
+        $refresh = null;
+        try { $refresh = $this->platform->refreshMarketDataProviders(); } catch (Throwable $e) { $refresh = null; }
+        $state = \AIWorkforce\ApiProviders::serviceState($this->AIWorkforce_model->db, $service);
+        if (!empty($state['live'])) {
+            if (is_array($actor) && !empty($actor['id'])) {
+                $this->portal->log($actor, 'MARKET_DATA_LIVE', 'ok', [
+                    'type' => 'api_provider', 'id' => $service, 'label' => (string) $state['label'],
+                ], [
+                    'driver' => $state['driver'],
+                    'registered' => is_array($refresh['registered'] ?? null) ? count($refresh['registered']) : null,
+                ], $this->ip());
+            }
+            $this->flash('notice', '✓ ' . $state['label'] . ' is LIVE — the market-data chart now streams real bars from ' . (string) $state['driver'] . '.');
+            return;
+        }
+        $this->flash('error', $state['label'] . ' is connected but NOT ENABLED — the chart stays on the labelled simulation until an enabled provider serves it.');
     }
 
     private function renderApiForm(array $actor, ?array $row): void

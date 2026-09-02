@@ -264,3 +264,92 @@ test('the server-rendered chart badge and the streamed badge use the same rule',
     assert_false($series['provenance']['live'], 'synthetic is never live');
     assert_equals('synthetic-demo', $series['provenance']['source']);
 });
+
+test('the dashboard chart renders on load without an analysis run', function () {
+    $welcome = file_get_contents(FCPATH . 'application/controllers/Welcome.php');
+    assert_contains('public function index', $welcome);
+    // A chart series is fetched even when no analysis was submitted.
+    assert_contains("if (\$data['chart'] === null)", $welcome, 'standalone chart is fetched on load');
+    assert_contains('getCandleSeries', $welcome);
+    assert_contains("'chartError'", $welcome, 'a failure to serve is reported, never fabricated');
+    assert_contains('marketStateView', $welcome);
+    assert_contains('MARKET_DATA_SERVICES', $welcome, 'connection strip reads the market-data services');
+
+    $view = file_get_contents(FCPATH . 'application/views/welcome/index.php');
+    assert_contains("partials/live_market_panel.php", $view);
+    assert_contains("if (empty(\$analysisChartRendered))", $view, 'the same symbol is never charted twice');
+    assert_contains("\$run = null;", $view, 'standalone chart has no S/R or setup overlays');
+    assert_contains("\$chartControls = true;", $view, 'standalone chart can switch symbol without a reload');
+    assert_contains('No market data to chart yet', $view, 'honest empty state');
+    assert_contains('tools marketdata --activate', $view, 'empty state tells the operator how to fix it');
+
+    $partial = file_get_contents(FCPATH . 'application/views/welcome/partials/chart.php');
+    // The partial must tolerate having no analysis run at all.
+    assert_contains("\$run = isset(\$run) && is_array(\$run) ? \$run : null;", $partial);
+    assert_contains("foreach ((\$run['agents'] ?? []) as \$a)", $partial, 'no run means no agents to scan');
+    assert_contains('data-controls', $partial);
+    assert_contains("<?= \$run ? ' · structure · setup' : '' ?>", $partial, 'heading adapts to a standalone chart');
+
+    $strip = file_get_contents(FCPATH . 'application/views/welcome/partials/live_market_panel.php');
+    assert_contains('CONNECTED · NOT ENABLED', $strip, 'the dark state is named explicitly');
+    assert_contains('NOT CONNECTED', $strip);
+    assert_contains("if (empty(\$marketState) || !is_array(\$marketState))", $strip, 'renders nothing without state');
+});
+
+test('connecting a market-data provider in Admin takes effect immediately and reports the truth', function () {
+    $admin = file_get_contents(FCPATH . 'application/controllers/Admin.php');
+    assert_contains('private function syncMarketData', $admin);
+    assert_contains('refreshMarketDataProviders', $admin, 'the chain is rebuilt in-process');
+    assert_contains('MARKET_DATA_LIVE', $admin, 'going live from the admin portal is logged');
+    assert_contains('is LIVE — the market-data chart now streams real bars from', $admin);
+    assert_contains('connected but NOT ENABLED', $admin, 'the dark state is surfaced, not hidden behind "saved"');
+    // Every mutating provider action must sync, not just the enable toggle.
+    foreach (['api_save', 'api_primary', 'api_delete', 'apiToggle'] as $method) {
+        assert_contains('function ' . $method, $admin, $method . ' exists');
+    }
+    assert_true(substr_count($admin, '$this->syncMarketData(') >= 4,
+        'save, primary, delete and the enable/disable toggle all sync market data');
+    // Non-market services keep the ordinary confirmation.
+    assert_contains("\$this->flash('notice', '✓ Changes saved successfully');", $admin);
+});
+
+test('the live chart offers only symbols a real provider can serve', function () {
+    $js = file_get_contents(FCPATH . 'assets/js/market-chart.js');
+    assert_contains('SYMBOL_GROUPS', $js);
+    assert_contains("if (m.dataset.controls === '1')", $js, 'the switcher is opt-in per mount');
+    assert_contains('switchTo(symbol, timeframe)', $js);
+    assert_contains("this.errors = 0;", $js, 'switching resets the error backoff');
+    assert_contains("this.marketClass = '';", $js, 'market class is re-inferred server-side per symbol');
+    assert_contains('does not re-run the multi-agent analysis', $js, 'switching is not an analysis run');
+
+    // XAUUSD is offered by the analysis form but has no real provider
+    // (Frankfurter covers ECB currencies only, metals excluded), so it must not
+    // be offered as a LIVE chart symbol.
+    assert_false(str_contains($js, "'XAUUSD'"), 'no real feed serves XAUUSD — it is not offered as a live symbol');
+    $welcome = file_get_contents(FCPATH . 'application/controllers/Welcome.php');
+    assert_contains("'XAUUSD'", $welcome, 'but it stays available for analysis');
+
+    // Crypto/forex/equity symbols must line up with the provider allow-lists.
+    foreach (\AIWorkforce\Providers\BinanceProvider::SYMBOLS as $sym) {
+        if (in_array($sym, ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'], true)) {
+            assert_contains("'" . $sym . "'", $js, 'binance-listed ' . $sym . ' is offered');
+        }
+    }
+    foreach (['AAPL', 'MSFT', 'NVDA', 'TSLA'] as $sym) {
+        assert_in_array($sym, \AIWorkforce\Providers\YahooChartProvider::STOCKS, $sym . ' is Yahoo-listed');
+        assert_contains("'" . $sym . "'", $js);
+    }
+    foreach (['SPY', 'QQQ', 'GLD'] as $sym) {
+        assert_in_array($sym, \AIWorkforce\Providers\YahooChartProvider::ETFS, $sym . ' is a Yahoo ETF');
+    }
+    foreach (['ES=F', 'NQ=F', 'CL=F', 'GC=F'] as $sym) {
+        assert_in_array($sym, \AIWorkforce\Providers\YahooChartProvider::FUTURES, $sym . ' is a Yahoo future');
+    }
+    // Frankfurter serves ECB currencies; every forex pair offered must split
+    // into two of them or the chart would silently fall back to simulation.
+    foreach (['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD'] as $pair) {
+        [$base, $quote] = \AIWorkforce\Providers\FrankfurterProvider::splitPair($pair);
+        assert_in_array($base, \AIWorkforce\Providers\FrankfurterProvider::ECB_CURRENCIES, $pair . ' base');
+        assert_in_array($quote, \AIWorkforce\Providers\FrankfurterProvider::ECB_CURRENCIES, $pair . ' quote');
+    }
+});

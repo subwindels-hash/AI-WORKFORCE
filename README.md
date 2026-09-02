@@ -63,7 +63,7 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **Lottery Intelligence (EuroMillions)**: rule engine, validated idempotent ingestion (verified draws never silently overwritten), frequency/gap/hot-cold/distribution/pair statistics, per-line combination analyzer, 5-mode AI combination generator with lock/exclude + AI decision reports, diversification engine, system builder (C(N,5) combinatorics), user-scoped ticket builder + saved tickets, backtesting (Strategy Lab) with mandatory random baseline + same-period strategy comparison, model versioning, separated performance overview, RBAC (lottery.view/manage), idempotent lottery-cron | **TESTED** (admin controls/UI/security-E2E next; official feeds PLANNED) |
 | MT4 / crypto-exchange / stock-broker connectors | **PLANNED** (added one at a time after MT5 is verified) |
 
-**358 automated tests** run through the real CodeIgniter stack
+**361 automated tests** run through the real CodeIgniter stack
 (`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
 sandbox — see below), plus 9 contract tests for the Python bridge
 (`python-services/mt5-bridge/.venv/bin/python -m pytest test_bridge.py`).
@@ -521,11 +521,30 @@ synthetic provider. Three things close that gap:
 | `php index.php tools marketdata` | Report only. Shows `configured` vs `live` per market-data service, real-provider health, and (with `--probe`) fetches real bars and prints `LIVE` / `DELAYED` / `STALE` / `SYNTHETIC` per market class. |
 | `php index.php tools marketdata --activate` | Promotes the **keyless public** feed (Binance / Frankfurter) an operator already saved: `enabled=1`, `role=primary`, audited as `MARKET_DATA_ACTIVATED`, then re-probes. Never enables `custom_http`, a licensed feed, anything needing a credential, or a service that is already live. |
 | **Go live** button on the chart | Calls `GET /api/market-data/refresh`, which runs `Platform::refreshMarketDataProviders()` and reports what is actually serving — then starts streaming. |
+| Saving / enabling in **Admin → API** | `Admin::syncMarketData()` rebuilds the chain in-process and replaces the generic *"Changes saved"* flash with the truth: **`Crypto Market Data is LIVE`**, or **`connected but NOT ENABLED`**. Logged as `MARKET_DATA_LIVE`. |
 
 `GET /api/market-data/live?symbol=&timeframe=&limit=` is the chart feed:
 candles + quote + a `live` verdict + `refreshSeconds`. `GET
 /api/market-data/refresh` rebuilds the provider chain in-process, so a newly
 enabled feed is picked up without waiting for the next page load.
+
+**The chart no longer needs an analysis run.** `Welcome::index()` fetches a
+series for the selected symbol on every dashboard load, so `/analysis` shows a
+streaming chart immediately — previously `partials/chart.php` was nested inside
+`<?php if (!empty($run)): ?>` and the page showed no chart at all until you
+submitted the form. Above it, `partials/live_market_panel.php` renders the
+connection strip that names the state explicitly: **LIVE**, **CONNECTED · NOT
+ENABLED** or **NOT CONNECTED** per market-data service. The standalone chart
+offers a symbol/timeframe switcher that re-polls the feed directly and
+deliberately does *not* re-run the multi-agent analysis; the analysis chart
+keeps its structure/setup overlays and no switcher, and only one of the two is
+rendered so a symbol is never charted twice.
+
+The switcher only offers symbols a real provider can actually serve — Binance
+crypto, Frankfurter/ECB forex pairs (both legs must be ECB currencies; `XAUUSD`
+is excluded because metals are not covered), and Yahoo's allow-listed
+equities/ETFs/futures. `XAUUSD` stays available for *analysis* (where the
+synthetic fallback is labelled), just not as a "live" chart symbol.
 
 `assets/js/market-chart.js` streams that endpoint and redraws the same SVG the
 server renders in `welcome/partials/chart.php` — candles, volume, EMA20/EMA50

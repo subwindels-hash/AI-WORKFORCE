@@ -22,6 +22,10 @@ class Welcome extends App_Controller
             'notice' => $this->session->flashdata('notice'),
             'modeError' => $this->session->flashdata('modeError'),
             'history' => $this->platform->model->analysis->history(8),
+            'chart' => null,
+            'chartError' => null,
+            'analysisChartRendered' => false,
+            'marketState' => $this->marketStateView(),
         ];
 
         if ($this->input->post_get('symbol') !== null) {
@@ -29,9 +33,33 @@ class Welcome extends App_Controller
             try {
                 $data['run'] = $this->platform->engine->run($data['symbol'], $marketClass, $data['timeframe']);
                 // chart candles from the same provenance for visual honesty
-                $data['candles'] = $this->platform->providers->getCandleSeries($data['symbol'], $marketClass, $data['timeframe'], 200)['candles'];
+                $series = $this->platform->providers->getCandleSeries($data['symbol'], $marketClass, $data['timeframe'], 200);
+                $data['candles'] = $series['candles'];
+                $data['chart'] = ['candles' => $series['candles'], 'prov' => $series['provenance']];
+                $data['analysisChartRendered'] = true;
             } catch (Throwable $e) {
                 $data['error'] = $e->getMessage();
+            }
+        }
+
+        // The live chart renders on load — no analysis run required — so market
+        // data is visibly LIVE as soon as a provider is connected. Reuses the
+        // per-request candle cache when the analysis above already fetched this
+        // symbol, and never fabricates: if no provider can serve it, the panel
+        // says so instead of drawing invented bars.
+        if ($data['chart'] === null) {
+            try {
+                $chartClass = $this->platform->paper->inferMarketClass($data['symbol']);
+                $series = $this->platform->providers->getCandleSeries($data['symbol'], $chartClass, $data['timeframe'], 200);
+                $data['chart'] = [
+                    'candles' => $series['candles'],
+                    'prov' => $series['provenance'],
+                    'symbol' => $series['symbol'],
+                    'timeframe' => $series['timeframe'],
+                    'marketClass' => $series['marketClass'],
+                ];
+            } catch (Throwable $e) {
+                $data['chartError'] = $e->getMessage();
             }
         }
         try {
@@ -70,6 +98,21 @@ class Welcome extends App_Controller
             'killSwitch' => $state['killSwitch'],
             'providers' => $this->platform->providers->getAllHealth(),
         ];
+    }
+
+    /**
+     * Per-service configured-vs-live state for the market-data strip.
+     * serviceState() is defensive, so this degrades to NOT CONNECTED rather
+     * than erroring when the api_providers schema has not been created yet.
+     */
+    private function marketStateView(): array
+    {
+        $out = [];
+        $db = $this->AIWorkforce_model->db;
+        foreach (\AIWorkforce\ApiProviders::MARKET_DATA_SERVICES as $service) {
+            $out[$service] = \AIWorkforce\ApiProviders::serviceState($db, $service);
+        }
+        return $out;
     }
 
     private function symbols(): array

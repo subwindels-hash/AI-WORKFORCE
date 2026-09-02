@@ -58,6 +58,50 @@ $biasClass = static function (?string $bias): string {
   </div>
 </div>
 
+<?php /*
+  LIVE market data. Rendered on load — no analysis run required — so the chart
+  is streaming real bars as soon as a provider is connected and enabled. The
+  analysis chart further down adds the structure/setup overlays from the run;
+  it is skipped here to avoid drawing the same symbol twice.
+*/ ?>
+<?php include __DIR__ . '/partials/live_market_panel.php'; ?>
+<?php if (empty($analysisChartRendered)): ?>
+  <?php if (!empty($chart['candles'])): ?>
+    <?php
+      $candles = $chart['candles'];
+      $prov = $chart['prov'];
+      $run = null;                       // no S/R or setup overlays without a run
+      $chartSymbol = $chart['symbol'] ?? $symbol;
+      $chartTimeframe = $chart['timeframe'] ?? $timeframe;
+      $chartMarketClass = $chart['marketClass'] ?? '';
+      $chartControls = true;             // symbol/timeframe switch without a page reload
+      include __DIR__ . '/partials/chart.php';
+    ?>
+  <?php else: ?>
+    <div class="panel" style="margin-bottom:12px">
+      <h3>Live market data</h3>
+      <div class="body">
+        <div class="notice warnbox" style="margin-bottom:0">
+          <b>No market data to chart yet.</b>
+          <?= !empty($chartError) ? e($chartError) : 'No provider could serve bars for ' . e($symbol) . '.' ?>
+          <div class="dim" style="font-size:11px;margin-top:6px">
+            Connect a provider in <a href="/admin/api">Admin → API</a> and tick <b>Enable</b>, then press
+            <b>Go live</b> below. The public no-key feeds (Binance, Frankfurter/ECB) need no credential —
+            or run <span class="mono">php index.php tools marketdata --activate</span> on the server.
+          </div>
+          <div style="margin-top:10px"
+               data-live-chart
+               data-symbol="<?= e($symbol) ?>"
+               data-timeframe="<?= e($timeframe) ?>"
+               data-limit="200"
+               data-autostart="0"
+               data-controls="1"></div>
+        </div>
+      </div>
+    </div>
+  <?php endif; ?>
+<?php endif; ?>
+
 <?php if (!empty($watch)): ?>
 <div class="panel" style="margin-bottom:16px">
   <h3>Watchlist consensus · <?= e($timeframe) ?></h3>
