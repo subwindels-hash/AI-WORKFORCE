@@ -144,9 +144,9 @@ test('lottery schema: combinations + ai_decisions tables exist and are verified 
     assert_contains('CREATE TABLE IF NOT EXISTS lottery_backtests', $mysql);
     assert_contains('CREATE TABLE IF NOT EXISTS lottery_model_versions', $mysql);
 
-    $installer = file_get_contents(FCPATH . 'tools/install.php');
+    $installer = file_get_contents(FCPATH . 'application/libraries/AIWorkforce/SchemaInstaller.php');
     assert_contains("'lottery_combinations', 'lottery_ai_decisions', 'lottery_tickets', 'lottery_ticket_lines',", $installer, 'installer verifies the combination/ticket tables');
-    assert_contains("'lottery_backtests', 'lottery_model_versions']", $installer, 'installer verifies the backtest + model-version tables');
+    assert_contains("'lottery_backtests', 'lottery_model_versions'", $installer, 'installer verifies the backtest + model-version tables');
 
     // the live test database has the columns usable by the repository layer
     $p = platform();

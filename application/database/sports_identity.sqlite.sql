@@ -3,9 +3,12 @@ CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
   display_name TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL, last_login_at TEXT,
-  username TEXT, user_uid TEXT, profile_image TEXT
+  username TEXT, user_uid TEXT, profile_image TEXT, phone TEXT, address TEXT,
+  security_pin TEXT, security_question TEXT, security_answer TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_users_active ON users(active);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_user_uid ON users(user_uid);
 CREATE TABLE IF NOT EXISTS roles (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS user_roles (user_id INTEGER NOT NULL, role_id INTEGER NOT NULL, PRIMARY KEY(user_id, role_id));

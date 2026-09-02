@@ -5,6 +5,14 @@ $uid = (string) ($u['user_uid'] ?? '');
 $username = (string) ($u['username'] ?? '');
 $email = (string) ($u['email'] ?? '');
 $avatar = (string) ($u['profile_image'] ?? '');
+$phone = (string) ($u['phone'] ?? '');
+$address = (string) ($u['address'] ?? '');
+$pin = (string) ($u['security_pin'] ?? '');
+$question = (string) ($u['security_question'] ?? '');
+$answer = (string) ($u['security_answer'] ?? '');
+$impersonating = !empty($impersonating);
+$questions = $securityQuestions ?? [];
+$questionIsCustom = $question !== '' && !in_array($question, $questions, true);
 $displayName = (string) ($u['display_name'] ?? $username ?: 'Platform user');
 $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayName), 0, 1) ?: 'W');
 ?>
@@ -12,7 +20,7 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
   <div>
     <p class="eyebrow">Account</p>
     <h2>My Account</h2>
-    <p>Manage your profile image, username, email, password and account details.</p>
+    <p>Manage your profile image, username, email, phone, address, password and account details. Your Security PIN is assigned automatically and cannot be changed.</p>
   </div>
   <div class="page-actions">
     <form method="post" action="/logout">
@@ -76,6 +84,20 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
         </td>
       </tr>
       <tr>
+        <td class="dim">Phone</td>
+        <td><?= $phone !== '' ? e($phone) : '<span class="dim">Not set</span>' ?></td>
+        <td class="num">
+          <button class="btn small" type="button" data-toggle-panel="edit-contact" aria-expanded="false">Edit</button>
+        </td>
+      </tr>
+      <tr>
+        <td class="dim">Address</td>
+        <td><?= $address !== '' ? e($address) : '<span class="dim">Not set</span>' ?></td>
+        <td class="num">
+          <button class="btn small" type="button" data-toggle-panel="edit-contact" aria-expanded="false">Edit</button>
+        </td>
+      </tr>
+      <tr>
         <td class="dim">User ID</td>
         <td><span class="mono badge b-sky"><?= e($uid) ?></span> <span class="dim" style="font-size:11px">permanent — cannot be changed</span></td>
         <td class="num"></td>
@@ -109,6 +131,23 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
           <span class="auth-hint">Must not already be attached to another account.</span>
         </label>
         <div><button class="btn primary" type="submit">Change email</button></div>
+      </form>
+    </div>
+
+    <div id="edit-contact" class="account-edit" hidden>
+      <h4>Change phone and address</h4>
+      <form method="post" action="/account/contact" class="auth-form" style="margin-top:12px">
+        <input type="hidden" name="csrf_token" value="<?= e($csrf) ?>">
+        <label class="auth-field">
+          <span>Phone number</span>
+          <span class="auth-control"><input type="tel" name="phone" id="new-phone" required maxlength="40" value="<?= e($phone) ?>" placeholder="+234 800 000 0000" autocomplete="tel" inputmode="tel"></span>
+          <span class="auth-hint">Include the country code. This pre-fills the public contact form.</span>
+        </label>
+        <label class="auth-field">
+          <span>Address</span>
+          <span class="auth-control"><textarea name="address" id="new-address" required minlength="5" maxlength="255" rows="3" placeholder="Street, city, country" autocomplete="street-address"><?= e($address) ?></textarea></span>
+        </label>
+        <div><button class="btn primary" type="submit">Save contact details</button></div>
       </form>
     </div>
   </div>
@@ -147,6 +186,49 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
         <div id="password-inline-error" class="notice err" role="alert" hidden></div>
         <div><button class="btn primary" type="submit">Change password</button></div>
       </form>
+
+      <?php if (!$impersonating): ?>
+      <hr style="border:0;border-top:1px solid var(--line, #e2e8f0);margin:22px 0">
+      <h4 style="margin:0 0 6px">Security PIN and question</h4>
+      <p class="dim" style="font-size:12px;margin:0 0 10px">Your 4-digit PIN is assigned automatically and cannot be changed. Super Admin can read it from the dashboard. Confirm your password to change the security question.</p>
+      <table class="tbl" style="margin-bottom:14px">
+        <tr><td class="dim">Current PIN</td><td class="mono"><?= $pin !== '' ? e($pin) : '<span class="dim">Not set</span>' ?> <span class="dim" style="font-size:11px">permanent — cannot be changed</span></td></tr>
+        <tr><td class="dim">Security question</td><td><?= $question !== '' ? e($question) : '<span class="dim">Not set</span>' ?></td></tr>
+        <tr><td class="dim">Security answer</td><td><?= $answer !== '' ? e($answer) : '<span class="dim">Not set</span>' ?></td></tr>
+      </table>
+      <form method="post" action="/account/recovery" class="auth-form" id="change-recovery-form">
+        <input type="hidden" name="csrf_token" value="<?= e($csrf) ?>">
+        <label class="auth-field">
+          <span>Current password</span>
+          <span class="auth-control has-toggle">
+            <input type="password" name="current_password" id="rec-current" required autocomplete="current-password" placeholder="********">
+            <button type="button" class="pw-toggle" data-toggle="rec-current" aria-label="Show password"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/></svg></button>
+          </span>
+        </label>
+        <label class="auth-field">
+          <span>Security question</span>
+          <span class="auth-control">
+            <select name="security_question" id="rec-question" required>
+              <option value="">Choose a question</option>
+              <?php foreach ($questions as $q): ?>
+                <option value="<?= e($q) ?>" <?= $question === $q ? 'selected' : '' ?>><?= e($q) ?></option>
+              <?php endforeach; ?>
+              <option value="__custom__" <?= $questionIsCustom ? 'selected' : '' ?>>Write your own question</option>
+            </select>
+          </span>
+        </label>
+        <label class="auth-field" id="rec-question-custom-wrap" <?= $questionIsCustom ? '' : 'hidden' ?>>
+          <span>Your security question</span>
+          <span class="auth-control"><input name="security_question_custom" id="rec-question-custom" maxlength="255" minlength="8" value="<?= $questionIsCustom ? e($question) : '' ?>"></span>
+        </label>
+        <label class="auth-field">
+          <span>Security answer</span>
+          <span class="auth-control"><input name="security_answer" id="rec-answer" required maxlength="120" minlength="2" autocomplete="off" value="<?= e($answer) ?>"></span>
+        </label>
+        <div id="recovery-inline-error" class="notice err" role="alert" hidden></div>
+        <div><button class="btn primary" type="submit">Save security question</button></div>
+      </form>
+      <?php endif; ?>
     </div>
   </section>
 
@@ -158,6 +240,12 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
         <tr><td class="dim">User ID</td><td><span class="mono badge b-sky"><?= e($uid) ?></span></td></tr>
         <tr><td class="dim">Username</td><td>@<?= e($username) ?></td></tr>
         <tr><td class="dim">Email</td><td><?= e($email) ?></td></tr>
+        <tr><td class="dim">Phone</td><td><?= $phone !== '' ? e($phone) : 'Not set' ?></td></tr>
+        <tr><td class="dim">Address</td><td><?= $address !== '' ? e($address) : 'Not set' ?></td></tr>
+        <?php if (!$impersonating): ?>
+        <tr><td class="dim">Security PIN</td><td class="mono"><?= $pin !== '' ? e($pin) : 'Not set' ?> <span class="dim" style="font-size:11px">cannot be changed</span></td></tr>
+        <tr><td class="dim">Security question</td><td><?= $question !== '' ? e($question) : 'Not set' ?></td></tr>
+        <?php endif; ?>
         <tr><td class="dim">Account created</td><td><?= e(substr((string) ($u['created_at'] ?? ''), 0, 16)) ?></td></tr>
         <tr><td class="dim">Last login</td><td><?= e(substr((string) ($u['last_login_at'] ?? 'Not recorded'), 0, 16)) ?></td></tr>
         <tr><td class="dim">Account status</td><td><span class="badge <?= empty($u['active']) ? 'b-red' : 'b-green' ?>"><?= empty($u['active']) ? 'INACTIVE' : 'ACTIVE' ?></span></td></tr>
@@ -184,7 +272,6 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
 <script>
 (function () {
   'use strict';
-  // Inline edit toggles
   document.querySelectorAll('[data-toggle-panel]').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var panel = document.getElementById(btn.getAttribute('data-toggle-panel'));
@@ -206,16 +293,15 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
       preview.hidden = false;
     });
   }
-  // Password toggles
   document.querySelectorAll('.pw-toggle').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var input = document.getElementById(btn.getAttribute('data-toggle'));
+      if (!input) return;
       var show = input.type === 'password';
       input.type = show ? 'text' : 'password';
       btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
     });
   });
-  // Change password client validation
   var form = document.getElementById('change-password-form');
   if (form) {
     var errEl = document.getElementById('password-inline-error');
@@ -231,5 +317,33 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
       errEl.hidden = true;
     });
   }
+  var recQ = document.getElementById('rec-question');
+  var recWrap = document.getElementById('rec-question-custom-wrap');
+  var recCustom = document.getElementById('rec-question-custom');
+  function syncRecQ() {
+    if (!recQ || !recWrap) return;
+    var custom = recQ.value === '__custom__';
+    recWrap.hidden = !custom;
+    if (recCustom) recCustom.required = custom;
+  }
+  if (recQ) recQ.addEventListener('change', syncRecQ);
+  syncRecQ();
+  var recForm = document.getElementById('change-recovery-form');
+  if (recForm) {
+    var recErr = document.getElementById('recovery-inline-error');
+    recForm.addEventListener('submit', function (e) {
+      var cur = document.getElementById('rec-current');
+      var q = document.getElementById('rec-question');
+      var ans = document.getElementById('rec-answer');
+      var ok = true, msg = '';
+      if (!cur.value) { msg = 'Enter your current password.'; ok = false; }
+      else if (!q.value) { msg = 'Choose a security question.'; ok = false; }
+      else if (q.value === '__custom__' && (recCustom.value || '').trim().length < 8) { msg = 'Write a security question of at least 8 characters.'; ok = false; }
+      else if ((ans.value || '').trim().length < 2) { msg = 'Enter an answer of at least 2 characters.'; ok = false; }
+      if (!ok) { e.preventDefault(); recErr.hidden = false; recErr.textContent = msg; return; }
+      recErr.hidden = true;
+    });
+  }
 })();
 </script>
+

@@ -27,7 +27,7 @@ use AIWorkforce\Strategies\StrategyRegistry;
 class ExecutionSupervisor
 {
     /** Indicative max quote age per market class (seconds). */
-    private const FRESHNESS = ['crypto' => 120, 'forex' => 300, 'default' => 600];
+    private const FRESHNESS = ['crypto' => 120, 'forex' => 300, 'stock' => 900, 'etf' => 900, 'futures' => 900, 'default' => 600];
     /** Indicative initial-margin rate used for the pre-trade margin estimate. */
     private const MARGIN_RATE = 0.033;
     private const EXECUTION_MODES = ['HUMAN_APPROVAL', 'SEMI_AUTONOMOUS', 'FULLY_AUTOMATED'];
@@ -462,9 +462,11 @@ class ExecutionSupervisor
         $stopLoss = isset($intent['stopLoss']) && is_numeric($intent['stopLoss']) ? (float) $intent['stopLoss'] : null;
         $takeProfit = isset($intent['takeProfit']) && is_numeric($intent['takeProfit']) ? (float) $intent['takeProfit'] : null;
         $price = isset($intent['price']) && is_numeric($intent['price']) ? (float) $intent['price'] : null;
-        if (!preg_match('/^[A-Z0-9._-]{1,32}$/', $symbol)) return null;
+        if (!preg_match('/^[A-Z0-9._:=-]{1,32}$/', $symbol)) return null;
         if (!in_array($side, ['BUY', 'SELL'], true) || !in_array($type, ['MARKET', 'LIMIT'], true)) return null;
-        if (!in_array($marketClass, ['forex', 'crypto', 'stock', 'etf', 'commodity', 'future', 'index', 'bond'], true)) return null;
+        if ($marketClass === 'future') $marketClass = 'futures';
+        if ($marketClass === 'index') $marketClass = 'indices';
+        if (!in_array($marketClass, ['forex', 'crypto', 'stock', 'etf', 'commodity', 'futures', 'options', 'indices', 'bonds'], true)) return null;
         if ($volume <= 0 || !is_finite($volume)) return null;
         if ($stopLoss === null || $stopLoss <= 0) return null;
         if ($type === 'LIMIT' && ($price === null || $price <= 0)) return null;

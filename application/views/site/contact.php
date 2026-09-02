@@ -8,6 +8,11 @@ $contactCity = (string) ($contact['city'] ?? 'Abuja, Nigeria');
 $mapSrc = (string) ($contact['mapSrc'] ?? '');
 $mapLink = (string) ($contact['mapLink'] ?? '');
 $mailEnabled = !empty($contact['mailEnabled']);
+$visitor = is_array($user ?? null) ? $user : [];
+$formName = (string) ($visitor['display_name'] ?? $visitor['username'] ?? '');
+$formEmail = (string) ($visitor['email'] ?? '');
+$formPhone = (string) ($visitor['phone'] ?? '');
+$formAddress = (string) ($visitor['address'] ?? '');
 ?>
 <section class="page-hero">
   <p class="kicker">Contact</p>
@@ -15,12 +20,13 @@ $mailEnabled = !empty($contact['mailEnabled']);
   <p class="lede">Send a message and a member of the WINDELS AI WORKFORCE team will get back to you — usually within one business day.</p>
 </section>
 
+<figure class="contact-hero">
+  <img src="/assets/images/contact-office.jpg" alt="WINDELS AI WORKFORCE office in Abuja" width="1600" height="900" loading="eager">
+</figure>
+
 <section class="band">
   <div class="contact-grid">
     <div class="contact-side">
-      <figure class="contact-media">
-        <img src="/assets/images/contact-support.jpg" alt="WINDELS AI WORKFORCE support team" loading="lazy" width="800" height="550">
-      </figure>
       <h2>Reach us directly</h2>
       <p class="contact-desc">Questions about the platform, your account or a service? Use the form or any of the contact details.</p>
       <div class="contact-details">
@@ -28,31 +34,46 @@ $mailEnabled = !empty($contact['mailEnabled']);
           <span class="contact-label">Email</span>
           <a href="mailto:<?= e($contactEmail) ?>"><?= e($contactEmail) ?></a>
         </div>
-        <?php if ($contactPhone !== ''): ?>
-          <div class="contact-detail">
-            <span class="contact-label">Phone</span>
+        <div class="contact-detail">
+          <span class="contact-label">Phone</span>
+          <?php if ($contactPhone !== ''): ?>
             <a href="tel:<?= e(preg_replace('/[^0-9+\-() ]/', '', $contactPhone)) ?>"><?= e($contactPhone) ?></a>
-          </div>
-        <?php endif; ?>
-        <?php if ($contactAddress !== ''): ?>
-          <div class="contact-detail">
-            <span class="contact-label">Office</span>
-            <span><?= e($contactAddress) ?></span>
-          </div>
-        <?php endif; ?>
+          <?php else: ?>
+            <span>Not published</span>
+          <?php endif; ?>
+        </div>
+        <div class="contact-detail">
+          <span class="contact-label">Office</span>
+          <span><?= e($contactAddress !== '' ? $contactAddress : $contactCity) ?></span>
+        </div>
         <div class="contact-detail">
           <span class="contact-label">Location</span>
           <span><?= e($contactCity) ?></span>
         </div>
       </div>
+      <?php if ($mapSrc !== ''): ?>
+        <div class="map-frame map-frame--side">
+          <iframe
+            title="Map showing <?= e($contactCity) ?>"
+            src="<?= e($mapSrc) ?>"
+            loading="lazy"
+            referrerpolicy="no-referrer-when-downgrade"
+            allowfullscreen></iframe>
+        </div>
+        <p class="map-actions map-actions--side">
+          <a class="btn ghost" href="<?= e($mapLink) ?>" target="_blank" rel="noopener">View larger map</a>
+        </p>
+      <?php endif; ?>
     </div>
 
     <div class="contact-main">
       <?php if (!empty($notice)): ?><div class="flash ok"><?= e($notice) ?></div><?php endif; ?>
       <?php if (!empty($error)): ?><div class="flash err"><?= e($error) ?></div><?php endif; ?>
       <form class="contact-form" method="post" action="/contact/submit">
-        <label>Name<input name="name" required maxlength="120"></label>
-        <label>Email<input type="email" name="email" required maxlength="190"></label>
+        <label>Name<input name="name" required maxlength="120" autocomplete="name" value="<?= e($formName) ?>"></label>
+        <label>Email<input type="email" name="email" required maxlength="190" autocomplete="email" value="<?= e($formEmail) ?>"></label>
+        <label>Phone number<input type="tel" name="phone" required maxlength="40" autocomplete="tel" inputmode="tel" placeholder="+234 800 000 0000" value="<?= e($formPhone) ?>"></label>
+        <label>Address<textarea name="address" required minlength="5" maxlength="255" rows="3" autocomplete="street-address" placeholder="Street, city, country"><?= e($formAddress) ?></textarea></label>
         <label>Message<textarea name="message" required minlength="10" rows="8" maxlength="2000"></textarea></label>
         <button class="btn solid" type="submit">Send message</button>
       </form>

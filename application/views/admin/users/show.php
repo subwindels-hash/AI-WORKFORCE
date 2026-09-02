@@ -15,12 +15,7 @@ $initial = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', (string) ($m
   <div class="page-actions">
     <a class="btn" href="/admin/users">Back to users</a>
     <?php if (!empty($canManage)): ?><a class="btn" href="/admin/users/<?= (int) $m['id'] ?>/edit">Edit</a><?php endif; ?>
-    <?php if (!empty($canImpersonate)): ?>
-      <form method="post" action="/admin/users/<?= (int) $m['id'] ?>/impersonate" onsubmit="return confirm('Sign in as this user? The action is recorded in the activity log.');">
-        <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
-        <button class="btn primary" type="submit">Login as User</button>
-      </form>
-    <?php endif; ?>
+    <?php $this->load->view('admin/partials/open_dashboard', ['target' => $m, 'csrfToken' => $csrfToken, 'label' => 'Open dashboard', 'class' => 'btn primary']); ?>
   </div>
 </div>
 
@@ -57,6 +52,32 @@ $initial = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', (string) ($m
         <tr><td class="dim">Roles</td><td><?php foreach ($roles as $role): ?><span class="badge b-violet"><?= e($role['name'] ?? $role['code']) ?></span> <?php endforeach; ?></td></tr>
       </tbody>
     </table>
+    <?php if (!empty($isSuperAdmin)): ?>
+      <div class="recovery-box" id="identity-recovery" style="margin-top:18px">
+        <h4 style="margin:0 0 8px">Identity &amp; recovery</h4>
+        <p class="dim" style="font-size:12px;margin:0 0 10px">Visible only to Super Admin. The PIN is assigned automatically and cannot be changed by the user. The account password is never displayed.</p>
+        <table class="tbl">
+          <tbody>
+            <tr>
+              <td class="dim">6-digit Identification Code</td>
+              <td class="mono"><b><?= e($m['user_uid'] ?? '') !== '' ? e($m['user_uid']) : 'Not set' ?></b></td>
+            </tr>
+            <tr>
+              <td class="dim">4-digit Security PIN</td>
+              <td class="mono"><b><?= e((string) ($m['security_pin'] ?? '')) !== '' ? e($m['security_pin']) : 'Not set' ?></b></td>
+            </tr>
+            <tr>
+              <td class="dim">Security question</td>
+              <td><?= e((string) ($m['security_question'] ?? '')) !== '' ? e($m['security_question']) : '<span class="dim">Not set</span>' ?></td>
+            </tr>
+            <tr>
+              <td class="dim">Security answer</td>
+              <td><?= e((string) ($m['security_answer'] ?? '')) !== '' ? e($m['security_answer']) : '<span class="dim">Not set</span>' ?></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    <?php endif; ?>
     <?php if (!empty($canManage)): ?>
       <div class="admin-actions" style="margin-top:16px">
         <?php if (!empty($m['active'])): ?>

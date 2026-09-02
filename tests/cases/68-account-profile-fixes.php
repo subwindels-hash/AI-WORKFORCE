@@ -7,7 +7,7 @@
 test('identity schema ensure exposes username, user_uid and profile_image', function () {
     $db = platform()->model->db;
     \AIWorkforce\IdentitySchema::ensure($db);
-    foreach (['username', 'user_uid', 'profile_image', 'email', 'password_hash'] as $col) {
+    foreach (['username', 'user_uid', 'profile_image', 'phone', 'address', 'security_pin', 'security_question', 'security_answer', 'email', 'password_hash'] as $col) {
         assert_true(\AIWorkforce\IdentitySchema::has($db, $col), "users.$col exists");
     }
 });

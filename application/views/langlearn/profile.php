@@ -1,8 +1,13 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed'); ?>
 <div class="page-head">
   <div>
-    <h2><?= e($language['name']) ?> <span class="dim"><?= e($language['native_name']) ?></span></h2>
-    <p>Progress from real activity only. <?= e(strtoupper($language['direction'])) ?> · <?= e($language['writing_system']) ?> · explanations in <?= e(strtoupper($profile['explanation_language'])) ?>.</p>
+    <h2><?= e($language['name'] ?? $profile['language_code']) ?> <span class="dim"><?= e($language['native_name'] ?? '') ?></span></h2>
+    <p>Progress from real activity only. <?= e(strtoupper($language['direction'] ?? 'ltr')) ?> · <?= e($language['writing_system'] ?? '') ?> · explanations in <?= e(strtoupper($profile['explanation_language'])) ?>.</p>
+  </div>
+  <div class="page-actions" style="flex-wrap:wrap">
+    <a class="btn primary" href="<?= e($continueHref ?? '/app/languages/d/' . (int) $profile['id']) ?>">Continue Learning</a>
+    <a class="btn" href="/app/languages/conv/<?= (int) $profile['id'] ?>">AI Conversation</a>
+    <a class="btn" href="/app/languages/d/<?= (int) $profile['id'] ?>">Daily Plan</a>
   </div>
 </div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
@@ -84,6 +89,23 @@
 </div>
 
 <div class="panel" style="margin-top:14px">
+  <h3>Practice</h3>
+  <div class="body" style="padding-top:12px">
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      <a class="btn small primary" href="<?= e($continueHref ?? '/app/languages/d/' . (int) $profile['id']) ?>">Start AI Lesson</a>
+      <a class="btn small" href="/app/languages/conv/<?= (int) $profile['id'] ?>">AI Conversation</a>
+      <a class="btn small" href="/app/languages/s/<?= (int) $profile['id'] ?>">Speaking Practice</a>
+      <a class="btn small" href="/app/languages/l/<?= (int) $profile['id'] ?>">Listening Practice</a>
+      <a class="btn small" href="/app/languages/v/<?= (int) $profile['id'] ?>">Vocabulary</a>
+      <a class="btn small" href="/app/languages/g/<?= (int) $profile['id'] ?>">Grammar</a>
+      <a class="btn small" href="/app/languages/w/<?= (int) $profile['id'] ?>">Writing Practice</a>
+      <a class="btn small" href="/app/languages/d/<?= (int) $profile['id'] ?>">Daily Plan</a>
+      <a class="btn small" href="/app/languages/h/<?= (int) $profile['id'] ?>">Progress</a>
+    </div>
+  </div>
+</div>
+
+<div class="panel" style="margin-top:14px">
   <h3>Learning path</h3>
   <div class="body" style="padding-top:12px">
     <?php if (empty($path['path'])): ?>
@@ -91,16 +113,6 @@
       <form method="post" action="/app/languages/p/<?= (int) $profile['id'] ?>/path/generate"><button class="btn primary">Generate learning path</button></form>
     <?php else: ?>
       <p class="dim" style="font-size:11px">From <?= e($path['path']['from_level']) ?> toward <?= e($path['path']['target_level']) ?> — modules unlock in order; each ends with a real checkpoint quiz drawn from the item bank.</p>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0">
-        <a class="btn small primary" href="/app/languages/d/<?= (int) $profile['id'] ?>">Today's plan</a>
-        <a class="btn small" href="/app/languages/conv/<?= (int) $profile['id'] ?>">AI conversation</a>
-        <a class="btn small" href="/app/languages/l/<?= (int) $profile['id'] ?>">Listening</a>
-        <a class="btn small" href="/app/languages/s/<?= (int) $profile['id'] ?>">Speaking</a>
-        <a class="btn small" href="/app/languages/v/<?= (int) $profile['id'] ?>">Vocabulary</a>
-        <a class="btn small" href="/app/languages/w/<?= (int) $profile['id'] ?>">Writing practice</a>
-        <a class="btn small" href="/app/languages/g/<?= (int) $profile['id'] ?>">Grammar</a>
-        <a class="btn small" href="/app/languages/h/<?= (int) $profile['id'] ?>">History</a>
-      </div>
       <table class="tbl" style="margin-top:8px">
         <thead><tr><th>#</th><th>Module</th><th>Focus</th><th>Status</th><th class="num"></th></tr></thead>
         <tbody>

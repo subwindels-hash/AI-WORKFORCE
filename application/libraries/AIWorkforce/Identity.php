@@ -26,8 +26,7 @@ class Identity
         $this->users->recordAuthEvent((int) $user['id'], 'LOGIN_SUCCEEDED');
         $this->users->updateUser((int) $user['id'], ['last_login_at' => gmdate('c')]);
         $user['last_login_at'] = gmdate('c');
-        unset($user['password_hash']);
-        return $user;
+        return IdentitySchema::stripSecrets($user);
     }
     /**
      * Rehydrate a session identity for a signed remember-me cookie. The
@@ -41,8 +40,7 @@ class Identity
         if (!$user || empty($user['active'])) return null;
         $user['permissions'] = $this->users->permissionsForUser($userId);
         $this->users->recordAuthEvent($userId, 'REMEMBER_RESTORED');
-        unset($user['password_hash']);
-        return $user;
+        return IdentitySchema::stripSecrets($user);
     }
 
     public function can(array $user, string $permission): bool

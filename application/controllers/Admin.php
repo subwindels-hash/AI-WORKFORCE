@@ -4,7 +4,8 @@ require_once APPPATH . 'core/App_Controller.php';
 
 /**
  * WINDELS AI WORKFORCE administrator portal.
- * Every action is authorized server-side. Passwords, hashes and secrets are never shown.
+ * Every action is authorized server-side. Passwords and hashes are never shown.
+ * The 4-digit Security PIN and security question are readable only by Super Admin.
  */
 class Admin extends App_Controller
 {
@@ -56,7 +57,7 @@ class Admin extends App_Controller
     public function user($id = 0)
     {
         $actor = $this->gate('admin.users.view'); if (!$actor) return;
-        $member = $this->findPublicUser((int) $id);
+        $member = $this->findPublicUser((int) $id, $this->isSuperAdmin($actor));
         if (!$member) { $this->flash('error', 'User not found.'); redirect('/admin/users'); return; }
         $data = $this->base('User ' . ($member['user_uid'] ?? $member['id']), 'users');
         $data['member'] = $member;
@@ -73,6 +74,7 @@ class Admin extends App_Controller
         if ($this->input->method(true) !== 'POST') {
             $data = $this->base('Create user', 'users');
             $data['roles'] = $this->portal->assignableRoles($actor);
+            $data['securityQuestions'] = \AIWorkforce\IdentitySchema::SECURITY_QUESTIONS;
             $this->render('admin/users/create', $data);
             return;
         }
@@ -93,17 +95,32 @@ class Admin extends App_Controller
             $this->flash('error', 'That username or email is already in use.');
             redirect('/admin/users/create'); return;
         }
+        $questionPosted = trim((string) $this->input->post('security_question'));
+        $recovery = null;
+        if ($questionPosted !== '') {
+            $recovery = \AIWorkforce\IdentitySchema::fromPostedQuestion(
+                (string) $this->input->post('security_question'),
+                (string) $this->input->post('security_question_custom'),
+                (string) $this->input->post('security_answer')
+            );
+            if (!$recovery) {
+                $this->flash('error', 'Enter a security question and an answer of at least 2 characters — or leave both blank.');
+                redirect('/admin/users/create'); return;
+            }
+        }
         $now = gmdate('c');
-        $new = $this->AIWorkforce_model->identity->createUser([
+        $payload = [
             'username' => $username, 'email' => $email,
             'password_hash' => password_hash($password, PASSWORD_DEFAULT),
             'display_name' => $username, 'active' => 1,
             'created_at' => $now, 'updated_at' => $now, 'last_login_at' => null,
-        ]);
+        ];
+        if ($recovery) $payload = array_merge($payload, $recovery);
+        $new = $this->AIWorkforce_model->identity->createUser($payload);
         $role = $this->AIWorkforce_model->identity->ensureRole($roleCode, ucwords(str_replace('_', ' ', $roleCode)));
         $this->AIWorkforce_model->identity->assignRole((int) $new['id'], $role);
         $this->portal->log($actor, 'USER_CREATED', 'ok', $this->portal->userTarget($new), ['role' => $roleCode], $this->ip());
-        $this->flash('notice', 'User account created. User ID ' . ($new['user_uid'] ?? '') . '. The temporary password is not stored and will not be shown again.');
+        $this->flash('notice', 'User account created. User ID ' . ($new['user_uid'] ?? '') . '. A 4-digit Security PIN was assigned automatically. The temporary password is not stored and will not be shown again.');
         redirect('/admin/users/' . (int) $new['id']);
     }
 
@@ -205,11 +222,15 @@ class Admin extends App_Controller
 
     public function impersonate($id = 0)
     {
+        if ($this->impersonator()) {
+            $this->flash('error', 'Return to your administrator account before opening another dashboard.');
+            redirect('/dashboard'); return;
+        }
         $actor = $this->gate('admin.users.impersonate'); if (!$actor) return;
         if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/users'); return; }
         $target = $this->AIWorkforce_model->identity->findUserById((int) $id);
         if (!$target) { $this->flash('error', 'User not found.'); redirect('/admin/users'); return; }
-        $public = $this->portal->publicUser($target);
+        $public = $this->portal->publicUser($target, false);
         $public['permissions'] = $this->AIWorkforce_model->identity->permissionsForUser((int) $id);
         $public['roles'] = $this->AIWorkforce_model->identity->rolesForUser((int) $id);
         if (!$this->canImpersonate($actor, $public)) {
@@ -225,6 +246,7 @@ class Admin extends App_Controller
             'impersonation_id' => $sessionId,
             'csrf_token' => bin2hex(random_bytes(32)),
         ]);
+        $this->flash('notice', 'You are viewing this account dashboard as an administrator. Use the banner to open the admin portal or return to your account.');
         redirect('/dashboard');
     }
 
@@ -244,7 +266,7 @@ class Admin extends App_Controller
             redirect('/admin/login'); return;
         }
         $fresh['permissions'] = $this->AIWorkforce_model->identity->permissionsForUser((int) $fresh['id']);
-        unset($fresh['password_hash']);
+        $fresh = \AIWorkforce\IdentitySchema::stripSecrets($fresh);
         $this->session->sess_regenerate(true);
         $this->session->unset_userdata(['impersonator', 'impersonation_id']);
         $this->session->set_userdata(['identity' => $fresh, 'csrf_token' => bin2hex(random_bytes(32))]);
@@ -703,11 +725,11 @@ class Admin extends App_Controller
         return false;
     }
 
-    private function findPublicUser(int $id): ?array
+    private function findPublicUser(int $id, bool $includeRecovery = false): ?array
     {
         $user = $this->AIWorkforce_model->identity->findUserById($id);
         if (!$user) return null;
-        $user = $this->portal->publicUser($user);
+        $user = $this->portal->publicUser($user, $includeRecovery);
         $user['permissions'] = $this->AIWorkforce_model->identity->permissionsForUser($id);
         $user['roles'] = $this->AIWorkforce_model->identity->rolesForUser($id);
         return $user;
@@ -766,7 +788,7 @@ class Admin extends App_Controller
     private function base(string $title, string $active): array
     {
         $state = $this->platform->state();
-        $identity = $this->currentUser();
+        $identity = $this->adminActor() ?: $this->currentUser();
         return [
             'title' => $title,
             'active' => $active,

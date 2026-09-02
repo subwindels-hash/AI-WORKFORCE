@@ -26,7 +26,12 @@
               <td><?= e($u['username'] ?? '') ?></td>
               <td class="dim"><?= e($u['email'] ?? '') ?></td>
               <td><span class="badge <?= !empty($u['active']) ? 'b-green' : 'b-gray' ?>"><?= !empty($u['active']) ? 'Active' : 'Suspended' ?></span></td>
-              <td><a class="btn small" href="/admin/users/<?= (int) $u['id'] ?>">Open</a></td>
+              <td>
+                <div class="admin-actions">
+                  <a class="btn small" href="/admin/users/<?= (int) $u['id'] ?>">View</a>
+                  <?php $this->load->view('admin/partials/open_dashboard', ['target' => $u, 'csrfToken' => $csrfToken]); ?>
+                </div>
+              </td>
             </tr>
           <?php endforeach; ?>
         </tbody>

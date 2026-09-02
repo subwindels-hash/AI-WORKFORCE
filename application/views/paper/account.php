@@ -147,7 +147,7 @@ $acc = $summary['account'];
             <input type="hidden" name="version" value="<?= e($strategies[0]['version'] ?? '') ?>">
             <label class="fld">Symbol <input class="sel" name="symbol" value="BTCUSDT"></label>
             <label class="fld">TF <select class="sel" name="timeframe"><option>1h</option><option>15m</option><option>4h</option><option>1d</option></select></label>
-            <input type="hidden" name="marketClass" value="crypto">
+            <p class="dim" style="font-size:10px;margin:0 0 8px">Market class is inferred from the symbol (AAPL→stock, SPY→etf, BTCUSDT→crypto). Yahoo equity data is DELAYED when reachable.</p>
           </div>
           <button class="btn" style="width:100%">Deploy to paper account</button>
         </form>

@@ -24,7 +24,7 @@
     <div class="body" style="padding-top:12px">
       <form method="post" action="/execution/propose" class="mono" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
         <input name="symbol" value="EURUSD" placeholder="SYMBOL" required>
-        <select name="marketClass"><?php foreach (['forex', 'crypto', 'stock', 'etf', 'commodity', 'future', 'index', 'bond'] as $c): ?><option><?= $c ?></option><?php endforeach; ?></select>
+        <select name="marketClass"><?php foreach (['forex', 'crypto', 'stock', 'etf', 'commodity', 'futures', 'options', 'indices', 'bonds'] as $c): ?><option><?= $c ?></option><?php endforeach; ?></select>
         <select name="side"><option>BUY</option><option>SELL</option></select>
         <select name="type"><option>MARKET</option><option>LIMIT</option></select>
         <input name="volume" value="1000" placeholder="volume (units/lots)" required>

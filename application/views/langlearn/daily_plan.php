@@ -12,6 +12,7 @@
         <div class="notice <?= !empty($b['done']) ? 'ok' : 'warnbox' ?>" style="margin:6px 0">
           <?= !empty($b['done']) ? '✓' : '○' ?> <b><?= e($b['title']) ?></b> <span class="dim">(<?= (int) $b['minutes'] ?> min)</span>
           <div class="dim" style="font-size:11px">why: <?= e($b['why']) ?></div>
+          <?php if (!empty($b['href'])): ?><div style="margin-top:6px"><a class="btn small" href="<?= e($b['href']) ?>">Open</a></div><?php endif; ?>
         </div>
       <?php endforeach; ?>
       <form method="post" action="/app/languages/d/<?= (int) $profileId ?>/regenerate"><button class="btn small">regenerate from current data</button></form>

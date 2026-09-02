@@ -12,6 +12,11 @@ CREATE TABLE IF NOT EXISTS users (
   username VARCHAR(64) NULL,
   user_uid CHAR(6) NULL,
   profile_image VARCHAR(255) NULL,
+  phone VARCHAR(40) NULL,
+  address VARCHAR(255) NULL,
+  security_pin CHAR(4) NULL,
+  security_question VARCHAR(255) NULL,
+  security_answer VARCHAR(255) NULL,
   INDEX idx_users_active (active),
   UNIQUE KEY uq_users_username (username),
   UNIQUE KEY uq_users_user_uid (user_uid)

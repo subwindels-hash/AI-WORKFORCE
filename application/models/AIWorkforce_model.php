@@ -32,6 +32,7 @@ class AIWorkforce_model extends CI_Model
         parent::__construct();
         $this->load->database();
         $db = $this->db;
+        \AIWorkforce\SchemaInstaller::ensure($db);
         \AIWorkforce\IdentitySchema::ensure($db);
 
         $this->strategies = new class($db) implements AIWorkforce\Persistence\StrategyRepository {
@@ -539,12 +540,19 @@ class AIWorkforce_model extends CI_Model
                     $user['username'] = $this->generateUniqueUsername((string) ($user['display_name'] ?? ''));
                 }
                 if (empty($user['user_uid'])) $user['user_uid'] = $this->generateUniqueUid();
+                $pin = \AIWorkforce\IdentitySchema::normalizePin((string) ($user['security_pin'] ?? ''));
+                $user['security_pin'] = \AIWorkforce\IdentitySchema::validPin($pin) ? $pin : \AIWorkforce\IdentitySchema::generatePin();
                 $user['profile_image'] = $user['profile_image'] ?? null;
-                $this->db->insert('users', $user); $user['id'] = (int) $this->db->insert_id(); return $user;
+                $allowed = ['email', 'password_hash', 'display_name', 'active', 'created_at', 'updated_at', 'last_login_at', 'username', 'user_uid', 'profile_image', 'phone', 'address', 'security_pin', 'security_question', 'security_answer'];
+                $row = [];
+                foreach ($allowed as $key) {
+                    if (array_key_exists($key, $user)) $row[$key] = $user[$key];
+                }
+                $this->db->insert('users', $row); $user['id'] = (int) $this->db->insert_id(); return $user;
             }
             public function updateUser(int $id, array $patch): void {
                 unset($patch['id'], $patch['user_uid']);
-                $allowed = ['email', 'password_hash', 'display_name', 'active', 'last_login_at', 'username', 'profile_image', 'updated_at'];
+                $allowed = ['email', 'password_hash', 'display_name', 'active', 'last_login_at', 'username', 'profile_image', 'phone', 'address', 'security_pin', 'security_question', 'security_answer', 'updated_at'];
                 $clean = [];
                 foreach ($allowed as $key) {
                     if (array_key_exists($key, $patch)) $clean[$key] = $patch[$key];

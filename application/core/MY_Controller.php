@@ -110,6 +110,19 @@ class MY_Controller extends CI_Controller
         return is_array($admin) && !empty($admin['id']) ? $admin : null;
     }
 
+    /**
+     * Administrator who is actually in control. Super Admin keeps full portal
+     * access while viewing another account's dashboard.
+     */
+    protected function adminActor(?array $user = null): ?array
+    {
+        $impersonator = $this->impersonator();
+        if ($impersonator && $this->isSuperAdmin($impersonator)) {
+            return $impersonator;
+        }
+        return $user ?? $this->currentUser();
+    }
+
     protected function requireLogin(): array
     {
         $user = $this->currentUser();
@@ -139,15 +152,16 @@ class MY_Controller extends CI_Controller
             redirect('/admin/login');
             exit;
         }
-        if ($this->impersonator()) {
+        $actor = $this->adminActor($user);
+        if ($this->impersonator() && !$this->isSuperAdmin($this->impersonator())) {
             redirect('/dashboard');
             exit;
         }
-        if (!$this->canAccessAdmin($user)) {
+        if (!$actor || !$this->canAccessAdmin($actor)) {
             redirect('/access-denied');
             exit;
         }
-        return $user;
+        return $actor;
     }
 
     /** Server-side permission gate for individual admin actions. */

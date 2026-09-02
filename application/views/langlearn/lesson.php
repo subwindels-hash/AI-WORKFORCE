@@ -1,10 +1,12 @@
-<?php defined('BASEPATH') or exit('No direct script access allowed'); 
+<?php defined('BASEPATH') or exit('No direct script access allowed');
+$lessonView = $lesson ?? $lessonView ?? null;
 $profile = $lessonView['module'] ?? null;
 $langCode = $profile['language_code'] ?? 'en';
 $locale = \AIWorkforce\LangLearn\Translator::LOCALES[$langCode] ?? 'en-GB';
 ?>
 <div class="page-head"><div><h2>Lesson</h2><p>Explanation, examples you can listen to, then practice. Completing the practice at 75% or more finishes the module.</p></div></div>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
+<?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 <?php if (!empty($lessonView)): $L = $lessonView['lesson']; ?>
   <div class="panel">
     <h3><?= e($L['title']) ?> <span class="badge b-sky"><?= e($locale) ?></span></h3>

@@ -66,7 +66,7 @@ $s = $stats ?? [];
         <div class="empty-state"><p>No user accounts have been created yet.</p></div>
       <?php else: ?>
         <table class="tbl">
-          <thead><tr><th>User ID</th><th>Username</th><th>Email</th><th>Status</th><th>Created</th></tr></thead>
+          <thead><tr><th>User ID</th><th>Username</th><th>Email</th><th>Status</th><th>Created</th><th></th></tr></thead>
           <tbody>
             <?php foreach ($recent as $u): ?>
               <tr>
@@ -75,6 +75,12 @@ $s = $stats ?? [];
                 <td class="dim"><?= e($u['email'] ?? '') ?></td>
                 <td><span class="badge <?= !empty($u['active']) ? 'b-green' : 'b-gray' ?>"><?= !empty($u['active']) ? 'Active' : 'Suspended' ?></span></td>
                 <td class="dim"><?= admin_dt($u['created_at'] ?? null) ?></td>
+                <td>
+                  <div class="admin-actions">
+                    <a class="btn small" href="/admin/users/<?= (int) $u['id'] ?>">View</a>
+                    <?php $this->load->view('admin/partials/open_dashboard', ['target' => $u, 'csrfToken' => $csrfToken]); ?>
+                  </div>
+                </td>
               </tr>
             <?php endforeach; ?>
           </tbody>

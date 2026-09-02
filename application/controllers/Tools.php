@@ -23,45 +23,10 @@ class Tools extends MY_Controller
 
     public function install()
     {
-        $this->load->helper('file');
-        $driver = $this->db->platform(); // mysql / sqlite
-        $schemaFile = APPPATH . 'database/schema.' . ($driver === 'sqlite' ? 'sqlite' : 'mysql') . '.sql';
-        if (!is_file($schemaFile)) {
-            fwrite(STDERR, "schema not found: {$schemaFile}\n");
-            exit(1);
-        }
-        $variant = $driver === 'sqlite' ? 'sqlite' : 'mysql';
-        $schemaFiles = [$schemaFile, APPPATH . 'database/sports_identity.' . $variant . '.sql', APPPATH . 'database/sports.' . $variant . '.sql', APPPATH . 'database/sports_decisions.' . $variant . '.sql', APPPATH . 'database/sports_results.' . $variant . '.sql', APPPATH . 'database/sports_intelligence.' . $variant . '.sql', APPPATH . 'database/lottery.' . $variant . '.sql', APPPATH . 'database/admin_portal.' . $variant . '.sql'];
-        foreach ($schemaFiles as $file) {
-            if (!is_file($file)) continue;
-            $sql = file_get_contents($file);
-            // Strip whole-line SQL comments before splitting: otherwise a leading
-            // comment can cause the first CREATE TABLE statement to be skipped.
-            $sql = preg_replace('/^\s*--[^\r\n]*[\r\n]?/m', '', $sql);
-            $statements = array_filter(array_map('trim', preg_split('/;\s*[\r\n]+/', $sql)));
-            foreach ($statements as $stmt) {
-                if ($stmt === '') continue;
-                $this->db->query($stmt);
-            }
-        }
-        // Spec §30: index upgrades for pre-existing sports tables (idempotent;
-        // CI query() returns false on duplicate-index errors — ignore safely).
-        require_once FCPATH . 'tools/sports_indexes.php';
-        foreach ([
-            ['idx_sports_odds_provider', 'sports_odds', 'provider_id, observed_at'],
-            ['idx_sports_matches_provider_kickoff', 'sports_matches', 'provider_id, kickoff_at'],
-            ['idx_sports_predictions_market', 'sports_predictions', 'market, created_at'],
-            ['idx_sports_selections_market', 'sports_ticket_selections', 'market, selection'],
-            ['idx_sports_selections_match', 'sports_ticket_selections', 'match_id'],
-            ['idx_sports_predictions_created', 'sports_predictions', 'created_at'],
-            ['idx_sports_health_provider', 'sports_provider_health', 'provider_id, observed_at'],
-        ] as [$name, $table, $cols]) {
-            $this->db->query($variant === 'sqlite'
-                ? "CREATE INDEX IF NOT EXISTS {$name} ON {$table} ({$cols})"
-                : "CREATE INDEX {$name} ON {$table} ({$cols})");
-        }
+        // Same modules, expected tables, and upgrades as php tools/install.php.
+        \AIWorkforce\SchemaInstaller::installCi($this->db);
         $this->seedAccessControls();
-        echo 'OK — schemas installed and RBAC defaults seeded on driver "' . $driver . "\".\n";
+        echo 'OK — schemas installed and RBAC defaults seeded on driver "' . $this->db->platform() . "\".\n";
     }
 
     /** CLI only: creates the initial super-admin from environment values. */

@@ -8,7 +8,30 @@ if (!function_exists('admin_can')) {
     function admin_can(string $permission): bool {
         $ci = get_instance();
         $user = $ci->session->userdata('identity');
+        $impersonator = $ci->session->userdata('impersonator');
+        if (is_array($impersonator) && !empty($impersonator['id']) && $ci->platform->identity->can($impersonator, 'system.super_admin')) {
+            $user = $impersonator;
+        }
         return is_array($user) && $ci->platform->identity->can($user, $permission);
+    }
+}
+if (!function_exists('admin_can_open_dashboard')) {
+    function admin_can_open_dashboard(array $target): bool {
+        $ci = get_instance();
+        if (is_array($ci->session->userdata('impersonator')) && !empty($ci->session->userdata('impersonator')['id'])) {
+            return false;
+        }
+        $actor = $ci->session->userdata('identity');
+        if (!is_array($actor) || empty($actor['id'])) return false;
+        if ((int) $actor['id'] === (int) ($target['id'] ?? 0)) return false;
+        if (empty($target['active'])) return false;
+        if (!$ci->platform->identity->can($actor, 'admin.users.impersonate')) return false;
+        if ($ci->platform->identity->can($actor, 'system.super_admin')) return true;
+        $codes = array_column($target['roles'] ?? [], 'code');
+        foreach (['super_admin', 'admin', 'support_admin'] as $code) {
+            if (in_array($code, $codes, true)) return false;
+        }
+        return true;
     }
 }
 if (!function_exists('admin_dt')) {
@@ -41,6 +64,7 @@ $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
 </head>
 <body class="app-shell admin-shell">
 <?php $this->load->view('partials/announcement_bar'); ?>
+<?php $this->load->view('partials/impersonation_banner'); ?>
 <aside class="sidebar" id="app-sidebar" aria-label="Administrator navigation">
   <a class="sidebar-brand" href="/admin">
     <img src="/assets/images/windels-mark.png" alt="<?= e($product) ?>" onerror="this.onerror=null;this.src='/assets/images/ai_workforce-mark.png'">
