@@ -31,6 +31,22 @@ class ProviderManager
         $this->onFallback = $fn;
     }
 
+    /**
+     * Drop every in-memory provider plus the candle/quote/health caches and
+     * the failure log. Used by Platform::refreshMarketDataProviders() so a
+     * provider that was just connected and enabled is re-probed from scratch
+     * instead of inheriting a stale DOWN/DEGRADED verdict from before it was
+     * reachable.
+     */
+    public function reset(): void
+    {
+        $this->providers = [];
+        $this->candleCache = [];
+        $this->quoteCache = [];
+        $this->healthCache = [];
+        $this->failureLog = [];
+    }
+
     /** @return MarketDataProvider[] */
     public function listProviders(): array
     {

@@ -18,7 +18,7 @@ class Tools extends MY_Controller
 
     public function index()
     {
-        echo "AI Workforce tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n  php index.php tools cron              — scheduled operations: portfolio risk scan, broker transitions, proposal expiry\n  php index.php tools sports-cron [job] — sports scheduled jobs (fixtures|odds|results|quality|ticket|settlement|performance|monitoring|cleanup)\n  php index.php tools lottery-cron [job] — lottery scheduled jobs (sync|health|statistics|systems|tickets|backtests|cleanup)\n";
+        echo "AI Workforce tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n  php index.php tools marketdata        — market-data connectivity report (add --activate to go live, --probe to fetch real bars)\n  php index.php tools cron              — scheduled operations: portfolio risk scan, broker transitions, proposal expiry\n  php index.php tools sports-cron [job] — sports scheduled jobs (fixtures|odds|results|quality|ticket|settlement|performance|monitoring|cleanup)\n  php index.php tools lottery-cron [job] — lottery scheduled jobs (sync|health|statistics|systems|tickets|backtests|cleanup)\n";
     }
 
     public function install()
@@ -126,6 +126,109 @@ class Tools extends MY_Controller
             $summary = $service->runAll();
         }
         echo json_encode($summary, JSON_UNESCAPED_SLASHES), "\n";
+    }
+
+    /**
+     * Market-data connectivity report + "make it live" switch.
+     *
+     *   php index.php tools marketdata              — report only (no changes)
+     *   php index.php tools marketdata --activate   — enable the keyless public
+     *                                                 feeds that are connected
+     *                                                 but not yet serving
+     *   php index.php tools marketdata --probe      — also fetch real bars and
+     *                                                 report LIVE/SYNTHETIC per
+     *                                                 market class
+     *
+     * Safe to run any time: report mode changes nothing, and --activate only
+     * promotes a public no-key feed (Binance / Frankfurter) that an operator
+     * already saved in Admin → API. It never enables custom_http, a licensed
+     * feed or anything that needs a credential, and never touches a service
+     * that is already live.
+     */
+    public function marketdata()
+    {
+        $argv = $_SERVER['argv'] ?? [];
+        $flags = array_values(array_filter(array_slice($argv, 3), fn($a) => str_starts_with((string) $a, '--')));
+        $activate = in_array('--activate', $flags, true);
+        $probe = in_array('--probe', $flags, true) || $activate;
+
+        $db = $this->AIWorkforce_model->db;
+        \AIWorkforce\ApiProviders::ensureSchema($db);
+
+        if (getenv('AI_WORKFORCE_DISABLE_REAL_PROVIDERS') === '1') {
+            fwrite(STDERR, "AI_WORKFORCE_DISABLE_REAL_PROVIDERS=1 — every market-data call is forced onto the labelled SIMULATION provider. Unset it to go live.\n");
+        }
+
+        $services = [];
+        $activated = [];
+        foreach (\AIWorkforce\ApiProviders::MARKET_DATA_SERVICES as $service) {
+            $before = \AIWorkforce\ApiProviders::serviceState($db, $service);
+            $action = null;
+            if ($activate && !$before['live']) {
+                $action = \AIWorkforce\ApiProviders::activateKeylessFeed($db, $service);
+                if ($action['ok'] && $action['action'] === 'activated') {
+                    $this->AIWorkforce_model->audit->emit(
+                        'MARKET_DATA_ACTIVATED',
+                        sprintf('%s switched to LIVE from the CLI (%s)', $before['label'], $action['driver'] ?? ''),
+                        ['service' => $service, 'providerId' => $action['id'] ?? null, 'driver' => $action['driver'] ?? null],
+                        'system'
+                    );
+                }
+            }
+            $after = $activate ? \AIWorkforce\ApiProviders::serviceState($db, $service) : $before;
+            if ($action) $activated[$service] = $action;
+            $services[$service] = $after;
+        }
+
+        // Rebuild the chain in this process so the report reflects the change.
+        $registry = $activate ? $this->platform->refreshMarketDataProviders() : null;
+
+        $health = [];
+        foreach ($this->platform->providers->getAllHealth(true) as $h) {
+            if (!empty($h['synthetic'])) continue; // the fallback is not a connection
+            $health[] = [
+                'name' => $h['name'] ?? '?',
+                'status' => $h['status'] ?? '?',
+                'latencyMs' => $h['latencyMs'] ?? null,
+                'detail' => $h['detail'] ?? ($h['lastError'] ?? null),
+            ];
+        }
+
+        $live = [];
+        if ($probe) {
+            foreach ([['crypto', 'BTCUSDT', '1h'], ['forex', 'EURUSD', '1d'], ['stock', 'AAPL', '1d']] as [$class, $symbol, $tf]) {
+                try {
+                    $series = $this->platform->providers->getCandleSeries($symbol, $class, $tf, 60);
+                    $p = $series['provenance'];
+                    $reason = !empty($p['synthetic']) ? 'SYNTHETIC'
+                        : (!empty($p['stale']) ? 'STALE' : (!empty($p['delayed']) ? 'DELAYED' : 'LIVE'));
+                    $last = count($series['candles']) ? end($series['candles']) : null;
+                    $live[$class] = [
+                        'symbol' => $symbol, 'timeframe' => $tf, 'live' => $reason === 'LIVE', 'reason' => $reason,
+                        'source' => $p['source'], 'bars' => count($series['candles']),
+                        'lastClose' => $last ? (float) $last['close'] : null,
+                        'barTime' => $last ? gmdate('c', (int) ($last['timestamp'] / 1000)) : null,
+                        'fallbackChain' => $p['fallbackChain'] ?? [],
+                    ];
+                } catch (Throwable $e) {
+                    $live[$class] = ['symbol' => $symbol, 'timeframe' => $tf, 'live' => false, 'reason' => 'NO_PROVIDER', 'error' => $e->getMessage()];
+                }
+            }
+        }
+
+        $anyLive = false;
+        foreach ($live as $v) if (!empty($v['live'])) $anyLive = true;
+
+        echo json_encode([
+            'ranAt' => gmdate('c'),
+            'realProvidersAllowed' => getenv('AI_WORKFORCE_DISABLE_REAL_PROVIDERS') !== '1',
+            'activated' => $activated,
+            'registry' => $registry,
+            'services' => $services,
+            'providerHealth' => $health,
+            'live' => $live ?: null,
+            'marketDataLive' => $probe ? $anyLive : null,
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), "\n";
     }
 
     public function tests()

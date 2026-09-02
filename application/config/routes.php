@@ -191,6 +191,8 @@ $route['api/events/(:num)'] = 'api_system/events/$1';
 $route['api/market-data/candles'] = 'api_marketdata/candles';
 $route['api/market-data/quote'] = 'api_marketdata/quote';
 $route['api/market-data/providers'] = 'api_marketdata/providers';
+$route['api/market-data/live'] = 'api_marketdata/live';
+$route['api/market-data/refresh'] = 'api_marketdata/refresh';
 
 $route['api/analysis/run'] = 'api_analysis/run';
 $route['api/analysis/history'] = 'api_analysis/history';

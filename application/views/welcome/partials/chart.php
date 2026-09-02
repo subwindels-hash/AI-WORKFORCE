@@ -44,6 +44,34 @@ $line = function (array $series) use ($x, $y, $offset, $n) {
     foreach ($series as $i => $v) { if ($v !== null) $pts[] = sprintf('%.1f,%.1f', $x($i), $y($v)); }
     return implode(' ', $pts);
 };
+
+// Provenance drives the badge. LIVE requires a real (non-synthetic), fresh,
+// non-delayed feed — exactly the rule the live API endpoint applies, so the
+// first paint and the streamed updates can never disagree.
+$prov = $run['provenance'] ?? [];
+$isSynthetic = !empty($prov['synthetic']);
+$isStale = !empty($prov['stale']);
+$isDelayed = !empty($prov['delayed']);
+$liveReason = $isSynthetic ? 'SYNTHETIC' : ($isStale ? 'STALE' : ($isDelayed ? 'DELAYED' : 'LIVE'));
+$liveBadgeClass = $liveReason === 'LIVE' ? 'b-green' : ($liveReason === 'SYNTHETIC' ? 'b-red' : 'b-gray');
+$liveBadgeText = $liveReason === 'SYNTHETIC' ? 'SIMULATION' : $liveReason;
+
+// Support/resistance + setup overlays are a snapshot of THIS analysis run, not
+// tick data. They are handed to the live renderer so switching symbol or
+// timeframe keeps the same visual grammar instead of losing the structure.
+$overlaysJson = json_encode([
+    'support' => array_values(array_map('floatval', $support)),
+    'resistance' => array_values(array_map('floatval', $resistance)),
+    'setup' => $setup ? [
+        'action' => $setup['action'] ?? null,
+        'stopLoss' => isset($setup['stopLoss']) ? (float) $setup['stopLoss'] : null,
+        'entry' => [
+            'min' => isset($setup['entry']['min']) ? (float) $setup['entry']['min'] : null,
+            'max' => isset($setup['entry']['max']) ? (float) $setup['entry']['max'] : null,
+        ],
+        'takeProfit' => array_values(array_map('floatval', (array) ($setup['takeProfit'] ?? []))),
+    ] : null,
+], JSON_UNESCAPED_SLASHES);
 ?>
 <div class="panel" style="margin-bottom:12px">
   <h3><?= e($run['symbol']) ?> · <?= e($run['timeframe']) ?> — candles · EMA · structure · setup</h3>
@@ -80,9 +108,27 @@ $line = function (array $series) use ($x, $y, $offset, $n) {
       <polyline points="<?= $line($ema20) ?>" fill="none" stroke="#fbbf24" stroke-width="1.3" opacity="0.9"><title>EMA20</title></polyline>
       <polyline points="<?= $line($ema50) ?>" fill="none" stroke="#a78bfa" stroke-width="1.3" opacity="0.9"><title>EMA50</title></polyline>
     </svg>
-    <div class="dim" style="font-size:10px;display:flex;gap:14px">
+    <div class="dim" style="font-size:10px;display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+      <span class="badge <?= $liveBadgeClass ?>" id="chart-live-badge"><?= e($liveBadgeText) ?></span>
       <span>— EMA20</span><span>— EMA50</span><span>— support/resistance (dashed)</span><?php if ($setup): ?><span>entry zone · SL · TP ladder</span><?php endif; ?>
-      <span style="margin-left:auto"><?= count($visible) ?> of <?= count($candles) ?> bars · source: <?= e($run['provenance']['source']) ?><?= $run['provenance']['synthetic'] ? ' (SYNTHETIC)' : '' ?></span>
+      <span style="margin-left:auto"><?= count($visible) ?> of <?= count($candles) ?> bars · source: <?= e($prov['source'] ?? 'none') ?><?= $isSynthetic ? ' (SYNTHETIC)' : '' ?></span>
+    </div>
+
+    <?php /*
+      Live stream mount. The server SVG above stays as the first paint (works
+      with JS off and for crawlers); market-chart.js takes over this mount to
+      poll /api/market-data/live and redraw with real bars. Auto-start only
+      when this run is already on a real, fresh, non-delayed feed.
+    */ ?>
+    <div class="livechart"
+         data-live-chart
+         data-symbol="<?= e($run['symbol']) ?>"
+         data-timeframe="<?= e($run['timeframe']) ?>"
+         data-market-class="<?= e($run['request']['marketClass'] ?? '') ?>"
+         data-limit="200"
+         data-autostart="<?= $liveReason === 'LIVE' ? '1' : '0' ?>"
+         data-overlays="<?= e((string) $overlaysJson) ?>">
+      <noscript><div class="dim" style="font-size:11px">Live refresh needs JavaScript — the chart above is the latest server-rendered snapshot.</div></noscript>
     </div>
   </div>
 </div>

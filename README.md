@@ -43,6 +43,8 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **MySQL / MariaDB** persistence — canonical schema + mysqli config (`application/database/schema.mysql.sql`) | **IMPLEMENTED** |
 | Market-data abstraction (health checks, retry, timeout, circuit breaker, cache, fallback, provenance) | **TESTED** |
 | Binance + Frankfurter/ECB real providers; labeled synthetic demo provider | **TESTED** |
+| **Live market data after connecting** (`tools marketdata --activate`, `/api/market-data/{live,refresh}`, in-process provider refresh) | **TESTED** |
+| **Live streaming candlestick chart** (polls real bars; LIVE / SIMULATION / STALE / DELAYED badge earned from provenance, never assumed) | **TESTED** |
 | Multi-agent analysis (technical, market-structure, forex, crypto, sentiment, consensus) | **TESTED** |
 | Regime detection + trade setup generator + Risk Engine (independent veto, actual-volume checks) | **TESTED** |
 | Strategy framework: 4 built-ins, evidence-gated lifecycle; **live APPROVED gate requires ≥10 paper trades with PF>1** | **TESTED** |
@@ -61,7 +63,7 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **Lottery Intelligence (EuroMillions)**: rule engine, validated idempotent ingestion (verified draws never silently overwritten), frequency/gap/hot-cold/distribution/pair statistics, per-line combination analyzer, 5-mode AI combination generator with lock/exclude + AI decision reports, diversification engine, system builder (C(N,5) combinatorics), user-scoped ticket builder + saved tickets, backtesting (Strategy Lab) with mandatory random baseline + same-period strategy comparison, model versioning, separated performance overview, RBAC (lottery.view/manage), idempotent lottery-cron | **TESTED** (admin controls/UI/security-E2E next; official feeds PLANNED) |
 | MT4 / crypto-exchange / stock-broker connectors | **PLANNED** (added one at a time after MT5 is verified) |
 
-**351 automated tests** run through the real CodeIgniter stack
+**358 automated tests** run through the real CodeIgniter stack
 (`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
 sandbox — see below), plus 9 contract tests for the Python bridge
 (`python-services/mt5-bridge/.venv/bin/python -m pytest test_bridge.py`).
@@ -506,13 +508,56 @@ To **demo** the full chain, Broker Center has a *Simulated MT5 bridge* toggle:
   post-trade portfolio snapshot. SEMI_AUTONOMOUS still refuses without an
   APPROVED (paper-proven) strategy — by design.
 
+### Live market data + the live chart (going live after connecting)
+
+Connecting a provider in **Admin → API** is not always enough on its own. Once a
+row exists for `crypto_market` or `forex_market`, `ApiProviders::serviceEnabled()`
+stops defaulting to `true` and requires an **enabled** row — so a provider saved
+with the *Enable* box unticked silently drops the live feed back to the labelled
+synthetic provider. Three things close that gap:
+
+| Switch | What it does |
+|---|---|
+| `php index.php tools marketdata` | Report only. Shows `configured` vs `live` per market-data service, real-provider health, and (with `--probe`) fetches real bars and prints `LIVE` / `DELAYED` / `STALE` / `SYNTHETIC` per market class. |
+| `php index.php tools marketdata --activate` | Promotes the **keyless public** feed (Binance / Frankfurter) an operator already saved: `enabled=1`, `role=primary`, audited as `MARKET_DATA_ACTIVATED`, then re-probes. Never enables `custom_http`, a licensed feed, anything needing a credential, or a service that is already live. |
+| **Go live** button on the chart | Calls `GET /api/market-data/refresh`, which runs `Platform::refreshMarketDataProviders()` and reports what is actually serving — then starts streaming. |
+
+`GET /api/market-data/live?symbol=&timeframe=&limit=` is the chart feed:
+candles + quote + a `live` verdict + `refreshSeconds`. `GET
+/api/market-data/refresh` rebuilds the provider chain in-process, so a newly
+enabled feed is picked up without waiting for the next page load.
+
+`assets/js/market-chart.js` streams that endpoint and redraws the same SVG the
+server renders in `welcome/partials/chart.php` — candles, volume, EMA20/EMA50
+and the support/resistance + trade-setup overlays carried over from the analysis
+run. The server-rendered chart remains the first paint (works with JS off).
+
+**The LIVE badge is earned, never assumed.** Both the server partial and the API
+derive it from the same rule — `LIVE` requires provenance that is
+non-synthetic **and** fresh **and** undelayed; otherwise the badge reads
+`SIMULATION`, `STALE` or `DELAYED`. The client honours that verdict:
+
+- synthetic data renders with a **SIMULATION** badge and auto-refresh stays
+  **off** — fake prices are never animated and presented as live;
+- polling pauses on a hidden tab and stops after 4 consecutive failures,
+  keeping the last real error visible instead of a bare "stopped";
+- the poll cadence mirrors the server-side candle cache TTL (25% of the bar
+  period, clamped 15–120s), so the browser never polls faster than fresh data
+  can exist;
+- a refused quote (e.g. Frankfurter serves `1d` reference rates only) degrades
+  to candles instead of failing the whole feed.
+
+Note that `AI_WORKFORCE_DISABLE_REAL_PROVIDERS=1` forces every market-data call
+onto the simulated provider; `tools marketdata` says so explicitly on stderr
+rather than reporting a mysterious all-synthetic registry.
+
 ## API surface
 
 `/api/auth/{login,me,logout}` · `/api/notifications[/read-all|/:id/read]`
 `/api/system/{status,features}` · `/api/events` · `/api/trading/{kill-switch,mode,synthetic-paper}`
 `/api/trading/limits[/update]` · `/api/trading/propose` · `/api/trading/execute` · `/api/trading/:id/{approve,route}`
 `/api/execution/{preflight,proposals,executions}` · `/api/portfolio/risk-scan` · `/api/brokers` · `/api/brokers/mt5/{account,quote}`
-`/api/market-data/{candles,quote,providers}` · `/api/analysis/{run,history}` · `/api/agents/consensus`
+`/api/market-data/{candles,quote,providers,live,refresh}` · `/api/analysis/{run,history}` · `/api/agents/consensus`
 `/api/strategies[/:id[/status]]` · `/api/backtesting/{run,results[/:id]}`
 `/api/accounts[/create|/:id|/:id/order|/:id/positions|/:id/positions/:pid/close|/:id/tick|/:id/deploy|/:id/deployments]`
 `/api/journal[/manual]` · `/api/analytics/{summary,confidence-calibration}` · `/api/risk/limits[/update]`
