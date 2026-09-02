@@ -32,6 +32,7 @@ $route['account'] = 'auth/account';
 $route['account/username'] = 'auth/update_username';
 $route['account/email'] = 'auth/update_email';
 $route['account/contact'] = 'auth/update_contact';
+$route['account/recovery'] = 'auth/update_recovery';
 $route['account/password'] = 'auth/change_password';
 $route['account/avatar'] = 'auth/upload_avatar';
 $route['account/avatar/remove'] = 'auth/remove_avatar';

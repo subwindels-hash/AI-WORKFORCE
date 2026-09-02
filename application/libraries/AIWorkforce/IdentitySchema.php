@@ -5,13 +5,21 @@ namespace AIWorkforce;
  * Ensures the account-profile columns exist on every request.
  *
  * production.sql historically created `users` without username / user_uid /
- * profile_image / phone / address. cPanel imports that file and never runs
- * the installer, so UPDATE users SET username=… fatals (HTTP 500) and
- * avatar / contact fields cannot be stored. This upgrade is idempotent and
- * must not break existing rows.
+ * profile_image / phone / address / recovery fields. cPanel imports that
+ * file and never runs the installer, so UPDATE users SET username=… fatals
+ * (HTTP 500) and avatar / contact / PIN fields cannot be stored. This
+ * upgrade is idempotent and must not break existing rows.
  */
 final class IdentitySchema
 {
+    public const SECURITY_QUESTIONS = [
+        'What city were you born in?',
+        'What is your mother\'s maiden name?',
+        'What was the name of your first school?',
+        'What is the name of your first pet?',
+        'What is your favorite teacher\'s name?',
+    ];
+
     private static bool $done = false;
 
     public static function ensure(object $db): void
@@ -32,6 +40,9 @@ final class IdentitySchema
             'profile_image' => $sqlite ? 'TEXT' : 'VARCHAR(255) NULL',
             'phone' => $sqlite ? 'TEXT' : 'VARCHAR(40) NULL',
             'address' => $sqlite ? 'TEXT' : 'VARCHAR(255) NULL',
+            'security_pin' => $sqlite ? 'TEXT' : 'CHAR(4) NULL',
+            'security_question' => $sqlite ? 'TEXT' : 'VARCHAR(255) NULL',
+            'security_answer' => $sqlite ? 'TEXT' : 'VARCHAR(255) NULL',
         ];
         $added = false;
         foreach ($alters as $col => $def) {
@@ -92,6 +103,76 @@ final class IdentitySchema
         $address = self::normalizeAddress($address);
         $len = function_exists('mb_strlen') ? mb_strlen($address) : strlen($address);
         return $len >= 5 && $len <= 255;
+    }
+
+    /** Exactly four digits. Spaces and punctuation are stripped first. */
+    public static function normalizePin(string $pin): string
+    {
+        return preg_replace('/\D/', '', $pin) ?? '';
+    }
+
+    public static function validPin(string $pin): bool
+    {
+        return (bool) preg_match('/^\d{4}$/', self::normalizePin($pin));
+    }
+
+    public static function normalizeQuestion(string $question): string
+    {
+        $question = trim(preg_replace('/\s+/', ' ', $question) ?? $question);
+        return function_exists('mb_substr') ? mb_substr($question, 0, 255) : substr($question, 0, 255);
+    }
+
+    public static function validQuestion(string $question): bool
+    {
+        $question = self::normalizeQuestion($question);
+        $len = function_exists('mb_strlen') ? mb_strlen($question) : strlen($question);
+        return $len >= 8 && $len <= 255;
+    }
+
+    public static function normalizeAnswer(string $answer): string
+    {
+        $answer = trim(preg_replace('/\s+/', ' ', $answer) ?? $answer);
+        return function_exists('mb_substr') ? mb_substr($answer, 0, 120) : substr($answer, 0, 120);
+    }
+
+    public static function validAnswer(string $answer): bool
+    {
+        $answer = self::normalizeAnswer($answer);
+        $len = function_exists('mb_strlen') ? mb_strlen($answer) : strlen($answer);
+        return $len >= 2 && $len <= 120;
+    }
+
+    /**
+     * Build a persisted recovery row from signup / account form fields.
+     * Returns null when any field is missing or invalid.
+     *
+     * @return array{security_pin:string,security_question:string,security_answer:string}|null
+     */
+    public static function fromPostedRecovery(string $pin, string $question, string $customQuestion, string $answer): ?array
+    {
+        if ($question === '__custom__') $question = $customQuestion;
+        $row = [
+            'security_pin' => self::normalizePin($pin),
+            'security_question' => self::normalizeQuestion($question),
+            'security_answer' => self::normalizeAnswer($answer),
+        ];
+        if (!self::validPin($row['security_pin']) || !self::validQuestion($row['security_question']) || !self::validAnswer($row['security_answer'])) {
+            return null;
+        }
+        return $row;
+    }
+
+    /**
+     * Drop password hashes always. Recovery PIN / question / answer stay only
+     * when Super Admin is reading a user profile.
+     */
+    public static function stripSecrets(array $user, bool $keepRecovery = false): array
+    {
+        unset($user['password_hash']);
+        if (!$keepRecovery) {
+            unset($user['security_pin'], $user['security_question'], $user['security_answer']);
+        }
+        return $user;
     }
 
     private static function isSqlite(object $db): bool

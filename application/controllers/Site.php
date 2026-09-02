@@ -39,7 +39,7 @@ class Site extends MY_Controller
                 $fresh = $this->AIWorkforce_model->identity->findUserById((int) $signedIn['id']);
                 if ($fresh) {
                     $fresh['permissions'] = $signedIn['permissions'] ?? $this->AIWorkforce_model->identity->permissionsForUser((int) $signedIn['id']);
-                    unset($fresh['password_hash']);
+                    $fresh = \AIWorkforce\IdentitySchema::stripSecrets($fresh);
                     $this->session->set_userdata(['identity' => $fresh]);
                 }
             } catch (Throwable $e) {

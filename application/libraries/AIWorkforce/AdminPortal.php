@@ -220,10 +220,13 @@ class AdminPortal
         $this->log($admin, 'IMPERSONATION_ENDED', 'ok', $this->userTarget($target), ['sessionId' => $sessionId], $ip);
     }
 
-    public function publicUser(array $user): array
+    /**
+     * Public admin view of a user. Password hashes are always removed.
+     * Recovery PIN / question / answer are included only for Super Admin.
+     */
+    public function publicUser(array $user, bool $includeRecovery = false): array
     {
-        unset($user['password_hash']);
-        return $user;
+        return IdentitySchema::stripSecrets($user, $includeRecovery);
     }
 
     public function label(array $user): string

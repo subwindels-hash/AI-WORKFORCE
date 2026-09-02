@@ -212,4 +212,8 @@ test('admin user views never expose a password field for the existing secret', f
     assert_false(str_contains($show, 'name="current_password"'));
     assert_false(str_contains($edit, 'password_hash'));
     assert_contains('current password is never displayed', $edit);
+    assert_contains('Identity &amp; recovery', $show);
+    assert_contains('4-digit Security PIN', $show);
+    assert_contains('6-digit Identification Code', $show);
+    assert_contains('isSuperAdmin', $show);
 });

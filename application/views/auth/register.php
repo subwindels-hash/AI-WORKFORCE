@@ -20,7 +20,7 @@
       <div class="auth-visual-copy">
         <p class="eyebrow">WINDELS AI WORKFORCE</p>
         <h2>One account, a full AI workforce</h2>
-        <p>Register once and get a unique six-digit User ID. Sign in later with your username, email or User ID.</p>
+        <p>Register once and get a unique six-digit User ID plus a 4-digit Security PIN. Sign in later with your username, email or User ID.</p>
       </div>
     </section>
 
@@ -91,6 +91,45 @@
           </span>
         </label>
 
+        <label class="auth-field">
+          <span>4-digit Security PIN</span>
+          <span class="auth-control has-toggle">
+            <input type="password" name="security_pin" id="reg-pin" required maxlength="4" minlength="4" inputmode="numeric" pattern="[0-9]{4}" autocomplete="off" placeholder="••••">
+            <button type="button" class="pw-toggle" data-toggle="reg-pin" aria-label="Show PIN" title="Show PIN">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/></svg>
+            </button>
+          </span>
+          <span class="auth-hint">Exactly four digits. Super Admin can read this PIN from the dashboard for account recovery.</span>
+        </label>
+
+        <label class="auth-field">
+          <span>Security question</span>
+          <span class="auth-control">
+            <select name="security_question" id="reg-question" required>
+              <option value="">Choose a question</option>
+              <?php foreach (($securityQuestions ?? []) as $q): ?>
+                <option value="<?= e($q) ?>"><?= e($q) ?></option>
+              <?php endforeach; ?>
+              <option value="__custom__">Write your own question</option>
+            </select>
+          </span>
+        </label>
+
+        <label class="auth-field" id="reg-question-custom-wrap" hidden>
+          <span>Your security question</span>
+          <span class="auth-control">
+            <input name="security_question_custom" id="reg-question-custom" maxlength="255" minlength="8" placeholder="At least 8 characters">
+          </span>
+        </label>
+
+        <label class="auth-field">
+          <span>Security answer</span>
+          <span class="auth-control">
+            <input name="security_answer" id="reg-answer" required maxlength="120" minlength="2" autocomplete="off" placeholder="Your answer">
+          </span>
+          <span class="auth-hint">At least 2 characters. Super Admin can read the question and answer from the dashboard.</span>
+        </label>
+
         <label class="auth-check">
           <input type="checkbox" name="terms" id="reg-terms" value="1" required>
           <span>I agree to the Terms and Privacy Policy</span>
@@ -119,10 +158,22 @@
         var input = document.getElementById(btn.getAttribute('data-toggle'));
         var show = input.type === 'password';
         input.type = show ? 'text' : 'password';
-        btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
-        btn.title = show ? 'Hide password' : 'Show password';
+        var noun = input.id === 'reg-pin' ? 'PIN' : 'password';
+        btn.setAttribute('aria-label', show ? 'Hide ' + noun : 'Show ' + noun);
+        btn.title = show ? 'Hide ' + noun : 'Show ' + noun;
       });
     });
+
+    var question = document.getElementById('reg-question');
+    var customWrap = document.getElementById('reg-question-custom-wrap');
+    var customInput = document.getElementById('reg-question-custom');
+    function syncCustomQuestion() {
+      var custom = question.value === '__custom__';
+      customWrap.hidden = !custom;
+      customInput.required = custom;
+    }
+    question.addEventListener('change', syncCustomQuestion);
+    syncCustomQuestion();
 
     function fail(message, focusEl) {
       inlineError.hidden = false;
@@ -138,16 +189,25 @@
       var address = document.getElementById('reg-address');
       var password = document.getElementById('reg-password');
       var confirm = document.getElementById('reg-confirm');
+      var pin = document.getElementById('reg-pin');
+      var q = document.getElementById('reg-question');
+      var customQ = document.getElementById('reg-question-custom');
+      var answer = document.getElementById('reg-answer');
       var terms = document.getElementById('reg-terms');
       inlineError.hidden = true;
       var ok = true;
       var phoneDigits = (phone.value || '').replace(/\D/g, '');
+      var pinDigits = (pin.value || '').replace(/\D/g, '');
       if (!/^[a-z][a-z0-9_]{2,19}$/i.test(username.value.trim())) ok = fail('Username must be 3–20 characters, start with a letter, and use only letters, numbers or underscores.', username);
       else if (!email.value.trim()) ok = fail('Enter your email address.', email);
       else if (phoneDigits.length < 7 || phoneDigits.length > 15) ok = fail('Enter a valid phone number with country code.', phone);
       else if ((address.value || '').trim().length < 5) ok = fail('Enter your street address.', address);
       else if (password.value.length < 12) ok = fail('Your password must be at least 12 characters.', password);
       else if (password.value !== confirm.value) ok = fail('The two passwords do not match.', confirm);
+      else if (!/^\d{4}$/.test(pinDigits)) ok = fail('Enter a 4-digit Security PIN.', pin);
+      else if (!q.value) ok = fail('Choose a security question.', q);
+      else if (q.value === '__custom__' && (customQ.value || '').trim().length < 8) ok = fail('Write a security question of at least 8 characters.', customQ);
+      else if ((answer.value || '').trim().length < 2) ok = fail('Enter an answer of at least 2 characters.', answer);
       else if (!terms.checked) ok = fail('Please accept the Terms and Privacy Policy.', terms);
       if (!ok) { event.preventDefault(); return; }
       submit.disabled = true;

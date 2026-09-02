@@ -30,6 +30,7 @@ class Auth extends MY_Controller
             'error' => $this->consumeFlash('error'),
             'notice' => $this->consumeFlash('notice'),
             'csrfToken' => $this->ensureVisitorCsrf(),
+            'securityQuestions' => \AIWorkforce\IdentitySchema::SECURITY_QUESTIONS,
         ]);
     }
 
@@ -68,6 +69,17 @@ class Auth extends MY_Controller
             redirect('/register');
             return;
         }
+        $recovery = \AIWorkforce\IdentitySchema::fromPostedRecovery(
+            (string) $this->input->post('security_pin'),
+            (string) $this->input->post('security_question'),
+            (string) $this->input->post('security_question_custom'),
+            (string) $this->input->post('security_answer')
+        );
+        if (!$recovery) {
+            $this->flash('error', 'Choose a 4-digit Security PIN, a security question, and an answer of at least 2 characters.');
+            redirect('/register');
+            return;
+        }
         if ($this->AIWorkforce_model->identity->findUserByEmail($email)) {
             $this->flash('error', 'An account with that email already exists. Sign in instead.');
             redirect('/login');
@@ -93,6 +105,9 @@ class Auth extends MY_Controller
                 'email' => $email,
                 'phone' => $phone,
                 'address' => $address,
+                'security_pin' => $recovery['security_pin'],
+                'security_question' => $recovery['security_question'],
+                'security_answer' => $recovery['security_answer'],
                 'password_hash' => password_hash($password, PASSWORD_DEFAULT),
                 'display_name' => $username,
                 'active' => 1,
@@ -228,7 +243,18 @@ class Auth extends MY_Controller
     public function account()
     {
         $user = $this->requireLogin();
-        $this->renderPage('My Account', 'account', ['user' => $user]);
+        $fresh = $this->AIWorkforce_model->identity->findUserById((int) $user['id']);
+        if ($fresh) {
+            $fresh['permissions'] = $user['permissions'] ?? [];
+            $user = $this->impersonator()
+                ? \AIWorkforce\IdentitySchema::stripSecrets($fresh)
+                : \AIWorkforce\IdentitySchema::stripSecrets($fresh, true);
+        }
+        $this->renderPage('My Account', 'account', [
+            'user' => $user,
+            'impersonating' => (bool) $this->impersonator(),
+            'securityQuestions' => \AIWorkforce\IdentitySchema::SECURITY_QUESTIONS,
+        ]);
     }
 
     /** Dashboard → My Account → Profile: change the username (their own only). */
@@ -317,6 +343,50 @@ class Auth extends MY_Controller
             $this->flash('error', 'Unable to save your changes. Please try again.');
         }
         redirect('/account');
+    }
+
+    /** Dashboard → My Account → Security: set or change PIN and security question. */
+    public function update_recovery()
+    {
+        $user = $this->requireLogin();
+        if ($this->impersonator()) {
+            $this->flash('error', 'Recovery details cannot be changed while viewing as another user.');
+            redirect('/account#security'); return;
+        }
+        if (!$this->validAuthCsrf()) { $this->flash('error', 'Your session expired. Please try again.'); redirect('/account#security'); return; }
+        $current = (string) $this->input->post('current_password');
+        $stored = $this->AIWorkforce_model->identity->findUserById((int) $user['id']);
+        if (!$stored || !password_verify($current, $stored['password_hash'])) {
+            $this->flash('error', 'Your current password is not correct.');
+            redirect('/account#security'); return;
+        }
+        $recovery = \AIWorkforce\IdentitySchema::fromPostedRecovery(
+            (string) $this->input->post('security_pin'),
+            (string) $this->input->post('security_question'),
+            (string) $this->input->post('security_question_custom'),
+            (string) $this->input->post('security_answer')
+        );
+        if (!$recovery) {
+            $this->flash('error', 'Choose a 4-digit Security PIN, a security question, and an answer of at least 2 characters.');
+            redirect('/account#security'); return;
+        }
+        try {
+            \AIWorkforce\IdentitySchema::ensure($this->db);
+            $this->AIWorkforce_model->identity->updateUser((int) $user['id'], $recovery);
+            $fresh = $this->AIWorkforce_model->identity->findUserById((int) $user['id']);
+            if (!$fresh || (string) ($fresh['security_pin'] ?? '') !== $recovery['security_pin']) {
+                log_message('error', 'update_recovery: persisted PIN mismatch for user ' . (int) $user['id']);
+                $this->flash('error', 'Unable to save your changes. Please try again.');
+                redirect('/account#security'); return;
+            }
+            $this->AIWorkforce_model->audit->emit('USER_UPDATED', 'User changed their security PIN and question', ['userId' => (int) $user['id']], (string) $user['id']);
+            $this->reestablishIdentity((int) $user['id']);
+            $this->flash('notice', '✓ Changes saved successfully');
+        } catch (Throwable $e) {
+            log_message('error', 'update_recovery failed: ' . $e->getMessage());
+            $this->flash('error', 'Unable to save your changes. Please try again.');
+        }
+        redirect('/account#security');
     }
 
     /** Dashboard → My Account → Security: change the password (their own only). */
@@ -413,7 +483,7 @@ class Auth extends MY_Controller
         $fresh = $this->AIWorkforce_model->identity->findUserById($userId);
         if (!$fresh) return;
         $fresh['permissions'] = $this->AIWorkforce_model->identity->permissionsForUser($userId);
-        unset($fresh['password_hash']);
+        $fresh = \AIWorkforce\IdentitySchema::stripSecrets($fresh);
         try { $this->session->sess_regenerate(true); }
         catch (Throwable $e) { log_message('error', 'session regenerate failed: ' . $e->getMessage()); }
         $this->session->set_userdata(['identity' => $fresh, 'csrf_token' => bin2hex(random_bytes(32))]);

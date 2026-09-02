@@ -57,6 +57,32 @@ $initial = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', (string) ($m
         <tr><td class="dim">Roles</td><td><?php foreach ($roles as $role): ?><span class="badge b-violet"><?= e($role['name'] ?? $role['code']) ?></span> <?php endforeach; ?></td></tr>
       </tbody>
     </table>
+    <?php if (!empty($isSuperAdmin)): ?>
+      <div class="recovery-box" id="identity-recovery" style="margin-top:18px">
+        <h4 style="margin:0 0 8px">Identity &amp; recovery</h4>
+        <p class="dim" style="font-size:12px;margin:0 0 10px">Visible only to Super Admin. The account password is never displayed.</p>
+        <table class="tbl">
+          <tbody>
+            <tr>
+              <td class="dim">6-digit Identification Code</td>
+              <td class="mono"><b><?= e($m['user_uid'] ?? '') !== '' ? e($m['user_uid']) : 'Not set' ?></b></td>
+            </tr>
+            <tr>
+              <td class="dim">4-digit Security PIN</td>
+              <td class="mono"><b><?= e((string) ($m['security_pin'] ?? '')) !== '' ? e($m['security_pin']) : 'Not set' ?></b></td>
+            </tr>
+            <tr>
+              <td class="dim">Security question</td>
+              <td><?= e((string) ($m['security_question'] ?? '')) !== '' ? e($m['security_question']) : '<span class="dim">Not set</span>' ?></td>
+            </tr>
+            <tr>
+              <td class="dim">Security answer</td>
+              <td><?= e((string) ($m['security_answer'] ?? '')) !== '' ? e($m['security_answer']) : '<span class="dim">Not set</span>' ?></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    <?php endif; ?>
     <?php if (!empty($canManage)): ?>
       <div class="admin-actions" style="margin-top:16px">
         <?php if (!empty($m['active'])): ?>
