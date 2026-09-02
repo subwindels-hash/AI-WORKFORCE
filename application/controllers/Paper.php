@@ -119,11 +119,12 @@ class Paper extends App_Controller
     {
         $strategyId = (string)$this->input->post('strategyId');
         try {
+            $symbol = strtoupper((string)$this->input->post('symbol'));
             $this->platform->paper->deployStrategy(
                 $id, $strategyId, (string)$this->input->post('version'),
-                strtoupper((string)$this->input->post('symbol')),
+                $symbol,
                 (string)$this->input->post('timeframe'),
-                (string)$this->input->post('marketClass')
+                $this->platform->paper->inferMarketClass($symbol)
             );
             $this->flash('notice', "Strategy {$strategyId} deployed — signals execute on each tick (risk-checked).");
         } catch (Throwable $e) {

@@ -60,6 +60,7 @@ final class LicensedAssetMarketDataProvider implements MarketDataProvider
         ?array $symbols = null,
         ?bool $delayed = null,
         ?int $priority = null,
+        ?string $license = null,
     ) {
         $assetClass = strtolower(trim($assetClass));
         if (!in_array($assetClass, ['stock', 'etf', 'futures', 'options'], true)) {
@@ -69,14 +70,24 @@ final class LicensedAssetMarketDataProvider implements MarketDataProvider
         $this->providerId = trim($providerId);
         $this->displayName = trim($displayName);
         $this->envPrefix = trim($envPrefix);
-        $this->baseUrl = trim($baseUrl ?? (getenv($this->envPrefix . '_URL') ?: ''));
-        $this->healthUrl = trim(getenv($this->envPrefix . '_HEALTH_URL') ?: '');
-        $this->token = trim($token ?? (getenv($this->envPrefix . '_TOKEN') ?: ''));
-        $this->license = trim(getenv($this->envPrefix . '_LICENSE') ?: '');
-        $this->enabled = $enabled ?? (getenv($this->envPrefix . '_ENABLED') === '1');
+        $managed = [];
+        if ($baseUrl === null && class_exists(\AIWorkforce\ApiProviders::class)) {
+            try {
+                $resolved = \AIWorkforce\ApiProviders::resolve(self::serviceKey($assetClass));
+                if (is_array($resolved)) $managed = $resolved;
+            } catch (\Throwable) {
+                $managed = [];
+            }
+        }
+        $this->baseUrl = trim($baseUrl ?? (($managed['base_url'] ?? '') ?: (getenv($this->envPrefix . '_URL') ?: '')));
+        $this->healthUrl = trim((string) (($managed['extra']['health_url'] ?? '') ?: (getenv($this->envPrefix . '_HEALTH_URL') ?: '')));
+        $this->token = trim($token ?? (($managed['secrets']['token'] ?? $managed['secrets']['api_key'] ?? '') ?: (getenv($this->envPrefix . '_TOKEN') ?: '')));
+        $this->license = trim($license ?? (($managed['extra']['license'] ?? $managed['account_id'] ?? '') ?: (getenv($this->envPrefix . '_LICENSE') ?: '')));
+        $this->enabled = $enabled ?? ((!empty($managed) && !empty($managed['enabled'])) || getenv($this->envPrefix . '_ENABLED') === '1');
         $this->delayed = $delayed ?? (getenv($this->envPrefix . '_DELAYED') !== '0');
-        $this->providerPriority = $priority ?? 30;
-        $this->symbols = $this->normalizeSymbols($symbols ?? $this->envSymbols());
+        $this->providerPriority = $priority ?? 12;
+        $managedSymbols = isset($managed['extra']['symbols']) ? preg_split('/[\s,]+/', strtoupper(trim((string) $managed['extra']['symbols'])), -1, PREG_SPLIT_NO_EMPTY) : [];
+        $this->symbols = $this->normalizeSymbols($symbols ?? ($this->envSymbols() ?: $managedSymbols));
         $this->request = $request ?? [$this, 'defaultRequest'];
     }
 
@@ -147,7 +158,7 @@ final class LicensedAssetMarketDataProvider implements MarketDataProvider
         $started = microtime(true);
         try {
             $health = ($this->request)($this->healthUrl !== '' ? $this->healthUrl : $this->endpoint('/health'), $this->token !== '' ? $this->token : null);
-            if (!is_array($health) || ($health['ok'] ?? true) === false) throw new \RuntimeException('health endpoint reported failure');
+            if (!is_array($health) || ($health['ok'] ?? false) !== true) throw new \RuntimeException('health endpoint reported failure');
             $out = $base + [
                 'status' => 'UP',
                 'latencyMs' => (int) round((microtime(true) - $started) * 1000),
@@ -182,6 +193,16 @@ final class LicensedAssetMarketDataProvider implements MarketDataProvider
             'configuredSymbols' => count($this->symbols),
             'licenseConfigured' => $this->license !== '',
         ];
+    }
+
+    public static function serviceKey(string $assetClass): string
+    {
+        return match (strtolower($assetClass)) {
+            'etf' => 'etf_market',
+            'futures' => 'futures_market',
+            'options' => 'options_market',
+            default => 'stock_market',
+        };
     }
 
     public function configured(): bool
@@ -272,7 +293,7 @@ final class LicensedAssetMarketDataProvider implements MarketDataProvider
     private function validUrl(): bool
     {
         $parts = parse_url($this->baseUrl);
-        return is_array($parts) && in_array(strtolower((string) ($parts['scheme'] ?? '')), ['https', 'http'], true)
+        return is_array($parts) && strtolower((string) ($parts['scheme'] ?? '')) === 'https'
             && !empty($parts['host']) && empty($parts['user']) && empty($parts['pass']);
     }
 
@@ -289,7 +310,7 @@ final class LicensedAssetMarketDataProvider implements MarketDataProvider
         $out = [];
         foreach ($symbols as $symbol) {
             $symbol = strtoupper(trim((string) $symbol));
-            if ($symbol !== '' && preg_match('/^[A-Z0-9._:-]{1,64}$/', $symbol)) $out[$symbol] = true;
+            if ($symbol !== '' && preg_match('/^[A-Z0-9._:=-]{1,64}$/', $symbol)) $out[$symbol] = true;
         }
         return array_keys($out);
     }

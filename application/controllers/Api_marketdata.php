@@ -48,6 +48,6 @@ class Api_marketdata extends Api_controller
 
     private function inferClass(string $symbol): string
     {
-        return str_ends_with($symbol, 'USDT') ? 'crypto' : 'forex';
+        return \AIWorkforce\MarketClasses::infer($symbol);
     }
 }

@@ -528,11 +528,6 @@ class PaperTradingEngine
 
     public function inferMarketClass(string $symbol): string
     {
-        $s = strtoupper($symbol);
-        $known = ['EURUSD' => 'forex', 'GBPUSD' => 'forex', 'USDJPY' => 'forex', 'AUDUSD' => 'forex',
-            'USDCAD' => 'forex', 'USDCHF' => 'forex', 'NZDUSD' => 'forex', 'XAUUSD' => 'commodity'];
-        if (isset($known[$s])) return $known[$s];
-        if (str_ends_with($s, 'USDT')) return 'crypto';
-        return 'forex';
+        return \AIWorkforce\MarketClasses::infer($symbol);
     }
 }

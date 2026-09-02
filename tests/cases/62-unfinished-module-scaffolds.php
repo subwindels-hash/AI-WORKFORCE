@@ -99,6 +99,26 @@ test('official lottery provider requires HTTPS authorization metadata and preser
     assert_equals('token', $calls[0][1]);
 });
 
+test('licensed asset provider rejects plaintext HTTP and health payloads without ok:true', function () {
+    fx_scaffold_env('AI_WORKFORCE_TEST_STOCK_DATA_LICENSE', 'contract-123');
+    fx_scaffold_env('AI_WORKFORCE_TEST_STOCK_DATA_SYMBOLS', 'AAPL');
+    try {
+        $http = new LicensedAssetMarketDataProvider('stock', 'stock-http', 'HTTP stocks', 'AI_WORKFORCE_TEST_STOCK_DATA', 'http://feed.example/v1', true);
+        assert_equals('NOT_CONFIGURED', $http->healthCheck()['status']);
+        assert_false($http->configured());
+
+        $noOk = new LicensedAssetMarketDataProvider(
+            'stock', 'stock-nook', 'No ok', 'AI_WORKFORCE_TEST_STOCK_DATA',
+            'https://feed.example/v1', true, 'token',
+            fn(string $url, ?string $token) => ['version' => '1'],
+        );
+        assert_equals('DOWN', $noOk->healthCheck()['status']);
+    } finally {
+        putenv('AI_WORKFORCE_TEST_STOCK_DATA_LICENSE');
+        putenv('AI_WORKFORCE_TEST_STOCK_DATA_SYMBOLS');
+    }
+});
+
 test('unfinished broker connectors are safe, testable and use normalized order contracts', function () {
     $disabled = new Mt4BridgeConnector('', false);
     assert_equals('DISABLED', $disabled->status()['state']);

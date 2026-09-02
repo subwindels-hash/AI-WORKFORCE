@@ -16,6 +16,7 @@ use AIWorkforce\Providers\BinanceProvider;
 use AIWorkforce\Providers\FrankfurterProvider;
 use AIWorkforce\Providers\LicensedAssetMarketDataProvider;
 use AIWorkforce\Providers\SyntheticProvider;
+use AIWorkforce\Providers\YahooChartProvider;
 use AIWorkforce\Lottery\OfficialLotteryProvider;
 use AIWorkforce\Strategies\StrategyRegistry;
 use AIWorkforce\Strategies\TradingStrategy;
@@ -68,10 +69,17 @@ class Platform
             // ENABLED flag and symbol allow-list are supplied. Registering
             // them here makes capability/health state observable without
             // allowing a missing integration to fabricate data.
-            $this->providers->register(new LicensedAssetMarketDataProvider('stock', 'stock-licensed', 'Licensed stock data', 'AI_WORKFORCE_STOCK_DATA', null, null, null, null, null, null, 30));
-            $this->providers->register(new LicensedAssetMarketDataProvider('etf', 'etf-licensed', 'Licensed ETF data', 'AI_WORKFORCE_ETF_DATA', null, null, null, null, null, null, 31));
-            $this->providers->register(new LicensedAssetMarketDataProvider('futures', 'futures-licensed', 'Licensed futures data', 'AI_WORKFORCE_FUTURES_DATA', null, null, null, null, null, null, 32));
-            $this->providers->register(new LicensedAssetMarketDataProvider('options', 'options-licensed', 'Licensed options data', 'AI_WORKFORCE_OPTIONS_DATA', null, null, null, null, null, null, 33));
+            $this->providers->register(new LicensedAssetMarketDataProvider('stock', 'stock-licensed', 'Licensed stock data', 'AI_WORKFORCE_STOCK_DATA', null, null, null, null, null, null, 12));
+            $this->providers->register(new LicensedAssetMarketDataProvider('etf', 'etf-licensed', 'Licensed ETF data', 'AI_WORKFORCE_ETF_DATA', null, null, null, null, null, null, 13));
+            $this->providers->register(new LicensedAssetMarketDataProvider('futures', 'futures-licensed', 'Licensed futures data', 'AI_WORKFORCE_FUTURES_DATA', null, null, null, null, null, null, 14));
+            $this->providers->register(new LicensedAssetMarketDataProvider('options', 'options-licensed', 'Licensed options data', 'AI_WORKFORCE_OPTIONS_DATA', null, null, null, null, null, null, 15));
+            // Delayed public Yahoo chart for allow-listed stocks/ETFs/futures.
+            // Disabled with AI_WORKFORCE_YAHOO_CHART_ENABLED=0. Not licensed.
+            if (getenv('AI_WORKFORCE_YAHOO_CHART_ENABLED') !== '0') {
+                $this->providers->register(new YahooChartProvider('stock'));
+                $this->providers->register(new YahooChartProvider('etf'));
+                $this->providers->register(new YahooChartProvider('futures'));
+            }
         }
         $this->providers->register(new SyntheticProvider()); // ALWAYS last
         $this->brokers = new BrokerManager();
@@ -283,7 +291,7 @@ class Platform
             $symbols = [];
             foreach ($patch['approvedSymbols'] as $s) {
                 $s = strtoupper(trim((string) $s));
-                if (!preg_match('/^[A-Z0-9._-]{1,32}$/', $s)) throw new \InvalidArgumentException("invalid symbol in approvedSymbols: {$s}");
+                if (!preg_match('/^[A-Z0-9._:=-]{1,32}$/', $s)) throw new \InvalidArgumentException("invalid symbol in approvedSymbols: {$s}");
                 $symbols[] = $s;
             }
             $limits['approvedSymbols'] = array_values(array_unique($symbols));

@@ -61,8 +61,7 @@ class Api_analysis extends Api_controller
             $sym = strtoupper((string)$s);
             $requests[] = [
                 'symbol' => $sym,
-                'marketClass' => $this->platform->paper->inferMarketClass($sym) === 'commodity' ? 'commodity'
-                    : (str_ends_with($sym, 'USDT') ? 'crypto' : 'forex'),
+                'marketClass' => $this->platform->paper->inferMarketClass($sym),
                 'timeframe' => $timeframe,
             ];
         }

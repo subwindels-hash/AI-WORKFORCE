@@ -25,9 +25,7 @@ class Welcome extends App_Controller
         ];
 
         if ($this->input->post_get('symbol') !== null) {
-            $marketClass = $this->platform->paper->inferMarketClass($data['symbol']) === 'commodity'
-                ? 'commodity'
-                : (str_ends_with($data['symbol'], 'USDT') ? 'crypto' : 'forex');
+            $marketClass = $this->platform->paper->inferMarketClass($data['symbol']);
             try {
                 $data['run'] = $this->platform->engine->run($data['symbol'], $marketClass, $data['timeframe']);
                 // chart candles from the same provenance for visual honesty
@@ -39,9 +37,9 @@ class Welcome extends App_Controller
         try {
             $data['watch'] = $this->platform->engine->consensus(array_map(fn($s) => [
                 'symbol' => $s,
-                'marketClass' => str_ends_with($s, 'USDT') ? 'crypto' : 'forex',
+                'marketClass' => $this->platform->paper->inferMarketClass($s),
                 'timeframe' => $data['timeframe'],
-            ], ['EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSDT', 'ETHUSDT', 'SOLUSDT']));
+            ], ['EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSDT', 'ETHUSDT', 'AAPL']));
         } catch (Throwable $e) { /* watchlist optional */ }
 
         $this->load->view('layout/header', $data);
@@ -79,6 +77,9 @@ class Welcome extends App_Controller
         return [
             'Crypto' => ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'],
             'Forex & Metals' => ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'XAUUSD'],
+            'Stocks (delayed)' => ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'JPM'],
+            'ETFs (delayed)' => ['SPY', 'QQQ', 'IWM', 'DIA', 'VTI', 'GLD'],
+            'Futures (delayed)' => ['ES=F', 'NQ=F', 'CL=F', 'GC=F'],
         ];
     }
 }
