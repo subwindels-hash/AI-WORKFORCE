@@ -1,14 +1,10 @@
-<?php defined('BASEPATH') or exit('No direct script access allowed'); if (!function_exists('e')) { function e($value): string { return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8'); } } ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title><?= e($title . ' · WINDELS AI WORKFORCE') ?></title>
-  <meta name="robots" content="noindex,nofollow">
-  <link rel="icon" href="/assets/images/windels-mark.png">
-  <link rel="stylesheet" href="/assets/css/ai_workforce.css">
-</head>
-<body class="auth-page">
+<?php
+defined('BASEPATH') or exit('No direct script access allowed');
+if (!function_exists('e')) {
+    function e($value): string { return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8'); }
+}
+$this->load->view('auth/layout/header', ['title' => ($admin ?? false) ? 'Administrator access' : 'Sign in', 'active' => 'login']);
+?>
   <main class="auth-shell auth-split">
     <!-- LEFT — WINDELS AI WORKFORCE visual -->
     <section class="auth-visual" aria-hidden="true">
@@ -107,5 +103,4 @@
     });
   })();
   </script>
-</body>
-</html>
+<?php $this->load->view('auth/layout/footer'); ?>

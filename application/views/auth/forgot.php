@@ -1,14 +1,10 @@
-<?php defined('BASEPATH') or exit('No direct script access allowed'); if (!function_exists('e')) { function e($value): string { return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8'); } } ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Reset password · WINDELS AI WORKFORCE</title>
-  <meta name="robots" content="noindex,nofollow">
-  <link rel="icon" href="/assets/images/windels-mark.png">
-  <link rel="stylesheet" href="/assets/css/ai_workforce.css">
-</head>
-<body class="auth-page">
+<?php
+defined('BASEPATH') or exit('No direct script access allowed');
+if (!function_exists('e')) {
+    function e($value): string { return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8'); }
+}
+$this->load->view('auth/layout/header', ['title' => 'Reset password', 'active' => 'login']);
+?>
   <main class="auth-shell">
     <section class="auth-card">
       <div class="auth-brand">
@@ -34,5 +30,4 @@
       <div class="auth-foot"><a href="/login"><b>Back to sign in</b></a> · <a href="/contact">Contact support</a></div>
     </section>
   </main>
-</body>
-</html>
+<?php $this->load->view('auth/layout/footer'); ?>
