@@ -242,7 +242,47 @@ check('AIWorkforce_model instantiation (schema check)', function () {
     return count($coreTables) . ' core tables present';
 });
 
-// 14. PHP memory limit
+// 14. Administrator account present (root cause of "Administrator access was not granted")
+check('Administrator account exists in the database', function () {
+    $host = getenv('VP_DB_HOST') ?: (getenv('AI_WORKFORCE_DB_HOST') ?: 'localhost');
+    $port = (int)(getenv('VP_DB_PORT') ?: (getenv('AI_WORKFORCE_DB_PORT') ?: 3306));
+    $name = getenv('VP_DB_NAME') ?: getenv('AI_WORKFORCE_DB_NAME') ?: '';
+    $user = getenv('VP_DB_USER') ?: getenv('AI_WORKFORCE_DB_USER') ?: '';
+    $pass = getenv('VP_DB_PASS') ?: getenv('AI_WORKFORCE_DB_PASS') ?: '';
+
+    $mysqli = @new \mysqli($host, $user, $pass, $name, $port);
+    if ($mysqli->connect_error) {
+        throw new \RuntimeException("DB connection failed: {$mysqli->connect_error}");
+    }
+    $count = static function (string $sql) use ($mysqli): int {
+        $r = $mysqli->query($sql);
+        return $r ? (int) ($r->fetch_row()[0] ?? 0) : 0;
+    };
+    $users = $count('SELECT COUNT(*) FROM users');
+    if ($users === 0) {
+        $mysqli->close();
+        throw new \RuntimeException("The users table is EMPTY — database/production.sql was not imported into the database the site uses ({$name}). "
+            . "Import it into '{$name}' via phpMyAdmin (not any other database). That import creates the "
+            . "initial administrator (admin@example.com — credentials in docs/CPANEL_DEPLOYMENT.md).");
+    }
+    $admins = $count("SELECT COUNT(DISTINCT u.id) FROM users u"
+        . " JOIN user_roles ur ON ur.user_id = u.id"
+        . " JOIN role_permissions rp ON rp.role_id = ur.role_id"
+        . " JOIN permissions p ON p.id = rp.permission_id"
+        . " WHERE u.active = 1 AND p.code IN ('admin.access','system.super_admin')");
+    $seeded = $count("SELECT COUNT(*) FROM users WHERE email = 'admin@example.com'");
+    $mysqli->close();
+    if ($admins === 0) {
+        $hint = $seeded > 0
+            ? 'admin@example.com exists but has no admin role — re-import database/production.sql so the roles, role_permissions and user_roles rows are present.'
+            : "Import database/production.sql into '{$name}' (it creates the documented initial administrator), or have an existing administrator grant your account an admin role.";
+        throw new \RuntimeException("{$users} user(s) found but NONE with admin permission — this is why login says \"Administrator access was not granted.\". {$hint}");
+    }
+    return $admins . ' admin-capable account(s) out of ' . $users . ' user(s)'
+        . ($seeded > 0 ? ' — production.sql administrator (admin@example.com) is present' : '');
+});
+
+// 15. PHP memory limit
 check('PHP memory limit', function () {
     $limit = ini_get('memory_limit');
     $bytes = (int) $limit;
