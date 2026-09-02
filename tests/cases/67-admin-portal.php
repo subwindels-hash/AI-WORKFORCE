@@ -44,7 +44,7 @@ test('admin portal schema, routes and views are installed', function () {
     foreach (['admin/users', 'admin/users/(:num)', 'admin/users/(:num)/impersonate', 'admin/impersonation/return', 'admin/admins', 'admin/logs', 'admin/settings', 'admin/security', 'admin/api', 'admin/api/create', 'admin/api/(:num)'] as $r) {
         assert_contains("\$route['{$r}']", $routes, "route $r");
     }
-    foreach (['index', 'users/index', 'users/show', 'users/create', 'users/edit', 'layout/header', 'layout/footer', 'logs', 'admins', 'settings', 'security', 'api/index', 'api/form'] as $view) {
+    foreach (['index', 'users/index', 'users/show', 'users/create', 'users/edit', 'layout/header', 'layout/footer', 'logs', 'admins', 'settings', 'security', 'api/index', 'api/form', 'partials/open_dashboard'] as $view) {
         assert_true(is_file(FCPATH . "application/views/admin/{$view}.php"), "view admin/{$view}.php");
     }
     $admin = file_get_contents(FCPATH . 'application/controllers/Admin.php');
@@ -197,6 +197,8 @@ test('user dashboard chrome stays intact and does not host admin management', fu
     $banner = file_get_contents(FCPATH . 'application/views/partials/impersonation_banner.php');
     assert_contains('You are currently viewing this account as an administrator.', $banner);
     assert_contains('Return to Admin Account', $banner);
+    assert_contains('href="/dashboard"', $banner);
+    assert_contains('href="/admin"', $banner);
     $adminHeader = file_get_contents(FCPATH . 'application/views/admin/layout/header.php');
     foreach (['Dashboard', 'Users', 'AI Workforce', 'Language Learning', 'Conversations', 'Analytics', 'Notifications', 'Reports', 'System Settings', 'Admin Accounts', 'Activity Logs', 'Security', 'Logout'] as $item) {
         assert_contains($item, $adminHeader, "admin sidebar has $item");
@@ -216,4 +218,22 @@ test('admin user views never expose a password field for the existing secret', f
     assert_contains('4-digit Security PIN', $show);
     assert_contains('6-digit Identification Code', $show);
     assert_contains('isSuperAdmin', $show);
+});
+
+test('Super Admin opens user and admin dashboards from the portal', function () {
+    foreach (['admin/index.php', 'admin/users/index.php', 'admin/users/show.php', 'admin/search.php', 'admin/admins.php'] as $view) {
+        $html = file_get_contents(FCPATH . 'application/views/' . $view);
+        assert_contains('admin/partials/open_dashboard', $html, $view . ' offers Open dashboard');
+    }
+    $partial = file_get_contents(FCPATH . 'application/views/admin/partials/open_dashboard.php');
+    assert_contains('/impersonate', $partial);
+    assert_contains('Open dashboard', $partial);
+    $core = file_get_contents(FCPATH . 'application/core/MY_Controller.php');
+    assert_contains('function adminActor', $core);
+    $admin = file_get_contents(FCPATH . 'application/controllers/Admin.php');
+    assert_contains('Return to your administrator account before opening another dashboard.', $admin);
+    assert_contains('adminActor()', $admin);
+    $header = file_get_contents(FCPATH . 'application/views/admin/layout/header.php');
+    assert_contains('impersonation_banner', $header);
+    assert_contains('admin_can_open_dashboard', $header);
 });

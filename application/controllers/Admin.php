@@ -222,6 +222,10 @@ class Admin extends App_Controller
 
     public function impersonate($id = 0)
     {
+        if ($this->impersonator()) {
+            $this->flash('error', 'Return to your administrator account before opening another dashboard.');
+            redirect('/dashboard'); return;
+        }
         $actor = $this->gate('admin.users.impersonate'); if (!$actor) return;
         if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/users'); return; }
         $target = $this->AIWorkforce_model->identity->findUserById((int) $id);
@@ -242,6 +246,7 @@ class Admin extends App_Controller
             'impersonation_id' => $sessionId,
             'csrf_token' => bin2hex(random_bytes(32)),
         ]);
+        $this->flash('notice', 'You are viewing this account dashboard as an administrator. Use the banner to open the admin portal or return to your account.');
         redirect('/dashboard');
     }
 
@@ -783,7 +788,7 @@ class Admin extends App_Controller
     private function base(string $title, string $active): array
     {
         $state = $this->platform->state();
-        $identity = $this->currentUser();
+        $identity = $this->adminActor() ?: $this->currentUser();
         return [
             'title' => $title,
             'active' => $active,

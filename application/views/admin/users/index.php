@@ -70,6 +70,7 @@ $col = function(string $key, string $label) use ($sort, $nextDir, $qs) {
                 <div class="admin-actions">
                   <a class="btn small" href="/admin/users/<?= (int) $u['id'] ?>">View</a>
                   <?php if (!empty($canManage)): ?><a class="btn small" href="/admin/users/<?= (int) $u['id'] ?>/edit">Edit</a><?php endif; ?>
+                  <?php $this->load->view('admin/partials/open_dashboard', ['target' => $u, 'csrfToken' => $csrfToken]); ?>
                 </div>
               </td>
             </tr>

@@ -812,6 +812,8 @@ pre.raw {
   font-weight: 700;
 }
 .impersonation-banner form { margin: 0; }
+.impersonation-banner .banner-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.impersonation-banner a.btn { text-decoration: none; }
 .admin-search { display: flex; align-items: center; gap: 6px; }
 .admin-search input {
   width: 240px;

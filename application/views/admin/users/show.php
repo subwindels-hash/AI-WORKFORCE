@@ -15,12 +15,7 @@ $initial = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', (string) ($m
   <div class="page-actions">
     <a class="btn" href="/admin/users">Back to users</a>
     <?php if (!empty($canManage)): ?><a class="btn" href="/admin/users/<?= (int) $m['id'] ?>/edit">Edit</a><?php endif; ?>
-    <?php if (!empty($canImpersonate)): ?>
-      <form method="post" action="/admin/users/<?= (int) $m['id'] ?>/impersonate" onsubmit="return confirm('Sign in as this user? The action is recorded in the activity log.');">
-        <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
-        <button class="btn primary" type="submit">Login as User</button>
-      </form>
-    <?php endif; ?>
+    <?php $this->load->view('admin/partials/open_dashboard', ['target' => $m, 'csrfToken' => $csrfToken, 'label' => 'Open dashboard', 'class' => 'btn primary']); ?>
   </div>
 </div>
 

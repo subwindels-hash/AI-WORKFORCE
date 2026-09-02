@@ -59,7 +59,13 @@
             </td>
             <td class="dim"><?= admin_dt($a['last_login_at'] ?? null, 'Never') ?></td>
             <td class="dim"><?= admin_dt($a['created_at'] ?? null) ?></td>
-            <td><span class="badge <?= !empty($a['active']) ? 'b-green' : 'b-gray' ?>"><?= !empty($a['active']) ? 'Active' : 'Disabled' ?></span></td>
+            <td>
+              <div class="admin-actions">
+                <span class="badge <?= !empty($a['active']) ? 'b-green' : 'b-gray' ?>"><?= !empty($a['active']) ? 'Active' : 'Disabled' ?></span>
+                <a class="btn small" href="/admin/users/<?= (int) $a['id'] ?>">View</a>
+                <?php $this->load->view('admin/partials/open_dashboard', ['target' => $a, 'csrfToken' => $csrfToken, 'label' => 'Open dashboard']); ?>
+              </div>
+            </td>
           </tr>
         <?php endforeach; ?>
       </tbody>
