@@ -213,7 +213,15 @@ class AlpacaProvider implements MarketDataProvider
     {
         $out = [];
         foreach ($bars as $b) {
-            if (!is_array($b) || !is_numeric($b['t'] ?? null) || !is_numeric($b['o'] ?? null)) continue;
+            // Alpaca returns `t` as an RFC 3339 string ("2024-01-02T12:00:00Z"),
+            // not a numeric epoch. Accept any non-empty timestamp value and let
+            // parseTs() convert it — the old is_numeric($b['t']) guard dropped
+            // every real Alpaca bar.
+            if (!is_array($b)
+                || !isset($b['t']) || $b['t'] === '' || $b['t'] === null
+                || !is_numeric($b['o'] ?? null)) {
+                continue;
+            }
             $out[] = [
                 'timestamp' => $this->parseTs((string)$b['t']),
                 'open' => (float)$b['o'], 'high' => (float)$b['h'],

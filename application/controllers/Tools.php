@@ -234,6 +234,10 @@ class Tools extends MY_Controller
     public function tests()
     {
         require_once TESTSPATH . 'framework.php';
+        // Provide the shared helpers (run(), assert_eq(), domain autoloading)
+        // for the newer suites before any case loads, so a filtered run of a
+        // single case still works.
+        require_once TESTSPATH . 'bootstrap.php';
         $suites = glob(TESTSPATH . 'cases/*.php') ?: [];
         sort($suites);
         $filter = trim((string) (getenv('AI_WORKFORCE_TEST_FILTER') ?: ($_SERVER['argv'][3] ?? '')));
