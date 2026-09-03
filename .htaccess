@@ -1,13 +1,21 @@
-Options -Indexes
+# Keep this file valid on Apache 2.2, 2.4, and LiteSpeed.
+# A parse error here takes the whole domain down (empty reply / 500).
+
 <IfModule mod_rewrite.c>
   RewriteEngine On
-  RewriteRule ^(?:database|tools|tests|runtime)/ - [F,L,NC]
+  # Hide data dirs. Do not block /tools — that is an application controller.
+  RewriteRule ^(?:database|tests|runtime|python-services)/ - [F,L,NC]
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
   RewriteRule ^(.*)$ index.php/$1 [L]
 </IfModule>
 
-# Never serve deployment configuration or database exports over HTTP.
 <FilesMatch "^(\.env|\.env\.example)$">
-  Require all denied
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
 </FilesMatch>
