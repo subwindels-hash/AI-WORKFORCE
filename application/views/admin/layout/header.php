@@ -89,6 +89,10 @@ $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
     $unread = 0;
     try { $unread = (int) $ci->AIWorkforce_model->inbox->counts()['unread']; } catch (\Throwable $_) {} ?>
   <a href="/admin/inbox" class="<?= $active === 'inbox' ? 'active' : '' ?>"><?= $ic ?><path d="M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"/><path d="m4 7 8 6 8-6"/></svg><span>Inbox<?= $unread > 0 ? ' <span class="sidebar-badge">' . $unread . '</span>' : '' ?></span></a>
+  <?php
+    $dmUnread = 0;
+    try { $dmUnread = (int) $ci->AIWorkforce_model->messages->counts()['unreadThreads']; } catch (\Throwable $_) {} ?>
+  <a href="/admin/messages" class="<?= $active === 'messages' ? 'active' : '' ?>"><?= $ic ?><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg><span>Messages<?= $dmUnread > 0 ? ' <span class="sidebar-badge">' . $dmUnread . '</span>' : '' ?></span></a>
   <?php endif; ?>
   <?php if (admin_can('admin.analytics.view')): ?>
   <a href="/admin/reports" class="<?= $active === 'reports' ? 'active' : '' ?>"><?= $ic ?><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg><span>Reports</span></a>

@@ -59,11 +59,13 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | Kill switch, audit trail, ANALYSIS_ONLY default | **TESTED** |
 | **RBAC on the trading API**: trading.view / trading.control / trading.execute (+ CSRF); approval decisions record the deciding operator | **TESTED** |
 | **Notifications**: risk alerts, approval requests, execution outcomes, broker disconnects, kill switch — deduped until acknowledged | **TESTED** |
+| **Admin-sent notifications** (`/admin/notifications` → send panel): one member or every active account, per-recipient read state, audited as NOTIFICATION_SENT | **TESTED** |
+| **Direct member ⇄ admin messages** (`/messages` member page, `/admin/messages` console): one support thread per member, per-side read badges, start-by-username/email/User-ID, audited as MESSAGE_SENT | **TESTED** |
 | **Scheduled operations worker** (`php index.php tools cron`): portfolio scan, broker transitions, proposal expiry | **TESTED** |
 | **Lottery Intelligence (EuroMillions)**: rule engine, validated idempotent ingestion (verified draws never silently overwritten), frequency/gap/hot-cold/distribution/pair statistics, per-line combination analyzer, 5-mode AI combination generator with lock/exclude + AI decision reports, diversification engine, system builder (C(N,5) combinatorics), user-scoped ticket builder + saved tickets, backtesting (Strategy Lab) with mandatory random baseline + same-period strategy comparison, model versioning, separated performance overview, RBAC (lottery.view/manage), idempotent lottery-cron | **TESTED** (dashboard UI at /lottery; admin controls, RBAC and idempotent ingestion wired; official feeds PLANNED) |
 | MT4 / crypto-exchange / stock-broker connectors + per-user broker connection dashboard | **IMPLEMENTED** (MT5 verified; user-scoped connections for MT4/MT5/OANDA/Alpaca/IBKR/Binance/Bybit/OKX/Coinbase/Kraken) |
 
-**361 automated tests** run through the real CodeIgniter stack
+**529 automated tests** run through the real CodeIgniter stack
 (`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
 sandbox — see below), plus 9 contract tests for the Python bridge
 (`python-services/mt5-bridge/.venv/bin/python -m pytest test_bridge.py`).

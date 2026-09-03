@@ -321,6 +321,8 @@ class Admin extends App_Controller
         $inbox = $this->platform->notifications->inbox((int) $actor['id'], false, 80);
         $data = $this->base('Notifications', 'notifications');
         $data['inbox'] = $inbox;
+        $data['canSend'] = $this->platform->identity->can($actor, 'admin.users.manage');
+        $data['activeUsers'] = count($this->AIWorkforce_model->identity->activeRecipients());
         $this->render('admin/notifications', $data);
     }
 
@@ -555,6 +557,135 @@ class Admin extends App_Controller
         $ok = $this->AIWorkforce_model->inbox->deleteTemplate((int) $id);
         $this->flash($ok ? 'notice' : 'error', $ok ? 'Template deleted.' : 'System templates cannot be deleted — clone them instead.');
         redirect('/admin/inbox/templates');
+    }
+
+    // ---- Direct messages: member ⇄ support conversations ----
+
+    public function messages()
+    {
+        $actor = $this->gate('admin.users.view'); if (!$actor) return;
+        $search = trim((string) $this->input->get('q', true));
+        $data = $this->base('Messages', 'messages');
+        $data['threads'] = $this->AIWorkforce_model->messages->threads($search);
+        $data['counts'] = $this->AIWorkforce_model->messages->counts();
+        $data['search'] = $search;
+        $data['canManage'] = $this->platform->identity->can($actor, 'admin.users.manage');
+        $this->render('admin/messages/index', $data);
+    }
+
+    public function message_user($userId = 0)
+    {
+        $actor = $this->gate('admin.users.view'); if (!$actor) return;
+        $member = $this->findPublicUser((int) $userId);
+        if (!$member) { $this->flash('error', 'User not found.'); redirect('/admin/messages'); return; }
+        // Opening the thread acknowledges every member message in it.
+        $this->AIWorkforce_model->messages->markReadByAdmin((int) $member['id']);
+        $data = $this->base('Message · ' . ($member['user_uid'] ?? $member['id']), 'messages');
+        $data['member'] = $member;
+        $data['thread'] = $this->AIWorkforce_model->messages->threadFor((int) $member['id']);
+        $data['canManage'] = $this->platform->identity->can($actor, 'admin.users.manage');
+        $this->render('admin/messages/view', $data);
+    }
+
+    /** Reply in a thread or start a new conversation (both forms post here). */
+    public function message_send()
+    {
+        $actor = $this->gate('admin.users.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/messages'); return; }
+        $targetRef = trim((string) $this->input->post('user'));
+        $body = \AIWorkforce\Messaging\DirectMessages::cleanBody((string) $this->input->post('body'));
+        $returnTo = '/admin/messages';
+        if (ctype_digit($targetRef) && (int) $targetRef > 0) $returnTo .= '/user/' . (int) $targetRef;
+
+        $member = $this->resolveUserTarget($targetRef);
+        if (!$member) {
+            $this->flash('error', 'Enter a valid recipient — numeric ID, User ID, username or email.');
+            redirect($returnTo); return;
+        }
+        if (!\AIWorkforce\Messaging\DirectMessages::validBody($body)) {
+            $this->flash('error', 'Write a message of 1–' . \AIWorkforce\Messaging\DirectMessages::MAX_BODY . ' characters.');
+            redirect('/admin/messages/user/' . (int) $member['id']); return;
+        }
+        $this->AIWorkforce_model->messages->append([
+            'user_id' => (int) $member['id'],
+            'sender_id' => (int) $actor['id'],
+            'sender_role' => 'admin',
+            'sender_label' => (string) ($actor['display_name'] ?? $actor['email'] ?? 'Support'),
+            'body' => $body,
+        ]);
+        try {
+            $this->portal->log($actor, 'MESSAGE_SENT', 'ok', $this->portal->userTarget($member), [
+                'chars' => mb_strlen($body),
+            ], $this->ip());
+        } catch (\Throwable $_) {}
+        $this->flash('notice', 'Message sent to ' . ($member['username'] ?? $member['email'] ?? 'user') . '.');
+        redirect('/admin/messages/user/' . (int) $member['id']);
+    }
+
+    // ---- Admin-sent notifications (member Alerts inbox) ----
+
+    public function notification_send()
+    {
+        $actor = $this->gate('admin.users.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/notifications'); return; }
+        $target = (string) $this->input->post('target') === 'all' ? 'all' : 'user';
+        $severity = (string) $this->input->post('severity');
+        if (!in_array($severity, ['info', 'warning', 'critical'], true)) $severity = 'info';
+        $title = mb_substr(trim((string) $this->input->post('title')), 0, 200);
+        $message = mb_substr(trim((string) $this->input->post('message')), 0, 2000);
+        if ($title === '' || $message === '') {
+            $this->flash('error', 'A title and a message are required.');
+            redirect('/admin/notifications'); return;
+        }
+        $from = (string) ($actor['display_name'] ?? $actor['email'] ?? 'Administrator');
+        $detail = ['message' => $message, 'from' => $from, 'sentVia' => 'admin console'];
+
+        if ($target === 'all') {
+            $recipients = $this->AIWorkforce_model->identity->activeRecipients();
+            $sent = 0;
+            foreach ($recipients as $recipient) {
+                $result = $this->platform->notifications->notify('admin_broadcast', $severity, $title, $detail, null, (int) $recipient['id']);
+                if (!empty($result['created'])) $sent++;
+            }
+            try {
+                $this->portal->log($actor, 'NOTIFICATION_SENT', 'ok', [
+                    'type' => 'notification', 'id' => 'broadcast', 'label' => 'all users',
+                ], ['severity' => $severity, 'title' => $title, 'delivered' => $sent, 'recipients' => count($recipients)], $this->ip());
+            } catch (\Throwable $_) {}
+            $this->flash('notice', "Notification delivered to {$sent} active user" . ($sent === 1 ? '' : 's') . '.');
+        } else {
+            $member = $this->resolveUserTarget(trim((string) $this->input->post('user')));
+            if (!$member) {
+                $this->flash('error', 'User not found — enter a numeric ID, User ID, username or email.');
+                redirect('/admin/notifications'); return;
+            }
+            $this->platform->notifications->notify('admin_message', $severity, $title, $detail, null, (int) $member['id']);
+            try {
+                $this->portal->log($actor, 'NOTIFICATION_SENT', 'ok', $this->portal->userTarget($member), [
+                    'severity' => $severity, 'title' => $title, 'delivered' => 1,
+                ], $this->ip());
+            } catch (\Throwable $_) {}
+            $this->flash('notice', 'Notification sent to ' . ($member['username'] ?? $member['email'] ?? 'user') . '.');
+        }
+        redirect('/admin/notifications');
+    }
+
+    /** Resolve a free-text admin entry to one user: id, User ID, username or email. */
+    private function resolveUserTarget(string $q): ?array
+    {
+        $q = trim($q);
+        if ($q === '') return null;
+        $identity = $this->AIWorkforce_model->identity;
+        if (ctype_digit($q)) {
+            $byId = $identity->findUserById((int) $q);
+            if ($byId) return $byId;
+        }
+        $byIdentifier = $identity->findUserByIdentifier($q); // email / six-digit User ID / username
+        if ($byIdentifier) return $byIdentifier;
+        // Partial match as a last resort — only when it names exactly one account.
+        $result = $identity->searchUsers(['q' => $q], 'id', 'ASC', 1, 5);
+        $rows = $result['rows'] ?? [];
+        return count($rows) === 1 ? $rows[0] : null;
     }
 
     public function reports()
