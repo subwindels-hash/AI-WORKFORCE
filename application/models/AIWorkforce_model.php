@@ -1331,7 +1331,7 @@ class AIWorkforce_model extends CI_Model
         };
 
         // Admin inbox: contact-form messages, replies and email-template CRUD.
-        \\AIWorkforce\\EmailTemplates::ensure($db);
+        \AIWorkforce\EmailTemplates::ensure($db);
         $this->inbox = new class($db) {
             public function __construct(private object $db) {}
 
