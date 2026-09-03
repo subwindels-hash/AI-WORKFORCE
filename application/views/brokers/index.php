@@ -16,6 +16,58 @@
 </div>
 
 <div class="panel" style="margin-top:14px">
+  <h3>Connect a trading platform</h3>
+  <div class="body" style="padding-top:12px">
+    <p class="dim" style="margin:0 0 12px">Connect your own broker account so AI Trading Intelligence can read live quotes and (after you opt in + enable demo/live gates) route approved orders through the supervised pipeline. Credentials are encrypted at rest and scoped to your account; other users never see them.</p>
+    <?php if (!empty($myConnections)): ?>
+      <table class="tbl mono" style="margin-bottom:14px">
+        <thead><tr><th>Broker</th><th>Label</th><th>URL</th><th>Status</th><th>Trading</th><th>Live</th><th>Last test</th><th></th></tr></thead>
+        <tbody>
+        <?php foreach ($myConnections as $mc):
+            $bid = $mc['broker']; $meta = $supportedBrokers[$bid] ?? ['label'=>$bid]; ?>
+          <tr>
+            <td><b><?= e($meta['label']) ?></b></td>
+            <td><?= e($mc['label'] ?? '') ?></td>
+            <td class="dim"><?= e($mc['base_url']) ?></td>
+            <td>
+              <?php if (empty($mc['enabled'])): ?><span class="badge b-gray">disabled</span>
+              <?php elseif ($mc['last_test_ok'] === true): ?><span class="badge b-green">connected</span>
+              <?php elseif ($mc['last_test_ok'] === false): ?><span class="badge b-red">failed</span>
+              <?php else: ?><span class="badge b-amber">untested</span><?php endif; ?>
+            </td>
+            <td><?= !empty($mc['trading_enabled']) ? '<span class="badge b-amber">writes on</span>' : '<span class="dim">read-only</span>' ?></td>
+            <td><?= !empty($mc['live_allowed']) ? '<span class="badge b-red">live</span>' : '<span class="dim">demo</span>' ?></td>
+            <td class="dim">
+              <?php if ($mc['last_test_at']): ?>
+                <?= e($mc['last_test_at']) ?><br><span class="dim"><?= e($mc['last_test_message'] ?? '') ?></span>
+              <?php else: ?>—<?php endif; ?>
+            </td>
+            <td style="white-space:nowrap">
+              <a class="btn" href="/brokers/connect/<?= e($bid) ?>">edit</a>
+              <form method="post" action="/brokers/test/<?= e($bid) ?>" style="display:inline"><button class="btn">test</button></form>
+              <form method="post" action="/brokers/disconnect/<?= e($bid) ?>" style="display:inline" data-confirm="Disconnect <?= e($meta['label']) ?>?"><button class="btn danger">remove</button></form>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+    <?php endif; ?>
+
+    <div class="grid" style="grid-template-columns:repeat(auto-fill, minmax(220px,1fr));gap:10px">
+      <?php foreach ($supportedBrokers as $bid => $meta): ?>
+        <a class="card-link" href="/brokers/connect/<?= e($bid) ?>" style="border:1px solid var(--border);border-radius:8px;padding:12px;display:block;text-decoration:none;color:inherit">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px"><b><?= e($meta['label']) ?></b>
+            <?php if (in_array($bid, array_column($myConnections ?: [], 'broker'))): ?><span class="badge b-green">added</span><?php endif; ?>
+          </div>
+          <div class="dim" style="font-size:12px"><?= e($meta['market']) ?></div>
+        </a>
+      <?php endforeach; ?>
+    </div>
+    <p class="dim" style="margin-top:12px">Connection is read-only by default. Enabling <i>Order submission</i> allows the Execution Supervisor to send orders, but every order still passes the kill switch, risk veto and the human approval pipeline. <i>Live trading</i> must be explicitly allowed and requires a verified non-demo gate.</p>
+  </div>
+</div>
+
+<div class="panel" style="margin-top:14px">
   <h3>Simulated MT5 bridge <span class="badge b-amber">DEMO · SIMULATION</span></h3>
   <div class="body" style="padding-top:12px">
     <?php if (!empty($sim['enabled'])): ?>

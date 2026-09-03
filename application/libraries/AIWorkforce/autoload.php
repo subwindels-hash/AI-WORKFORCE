@@ -17,6 +17,10 @@ $priority = [
     $ai_workforceDir . '/Brokers/TradingConnector.php',      // order-capable broker interface
     $ai_workforceDir . '/Agents/AgentHelperTrait.php',       // trait
     $ai_workforceDir . '/Strategies/BuiltinStrategies.php',  // TradingStrategy interface + builtins
+    $ai_workforceDir . '/Providers/CryptoExchangeProvider.php', // shared base for exchange REST providers (before subclasses)
+    $ai_workforceDir . '/Providers/AlpacaProvider.php',
+    $ai_workforceDir . '/Providers/OandaProvider.php',
+    $ai_workforceDir . '/Providers/IbkrProvider.php',
 ];
 foreach ($priority as $file) {
     if (is_file($file)) {

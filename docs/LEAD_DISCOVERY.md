@@ -113,5 +113,63 @@ businesses. CSV export prefixes formula-leading values (`=`, `+`, `-`, `@`)
 and every export, status change, owner change, note, collection action, and
 duplicate decision is recorded in `lead_activities` or `export_history`.
 
-AI qualification, enrichment, website analysis, ICP matching and outreach are
-future phases. No AI inference is currently presented as a fact.
+## Discovery Modes (PHP/cPanel build)
+
+The `/leads` view (`application/views/leads/index.php`) ships with two modes:
+
+1. **Business Mode** — keyword + country + city targeting. Example inputs:
+   - Keywords: `Banking, Commercial Real Estate, Architecture`
+   - Country: `Nigeria`, City: `Lagos`
+   Works with both Google Places (business listings) and Apollo.io (B2B contacts with emails/phones).
+
+2. **Person Mode** — first-name list + country + city. Results are **server-side
+   filtered** to people whose email resolves to a free/personal webmail domain
+   (`icloud.com`, `gmail.com`, `yahoo.com`, `outlook.com`, plus
+   `hotmail.com`, `aol.com`, `proton.me`, `live.com`, `me.com`, `mail.com`,
+   `gmx.com`, `yandex.com`). Requires Apollo.io (`APOLLO_IO_API_KEY`) because
+   only Apollo returns people with personal emails. Name matching is a
+   startswith prefix on the normalized contact name.
+
+New API endpoints:
+- `GET /modes` — returns the list of supported modes with descriptions.
+- `POST /search` accepts `mode` (`business`|`person`), `keywords[]`, `country`,
+  `city`, `names[]`, `seniorities[]`, `provider`. Persisted leads carry
+  `lead_kind` (`business`|`person`), per-lead `email`, `job_title`,
+  `company_name`, `linkedin_url`, and a truthful `verification_status` in
+  metadata:
+  - `verified` — Apollo-reported verified email/direct phone.
+  - `partial_verified` — phone present but email not fully verified.
+  - `provider_enriched` — data present but no provider-level verification signal.
+  - `business_listing` — Google Places business listing (no person verification).
+
+  We never claim "100% verified" globally; verification is per-lead and shown as a coloured pill.
+
+## Cold Outreach (in-platform)
+
+- `POST /leads/:id/outreach` accepts `channel` (`email`|`linkedin`|`note`|`call`), `subject`, `body`.
+  - Inserts a row into `lead_outreach`.
+  - Flips the lead's status to `contacted`.
+  - Writes an `OUTREACH_SENT` activity.
+  - For `email`, if a transport is configured (Resend via `RESEND_API_KEY`,
+    Postmark via `POSTMARK_SERVER_TOKEN`, or SMTP via `SMTP_HOST`/`SMTP_PORT`/
+    `SMTP_USER`/`SMTP_PASS`) the message is delivered immediately; otherwise
+    it's stored as a `draft` for manual follow-up. Sender identity is taken
+    from `OUTREACH_FROM_EMAIL`/`OUTREACH_FROM_NAME` (falling back to
+    `MAIL_FROM_*`).
+- `GET /leads/:id/outreach` lists past outreach on a lead.
+
+The UI adds an **Outreach** button to each lead row and pipeline card, which prompts for channel/subject/body and posts to the endpoint.
+
+## Honest status
+
+Only configured providers are marked usable. A missing API key is
+`DISABLED`; a provider error is returned rather than converted into fake
+businesses. CSV export prefixes formula-leading values (`=`, `+`, `-`, `@`)
+and every export, status change, owner change, note, collection action,
+outreach send, and duplicate decision is recorded in `lead_activities`,
+`lead_outreach`, or `export_history`.
+
+AI qualification, enrichment, website analysis, and ICP matching are future phases.
+No AI inference is currently presented as a fact. Verification is derived
+exclusively from explicit provider signals (Apollo `email_status.verified`,
+direct phone presence, Google Places listing) — never fabricated.

@@ -85,6 +85,11 @@ $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
   <a href="/admin/analytics" class="<?= $active === 'analytics' ? 'active' : '' ?>"><?= $ic ?><path d="M3 3v18h18"/><path d="m7 14 3-3 3 2 5-6"/></svg><span>Analytics</span></a>
   <?php endif; ?>
   <a href="/admin/notifications" class="<?= $active === 'notifications' ? 'active' : '' ?>"><?= $ic ?><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg><span>Notifications</span></a>
+  <?php if (admin_can('admin.users.view')):
+    $unread = 0;
+    try { $unread = (int) $ci->AIWorkforce_model->inbox->counts()['unread']; } catch (\Throwable $_) {} ?>
+  <a href="/admin/inbox" class="<?= $active === 'inbox' ? 'active' : '' ?>"><?= $ic ?><path d="M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"/><path d="m4 7 8 6 8-6"/></svg><span>Inbox<?= $unread > 0 ? ' <span class="sidebar-badge">' . $unread . '</span>' : '' ?></span></a>
+  <?php endif; ?>
   <?php if (admin_can('admin.analytics.view')): ?>
   <a href="/admin/reports" class="<?= $active === 'reports' ? 'active' : '' ?>"><?= $ic ?><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg><span>Reports</span></a>
   <?php endif; ?>
