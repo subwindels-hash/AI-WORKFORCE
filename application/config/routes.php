@@ -59,6 +59,7 @@ $route['admin/languages'] = 'admin/languages';
 $route['admin/conversations'] = 'admin/conversations';
 $route['admin/analytics'] = 'admin/analytics';
 $route['admin/notifications'] = 'admin/notifications';
+$route['admin/notifications/send'] = 'admin/notification_send';
 $route['admin/reports'] = 'admin/reports';
 $route['admin/settings'] = 'admin/settings';
 $route['admin/settings/save'] = 'admin/settings_save';
@@ -92,6 +93,14 @@ $route['admin/inbox/(:num)/star'] = 'admin/inbox_toggle_star/$1';
 $route['admin/inbox/(:num)/status'] = 'admin/inbox_status/$1';
 $route['admin/inbox/(:num)/delete'] = 'admin/inbox_delete/$1';
 $route['admin/inbox/(:num)'] = 'admin/inbox_view/$1';
+
+// ---- Direct member ⇄ admin messages ----
+$route['admin/messages'] = 'admin/messages';
+$route['admin/messages/send'] = 'admin/message_send';
+$route['admin/messages/user/(:num)'] = 'admin/message_user/$1';
+$route['messages'] = 'messages';
+$route['messages/send'] = 'messages/send';
+
 $route['translate_uri_dashes'] = false;
 
 // ---- pretty URLs for the MVC pages ---------------------------------------

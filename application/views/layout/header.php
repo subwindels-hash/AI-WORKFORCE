@@ -77,6 +77,8 @@ $isActive = function(array $keys) use ($active): bool {
 
   <!-- Required: Settings / My Account -->
   <p class="sidebar-label">Account</p>
+  <?php $dmUnread = AIWorkforce_MessagesHelper::unreadCount(); ?>
+  <a href="/messages" class="<?= $active === 'messages' ? 'active' : '' ?>" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg><span>Messages</span><?php if ($dmUnread > 0): ?> <span class="sidebar-badge"><?= (int) $dmUnread ?></span><?php endif; ?></a>
   <a href="/account" class="<?= $active === 'account' ? 'active' : '' ?>" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg><span>My Account</span></a>
   <a href="/faq" class="sidebar-sub" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.2 9a2.9 2.9 0 0 1 5.6.9c0 2-2.8 2.4-2.8 4"/><path d="M12 17.5h.01"/></svg><span>Help</span></a>
 
@@ -123,6 +125,7 @@ $isActive = function(array $keys) use ($active): bool {
         <a href="/account" role="menuitem" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg> Account &amp; settings</a>
         <a href="/account#security" role="menuitem" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg> Security</a>
         <a href="/notifications" role="menuitem" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg> Notifications<?php if ($unread > 0): ?> (<?= (int)$unread ?>)<?php endif; ?></a>
+        <a href="/messages" role="menuitem" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg> Messages<?php if ($dmUnread > 0): ?> (<?= (int)$dmUnread ?>)<?php endif; ?></a>
         <?php if ($isAdmin): ?><a href="/admin" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5z"/></svg> Admin portal</a><?php endif; ?>
         <div class="sep"></div>
         <?php if ($identity): ?>

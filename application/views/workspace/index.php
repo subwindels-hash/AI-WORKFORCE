@@ -23,6 +23,7 @@ $mode = $status['tradingMode'] ?? null;
     <a class="btn primary" href="/analysis" data-dashboard-link><?= $ic ?><rect x="4" y="6" width="16" height="13" rx="2"/><path d="M9 12h.01M15 12h.01M9 16h6"/></svg> Run AI analysis</a>
     <a class="btn" href="/app/languages/teacher" data-dashboard-link><?= $ic ?><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/></svg> Learn a language</a>
     <a class="btn" href="/paper" data-dashboard-link><?= $ic ?><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h5"/></svg> Paper trading</a>
+    <a class="btn" href="/messages" data-dashboard-link><?= $ic ?><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg> Message support<?= (int)($messagesUnread ?? 0) > 0 ? ' (' . (int) $messagesUnread . ')' : '' ?></a>
   </div>
 </div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
@@ -82,6 +83,31 @@ $mode = $status['tradingMode'] ?? null;
     <a class="panel-foot-link" href="/journal">View analytics →</a>
   </section>
 
+  <div class="stack">
+  <section class="panel">
+    <h3><?= $ic ?><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg> Messages</h3>
+    <div class="body">
+      <?php $latest = $latestMessage ?? null; ?>
+      <?php if ($latest): ?>
+        <div class="feed">
+          <div class="row">
+            <span class="t"><?= e($latest['sender_label'] !== '' ? $latest['sender_label'] : 'Support team') ?></span>
+            <span class="d"><?= e(substr((string)($latest['created_at'] ?? ''), 5, 11)) ?></span>
+          </div>
+          <div class="row"><span class="t" style="font-weight:400"><?= e(\AIWorkforce\Messaging\DirectMessages::preview((string) ($latest['body'] ?? ''), 110)) ?></span></div>
+        </div>
+      <?php else: ?>
+        <div class="empty-state" style="padding:20px">
+          <p>No support messages yet.</p>
+        </div>
+      <?php endif; ?>
+      <?php if ((int)($messagesUnread ?? 0) > 0): ?>
+        <p style="margin:10px 0 0"><span class="badge b-red"><?= (int) $messagesUnread ?> unread</span></p>
+      <?php endif; ?>
+    </div>
+    <a class="panel-foot-link" href="/messages">Open messages →</a>
+  </section>
+
   <section class="panel">
     <h3><?= $ic ?><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg> Notifications</h3>
     <div class="body">
@@ -102,4 +128,5 @@ $mode = $status['tradingMode'] ?? null;
     </div>
     <a class="panel-foot-link" href="/notifications">Open all alerts →</a>
   </section>
+  </div>
 </div>

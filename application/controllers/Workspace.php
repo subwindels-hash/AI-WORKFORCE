@@ -28,6 +28,8 @@ class Workspace extends App_Controller
             'history' => $history,
             'paperAccounts' => count($accounts),
             'languageProfiles' => count($profiles),
+            'messagesUnread' => $this->AIWorkforce_model->messages->unreadForUser((int) $user['id']),
+            'latestMessage' => $this->AIWorkforce_model->messages->latestForUser((int) $user['id']),
             'notice' => $this->session->flashdata('notice'),
             'error' => $this->session->flashdata('error'),
         ];

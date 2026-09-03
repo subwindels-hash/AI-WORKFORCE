@@ -22,6 +22,7 @@ final class SchemaInstaller
         'lottery',
         'admin_portal',
         'admin_inbox',
+        'direct_messages',
     ];
 
     /** Every table created by the module files. Installers verify this list. */
@@ -49,6 +50,7 @@ final class SchemaInstaller
         'lottery_backtests', 'lottery_model_versions',
         'admin_activity_logs', 'impersonation_sessions', 'platform_settings', 'api_providers',
         'contact_messages', 'contact_message_replies', 'email_templates',
+        'direct_messages',
         'user_broker_connections',
     ];
 

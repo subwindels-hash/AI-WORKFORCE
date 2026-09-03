@@ -14,6 +14,7 @@ $initial = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', (string) ($m
   </div>
   <div class="page-actions">
     <a class="btn" href="/admin/users">Back to users</a>
+    <a class="btn" href="/admin/messages/user/<?= (int) $m['id'] ?>">Message</a>
     <?php if (!empty($canManage)): ?><a class="btn" href="/admin/users/<?= (int) $m['id'] ?>/edit">Edit</a><?php endif; ?>
     <?php $this->load->view('admin/partials/open_dashboard', ['target' => $m, 'csrfToken' => $csrfToken, 'label' => 'Open dashboard', 'class' => 'btn primary']); ?>
   </div>

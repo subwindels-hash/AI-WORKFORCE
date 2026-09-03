@@ -26,6 +26,7 @@ class AIWorkforce_model extends CI_Model
     public object $proposals;
     public object $notifications;
     public object $langlearn;
+    public object $messages;
 
     public function __construct()
     {
@@ -621,6 +622,11 @@ class AIWorkforce_model extends CI_Model
                 $rows = $this->db->select('id,email,display_name,username,user_uid,profile_image,active,created_at,updated_at,last_login_at')->order_by('created_at', 'ASC')->get('users')->result_array();
                 foreach ($rows as &$row) $row['permissions'] = $this->permissionsForUser((int) $row['id']);
                 return $rows;
+            }
+            /** Lightweight active-account list for admin notification broadcasts. */
+            public function activeRecipients(): array {
+                return $this->db->select('id,email,display_name,username,user_uid')
+                    ->where('active', 1)->order_by('id', 'ASC')->get('users')->result_array();
             }
             public function setActive(int $userId, bool $active): void {
                 $this->db->where('id', $userId)->update('users', ['active' => $active ? 1 : 0, 'updated_at' => gmdate('c')]);
@@ -1502,6 +1508,106 @@ class AIWorkforce_model extends CI_Model
                 if (!$row || !empty($row['is_system'])) return false;
                 $this->db->where('id', $id)->delete('email_templates');
                 return true;
+            }
+        };
+
+        // Direct member ⇄ administrator messages (one support thread per member).
+        $this->messages = new class($db) {
+            public function __construct(private object $db) {}
+
+            /** Full thread for one member, oldest → newest (recent window). */
+            public function threadFor(int $userId, int $limit = 300): array {
+                $rows = $this->db->where('user_id', $userId)
+                    ->order_by('created_at', 'DESC')->order_by('id', 'DESC')
+                    ->limit(max(1, min(1000, $limit)))->get('direct_messages')->result_array();
+                return array_reverse($rows);
+            }
+
+            /**
+             * Conversation list for the admin console: newest activity first,
+             * joined with the member's account row, search across identity
+             * fields and message bodies.
+             * @return array<int, array<string, mixed>>
+             */
+            public function threads(?string $search = null): array {
+                $this->db->select('dm.id, dm.user_id, dm.sender_id, dm.sender_role, dm.sender_label, dm.body, dm.read_by_user, dm.read_by_admin, dm.created_at, u.username, u.display_name, u.email, u.user_uid, u.active, u.profile_image')
+                    ->from('direct_messages dm')
+                    ->join('users u', 'u.id = dm.user_id', 'left');
+                $search = trim((string) $search);
+                if ($search !== '') {
+                    $this->db->group_start()
+                        ->like('u.username', $search)->or_like('u.email', $search)
+                        ->or_like('u.display_name', $search)->or_like('u.user_uid', $search)
+                        ->or_like('dm.body', $search)
+                        ->group_end();
+                }
+                $rows = $this->db->order_by('dm.created_at', 'DESC')->order_by('dm.id', 'DESC')
+                    ->limit(500)->get()->result_array();
+                return \AIWorkforce\Messaging\DirectMessages::collapse($rows);
+            }
+
+            /** Console counters for the sidebar badge and page head. */
+            public function counts(): array {
+                $threadRows = $this->db->select('user_id')->group_by('user_id')->get('direct_messages')->result_array();
+                $unreadRows = $this->db->select('user_id')
+                    ->where('sender_role', 'user')->where('read_by_admin', 0)
+                    ->group_by('user_id')->get('direct_messages')->result_array();
+                return [
+                    'threads' => count($threadRows),
+                    'unreadThreads' => count($unreadRows),
+                    'unreadMessages' => (int) $this->db->where('sender_role', 'user')->where('read_by_admin', 0)
+                        ->count_all_results('direct_messages'),
+                ];
+            }
+
+            public function append(array $m): int {
+                $role = ($m['sender_role'] ?? '') === 'admin' ? 'admin' : 'user';
+                $row = [
+                    'user_id' => (int) ($m['user_id'] ?? 0),
+                    'sender_id' => (int) ($m['sender_id'] ?? 0),
+                    'sender_role' => $role,
+                    'sender_label' => mb_substr((string) ($m['sender_label'] ?? ''), 0, 190),
+                    'body' => (string) ($m['body'] ?? ''),
+                    // The sender has inherently seen their own message; the
+                    // other side's flag starts unread.
+                    'read_by_user' => $role === 'admin' ? 0 : 1,
+                    'read_by_admin' => $role === 'admin' ? 1 : 0,
+                    'created_at' => (string) ($m['created_at'] ?? gmdate('c')),
+                ];
+                $this->db->insert('direct_messages', $row);
+                return (int) $this->db->insert_id();
+            }
+
+            /** Admin opened the thread → clear the member-side unread flags. */
+            public function markReadByAdmin(int $userId): int {
+                $this->db->where('user_id', $userId)->where('sender_role', 'user')->where('read_by_admin', 0)
+                    ->set('read_by_admin', 1)->update('direct_messages');
+                return (int) $this->db->affected_rows();
+            }
+
+            /** Member opened the thread → clear the admin-side unread flags. */
+            public function markReadByUser(int $userId): int {
+                $this->db->where('user_id', $userId)->where('sender_role', 'admin')->where('read_by_user', 0)
+                    ->set('read_by_user', 1)->update('direct_messages');
+                return (int) $this->db->affected_rows();
+            }
+
+            /** Unread admin replies in the member's thread (sidebar badge). */
+            public function unreadForUser(int $userId): int {
+                return (int) $this->db->where('user_id', $userId)->where('sender_role', 'admin')
+                    ->where('read_by_user', 0)->count_all_results('direct_messages');
+            }
+
+            /** Newest admin message in a member's thread (dashboard preview). */
+            public function latestForUser(int $userId): ?array {
+                $row = $this->db->where('user_id', $userId)->where('sender_role', 'admin')
+                    ->order_by('created_at', 'DESC')->order_by('id', 'DESC')
+                    ->limit(1)->get('direct_messages')->row_array();
+                return $row ?: null;
+            }
+
+            public function deleteForUser(int $userId): void {
+                $this->db->where('user_id', $userId)->delete('direct_messages');
             }
         };
     }
