@@ -21,6 +21,7 @@ final class SchemaInstaller
         'langlearn',
         'lottery',
         'admin_portal',
+        'admin_inbox',
     ];
 
     /** Every table created by the module files. Installers verify this list. */
@@ -47,10 +48,12 @@ final class SchemaInstaller
         'lottery_combinations', 'lottery_ai_decisions', 'lottery_tickets', 'lottery_ticket_lines',
         'lottery_backtests', 'lottery_model_versions',
         'admin_activity_logs', 'impersonation_sessions', 'platform_settings', 'api_providers',
+        'contact_messages', 'contact_message_replies', 'email_templates',
+        'user_broker_connections',
     ];
 
     /** Representative tables — if any are missing, re-apply CREATE IF NOT EXISTS. */
-    public const CORE_TABLES = ['users', 'languages', 'leads', 'lotteries', 'api_providers', 'sports_matches'];
+    public const CORE_TABLES = ['users', 'languages', 'leads', 'lotteries', 'api_providers', 'sports_matches', 'contact_messages'];
 
     private static bool $done = false;
 
@@ -151,6 +154,26 @@ final class SchemaInstaller
             try { $exec($sql); } catch (\Throwable $e) { /* column already exists */ }
         }
 
+        $userBrokers = $sqlite
+            ? "CREATE TABLE IF NOT EXISTS user_broker_connections (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, broker TEXT NOT NULL,
+                  label TEXT NULL, base_url TEXT NOT NULL, extra_url TEXT NULL, token_ciphertext TEXT NULL,
+                  token_nonce TEXT NULL, account_hint TEXT NULL, enabled INTEGER NOT NULL DEFAULT 0,
+                  trading_enabled INTEGER NOT NULL DEFAULT 0, live_allowed INTEGER NOT NULL DEFAULT 0,
+                  last_test_ok INTEGER NULL, last_test_message TEXT NULL, last_test_at TEXT NULL,
+                  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(user_id, broker))"
+            : "CREATE TABLE IF NOT EXISTS user_broker_connections (
+                  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL, broker VARCHAR(40) NOT NULL,
+                  label VARCHAR(120) NULL, base_url VARCHAR(255) NOT NULL, extra_url VARCHAR(255) NULL,
+                  token_ciphertext TEXT NULL, token_nonce VARCHAR(64) NULL, account_hint VARCHAR(120) NULL,
+                  enabled TINYINT(1) NOT NULL DEFAULT 0, trading_enabled TINYINT(1) NOT NULL DEFAULT 0,
+                  live_allowed TINYINT(1) NOT NULL DEFAULT 0, last_test_ok TINYINT(1) NULL,
+                  last_test_message VARCHAR(255) NULL, last_test_at VARCHAR(32) NULL,
+                  created_at VARCHAR(32) NOT NULL, updated_at VARCHAR(32) NOT NULL,
+                  UNIQUE KEY uq_user_broker (user_id, broker), KEY idx_user_enabled (user_id, enabled)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+        try { $exec($userBrokers); } catch (\Throwable $e) { /* already exists */ }
+
         $outreach = $sqlite
             ? "CREATE TABLE IF NOT EXISTS lead_outreach (
                   id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, lead_id TEXT NOT NULL,
@@ -208,18 +231,20 @@ final class SchemaInstaller
         if (self::$done) return;
         self::$done = true;
         $sqlite = self::isSqlite($db);
+        // Apply module files whenever any expected table is missing, not just core.
+        // CREATE IF NOT EXISTS makes this idempotent and cheap on healthy boots.
         $missing = false;
-        foreach (self::CORE_TABLES as $table) {
-            try {
-                if (!method_exists($db, 'table_exists') || !$db->table_exists($table)) {
-                    $missing = true;
-                    break;
-                }
-            } catch (\Throwable $e) {
-                $missing = true;
-                break;
+        try {
+            $have = [];
+            if (self::isSqlite($db)) {
+                $r = $db->query("SELECT name FROM sqlite_master WHERE type='table'");
+                foreach ($r->result_array() as $row) $have[] = (string) (reset($row));
+            } else {
+                $r = $db->query('SHOW TABLES');
+                foreach ($r->result_array() as $row) $have[] = (string) (reset($row));
             }
-        }
+            foreach (self::EXPECTED_TABLES as $t) { if (!in_array($t, $have, true)) { $missing = true; break; } }
+        } catch (\Throwable $e) { $missing = true; }
         $exec = function (string $sql) use ($db) {
             try { $db->query($sql); } catch (\Throwable $e) { /* duplicate / racing request */ }
         };

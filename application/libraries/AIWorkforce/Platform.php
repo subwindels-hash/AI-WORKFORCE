@@ -4,6 +4,7 @@ namespace AIWorkforce;
 use AIWorkforce\Backtest\Backtester;
 use AIWorkforce\Brokers\BrokerManager;
 use AIWorkforce\Brokers\Mt5BridgeConnector;
+use AIWorkforce\Brokers\UserBrokerConnections;
 use AIWorkforce\Paper\PaperTradingEngine;
 use AIWorkforce\Persistence\AuditRepository;
 use AIWorkforce\Persistence\AnalysisRepository;
@@ -12,9 +13,16 @@ use AIWorkforce\Persistence\JournalRepository;
 use AIWorkforce\Persistence\PaperRepository;
 use AIWorkforce\Persistence\PlatformStateRepository;
 use AIWorkforce\Persistence\StrategyRepository;
+use AIWorkforce\Providers\AlpacaProvider;
 use AIWorkforce\Providers\BinanceProvider;
+use AIWorkforce\Providers\BybitProvider;
+use AIWorkforce\Providers\CoinbaseProvider;
 use AIWorkforce\Providers\FrankfurterProvider;
+use AIWorkforce\Providers\IbkrProvider;
+use AIWorkforce\Providers\KrakenProvider;
 use AIWorkforce\Providers\LicensedAssetMarketDataProvider;
+use AIWorkforce\Providers\OandaProvider;
+use AIWorkforce\Providers\OkxProvider;
 use AIWorkforce\Providers\SyntheticProvider;
 use AIWorkforce\Providers\YahooChartProvider;
 use AIWorkforce\Lottery\OfficialLotteryProvider;
@@ -30,6 +38,7 @@ class Platform
 {
     public readonly ProviderManager $providers;
     public readonly BrokerManager $brokers;
+    public readonly UserBrokerConnections $userBrokers;
     public readonly ExecutionSupervisor $execution;
     public readonly \AIWorkforce\Sports\SportsIntelligence $sports;
     public readonly \AIWorkforce\Lottery\LotteryIntelligence $lottery;
@@ -70,6 +79,8 @@ class Platform
         $this->brokers->register(new \AIWorkforce\Brokers\InteractiveBrokersConnector());
         $this->brokers->register(new \AIWorkforce\Brokers\AlpacaConnector());
         $this->brokers->register(new \AIWorkforce\Brokers\OandaConnector());
+        $this->userBrokers = new UserBrokerConnections($model->db);
+
         $this->providers->setFallbackHandler(function (array $info) use ($model) {
             $model->audit->emit('PROVIDER_FALLBACK', "{$info['symbol']}: providers [" . implode(', ', $info['failed']) . "] failed — falling back to {$info['used']}", $info);
         });
@@ -131,14 +142,60 @@ class Platform
     private function registerMarketDataProviders(): void
     {
         if (!$this->disableRealProviders) {
-            if (ApiProviders::enabled('crypto_market', true)) {
-                $crypto = ApiProviders::resolve('crypto_market');
-                $cryptoBase = is_array($crypto) ? trim((string) ($crypto['base_url'] ?? '')) : '';
-                $this->providers->register(new BinanceProvider($cryptoBase !== '' ? $cryptoBase : null));
+            // Crypto exchanges: register every enabled exchange. ProviderManager
+            // picks the highest-priority healthy provider per symbol, so
+            // multiple exchanges give transparent redundancy. Each provider
+            // accepts an explicit base URL from the environment (useful when
+            // a regional CDN is required) but defaults to the public REST root.
+            //
+            // To disable an individual exchange, set e.g. BINANCE_ENABLED=0,
+            // BYBIT_ENABLED=0, etc. in .env. All are enabled by default so the
+            // operator sees health/capability without any admin action.
+            $cryptoEnv = function (string $key, bool $default = true): bool {
+                $v = getenv($key);
+                return $v === false ? $default : (strtolower(trim((string) $v)) !== '0');
+            };
+            if (ApiProviders::enabled('crypto_market', true) || $cryptoEnv('CRYPTO_EXCHANGES_ENABLED', true)) {
+                if ($cryptoEnv('BINANCE_ENABLED', true)) {
+                    $binanceBase = trim((string) (getenv('BINANCE_API_BASE') ?: ''));
+                    $this->providers->register(new BinanceProvider($binanceBase !== '' ? $binanceBase : null));
+                }
+                if ($cryptoEnv('BYBIT_ENABLED', true)) {
+                    $bybitBase = trim((string) (getenv('BYBIT_API_BASE') ?: ''));
+                    $this->providers->register(new BybitProvider($bybitBase !== '' ? $bybitBase : null));
+                }
+                if ($cryptoEnv('OKX_ENABLED', true)) {
+                    $okxBase = trim((string) (getenv('OKX_API_BASE') ?: ''));
+                    $this->providers->register(new OkxProvider($okxBase !== '' ? $okxBase : null));
+                }
+                if ($cryptoEnv('COINBASE_ENABLED', true)) {
+                    $cbBase = trim((string) (getenv('COINBASE_API_BASE') ?: ''));
+                    $this->providers->register(new CoinbaseProvider($cbBase !== '' ? $cbBase : null));
+                }
+                if ($cryptoEnv('KRAKEN_ENABLED', true)) {
+                    $krBase = trim((string) (getenv('KRAKEN_API_BASE') ?: ''));
+                    $this->providers->register(new KrakenProvider($krBase !== '' ? $krBase : null));
+                }
+                // Alpaca's public crypto feed works without keys; equities/ETFs
+                // only activate when ALPACA_API_KEY + ALPACA_API_SECRET are set
+                // (or ALPACA_EQUITIES_ENABLED=1 is forced). Priority 16 sits
+                // after the dedicated crypto exchanges.
+                if ($cryptoEnv('ALPACA_ENABLED', true)) {
+                    $alpacaBase = trim((string) (getenv('ALPACA_API_BASE') ?: ''));
+                    $this->providers->register(new AlpacaProvider($alpacaBase !== '' ? $alpacaBase : null));
+                }
             }
             if (ApiProviders::enabled('forex_market', true)) {
                 $fx = ApiProviders::resolve('forex_market');
                 $fxBase = is_array($fx) ? trim((string) ($fx['base_url'] ?? '')) : '';
+                // OANDA has priority over Frankfurter when a token is configured
+                // (it provides bid/ask candles at sub-daily granularity), but
+                // Frankfurter always registers as the fallback for daily ECB
+                // reference rates.
+                if (getenv('OANDA_API_KEY') || getenv('OANDA_TOKEN')) {
+                    $oandaBase = trim((string) (getenv('OANDA_API_BASE') ?: ''));
+                    $this->providers->register(new OandaProvider($oandaBase !== '' ? $oandaBase : null));
+                }
                 $this->providers->register(new FrankfurterProvider($fxBase !== '' ? $fxBase : null));
             }
             // These adapters are inert until a licensed feed, explicit
@@ -156,8 +213,31 @@ class Platform
                 $this->providers->register(new YahooChartProvider('etf'));
                 $this->providers->register(new YahooChartProvider('futures'));
             }
+            // Interactive Brokers Client Portal Gateway. Opt-in: only
+            // registers when IBKR_ENABLED=1 and IBKR_API_BASE points at a
+            // running (authenticated) local gateway. Priority 20 sits between
+            // licensed feeds and Yahoo so configured brokerage data wins over
+            // the public delayed feed, without ever fabricating.
+            if (strtolower((string)(getenv('IBKR_ENABLED') ?: '0')) === '1') {
+                $ibBase = trim((string)(getenv('IBKR_API_BASE') ?: 'https://localhost:5000'));
+                $this->providers->register(new IbkrProvider($ibBase !== '' ? $ibBase : null));
+            }
         }
         $this->providers->register(new SyntheticProvider()); // ALWAYS last
+    }
+
+    /**
+     * Register a user's personal broker connections into the broker manager
+     * for this request. User connectors are prefixed 'user-{broker}' and
+     * only expose connectors that the user saved and enabled. If the user
+     * saves no connections, nothing is added and the platform-scoped env
+     * connectors (admin/CLI configured) keep working as before.
+     */
+    public function bindUserConnectors(int $userId): void
+    {
+        foreach ($this->userBrokers->connectorsForUser($userId) as $connector) {
+            $this->brokers->register($connector);
+        }
     }
 
     /**

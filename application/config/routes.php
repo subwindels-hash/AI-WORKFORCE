@@ -78,6 +78,20 @@ $route['admin/admins/create'] = 'admin/create_admin';
 $route['admin/admins/(:num)'] = 'admin/update_admin/$1';
 $route['admin/logs'] = 'admin/logs';
 $route['admin/security'] = 'admin/security';
+
+// ---- Admin Inbox (contact messages + email templates) ----
+$route['admin/inbox'] = 'admin/inbox';
+$route['admin/inbox/templates'] = 'admin/inbox_templates';
+$route['admin/inbox/templates/new'] = 'admin/inbox_template_new';
+$route['admin/inbox/templates/save'] = 'admin/inbox_template_save';
+$route['admin/inbox/templates/(:num)/edit'] = 'admin/inbox_template_edit/$1';
+$route['admin/inbox/templates/(:num)/save'] = 'admin/inbox_template_save/$1';
+$route['admin/inbox/templates/(:num)/delete'] = 'admin/inbox_template_delete/$1';
+$route['admin/inbox/(:num)/reply'] = 'admin/inbox_reply/$1';
+$route['admin/inbox/(:num)/star'] = 'admin/inbox_toggle_star/$1';
+$route['admin/inbox/(:num)/status'] = 'admin/inbox_status/$1';
+$route['admin/inbox/(:num)/delete'] = 'admin/inbox_delete/$1';
+$route['admin/inbox/(:num)'] = 'admin/inbox_view/$1';
 $route['translate_uri_dashes'] = false;
 
 // ---- pretty URLs for the MVC pages ---------------------------------------
@@ -96,6 +110,11 @@ $route['execution/(:any)/decide'] = 'execution/decide/$1';
 $route['execution/(:any)/route'] = 'execution/route/$1';
 $route['brokers'] = 'brokers';
 $route['brokers/sim-toggle'] = 'brokers/sim_toggle';
+$route['brokers/connect'] = 'brokers/connect';
+$route['brokers/connect/(:any)'] = 'brokers/connect/$1';
+$route['brokers/save/(:any)'] = 'brokers/save/$1';
+$route['brokers/disconnect/(:any)'] = 'brokers/disconnect/$1';
+$route['brokers/test/(:any)'] = 'brokers/test/$1';
 $route['risk'] = 'risk_center';
 $route['risk/scan'] = 'risk_center/scan';
 $route['risk/limits'] = 'risk_center/limits';
@@ -111,6 +130,10 @@ $route['sports'] = 'sports';
 $route['sports/tickets'] = 'sports/tickets';
 $route['sports/(:any)/decide'] = 'sports/decide/$1';
 $route['sports/(:any)/settle'] = 'sports/settle/$1';
+$route['lottery'] = 'lottery';
+$route['lottery/draw/(:num)'] = 'lottery/index';
+$route['lottery/tickets'] = 'lottery/index';
+$route['lottery/backtests'] = 'lottery/index';
 
 // ---- JSON API (spec §17 subset for Phases 1–3) ---------------------------
 $route['api/system/status'] = 'api_system/status';

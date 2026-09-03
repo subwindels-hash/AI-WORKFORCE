@@ -26,7 +26,7 @@ final class ApiProviders
                 'label' => 'Lead Discovery',
                 'group' => 'Lead Discovery',
                 'kind' => 'data',
-                'drivers' => ['google_places', 'custom_http'],
+                'drivers' => ['google_places', 'apollo_io', 'custom_http'],
             ],
             'sports' => [
                 'label' => 'Sports Intelligence',
@@ -44,13 +44,19 @@ final class ApiProviders
                 'label' => 'Crypto Market Data',
                 'group' => 'AI Trading',
                 'kind' => 'data',
-                'drivers' => ['binance_public', 'custom_http'],
+                'drivers' => ['binance_public', 'bybit_public', 'okx_public', 'coinbase_public', 'kraken_public', 'alpaca_public', 'custom_http'],
             ],
             'forex_market' => [
                 'label' => 'Forex Market Data',
                 'group' => 'AI Trading',
                 'kind' => 'data',
-                'drivers' => ['frankfurter', 'custom_http'],
+                'drivers' => ['oanda_v20', 'frankfurter', 'custom_http'],
+            ],
+            'stock_market' => [
+                'label' => 'Stock / ETF / Futures Market Data',
+                'group' => 'AI Trading',
+                'kind' => 'data',
+                'drivers' => ['alpaca_public', 'ibkr_gateway', 'custom_http'],
             ],
             'translation' => [
                 'label' => 'Translation',
@@ -109,6 +115,12 @@ final class ApiProviders
                     $f('api_key', 'API Key', true, true, 'Places API (New) key'),
                 ],
             ],
+            'apollo_io' => [
+                'label' => 'Apollo.io',
+                'fields' => [
+                    $f('api_key', 'API Key', true, true, 'Apollo.io API key (Settings → API → API Keys). B2B people + company enrichment.'),
+                ],
+            ],
             'http_sports' => [
                 'label' => 'Sports HTTP feed',
                 'fields' => [
@@ -133,6 +145,50 @@ final class ApiProviders
                 'label' => 'Binance public market data',
                 'fields' => [
                     $f('base_url', 'Base URL', false, false, 'Defaults to https://api.binance.com — market data only, no trading'),
+                ],
+            ],
+            'bybit_public' => [
+                'label' => 'Bybit public market data',
+                'fields' => [
+                    $f('base_url', 'Base URL', false, false, 'Defaults to https://api.bybit.com (alt: https://api.bytick.com). Spot klines + tickers, no key.'),
+                ],
+            ],
+            'okx_public' => [
+                'label' => 'OKX public market data',
+                'fields' => [
+                    $f('base_url', 'Base URL', false, false, 'Defaults to https://www.okx.com. Public /api/v5/market endpoints.'),
+                ],
+            ],
+            'coinbase_public' => [
+                'label' => 'Coinbase Exchange public market data',
+                'fields' => [
+                    $f('base_url', 'Base URL', false, false, 'Defaults to https://api.exchange.coinbase.com. Public /products/{id}/candles.'),
+                ],
+            ],
+            'kraken_public' => [
+                'label' => 'Kraken public market data',
+                'fields' => [
+                    $f('base_url', 'Base URL', false, false, 'Defaults to https://api.kraken.com. Public /0/public/OHLC + /Ticker.'),
+                ],
+            ],
+            'alpaca_public' => [
+                'label' => 'Alpaca Markets (crypto public; equities keyed)',
+                'fields' => [
+                    $f('base_url', 'Data API base URL', false, false, 'Defaults to https://data.alpaca.markets. Crypto works without keys; equities require APCA key/secret.'),
+                    $f('api_key', 'APCA-API-KEY-ID', true, false, 'Optional — unlocks US equities/ETFs'),
+                ],
+            ],
+            'oanda_v20' => [
+                'label' => 'OANDA v20 forex (token required)',
+                'fields' => [
+                    $f('base_url', 'Base URL', false, false, 'Defaults to https://api-fxpractice.oanda.com. Use api-fxtrade.oanda.com for live.'),
+                    $f('api_key', 'Bearer token', true, true, 'Personal access token for /v3/instruments/*'),
+                ],
+            ],
+            'ibkr_gateway' => [
+                'label' => 'Interactive Brokers Client Portal Gateway',
+                'fields' => [
+                    $f('base_url', 'Gateway URL', false, false, 'Defaults to https://localhost:5000 — must be running AND authenticated.'),
                 ],
             ],
             'frankfurter' => [
@@ -419,7 +475,7 @@ final class ApiProviders
      * Market-data services whose live provider registration is gated on this
      * store (see Platform::registerMarketDataProviders).
      */
-    public const MARKET_DATA_SERVICES = ['crypto_market', 'forex_market'];
+    public const MARKET_DATA_SERVICES = ['crypto_market', 'forex_market', 'stock_market'];
 
     /**
      * Public, no-API-key market-data drivers. These are safe to switch on
@@ -428,6 +484,7 @@ final class ApiProviders
     public const KEYLESS_MARKET_DRIVERS = [
         'crypto_market' => 'binance_public',
         'forex_market' => 'frankfurter',
+        'stock_market' => null, // stocks require a key or the Yahoo delayed fallback
     ];
 
     /**
@@ -631,7 +688,15 @@ final class ApiProviders
         try {
             $ok = match ($driver) {
                 'google_places' => self::testGooglePlaces((string) ($secrets['api_key'] ?? '')),
+                'apollo_io' => self::testApollo((string) ($secrets['api_key'] ?? '')),
                 'binance_public' => self::testGet(($base !== '' ? $base : 'https://api.binance.com') . '/api/v3/ping'),
+                'bybit_public'   => self::testGet(($base !== '' ? $base : 'https://api.bybit.com') . '/v5/market/time'),
+                'okx_public'     => self::testGet(($base !== '' ? $base : 'https://www.okx.com') . '/api/v5/public/time'),
+                'coinbase_public'=> self::testGet(($base !== '' ? $base : 'https://api.exchange.coinbase.com') . '/products/BTC-USD/ticker'),
+                'kraken_public'  => self::testGet(($base !== '' ? $base : 'https://api.kraken.com') . '/0/public/Time'),
+                'alpaca_public'  => self::testGet(($base !== '' ? $base : 'https://data.alpaca.markets') . '/v1beta3/crypto/us/bars?symbols=BTC%2FUSD&timeframe=1Min&limit=1', $secrets['api_key'] ?? ''),
+                'oanda_v20'      => self::testGet(($base !== '' ? $base : 'https://api-fxpractice.oanda.com') . '/v3/accounts', $secrets['api_key'] ?? $secrets['token'] ?? ''),
+                'ibkr_gateway'   => self::testGet(($base !== '' ? $base : 'https://localhost:5000') . '/v1/api/tickle'),
                 'frankfurter' => self::testGet(($base !== '' ? $base : 'https://api.frankfurter.dev') . '/v1/latest?base=EUR&symbols=USD'),
                 'http_sports' => self::testGet(($base !== '' ? $base : '') . '/health', $secrets['token'] ?? $secrets['api_key'] ?? ''),
                 'official_lottery' => self::testGet((string) ($extra['health_url'] ?? ($base . '/health')), $secrets['token'] ?? $secrets['api_key'] ?? ''),
@@ -680,6 +745,22 @@ final class ApiProviders
         ], json_encode(['textQuery' => 'cafe', 'maxResultCount' => 1]));
         $status = (int) ($resp['status'] ?? 0);
         return ['ok' => $status >= 200 && $status < 400, 'message' => ($status >= 200 && $status < 400) ? 'Connected' : 'Connection failed'];
+    }
+
+    private static function testApollo(string $key): array
+    {
+        if ($key === '') return ['ok' => false, 'message' => 'An API key is required.'];
+        // Apollo uses POST with the api_key in the JSON body for /v1/auth/health,
+        // but a cheap /mixed_people/search with per_page=0 is the canonical ping
+        // that returns 200 for valid keys and 401 for bad/missing keys.
+        $resp = self::http('https://api.apollo.io/api/v1/mixed_people/search', [
+            'Content-Type: application/json',
+            'Accept: application/json',
+        ], json_encode(['api_key' => $key, 'page' => 1, 'per_page' => 1, 'q_keywords' => 'test']));
+        $status = (int) ($resp['status'] ?? 0);
+        if ($status >= 200 && $status < 400) return ['ok' => true, 'message' => 'Connected'];
+        if ($status === 401 || $status === 403) return ['ok' => false, 'message' => 'Invalid API key'];
+        return ['ok' => false, 'message' => 'Connection failed'];
     }
 
     private static function testOpenAi(string $url, string $key): array

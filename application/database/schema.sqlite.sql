@@ -215,3 +215,4 @@ CREATE TABLE IF NOT EXISTS notifications (
  title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '{}', dedupe_key TEXT NULL, read_at TEXT NULL, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id, read_at, created_at);
+CREATE TABLE IF NOT EXISTS user_broker_connections (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, broker TEXT NOT NULL, label TEXT NULL, base_url TEXT NOT NULL, extra_url TEXT NULL, token_ciphertext TEXT NULL, token_nonce TEXT NULL, account_hint TEXT NULL, enabled INTEGER NOT NULL DEFAULT 0, trading_enabled INTEGER NOT NULL DEFAULT 0, live_allowed INTEGER NOT NULL DEFAULT 0, last_test_ok INTEGER NULL, last_test_message TEXT NULL, last_test_at TEXT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(user_id, broker));

@@ -1329,6 +1329,181 @@ class AIWorkforce_model extends CI_Model
                 return $r;
             }
         };
+
+        // Admin inbox: contact-form messages, replies and email-template CRUD.
+        \\AIWorkforce\\EmailTemplates::ensure($db);
+        $this->inbox = new class($db) {
+            public function __construct(private object $db) {}
+
+            public function counts(): array {
+                return [
+                    'total' => (int) $this->db->count_all('contact_messages'),
+                    'unread' => (int) $this->db->where('is_read', 0)->count_all_results('contact_messages'),
+                    'open' => (int) $this->db->where_in('status', ['new','open','replied'])->count_all_results('contact_messages'),
+                    'starred' => (int) $this->db->where('is_starred', 1)->count_all_results('contact_messages'),
+                ];
+            }
+
+            public function list(array $filter = [], int $limit = 50, int $offset = 0): array {
+                if (!empty($filter['status']) && $filter['status'] !== 'all') $this->db->where('status', $filter['status']);
+                if (!empty($filter['search'])) {
+                    $q = $filter['search'];
+                    $this->db->group_start()
+                        ->like('sender_name', $q)->or_like('sender_email', $q)
+                        ->or_like('subject', $q)->or_like('body', $q)
+                        ->group_end();
+                }
+                if (!empty($filter['starred'])) $this->db->where('is_starred', 1);
+                if (!empty($filter['unread'])) $this->db->where('is_read', 0);
+                $total = $this->db->count_all_results('contact_messages', false);
+                $rows = $this->db->order_by('is_read', 'ASC')->order_by('created_at', 'DESC')
+                    ->limit(max(1, min(200, $limit)), max(0, $offset))->get()->result_array();
+                return ['rows' => $rows, 'total' => (int) $total];
+            }
+
+            public function find(int|string $id): ?array {
+                if (is_string($id) && !ctype_digit($id)) {
+                    $row = $this->db->get_where('contact_messages', ['uid' => $id], 1)->row_array();
+                } else {
+                    $row = $this->db->get_where('contact_messages', ['id' => (int) $id], 1)->row_array();
+                }
+                return $row ?: null;
+            }
+
+            public function recent(int $limit = 6): array {
+                return $this->db->order_by('created_at', 'DESC')->limit(max(1, min(20, $limit)))->get('contact_messages')->result_array();
+            }
+
+            public function create(array $m): int {
+                $now = gmdate('c');
+                $uid = $m['uid'] ?? strtoupper(bin2hex(random_bytes(6)));
+                $row = [
+                    'uid' => $uid,
+                    'sender_name' => (string) ($m['sender_name'] ?? ''),
+                    'sender_email' => (string) ($m['sender_email'] ?? ''),
+                    'sender_phone' => (string) ($m['sender_phone'] ?? ''),
+                    'sender_address' => (string) ($m['sender_address'] ?? ''),
+                    'subject' => (string) ($m['subject'] ?? 'Contact form inquiry'),
+                    'body' => (string) ($m['body'] ?? ''),
+                    'source' => (string) ($m['source'] ?? 'contact_form'),
+                    'ip' => (string) ($m['ip'] ?? null),
+                    'user_agent' => (string) ($m['user_agent'] ?? null),
+                    'user_id' => isset($m['user_id']) ? (int) $m['user_id'] : null,
+                    'status' => (string) ($m['status'] ?? 'new'),
+                    'is_starred' => !empty($m['is_starred']) ? 1 : 0,
+                    'is_read' => !empty($m['is_read']) ? 1 : 0,
+                    'assigned_to' => isset($m['assigned_to']) ? (int) $m['assigned_to'] : null,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+                $this->db->insert('contact_messages', $row);
+                return (int) $this->db->insert_id();
+            }
+
+            public function update(int $id, array $patch): void {
+                $patch['updated_at'] = gmdate('c');
+                $this->db->where('id', $id)->update('contact_messages', $patch);
+            }
+
+            public function markRead(int $id): void {
+                $this->update($id, ['is_read' => 1]);
+            }
+
+            public function toggleStar(int $id, int $v): void {
+                $this->update($id, ['is_starred' => $v ? 1 : 0]);
+            }
+
+            public function setStatus(int $id, string $status): void {
+                if (!in_array($status, ['new','open','replied','closed','archived','spam'], true)) return;
+                $this->update($id, ['status' => $status]);
+            }
+
+            public function delete(int $id): void {
+                $this->db->where('message_id', $id)->delete('contact_message_replies');
+                $this->db->where('id', $id)->delete('contact_messages');
+            }
+
+            /** @return array<int,array<string,mixed>> */
+            public function replies(int $messageId): array {
+                return $this->db->where('message_id', $messageId)->order_by('sent_at', 'ASC')->get('contact_message_replies')->result_array();
+            }
+
+            public function addReply(array $r): int {
+                $now = gmdate('c');
+                $row = [
+                    'message_id' => (int) $r['message_id'],
+                    'template_id' => !empty($r['template_id']) ? (int) $r['template_id'] : null,
+                    'author_id' => !empty($r['author_id']) ? (int) $r['author_id'] : null,
+                    'author_label' => (string) ($r['author_label'] ?? 'Admin'),
+                    'direction' => (string) ($r['direction'] ?? 'outbound'),
+                    'to_email' => (string) ($r['to_email'] ?? ''),
+                    'subject' => (string) ($r['subject'] ?? ''),
+                    'body' => (string) ($r['body'] ?? ''),
+                    'body_text' => (string) ($r['body_text'] ?? ''),
+                    'sent_at' => (string) ($r['sent_at'] ?? $now),
+                    'delivery_status' => (string) ($r['delivery_status'] ?? 'sent'),
+                    'delivery_message' => (string) ($r['delivery_message'] ?? null),
+                    'ip' => (string) ($r['ip'] ?? null),
+                ];
+                $this->db->insert('contact_message_replies', $row);
+                return (int) $this->db->insert_id();
+            }
+
+            // ---- Email templates ----
+            public function listTemplates(?string $category = null, bool $activeOnly = false): array {
+                if ($category !== null && $category !== 'all') $this->db->where('category', $category);
+                if ($activeOnly) $this->db->where('is_active', 1);
+                return $this->db->order_by('category', 'ASC')->order_by('name', 'ASC')->get('email_templates')->result_array();
+            }
+
+            public function findTemplate(int $id): ?array {
+                $row = $this->db->get_where('email_templates', ['id' => $id], 1)->row_array();
+                return $row ?: null;
+            }
+
+            public function findTemplateByCode(string $code): ?array {
+                $row = $this->db->get_where('email_templates', ['code' => $code], 1)->row_array();
+                return $row ?: null;
+            }
+
+            public function saveTemplate(array $t): int {
+                $now = gmdate('c');
+                $vars = [];
+                if (preg_match_all('/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/', (string) ($t['body_html'] ?? '') . ' ' . (string) ($t['subject'] ?? ''), $m)) {
+                    $vars = array_values(array_unique($m[1]));
+                }
+                $payload = [
+                    'code' => (string) ($t['code'] ?? ''),
+                    'name' => (string) ($t['name'] ?? ''),
+                    'category' => (string) ($t['category'] ?? 'general'),
+                    'description' => (string) ($t['description'] ?? ''),
+                    'subject' => (string) ($t['subject'] ?? ''),
+                    'body_html' => (string) ($t['body_html'] ?? ''),
+                    'body_text' => (string) ($t['body_text'] ?? ''),
+                    'variables_json' => json_encode($vars),
+                    'is_active' => !empty($t['is_active']) ? 1 : 0,
+                    'updated_by' => !empty($t['updated_by']) ? (int) $t['updated_by'] : null,
+                    'updated_at' => $now,
+                ];
+                if (!empty($t['id'])) {
+                    // Never overwrite system protected flags via the UI.
+                    $this->db->where('id', (int) $t['id'])->update('email_templates', $payload);
+                    return (int) $t['id'];
+                }
+                $payload['is_system'] = 0;
+                $payload['created_by'] = !empty($t['created_by']) ? (int) $t['created_by'] : null;
+                $payload['created_at'] = $now;
+                $this->db->insert('email_templates', $payload);
+                return (int) $this->db->insert_id();
+            }
+
+            public function deleteTemplate(int $id): bool {
+                $row = $this->db->get_where('email_templates', ['id' => $id], 1)->row_array();
+                if (!$row || !empty($row['is_system'])) return false;
+                $this->db->where('id', $id)->delete('email_templates');
+                return true;
+            }
+        };
     }
 }
 

@@ -42,7 +42,7 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | CodeIgniter 3.1.13 MVC (controllers / models / views / libraries) | **TESTED** |
 | **MySQL / MariaDB** persistence — canonical schema + mysqli config (`application/database/schema.mysql.sql`) | **IMPLEMENTED** |
 | Market-data abstraction (health checks, retry, timeout, circuit breaker, cache, fallback, provenance) | **TESTED** |
-| Binance + Frankfurter/ECB real providers; labeled synthetic demo provider | **TESTED** |
+| Binance + Bybit + OKX + Coinbase + Kraken + Alpaca (crypto) + OANDA (fx) + Frankfurter/ECB real providers; Yahoo-delayed stocks/ETFs; IBKR Client Portal (opt-in); labeled synthetic demo provider | **TESTED** |
 | **Live market data after connecting** (`tools marketdata --activate`, `/api/market-data/{live,refresh}`, in-process provider refresh) | **TESTED** |
 | **Live streaming candlestick chart** (polls real bars; LIVE / SIMULATION / STALE / DELAYED badge earned from provenance, never assumed) | **TESTED** |
 | Multi-agent analysis (technical, market-structure, forex, crypto, sentiment, consensus) | **TESTED** |
@@ -60,8 +60,8 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **RBAC on the trading API**: trading.view / trading.control / trading.execute (+ CSRF); approval decisions record the deciding operator | **TESTED** |
 | **Notifications**: risk alerts, approval requests, execution outcomes, broker disconnects, kill switch — deduped until acknowledged | **TESTED** |
 | **Scheduled operations worker** (`php index.php tools cron`): portfolio scan, broker transitions, proposal expiry | **TESTED** |
-| **Lottery Intelligence (EuroMillions)**: rule engine, validated idempotent ingestion (verified draws never silently overwritten), frequency/gap/hot-cold/distribution/pair statistics, per-line combination analyzer, 5-mode AI combination generator with lock/exclude + AI decision reports, diversification engine, system builder (C(N,5) combinatorics), user-scoped ticket builder + saved tickets, backtesting (Strategy Lab) with mandatory random baseline + same-period strategy comparison, model versioning, separated performance overview, RBAC (lottery.view/manage), idempotent lottery-cron | **TESTED** (admin controls/UI/security-E2E next; official feeds PLANNED) |
-| MT4 / crypto-exchange / stock-broker connectors | **PLANNED** (added one at a time after MT5 is verified) |
+| **Lottery Intelligence (EuroMillions)**: rule engine, validated idempotent ingestion (verified draws never silently overwritten), frequency/gap/hot-cold/distribution/pair statistics, per-line combination analyzer, 5-mode AI combination generator with lock/exclude + AI decision reports, diversification engine, system builder (C(N,5) combinatorics), user-scoped ticket builder + saved tickets, backtesting (Strategy Lab) with mandatory random baseline + same-period strategy comparison, model versioning, separated performance overview, RBAC (lottery.view/manage), idempotent lottery-cron | **TESTED** (dashboard UI at /lottery; admin controls, RBAC and idempotent ingestion wired; official feeds PLANNED) |
+| MT4 / crypto-exchange / stock-broker connectors + per-user broker connection dashboard | **IMPLEMENTED** (MT5 verified; user-scoped connections for MT4/MT5/OANDA/Alpaca/IBKR/Binance/Bybit/OKX/Coinbase/Kraken) |
 
 **361 automated tests** run through the real CodeIgniter stack
 (`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
@@ -73,7 +73,7 @@ sandbox — see below), plus 9 contract tests for the Python bridge
 | CodeIgniter 3.1.13 MVC (controllers / models / views / libraries) | **TESTED** |
 | **MySQL / MariaDB** persistence — canonical schema + mysqli config (`application/database/schema.mysql.sql`) | **IMPLEMENTED** |
 | Market-data abstraction (health checks, retry, timeout, circuit breaker, cache, fallback, provenance) | **TESTED** |
-| Binance + Frankfurter/ECB real providers; labeled synthetic demo provider | **TESTED** |
+| Binance + Bybit + OKX + Coinbase + Kraken + Alpaca (crypto) + OANDA (fx) + Frankfurter/ECB real providers; Yahoo-delayed stocks/ETFs; IBKR Client Portal (opt-in); labeled synthetic demo provider | **TESTED** |
 | Multi-agent analysis (technical, market-structure, forex, crypto, sentiment, consensus) | **TESTED** |
 | Regime detection + trade setup generator + Risk Engine (independent veto) | **TESTED** |
 | Strategy framework: 4 built-ins, evidence-gated lifecycle through PAPER_TRADING | **TESTED** |
@@ -162,7 +162,7 @@ application/
                                 implemented over CI3's query builder (mysqli/sqlite)
   libraries/AIWorkforce/              domain layer (no framework dependency):
     Indicators, MathUtils, CandleNormalizer, Timeframes
-    ProviderManager + Providers/ (Binance, Frankfurter, Synthetic)
+    ProviderManager + Providers/ (Binance, Bybit, OKX, Coinbase, Kraken, Alpaca, OANDA, Frankfurter, Yahoo, Ibkr, Synthetic)
     Agents/ (Technical, MarketStructure, Forex, Crypto, Sentiment, Intelligence)
     Analysis (regime + setup generator), RiskEngine
     Strategies/ (SeriesView w/ look-ahead guard, 4 built-ins, StrategyRegistry)

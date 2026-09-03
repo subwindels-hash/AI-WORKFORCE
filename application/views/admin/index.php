@@ -50,6 +50,11 @@ $s = $stats ?? [];
     <div class="v"><?= (int) ($s['conversations'] ?? 0) ?></div>
     <div class="trend">Teacher sessions stored</div>
   </a>
+  <a class="kp-card" href="/admin/inbox">
+    <div class="kp-top"><div class="k">Inbox messages</div></div>
+    <div class="v"><?= (int) ($s['inboxTotal'] ?? 0) ?><?php if ((int) ($s['inboxUnread'] ?? 0) > 0): ?> <span style="color:#dc2626;font-size:14px;font-weight:600">(<?= (int) $s['inboxUnread'] ?> unread)</span><?php endif; ?></div>
+    <div class="trend">Contact-form submissions — reply from the inbox</div>
+  </a>
   <div class="kp-card">
     <div class="kp-top"><div class="k">Recent logins (30 days)</div></div>
     <div class="v"><?= (int) ($s['recentLogins'] ?? 0) ?></div>
@@ -109,3 +114,34 @@ $s = $stats ?? [];
     <?php if (admin_can('admin.logs.view')): ?><a class="panel-foot-link" href="/admin/logs">Open activity logs →</a><?php endif; ?>
   </section>
 </div>
+
+<?php if (admin_can('admin.users.view')): ?>
+<section class="panel" style="margin-top:16px">
+  <h3 style="display:flex;align-items:center;justify-content:space-between">
+    <span>Recent inbox messages</span>
+    <a class="btn small ghost" href="/admin/inbox">Open inbox</a>
+  </h3>
+  <div class="body table-scroll">
+    <?php $recentInbox = $s['recentInbox'] ?? []; ?>
+    <?php if (!$recentInbox): ?>
+      <div class="empty-state"><p>No contact messages yet. Submissions from the public Contact page will appear here.</p></div>
+    <?php else: ?>
+      <table class="tbl">
+        <thead><tr><th></th><th>From</th><th>Subject</th><th>Status</th><th>Received</th></tr></thead>
+        <tbody>
+          <?php foreach ($recentInbox as $m): ?>
+            <tr>
+              <td style="width:16px"><?= empty($m['is_read']) ? '<span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:#dc2626"></span>' : '' ?></td>
+              <td><a href="/admin/inbox/<?= (int) $m['id'] ?>"><strong><?= e($m['sender_name'] ?? '') ?></strong></a><div class="dim" style="font-size:12px"><?= e($m['sender_email'] ?? '') ?></div></td>
+              <td><a href="/admin/inbox/<?= (int) $m['id'] ?>"><?= e($m['subject'] ?? '') ?></a></td>
+              <td><span class="badge <?= ((int)($m['is_read']??0) === 0 ? 'b-red' : 'b-gray') ?>"><?= e(($m['status'] ?? 'new')) ?></span></td>
+              <td class="dim"><?= admin_dt($m['created_at'] ?? null) ?></td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    <?php endif; ?>
+  </div>
+  <a class="panel-foot-link" href="/admin/inbox">Go to admin inbox →</a>
+</section>
+<?php endif; ?>

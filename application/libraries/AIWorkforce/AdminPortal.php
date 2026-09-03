@@ -39,6 +39,8 @@ class AdminPortal
     public function ensureSchema(): void
     {
         $db = $this->model->db;
+        // Also seed admin inbox tables + default email templates idempotently.
+        try { \\AIWorkforce\\EmailTemplates::ensure($db); } catch (\\Throwable $_) {}
         $driver = (string) $db->dbdriver;
         $isSqlite = str_contains($driver, 'sqlite');
         if ($isSqlite) {
@@ -165,9 +167,24 @@ class AdminPortal
             'languageProfiles' => $this->safeCount('user_language_profiles'),
             'languageSessions' => $this->safeCount('study_sessions'),
             'conversations' => $this->safeCount('conversation_sessions'),
+            'inboxUnread' => $this->safeInboxCount('unread'),
+            'inboxTotal' => $this->safeInboxCount('total'),
+            'recentInbox' => $this->safeInboxRecent(5),
             'recentUsers' => $id->recentRegistrations(8),
             'recentAdmin' => $this->activityLogs([], 1, 8)['rows'],
         ];
+    }
+
+    private function safeInboxCount(string $key): int {
+        try {
+            $c = $this->model->inbox->counts();
+            return (int) ($c[$key] ?? 0);
+        } catch (\Throwable $e) { return 0; }
+    }
+
+    /** @return array<int,array<string,mixed>> */
+    private function safeInboxRecent(int $limit = 5): array {
+        try { return $this->model->inbox->recent($limit); } catch (\Throwable $e) { return []; }
     }
 
     public function userProfileBundle(array $user): array

@@ -324,6 +324,239 @@ class Admin extends App_Controller
         $this->render('admin/notifications', $data);
     }
 
+    // ---- Admin Inbox: contact form messages + replies + email templates ----
+
+    public function inbox()
+    {
+        $actor = $this->gate('admin.users.view'); if (!$actor) return;
+        $status = (string) $this->input->get('status', true);
+        if ($status === '') $status = 'all';
+        $search = trim((string) $this->input->get('q', true));
+        $page = max(1, (int) $this->input->get('page'));
+        $perPage = 30;
+        $filter = ['status' => $status];
+        if ($search !== '') $filter['search'] = $search;
+        if ($status === 'starred') { $filter['starred'] = true; $filter['status'] = 'all'; }
+        if ($status === 'unread') { $filter['unread'] = true; $filter['status'] = 'all'; }
+        $list = $this->AIWorkforce_model->inbox->list($filter, $perPage, ($page - 1) * $perPage);
+        $data = $this->base('Inbox', 'inbox');
+        $data['messages'] = $list['rows'];
+        $data['total'] = (int) $list['total'];
+        $data['page'] = $page;
+        $data['perPage'] = $perPage;
+        $data['status'] = $status;
+        $data['search'] = $search;
+        $data['counts'] = $this->AIWorkforce_model->inbox->counts();
+        $this->render('admin/inbox/index', $data);
+    }
+
+    public function inbox_view($id = 0)
+    {
+        $actor = $this->gate('admin.users.view'); if (!$actor) return;
+        $msg = $this->AIWorkforce_model->inbox->find((string) $id);
+        if (!$msg) { $this->flash('error', 'Message not found.'); redirect('/admin/inbox'); return; }
+        // Mark read and transition new -> open once an admin opens it.
+        if (empty($msg['is_read'])) $this->AIWorkforce_model->inbox->markRead((int) $msg['id']);
+        if (($msg['status'] ?? '') === 'new') $this->AIWorkforce_model->inbox->setStatus((int) $msg['id'], 'open');
+        $msg = $this->AIWorkforce_model->inbox->find((int) $msg['id']);
+        $replies = $this->AIWorkforce_model->inbox->replies((int) $msg['id']);
+        $templates = $this->AIWorkforce_model->inbox->listTemplates('contact', true);
+        $data = $this->base('Message from ' . $msg['sender_name'], 'inbox');
+        $data['msg'] = $msg;
+        $data['replies'] = $replies;
+        $data['templates'] = $templates;
+        $data['smtp'] = \AIWorkforce\Mailer::configSummary();
+        $data['csrfToken'] = (string) $this->session->userdata('csrf_token');
+        $this->render('admin/inbox/view', $data);
+    }
+
+    public function inbox_reply($id = 0)
+    {
+        $actor = $this->gate('admin.users.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/inbox'); return; }
+        $msg = $this->AIWorkforce_model->inbox->find((int) $id);
+        if (!$msg) { $this->flash('error', 'Message not found.'); redirect('/admin/inbox'); return; }
+
+        $templateId = (int) $this->input->post('template_id');
+        $subject = trim((string) $this->input->post('subject'));
+        $body = trim((string) $this->input->post('body'));
+        if ($subject === '' || $body === '') {
+            $this->flash('error', 'Subject and reply body are required.');
+            redirect('/admin/inbox/' . (int) $msg['id']); return;
+        }
+
+        $tpl = $templateId ? $this->AIWorkforce_model->inbox->findTemplate($templateId) : null;
+        $site = (string) (getenv('VP_SITE_NAME') ?: 'WINDELS AI WORKFORCE');
+        $senderName = (string) $msg['sender_name'];
+        $to = (string) $msg['sender_email'];
+        $ctx = [
+            'site_name' => $site, 'name' => $senderName, 'subject' => $msg['subject'],
+            'reply_body' => $body, 'original_message' => (string) $msg['body'],
+            'original_message_date' => (string) ($msg['created_at'] ?? ''),
+            'signature_name' => (string) ($actor['display_name'] ?? $actor['email'] ?? 'Support'),
+        ];
+        $htmlBody = $body;
+        if ($tpl && ($tpl['code'] ?? '') === 'admin_reply') {
+            $htmlBody = \AIWorkforce\EmailTemplates::render($tpl['body_html'], $ctx);
+            $textBody = $tpl['body_text'] ? \AIWorkforce\EmailTemplates::renderText($tpl['body_text'], $ctx) : $body;
+        } else {
+            $htmlBody = '<div style="font-family:Arial,Helvetica,sans-serif;max-width:620px;margin:0 auto;color:#0f172a;padding:16px">'
+                . '<p>Hi ' . htmlspecialchars($senderName) . ',</p>'
+                . '<div style="white-space:pre-wrap;line-height:1.6">' . htmlspecialchars($body) . '</div>'
+                . '<p style="margin-top:24px">Best regards,<br><strong>' . htmlspecialchars((string) $ctx['signature_name']) . '</strong><br>' . htmlspecialchars($site) . '</p>'
+                . '<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0">'
+                . '<p style="font-size:12px;color:#64748b"><strong>On ' . htmlspecialchars((string) $msg['created_at']) . ' you wrote:</strong></p>'
+                . '<blockquote style="margin:4px 0 0;padding:10px 14px;border-left:3px solid #cbd5e1;color:#475569;white-space:pre-wrap;font-size:13px;background:#f8fafc;border-radius:0 6px 6px 0">' . htmlspecialchars((string) $msg['body']) . '</blockquote>'
+                . '</div>';
+            $textBody = "Hi {$senderName},\n\n{$body}\n\nBest regards,\n{$ctx['signature_name']}\n{$site}";
+        }
+
+        $sendResult = \AIWorkforce\Mailer::send($this, $to, $subject, $htmlBody, $textBody);
+        $this->AIWorkforce_model->inbox->addReply([
+            'message_id' => (int) $msg['id'],
+            'template_id' => $templateId ?: null,
+            'author_id' => (int) $actor['id'],
+            'author_label' => (string) ($actor['display_name'] ?? $actor['email'] ?? 'Admin'),
+            'direction' => 'outbound',
+            'to_email' => $to,
+            'subject' => $subject,
+            'body' => $htmlBody,
+            'body_text' => $textBody,
+            'delivery_status' => !empty($sendResult['ok']) ? 'sent' : 'failed',
+            'delivery_message' => (string) ($sendResult['message'] ?? ''),
+            'ip' => $this->input->ip_address(),
+        ]);
+        $this->AIWorkforce_model->inbox->update((int) $msg['id'], [
+            'status' => 'replied', 'is_read' => 1, 'last_reply_at' => gmdate('c'), 'last_reply_by' => (int) $actor['id'],
+        ]);
+        try {
+            $this->portal->log($actor, 'INBOX_REPLY_SENT', !empty($sendResult['ok']) ? 'ok' : 'error', [
+                'type' => 'contact_message', 'id' => (string) $msg['id'], 'label' => $senderName . ' <' . $to . '>',
+            ], ['subject' => $subject, 'delivered' => !empty($sendResult['ok'])], $this->input->ip_address());
+        } catch (\Throwable $_) {}
+
+        if (!empty($sendResult['ok'])) {
+            $this->flash('notice', 'Reply sent to ' . $to . '.');
+        } else {
+            $this->flash('error', 'Reply saved but email delivery failed: ' . (string) ($sendResult['message'] ?? 'Unknown error') . '. Check SMTP configuration.');
+        }
+        redirect('/admin/inbox/' . (int) $msg['id']);
+    }
+
+    public function inbox_toggle_star($id = 0)
+    {
+        $actor = $this->gate('admin.users.view'); if (!$actor) return;
+        $msg = $this->AIWorkforce_model->inbox->find((int) $id);
+        if (!$msg) { $this->flash('error', 'Message not found.'); redirect('/admin/inbox'); return; }
+        $v = empty($msg['is_starred']) ? 1 : 0;
+        $this->AIWorkforce_model->inbox->toggleStar((int) $msg['id'], $v);
+        redirect($this->input->get_post('return') ?: '/admin/inbox');
+    }
+
+    public function inbox_status($id = 0)
+    {
+        $actor = $this->gate('admin.users.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/inbox'); return; }
+        $msg = $this->AIWorkforce_model->inbox->find((int) $id);
+        if (!$msg) { $this->flash('error', 'Message not found.'); redirect('/admin/inbox'); return; }
+        $status = (string) $this->input->post('status');
+        $this->AIWorkforce_model->inbox->setStatus((int) $msg['id'], $status);
+        $this->flash('notice', 'Message status updated.');
+        redirect('/admin/inbox/' . (int) $msg['id']);
+    }
+
+    public function inbox_delete($id = 0)
+    {
+        $actor = $this->gate('admin.users.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/inbox'); return; }
+        $msg = $this->AIWorkforce_model->inbox->find((int) $id);
+        if (!$msg) { $this->flash('error', 'Message not found.'); redirect('/admin/inbox'); return; }
+        $this->AIWorkforce_model->inbox->delete((int) $msg['id']);
+        try { $this->portal->log($actor, 'INBOX_MESSAGE_DELETED', 'ok', ['type' => 'contact_message', 'id' => (string) $id, 'label' => (string) $msg['sender_name']], [], $this->input->ip_address()); } catch (\Throwable $_) {}
+        $this->flash('notice', 'Conversation deleted.');
+        redirect('/admin/inbox');
+    }
+
+    public function inbox_templates()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        $category = (string) $this->input->get('category', true) ?: 'all';
+        $data = $this->base('Email templates', 'inbox');
+        $data['templates'] = $this->AIWorkforce_model->inbox->listTemplates($category);
+        $data['category'] = $category;
+        $data['categories'] = ['all','contact','account','internal','general','marketing'];
+        $this->render('admin/inbox/templates', $data);
+    }
+
+    public function inbox_template_new()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        $data = $this->base('New email template', 'inbox');
+        $data['tpl'] = ['id' => null, 'code' => '', 'name' => '', 'category' => 'general', 'description' => '',
+            'subject' => '', 'body_html' => "<p>Hi {{name}},</p>\n<p>…</p>", 'body_text' => '', 'is_active' => 1, 'is_system' => 0];
+        $data['categories'] = ['general','contact','account','internal','marketing'];
+        $this->render('admin/inbox/template_form', $data);
+    }
+
+    public function inbox_template_edit($id = 0)
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        $tpl = $this->AIWorkforce_model->inbox->findTemplate((int) $id);
+        if (!$tpl) { $this->flash('error', 'Template not found.'); redirect('/admin/inbox/templates'); return; }
+        $data = $this->base('Edit email template', 'inbox');
+        $data['tpl'] = $tpl;
+        $data['tpl']['variables'] = json_decode((string) ($tpl['variables_json'] ?? '[]'), true) ?: [];
+        $data['categories'] = ['general','contact','account','internal','marketing'];
+        $this->render('admin/inbox/template_form', $data);
+    }
+
+    public function inbox_template_save($id = 0)
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/inbox/templates'); return; }
+        $payload = [
+            'id' => (int) $id ?: null,
+            'code' => strtolower(trim((string) $this->input->post('code'))),
+            'name' => trim((string) $this->input->post('name')),
+            'category' => trim((string) $this->input->post('category')) ?: 'general',
+            'description' => trim((string) $this->input->post('description')),
+            'subject' => trim((string) $this->input->post('subject')),
+            'body_html' => (string) $this->input->post('body_html'),
+            'body_text' => trim((string) $this->input->post('body_text')),
+            'is_active' => (int) $this->input->post('is_active') ? 1 : 0,
+            'created_by' => (int) $actor['id'],
+            'updated_by' => (int) $actor['id'],
+        ];
+        if ($payload['name'] === '' || $payload['code'] === '' || $payload['subject'] === '' || $payload['body_html'] === '') {
+            $this->flash('error', 'Code, name, subject and HTML body are required.');
+            redirect($id ? '/admin/inbox/templates/' . (int) $id . '/edit' : '/admin/inbox/templates/new');
+            return;
+        }
+        if (!preg_match('/^[a-z0-9_]{3,60}$/', $payload['code'])) {
+            $this->flash('error', 'Template code must be 3–60 lowercase letters, digits or underscores.');
+            redirect($id ? '/admin/inbox/templates/' . (int) $id . '/edit' : '/admin/inbox/templates/new');
+            return;
+        }
+        try {
+            $newId = $this->AIWorkforce_model->inbox->saveTemplate($payload);
+            $this->flash('notice', 'Template saved.');
+            redirect('/admin/inbox/templates/' . (int) $newId . '/edit');
+            return;
+        } catch (\Throwable $e) {
+            $this->flash('error', 'Could not save template: ' . $e->getMessage());
+            redirect($id ? '/admin/inbox/templates/' . (int) $id . '/edit' : '/admin/inbox/templates/new');
+        }
+    }
+
+    public function inbox_template_delete($id = 0)
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/inbox/templates'); return; }
+        $ok = $this->AIWorkforce_model->inbox->deleteTemplate((int) $id);
+        $this->flash($ok ? 'notice' : 'error', $ok ? 'Template deleted.' : 'System templates cannot be deleted — clone them instead.');
+        redirect('/admin/inbox/templates');
+    }
+
     public function reports()
     {
         $actor = $this->gate('admin.analytics.view'); if (!$actor) return;
