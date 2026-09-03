@@ -28,7 +28,7 @@ from typing import Iterable
 
 ROOT = Path(__file__).resolve().parent.parent
 ARCHIVE = ROOT / "application-deployment.zip"
-ROOT_FILES = (".env.example", ".gitignore", ".htaccess", "index.php")
+ROOT_FILES = (".env.example", ".gitignore", ".htaccess", "index.php", "error500.html")
 RELEASE_DIRECTORIES = ("application", "assets", "database", "docs", "runtime", "system")
 EXCLUDED_DIRECTORY_NAMES = {
     ".git",
