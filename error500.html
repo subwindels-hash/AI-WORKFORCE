@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>WINDELS AI WORKFORCE — temporarily unavailable</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: #f1f5f9; color: #0f172a; line-height: 1.55; }
+  .card { max-width: 640px; margin: 60px auto; padding: 32px 28px;
+          background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px;
+          box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06); }
+  h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: 0.02em; }
+  .brand { color: #2563eb; font-weight: 700; }
+  p { margin: 12px 0; }
+  code { background: #f1f5f9; padding: 1px 6px; border-radius: 4px; font-size: 0.9em; }
+  .hint { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 12px 14px; font-size: 0.92em; }
+  .footer { margin-top: 16px; font-size: 0.82em; color: #64748b; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #0b1220; color: #e2e8f0; }
+    .card { background: #111827; border-color: #1f2937; }
+    .hint { background: #0b1e3a; border-color: #1d4ed8; }
+    code { background: #1f2937; }
+    .footer { color: #94a3b8; }
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1><span class="brand">WINDELS AI WORKFORCE</span> is temporarily unavailable</h1>
+    <p>We're sorry — the site hit a server error and could not display this page. Please try again in a few minutes.</p>
+
+    <div class="hint">
+      <strong>Site owner?</strong> The exact cause is logged, and it is most likely a PHP error. Check
+      <code>cPanel &rarr; Metrics &rarr; Errors</code> for the file and line number. Common causes:
+      <ul style="margin:8px 0 0; padding-left:20px;">
+        <li>A syntax error in a recently updated <code>.php</code> file.</li>
+        <li>The PHP version is set below <b>8.2</b> &mdash; set <code>cPanel &rarr; Select PHP Version</code> to <b>PHP 8.2</b> with <code>mysqli</code> and <code>mbstring</code> enabled.</li>
+      </ul>
+      For a guided step-by-step check, temporarily upload the bundled <code>diagnose.php</code> next to <code>index.php</code>, open <code>/diagnose.php</code>, then delete it afterwards.
+    </div>
+
+    <div class="footer">Error reference: HTTP 500 &middot; WINDELS AI WORKFORCE</div>
+  </div>
+</body>
+</html>

@@ -40,7 +40,7 @@ class AdminPortal
     {
         $db = $this->model->db;
         // Also seed admin inbox tables + default email templates idempotently.
-        try { \\AIWorkforce\\EmailTemplates::ensure($db); } catch (\\Throwable $_) {}
+        try { \AIWorkforce\EmailTemplates::ensure($db); } catch (\Throwable $_) {}
         $driver = (string) $db->dbdriver;
         $isSqlite = str_contains($driver, 'sqlite');
         if ($isSqlite) {

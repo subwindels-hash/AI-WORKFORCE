@@ -36,13 +36,24 @@ class FakeDb
     {
         $this->queries[] = $sql;
         if (preg_match('/CREATE TABLE IF NOT EXISTS (\w+)/i', $sql, $m)) {
-            $this->tables[$m[1]] = [];
+            // Real DDL is a no-op when the table already exists; only create
+            // the in-memory table the first time, otherwise every ensureSchema()
+            // call would wipe rows saved earlier in the same test.
+            if (!isset($this->tables[$m[1]])) {
+                $this->tables[$m[1]] = [];
+            }
         }
         return new FakeDbResult([]);
     }
 
     public function where($key, $val = null): self {
-        $this->filters[$key] = $val; return $this;
+        // CI's query builder supports where(['k' => $v, ...]) in one call.
+        if (is_array($key)) {
+            $this->filters = array_merge($this->filters, $key);
+        } else {
+            $this->filters[$key] = $val;
+        }
+        return $this;
     }
     public function order_by($_a, $_b): self { return $this; }
     public function limit($_n): self { return $this; }

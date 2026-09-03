@@ -39,7 +39,12 @@ class Http
         if (!is_array($json) || array_is_list($json)) return false;
         if (!array_key_exists('code', $json) || !isset($json['msg'])) return false;
         if (!is_numeric($json['code'])) return false;
-        return (int) $json['code'] !== 200;
+        $code = (int) $json['code'];
+        // A 0 code is the success convention for OKX and similar v5 APIs
+        // ({"code":"0","msg":"","data":...}); only a non-zero, non-200 code is
+        // a provider error envelope. Without this, every OKX klines response
+        // was misread as "provider error".
+        return $code !== 200 && $code !== 0;
     }
 
     public function getJson(string $url, int $retries = 2, int $timeoutMs = 6000, int $rateLimitCooldownMs = 30000)

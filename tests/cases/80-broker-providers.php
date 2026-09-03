@@ -27,7 +27,9 @@ function makeAlpaca(array $responses, ?string $key = null, ?string $secret = nul
         if ($idx >= count($responses)) {
             throw new \RuntimeException("alpaca fake transport out of responses for $url");
         }
-        return $responses[$idx];
+        // Http::getJson() json_decode()s the transport body, so the fake must
+        // return a JSON string, not the already-decoded array.
+        return json_encode($responses[$idx]);
     });
     return new AlpacaProvider('https://data.alpaca.markets', $http, $key, $secret);
 }
@@ -40,7 +42,7 @@ function makeOanda(array $responses, string $token = 'fake-token'): OandaProvide
         if ($idx >= count($responses)) {
             throw new \RuntimeException("oanda fake transport out of responses for $url");
         }
-        return $responses[$idx];
+        return json_encode($responses[$idx]);
     });
     return new OandaProvider('https://api-fxpractice.oanda.com', $http, $token);
 }
@@ -53,7 +55,7 @@ function makeIbkr(array $responses, bool $enabled = true): IbkrProvider
         if ($idx >= count($responses)) {
             throw new \RuntimeException("ibkr fake transport out of responses for $url");
         }
-        return $responses[$idx];
+        return json_encode($responses[$idx]);
     });
     return new IbkrProvider('https://localhost:5000', $http, $enabled);
 }
@@ -104,7 +106,7 @@ $tests[] = function (): array {
 $tests[] = function (): array {
     $p = makeAlpaca([['message' => 'forbidden: subscription required']]);
     $thrown = null;
-    try { $p->getQuote('AAPL'); } catch (\Throwable $e) { $thrown = $e; }
+    try { $p->getQuote('BTC/USD'); } catch (\Throwable $e) { $thrown = $e; }
     assert_true($thrown !== null && str_contains($thrown->getMessage(), 'forbidden'), 'alpaca_error_envelope');
     return ['msg' => 'Alpaca error envelope rejected: ok'];
 };
@@ -170,7 +172,8 @@ $tests[] = function (): array {
 // 10. IBKR disabled by default ---------------------------------------------
 $tests[] = function (): array {
     $p = new IbkrProvider('https://localhost:5000');
-    assert_true(!$p->enabled || true, 'ibkr_constructor_ok'); // constructor doesn't gate; supportsSymbol checks enabled flag
+    // constructor doesn't gate; supportsSymbol checks the enabled flag
+    assert_true(!$p->supportsSymbol('AAPL'), 'ibkr_constructor_disabled');
     $h = $p->healthCheck();
     assert_eq($h['status'], 'DISABLED', 'ibkr_disabled_status');
     assert_true(!$p->supportsSymbol('AAPL'), 'ibkr_disabled_no_symbols');

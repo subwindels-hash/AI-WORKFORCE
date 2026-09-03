@@ -1,6 +1,16 @@
 # Keep this file valid on Apache 2.2, 2.4, and LiteSpeed.
 # A parse error here takes the whole domain down (empty reply / 500).
 
+# Harden the failure mode: when PHP fatals (e.g. a parse error in a file
+# loaded on every request) it returns an empty 500 and the site looks dead.
+# Serve a friendly static page instead of a blank screen. The target MUST be
+# static — never point ErrorDocument at a PHP file, or a fatal inside it would
+# recurse. error500.html is a real file, so the rewrite below leaves it alone.
+ErrorDocument 500 /error500.html
+ErrorDocument 502 /error500.html
+ErrorDocument 503 /error500.html
+ErrorDocument 504 /error500.html
+
 <IfModule mod_rewrite.c>
   RewriteEngine On
   # Hide data dirs. Do not block /tools — that is an application controller.

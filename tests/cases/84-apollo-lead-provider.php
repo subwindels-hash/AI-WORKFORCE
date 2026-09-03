@@ -69,7 +69,7 @@ $tests[] = function(): array {
                 ],
             ],
             [
-                'id' => 'pers_2', 'first_name' => 'Bob', 'last_name' => '',
+                'id' => 'pers_2', 'first_name' => '', 'last_name' => '',
                 'title' => '', 'organization' => ['name' => 'Bob Co'],
             ],
         ]

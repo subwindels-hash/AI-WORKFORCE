@@ -155,7 +155,12 @@ class Platform
                 $v = getenv($key);
                 return $v === false ? $default : (strtolower(trim((string) $v)) !== '0');
             };
-            if (ApiProviders::enabled('crypto_market', true) || $cryptoEnv('CRYPTO_EXCHANGES_ENABLED', true)) {
+            // Register crypto exchanges only when BOTH the per-service gate is
+            // open (a disabled crypto_market row closes it) and the coarse
+            // CRYPTO_EXCHANGES_ENABLED kill-switch is not off. The previous
+            // `||` let the default-true env var bypass the row gate entirely,
+            // so a connected-but-disabled provider never dropped the feeds.
+            if (ApiProviders::enabled('crypto_market', true) && $cryptoEnv('CRYPTO_EXCHANGES_ENABLED', true)) {
                 if ($cryptoEnv('BINANCE_ENABLED', true)) {
                     $binanceBase = trim((string) (getenv('BINANCE_API_BASE') ?: ''));
                     $this->providers->register(new BinanceProvider($binanceBase !== '' ? $binanceBase : null));

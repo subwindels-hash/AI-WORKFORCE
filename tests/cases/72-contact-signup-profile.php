@@ -71,7 +71,7 @@ test('contact page shows office phone, address, visitor fields and a map', funct
     assert_contains("input->post('phone')", $site);
     assert_contains("input->post('address')", $site);
     assert_contains('VP_CONTACT_LAT', $site);
-    assert_contains('notifyOperator($name, $email, $phone, $address, $message)', $site);
+    assert_contains('notifyOperator($name, $email, $phone, $address, $message, $inboxId)', $site);
 });
 
 test('account page edits phone and address through /account/contact', function () {
