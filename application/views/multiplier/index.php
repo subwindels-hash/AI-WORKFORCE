@@ -164,7 +164,7 @@ $acc = $accuracy ?? [];
         <span class="dot"></span>
         LLM Enhancement <?= $llmActive ? 'Active (' . (int)($intg['llm']['providers'] ?? 0) . ' providers)' : 'Standby' ?>
       </span>
-      <span class="mi-int-pill <?= $sportsActive ? 'active' : 'inactive' ?>" title="Sports Intelligence enrichment (api-football, thesportsdb, sportmonks)">
+      <span class="mi-int-pill <?= $sportsActive ? 'active' : 'inactive' ?>" title="Sports Intelligence enrichment">
         <span class="dot"></span>
         Sports Intel <?= $sportsActive ? 'Enriching' : 'Awaiting Config' ?>
       </span>

@@ -23,7 +23,7 @@ Product map (member sidebar):
 - Lead Discovery (/leads) and Pipeline (/lead-pipeline) — search city/category; configured Places (or similar) required; empty results are never filled with fake businesses. Duplicates: provider + stable source ID; human merge.
 - Paper Trading (/paper), Strategy Lab (/strategy), Analytics (/journal) — paper orders run kill switch → mode → risk engine. Paper is simulation.
 - My Trading (/app/trading), Execution (/execution), Brokers (/brokers), Risk Center (/risk) — 15-step execution supervisor; ANALYSIS_ONLY + kill switch on by default; agents never call brokers.
-- Sports Intel (/sports) — api-football / TheSportsDB / SportMonks when configured; no fixtures invented.
+- Sports Intel (/sports) — fixtures and odds from connected sports data when available; no fixtures invented.
 - EuroMillions (/lottery) — historical observations only, not predictions; official draws need a configured feed. Tickets, statistics, system builder, backtests stay on that hub.
 - Multiplier AI (/multiplier) — live crash-history analysis (Bustabit by default). No demo multipliers silently substituted. Crash games are RNG; analysis is educational.
 - Alerts (/notifications), Messages (/messages), My Account (/account), Help (/faq).
@@ -85,7 +85,7 @@ TXT;
             'execution' => 'Execution (/execution) runs the 15-step Trade Execution Supervisor: kill switch, mode, strategy lifecycle, broker health, freshness, duplicates, risk, then human approval or a configured automation envelope. Routing only happens through a verified connector. Brokers are at /brokers; limits at /risk.',
             'brokers' => 'Brokers (/brokers) lists your connections (MT5, OANDA, Alpaca, IBKR, exchanges). Order routing needs a healthy, demo-gated connector unless live is explicitly allowed. A missing bridge is ROUTING_BLOCKED — the platform does not pretend a terminal exists.',
             'risk' => 'Risk Center (/risk) holds limits, kill switch and the Portfolio Risk Monitor (exposure, leverage, correlated positions, drawdown, daily loss, broker disconnect). The Risk Engine can veto any paper or live order. Default boot: ANALYSIS_ONLY + kill switch active.',
-            'sports' => 'Sports Intel is /sports. Fixtures and odds come from configured api-football, TheSportsDB or SportMonks. With no provider the module is DISABLED_NO_PROVIDER and shows no invented matches. Predictions, when enabled, are model-stamped and never mixed with demo data.',
+            'sports' => 'Sports Intel is /sports. Fixtures and odds come from connected sports data. With no feed the module stays off and shows no invented matches. Predictions, when enabled, are model-stamped and never mixed with demo data.',
             'lottery' => 'EuroMillions is /lottery. Frequency, hot/cold and gaps are historical observations, not predictions — the engine states that every valid line has the same chance. Official draws appear only after a configured feed is ingested and verified. Build tickets, statistics, systems and backtests on that hub. Actual ticket results stay separate from backtests and sandbox data.',
             'multiplier' => 'Multiplier AI is /multiplier. It analyses live crash-game history (Bustabit public feed by default, or WINDELS_CRASH_HISTORY_URL). Nine specialist agents produce an ensemble estimate with confidence and risk. If the live feed is down you see NO_DATA — simulated rounds are not substituted. Crash games use RNG; this is educational analysis, not a guaranteed next crash.',
             'account' => 'My Account is /account (profile, security, password). Messages with support are /messages. Alerts are /notifications. Sign in from the homepage; register if you do not have an account. Public pages never link an administrator login.',
@@ -130,7 +130,7 @@ TXT;
             'brokers' => ['broker', 'mt5', 'metatrader', 'oanda', 'alpaca', 'ibkr'],
             'risk' => ['risk center', 'risk engine', 'drawdown', 'exposure'],
             'trading' => ['trad', 'strategy lab', 'journal', 'kill switch', 'analysis_only', 'forex', 'crypto'],
-            'sports' => ['sport', 'fixture', 'football', 'premier league', 'api-football'],
+            'sports' => ['sport', 'fixture', 'football', 'premier league'],
             'lottery' => ['lottery', 'euromillions', 'euro millions', 'lucky star', 'ticket'],
             'multiplier' => ['multiplier', 'crash game', 'aviator', 'bustabit'],
             'admin' => ['admin', 'administrator', 'super admin'],

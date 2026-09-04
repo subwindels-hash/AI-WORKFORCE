@@ -16,7 +16,7 @@ $disabled = ($sys['ticketEngine'] ?? '') === 'DISABLED_NO_PROVIDER';
 <div class="page-head">
   <div>
     <h2>Sports Intelligence — daily ticket engine</h2>
-    <p>Daily ticket research from stored fixtures, odds and settled results. With no provider the module stays DISABLED_NO_PROVIDER and fabricates nothing.</p>
+    <p>Daily ticket research from stored fixtures, odds and settled results. With no sports data connected the module stays off and fabricates nothing.</p>
   </div>
 </div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
@@ -25,7 +25,7 @@ $disabled = ($sys['ticketEngine'] ?? '') === 'DISABLED_NO_PROVIDER';
   <div class="notice warnbox"><b>SANDBOX / DEMO DATA</b> — sports figures are simulated, not real-world performance.</div>
 <?php endif; ?>
 <?php if ($disabled): ?>
-  <div class="notice warnbox"><b>DISABLED_NO_PROVIDER</b> — no sports data provider is configured. No fixtures, odds, predictions or tickets are fabricated; configure a provider (environment-only credentials) to enable the pipeline.</div>
+  <div class="notice warnbox"><b>No sports data connected</b> — no fixtures, odds, predictions or tickets are fabricated until a feed is available.</div>
 <?php endif; ?>
 
 <div class="grid cols-main">
@@ -127,14 +127,14 @@ $disabled = ($sys['ticketEngine'] ?? '') === 'DISABLED_NO_PROVIDER';
           <div class="stat"><div class="k">Ticket engine</div><div class="v" style="font-size:12px"><?= e((string) ($sys['ticketEngine'] ?? '—')) ?></div></div>
         </div>
         <table class="tbl" style="margin-top:12px">
-          <thead><tr><th>Provider</th><th>Health</th><th class="num">Reliability</th></tr></thead>
+          <thead><tr><th>Feed</th><th>Health</th><th class="num">Reliability</th></tr></thead>
           <tbody>
             <?php if (empty($sys['providers'])): ?>
-              <tr><td colspan="3" class="dim">No providers registered.</td></tr>
+              <tr><td colspan="3" class="dim">No sports data connected.</td></tr>
             <?php else: ?>
-              <?php foreach ($sys['providers'] as $p): $st = (string) ($p['derivedStatus'] ?? 'UNKNOWN'); ?>
+              <?php foreach (array_values($sys['providers']) as $i => $p): $st = (string) ($p['derivedStatus'] ?? 'UNKNOWN'); ?>
                 <tr>
-                  <td style="font-weight:700"><?= e((string) ($p['provider_code'] ?? $p['display_name'] ?? '?')) ?></td>
+                  <td style="font-weight:700">Feed <?= (int) $i + 1 ?></td>
                   <td><span class="dot <?= $st === 'ONLINE' ? 'up' : ($st === 'DEGRADED' ? 'synth' : 'down') ?>"></span> <?= e($st) ?></td>
                   <td class="num"><?= ($p['reliability'] ?? null) !== null ? e(number_format((float) $p['reliability'], 2)) : '—' ?></td>
                 </tr>

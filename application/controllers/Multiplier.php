@@ -425,7 +425,7 @@ class Multiplier extends App_Controller
                 'data_available' => $signals['data_available'],
                 'source' => $signals['source'] ?? 'none',
                 'enrichment_weight' => $enrichment->getEnrichmentWeight(),
-                'note' => 'Becomes active when Sports Intelligence providers (api-football, thesportsdb, sportmonks) are configured with API keys',
+                'note' => 'Becomes active when Sports Intelligence has connected sports data',
             ];
         } catch (\Throwable $e) {
             $results['checks']['sports_enrichment'] = ['status' => 'FAIL', 'error' => $e->getMessage()];

@@ -182,7 +182,7 @@ $_aiHealth = $_aiTotal > 0 ? round(($_aiHealthy / $_aiTotal) * 100, 0) : 0;
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px">
       <div>
         <h3 style="margin:0 0 4px">⚽ AI Sports Intelligence</h3>
-        <p class="dim" style="margin:0">Multi-source sports analytics from api-football, TheSportsDB, and SportMonks with AI-powered predictions.</p>
+        <p class="dim" style="margin:0">Fixtures, odds and ticket research from connected sports data — never invented when a feed is missing.</p>
       </div>
       <div style="display:flex;gap:8px">
         <a class="btn primary" href="/sports">Open Sports Intel</a>
@@ -192,10 +192,10 @@ $_aiHealth = $_aiTotal > 0 ? round(($_aiHealthy / $_aiTotal) * 100, 0) : 0;
     <?php $sportsProviders = $sportsWidget['providers'] ?? []; ?>
     <?php if (!empty($sportsProviders)): ?>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
-      <?php foreach ($sportsProviders as $sp): ?>
+      <?php foreach (array_values($sportsProviders) as $i => $sp): ?>
         <div style="background:var(--panel2);border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 14px;display:flex;align-items:center;gap:8px">
           <span style="width:8px;height:8px;border-radius:50%;background:<?= !empty($sp['healthy']) ? 'var(--green)' : 'var(--dim)' ?>;box-shadow:0 0 6px <?= !empty($sp['healthy']) ? 'var(--green)' : 'var(--dim)' ?>"></span>
-          <span style="font-size:12px;font-weight:600;color:#fff"><?= e($sp['name'] ?? $sp['code'] ?? 'Provider') ?></span>
+          <span style="font-size:12px;font-weight:600;color:#fff">Feed <?= (int) $i + 1 ?></span>
           <?php if (!empty($sp['healthy'])): ?>
             <span style="font-size:10px;color:var(--green);text-transform:uppercase">Connected</span>
           <?php else: ?>
@@ -205,13 +205,13 @@ $_aiHealth = $_aiTotal > 0 ? round(($_aiHealthy / $_aiTotal) * 100, 0) : 0;
       <?php endforeach; ?>
     </div>
     <?php else: ?>
-    <p class="dim">No sports data providers configured yet. <a href="/sports">Set up providers →</a></p>
+    <p class="dim">No sports data connected yet. <a href="/sports">Open Sports Intel →</a></p>
     <?php endif; ?>
     
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px">
       <div style="background:var(--panel2);border-radius:var(--radius-sm);padding:12px 14px">
-        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">Data Providers</div>
-        <div style="font-size:20px;font-weight:700;color:#fff"><?= (int)($sportsWidget['totalProviders'] ?? 0) ?> / 3</div>
+        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">Live feeds</div>
+        <div style="font-size:20px;font-weight:700;color:#fff"><?= (int)($sportsWidget['totalProviders'] ?? 0) ?></div>
       </div>
       <div style="background:var(--panel2);border-radius:var(--radius-sm);padding:12px 14px">
         <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">API Status</div>

@@ -31,7 +31,7 @@ test('chat assistant maps modules to real paths and honesty rules', function () 
         ['Multiplier live data', '/multiplier', 'NO_DATA'],
         ['Lead discovery search', '/leads', 'fake businesses'],
         ['paper trading', '/paper', 'simulation'],
-        ['sports fixtures', '/sports', 'DISABLED_NO_PROVIDER'],
+        ['sports fixtures', '/sports', 'no invented matches'],
         ['what is windels ai workforce', '/dashboard', 'kill switch'],
         ['admin login please', 'member sign-in', 'URL'],
     ];

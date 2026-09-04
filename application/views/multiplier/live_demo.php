@@ -211,7 +211,7 @@
           <div style="text-align:center;padding:20px;color:#64748b">
             <div style="font-size:40px;margin-bottom:8px">⚽</div>
             <div>Sports Intelligence</div>
-            <div style="font-size:11px;margin-top:4px">Configure api-football, thesportsdb, or sportmonks to activate</div>
+            <div style="font-size:11px;margin-top:4px">Connect sports data to activate</div>
           </div>
         <?php endif; ?>
       </div>
@@ -257,7 +257,7 @@
           <div class="demo-flow-icon">⚽</div>
           <div class="demo-flow-text">
             <div class="demo-flow-title">3. Sports Intelligence Enrichment</div>
-            <div class="demo-flow-desc">Extracts market sentiment from api-football/thesportsdb/sportmonks (±15% adjustment)</div>
+            <div class="demo-flow-desc">Extracts market sentiment from connected sports data (±15% adjustment)</div>
           </div>
         </div>
         <?php endif; ?>
