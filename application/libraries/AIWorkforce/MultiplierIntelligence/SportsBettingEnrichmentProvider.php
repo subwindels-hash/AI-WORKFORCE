@@ -1,6 +1,8 @@
 <?php
 namespace AIWorkforce\MultiplierIntelligence;
 
+use AIWorkforce\Sports\Providers\ProviderException;
+
 /**
  * Sports Betting Enrichment Provider
  * 
@@ -97,7 +99,8 @@ class SportsBettingEnrichmentProvider
     private function extractSignalsFromSports(array $signals): array
     {
         // Get current fixtures and odds from Sports Intelligence
-        $fixtures = $this->getCurrentFixtures();
+        $current = $this->getCurrentFixtures();
+        $fixtures = $current['fixtures'];
         if (empty($fixtures)) {
             return $signals;
         }
@@ -129,10 +132,10 @@ class SportsBettingEnrichmentProvider
             $signals['betting_volume_indicator'] = 'low';
         }
         
-        // 2. Major Event Detection
+        // 2. Major Event Detection (internal fixture shape uses 'competition')
         $majorLeagues = ['premier league', 'la liga', 'champions league', 'serie a', 'bundesliga', 'world cup'];
         foreach ($fixtures as $f) {
-            $league = strtolower($f['league'] ?? $f['league_name'] ?? '');
+            $league = strtolower($f['competition'] ?? $f['league'] ?? $f['league_name'] ?? '');
             foreach ($majorLeagues as $ml) {
                 if (strpos($league, $ml) !== false) {
                     $signals['major_event'] = true;
@@ -143,7 +146,7 @@ class SportsBettingEnrichmentProvider
         }
         
         // 3. Market Sentiment from Odds
-        $oddsData = $this->getOddsSummary($fixtures);
+        $oddsData = $this->getOddsSummary($fixtures, $current['provider']);
         if (!empty($oddsData)) {
             $signals['sentiment_score'] = $oddsData['sentiment'];
             $signals['volatility_signal'] = $oddsData['volatility'];
@@ -161,18 +164,23 @@ class SportsBettingEnrichmentProvider
     }
     
     /**
-     * Get current fixtures from Sports Intelligence
+     * Get today's fixtures from Sports Intelligence.
+     *
+     * @return array{fixtures: array<int,array<string,mixed>>, provider: string|null}
+     *   `provider` is the provider id that served the fixtures, so odds lookups
+     *   can prefer the same source (fixture ids only join within one provider).
      */
     private function getCurrentFixtures(): array
     {
-        if ($this->sportsIntel === null) return [];
+        $empty = ['fixtures' => [], 'provider' => null];
+        if ($this->sportsIntel === null) return $empty;
         
         try {
             // Use the SportsProviderManager to get fixtures with fallback
             // This automatically uses api-football, thesportsdb, or sportmonks
             $providers = $this->sportsIntel->providers;
             if (!$providers->configured()) {
-                return [];
+                return $empty;
             }
             
             // Get today's fixtures using provider fallback chain
@@ -184,80 +192,99 @@ class SportsBettingEnrichmentProvider
             });
             
             if (!empty($result['ok']) && !empty($result['result'])) {
-                return $result['result'];
+                return ['fixtures' => $result['result'], 'provider' => $result['provider'] ?? null];
             }
         } catch (\Throwable $e) {
             // Non-critical, return empty
         }
         
-        return [];
+        return $empty;
     }
     
     /**
-     * Get odds summary from fixtures
+     * Get odds summary from fixtures.
+     *
+     * Prefers the round endpoint: fixtures carrying a roundId are covered by
+     * ONE round() call per distinct matchday instead of one odds() call per
+     * fixture. Fixtures without a roundId (or whose round fetch fails) fall
+     * back to the per-fixture odds() call. The sample is bounded because the
+     * summary is an aggregate sentiment signal — and it keeps the fallback
+     * path's API cost bounded.
      */
-    private function getOddsSummary(array $fixtures): array
+    private function getOddsSummary(array $fixtures, ?string $preferredProvider = null): array
     {
         if (empty($fixtures) || $this->sportsIntel === null) return [];
         
         $providers = $this->sportsIntel->providers;
         if (!$providers->configured()) return [];
         
-        $totalOdds = 0;
-        $count = 0;
-        $oddsVariance = [];
+        $sample = array_slice($fixtures, 0, 50);
+        $oddsByFixture = [];
+        $byRound = [];
         
-        foreach (array_slice($fixtures, 0, 10) as $f) {
-            try {
-                $fixtureId = $f['id'] ?? $f['fixture_id'] ?? $f['fixtureExternalId'] ?? null;
-                if (!$fixtureId) continue;
-                
-                // Use provider fallback to get odds
-                $result = $providers->withFallback('odds', function ($provider) use ($fixtureId) {
-                    return $provider->odds($fixtureId);
-                });
-                
-                $odds = [];
-                if (!empty($result['ok']) && !empty($result['result'])) {
-                    $odds = $result['result'];
-                }
-                
-                if (!empty($odds)) {
-                    // Extract implied probabilities from odds
-                    // Odds format varies by provider, but we look for home/away probabilities
-                    $homeProb = null;
-                    $awayProb = null;
-                    
-                    // Try different odds structures
-                    if (isset($odds['home']['implied_probability'])) {
-                        $homeProb = (float) $odds['home']['implied_probability'];
-                    } elseif (isset($odds['home']['odds'])) {
-                        $homeProb = 1.0 / (float) $odds['home']['odds'];
-                    }
-                    
-                    if (isset($odds['away']['implied_probability'])) {
-                        $awayProb = (float) $odds['away']['implied_probability'];
-                    } elseif (isset($odds['away']['odds'])) {
-                        $awayProb = 1.0 / (float) $odds['away']['odds'];
-                    }
-                    
-                    if ($homeProb !== null && $awayProb !== null) {
-                        // Favorite strength indicates market confidence
-                        $favoriteProb = max($homeProb, $awayProb);
-                        $totalOdds += $favoriteProb;
-                        $count++;
-                        $oddsVariance[] = abs($homeProb - $awayProb);
-                    }
-                }
-            } catch (\Throwable $e) {
-                continue;
+        foreach ($sample as $f) {
+            // Internal fixture shape uses externalId; legacy keys kept for safety.
+            $ext = (string) ($f['externalId'] ?? $f['id'] ?? $f['fixture_id'] ?? '');
+            if ($ext === '') continue;
+            $roundId = (string) ($f['roundId'] ?? '');
+            if ($roundId !== '') {
+                $byRound[$roundId][] = $ext;
+            } else {
+                $this->fetchFixtureOdds($providers, $preferredProvider, $ext, $oddsByFixture);
             }
+        }
+        
+        foreach ($byRound as $roundId => $exts) {
+            $attempt = $providers->withFallback('round', function ($p) use ($roundId) {
+                if (!method_exists($p, 'round')) throw new ProviderException('round endpoint not supported', ProviderException::DATA_ERROR);
+                return $p->round((string) $roundId);
+            }, $preferredProvider);
+            $covered = false;
+            if (!empty($attempt['ok']) && is_array($attempt['result'] ?? null)) {
+                foreach (($attempt['result']['odds'] ?? []) as $row) {
+                    if (is_array($row) && !empty($row['fixtureId'])) {
+                        $oddsByFixture[(string) $row['fixtureId']][] = $row;
+                        $covered = true;
+                    }
+                }
+            }
+            // A failed (or odds-less) round fetch degrades to per-fixture odds.
+            if (!$covered) {
+                foreach ($exts as $ext) {
+                    $this->fetchFixtureOdds($providers, $preferredProvider, $ext, $oddsByFixture);
+                }
+            }
+        }
+        
+        // Aggregate from the internal odds rows (list of market/selection/
+        // decimalOdds). Only MATCH_RESULT home/away prices feed the
+        // favorite-strength and spread metrics.
+        $favoriteSum = 0.0;
+        $spreads = [];
+        $count = 0;
+        foreach ($oddsByFixture as $rows) {
+            $home = null;
+            $away = null;
+            foreach ($rows as $row) {
+                if (($row['market'] ?? '') !== 'MATCH_RESULT') continue;
+                $odd = is_numeric($row['decimalOdds'] ?? null) ? (float) $row['decimalOdds'] : null;
+                if ($odd === null || $odd <= 1.0) continue;
+                if (($row['selection'] ?? '') === 'HOME') $home = $odd;
+                elseif (($row['selection'] ?? '') === 'AWAY') $away = $odd;
+            }
+            if ($home === null || $away === null) continue;
+            $homeProb = 1.0 / $home;
+            $awayProb = 1.0 / $away;
+            // Favorite strength indicates market confidence.
+            $favoriteSum += max($homeProb, $awayProb);
+            $spreads[] = abs($homeProb - $awayProb);
+            $count++;
         }
         
         if ($count === 0) return [];
         
-        $avgFavoriteProb = $totalOdds / $count;
-        $avgVariance = count($oddsVariance) > 0 ? array_sum($oddsVariance) / count($oddsVariance) : 0;
+        $avgFavoriteProb = $favoriteSum / $count;
+        $avgVariance = count($spreads) > 0 ? array_sum($spreads) / count($spreads) : 0;
         
         return [
             'sentiment' => round($avgFavoriteProb, 3),
@@ -265,6 +292,23 @@ class SportsBettingEnrichmentProvider
             'avg_favorite_prob' => round($avgFavoriteProb, 3),
             'odds_variability' => round($avgVariance, 3),
         ];
+    }
+    
+    /** Per-fixture odds lookup through the provider fallback chain. */
+    private function fetchFixtureOdds(object $providers, ?string $preferredProvider, string $fixtureId, array &$oddsByFixture): void
+    {
+        try {
+            $result = $providers->withFallback('odds', function ($provider) use ($fixtureId) {
+                return $provider->odds($fixtureId);
+            }, $preferredProvider);
+            if (!empty($result['ok']) && is_array($result['result'] ?? null)) {
+                foreach ($result['result'] as $row) {
+                    if (is_array($row)) $oddsByFixture[$fixtureId][] = $row;
+                }
+            }
+        } catch (\Throwable $e) {
+            // Non-critical enrichment; skip this fixture.
+        }
     }
     
     /**
