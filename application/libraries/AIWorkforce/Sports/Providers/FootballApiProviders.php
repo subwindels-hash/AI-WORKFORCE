@@ -34,11 +34,46 @@ trait HttpTransport
     private function initTransport(int $timeout, ?callable $override = null): void
     {
         $this->transport = $override ?? function (string $url, array $headers) use ($timeout): array {
+            $headerList = [];
+            foreach ($headers as $h) {
+                $h = trim((string) $h);
+                if ($h !== '') $headerList[] = $h;
+            }
+            // Prefer cURL on cPanel hosts where allow_url_fopen is often off.
+            if (function_exists('curl_init')) {
+                $ch = curl_init($url);
+                if ($ch !== false) {
+                    curl_setopt_array($ch, [
+                        CURLOPT_RETURNTRANSFER => true,
+                        CURLOPT_FOLLOWLOCATION => true,
+                        CURLOPT_MAXREDIRS => 3,
+                        CURLOPT_CONNECTTIMEOUT => max(3, min(30, $timeout)),
+                        CURLOPT_TIMEOUT => max(3, min(60, $timeout)),
+                        CURLOPT_HTTPHEADER => $headerList,
+                        CURLOPT_USERAGENT => 'WINDELS-Sports/1.0',
+                        CURLOPT_SSL_VERIFYPEER => true,
+                        CURLOPT_SSL_VERIFYHOST => 2,
+                        CURLOPT_ENCODING => '',
+                    ]);
+                    $body = curl_exec($ch);
+                    $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                    curl_close($ch);
+                    if ($body !== false) {
+                        return ['status' => $status, 'body' => (string) $body];
+                    }
+                    if ($status > 0) {
+                        return ['status' => $status, 'body' => ''];
+                    }
+                }
+            }
+            if (!ini_get('allow_url_fopen')) {
+                return ['status' => 0, 'body' => ''];
+            }
             $ctx = stream_context_create([
                 'http' => [
                     'method' => 'GET',
                     'timeout' => $timeout,
-                    'header' => implode("\r\n", $headers),
+                    'header' => implode("\r\n", $headerList),
                     'ignore_errors' => true,
                 ],
                 'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
@@ -48,7 +83,7 @@ trait HttpTransport
             if (isset($http_response_header[0]) && preg_match('#HTTP/\S+\s+(\d+)#', $http_response_header[0], $m)) {
                 $status = (int) $m[1];
             }
-            return ['status' => $status, 'body' => (string) $body];
+            return ['status' => $status, 'body' => is_string($body) ? $body : ''];
         };
     }
 
@@ -177,8 +212,18 @@ class ApiFootballProvider implements SportsDataProvider
         private int $timeout = 10,
         ?callable $transport = null,
     ) {
-        if (class_exists('\\AIWorkforce\\ApiProviders')) {
+        // Always canonicalize marketing hosts (api-football.com / football.com)
+        // onto the real v3 API root so a saved website URL cannot break live calls.
+        if (class_exists(\AIWorkforce\ApiProviders::class)) {
             $this->baseUrl = \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl($this->baseUrl);
+        } else {
+            $host = strtolower((string) (parse_url(
+                preg_match('#^https?://#i', $this->baseUrl) ? $this->baseUrl : 'https://' . $this->baseUrl,
+                PHP_URL_HOST
+            ) ?? ''));
+            if ($host === '' || str_contains($host, 'api-football.com') || $host === 'football.com' || $host === 'www.football.com') {
+                $this->baseUrl = 'https://v3.football.api-sports.io';
+            }
         }
         $this->initTransport($timeout, $transport);
     }

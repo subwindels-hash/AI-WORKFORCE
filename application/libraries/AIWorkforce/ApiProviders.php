@@ -148,8 +148,8 @@ final class ApiProviders
             'api_football' => [
                 'label' => 'API-Football (api-football.com)',
                 'fields' => [
-                    $f('base_url', 'Base URL', false, false, 'Defaults to https://v3.football.api-sports.io'),
-                    $f('api_key', 'API Key (x-apisports-key)', true, true, 'Get yours at https://dashboard.api-football.com/'),
+                    $f('base_url', 'Base URL', false, false, 'Leave blank or use https://v3.football.api-sports.io — do not paste api-football.com / football.com (marketing sites are auto-rewritten)'),
+                    $f('api_key', 'API Key (x-apisports-key)', true, true, 'Dashboard → Account → API key at https://dashboard.api-football.com/ (header: x-apisports-key)'),
                     $f('timeout', 'Timeout (seconds)', false, false),
                 ],
             ],
@@ -856,45 +856,127 @@ final class ApiProviders
 
     /**
      * Map marketing / RapidAPI hostnames onto a real API-Football v3 root.
+     *
+     * Operators frequently paste the product site (api-football.com / football.com)
+     * or a markdown-wrapped URL. Those are not API origins — without this remap
+     * Test Connection hits a website and reports "Connection failed".
      */
     public static function normalizeApiFootballBaseUrl(string $baseUrl): string
     {
-        $base = rtrim(trim($baseUrl), '/');
-        if ($base === '') return 'https://v3.football.api-sports.io';
+        $base = trim($baseUrl);
+        // Strip accidental markdown / link wrappers: [http://football.com](http://football.com)
+        $base = preg_replace('#^\[[^\]]*\]\((https?://[^)\s]+)\)\s*$#i', '$1', $base) ?? $base;
+        $base = preg_replace('#^<\s*(https?://[^>\s]+)\s*>$#i', '$1', $base) ?? $base;
+        $base = rtrim(trim($base), "/ \t");
+        if ($base === '' || strcasecmp($base, 'default') === 0 || strcasecmp($base, 'auto') === 0) {
+            return 'https://v3.football.api-sports.io';
+        }
         // parse_url treats a bare hostname as a path. Accept it because
         // provider settings are often pasted without a scheme.
-        $urlForParsing = preg_match('#^https?://#i', $base) ? $base : 'https://' . $base;
-        $host = strtolower((string) (parse_url($urlForParsing, PHP_URL_HOST) ?? ''));
-        if ($host === 'api-football.com' || $host === 'www.api-football.com' || $host === 'dashboard.api-football.com' || $host === 'football.com' || $host === 'www.football.com') {
+        $urlForParsing = preg_match('#^https?://#i', $base) ? $base : 'https://' . ltrim($base, '/');
+        $parts = parse_url($urlForParsing);
+        $host = strtolower((string) ($parts['host'] ?? ''));
+        // If parse_url still only saw a path (e.g. "api-football.com/docs"), use first segment.
+        if ($host === '' && isset($parts['path'])) {
+            $host = strtolower((string) explode('/', ltrim((string) $parts['path'], '/'))[0]);
+        }
+        $host = preg_replace('#:\d+$#', '', $host) ?? $host;
+        $marketing = [
+            'api-football.com', 'www.api-football.com', 'dashboard.api-football.com',
+            'football.com', 'www.football.com', 'api.football.com',
+            'v3.api-football.com', 'api-sports.io', 'www.api-sports.io',
+        ];
+        if (in_array($host, $marketing, true) || str_ends_with($host, '.api-football.com')) {
+            return 'https://v3.football.api-sports.io';
+        }
+        if ($host === 'v3.football.api-sports.io' || $host === 'football.api-sports.io') {
             return 'https://v3.football.api-sports.io';
         }
         if (str_contains($host, 'rapidapi.com')) {
-            if (!str_ends_with($base, '/v3')) $base = rtrim($base, '/') . '/v3';
+            // Canonical RapidAPI API-Football v3 root.
+            if ($host === 'api-football-v1.p.rapidapi.com' || str_contains($host, 'api-football')) {
+                return 'https://api-football-v1.p.rapidapi.com/v3';
+            }
+            if (!str_ends_with(rtrim($base, '/'), '/v3')) {
+                $base = rtrim($urlForParsing, '/') . '/v3';
+            } else {
+                $base = rtrim($urlForParsing, '/');
+            }
+            // Force https even if the operator pasted http://
+            if (str_starts_with(strtolower($base), 'http://')) {
+                $base = 'https://' . substr($base, 7);
+            }
             return $base;
         }
-        return $base;
+        // Any leftover non-https paste becomes https so save() + test() agree.
+        if (!preg_match('#^https://#i', $base)) {
+            $base = 'https://' . preg_replace('#^https?://#i', '', $urlForParsing);
+        }
+        return rtrim($base, '/');
     }
 
     private static function testApiFootball(string $baseUrl, string $key): array
     {
-        if ($key === '') return ['ok' => false, 'message' => 'An API key is required. Register at https://dashboard.api-football.com/'];
+        $key = trim($key);
+        if ($key === '') {
+            return ['ok' => false, 'message' => 'An API key is required. Register at https://dashboard.api-football.com/'];
+        }
         $base = self::normalizeApiFootballBaseUrl($baseUrl);
         $url = rtrim($base, '/') . '/status';
         $host = strtolower((string) (parse_url($base, PHP_URL_HOST) ?? ''));
-        $headers = ['Accept: application/json', 'x-apisports-key: ' . $key];
+        $headers = [
+            'Accept: application/json',
+            'x-apisports-key: ' . $key,
+        ];
         if (str_contains($host, 'rapidapi.com')) {
             $headers[] = 'x-rapidapi-key: ' . $key;
             $headers[] = 'x-rapidapi-host: ' . $host;
         }
         $resp = self::http($url, $headers);
         $status = (int) ($resp['status'] ?? 0);
-        $decoded = json_decode((string) ($resp['body'] ?? ''), true);
-        $errors = is_array($decoded) ? ($decoded['errors'] ?? null) : null;
-        $hasErrors = is_array($errors) && $errors !== [];
-        if ($status >= 200 && $status < 400 && !$hasErrors) {
-            $requests = is_array($decoded['response']['requests'] ?? null) ? $decoded['response']['requests'] : [];
-            $limit = isset($requests['limit_day']) ? (int) $requests['limit_day'] : null;
-            $used = isset($requests['current']) ? (int) $requests['current'] : (isset($requests['used']) ? (int) $requests['used'] : null);
+        $body = (string) ($resp['body'] ?? '');
+        $decoded = json_decode($body, true);
+        if (!is_array($decoded)) $decoded = [];
+
+        // Vendor may return HTTP 200 with errors: { token: "..." } or errors: ["..."].
+        $errors = $decoded['errors'] ?? null;
+        $hasErrors = false;
+        $errorText = '';
+        if (is_array($errors) && $errors !== []) {
+            $hasErrors = true;
+            $flat = [];
+            foreach ($errors as $k => $v) {
+                if (is_string($v) && $v !== '') $flat[] = $v;
+                elseif (is_string($k) && is_scalar($v)) $flat[] = $k . ': ' . (string) $v;
+                elseif (is_string($k)) $flat[] = $k;
+            }
+            $errorText = strtolower(implode(' ', $flat));
+        } elseif (is_string($errors) && trim($errors) !== '') {
+            $hasErrors = true;
+            $errorText = strtolower($errors);
+        }
+
+        $response = is_array($decoded['response'] ?? null) ? $decoded['response'] : [];
+        // A real /status payload is JSON with response/account/subscription/requests
+        // (or at least get=status). Plain HTML from a marketing host must not pass.
+        $looksLikeStatus = $response !== []
+            || (isset($decoded['get']) && (string) $decoded['get'] === 'status')
+            || isset($decoded['results'])
+            || isset($decoded['paging']);
+
+        if ($status >= 200 && $status < 400 && !$hasErrors && $looksLikeStatus) {
+            // Never do arithmetic on the whole requests object (PHP 8 TypeError → false "Connection failed").
+            $requests = is_array($response['requests'] ?? null) ? $response['requests'] : [];
+            $limit = null;
+            $used = null;
+            if (isset($requests['limit_day']) && is_numeric($requests['limit_day'])) {
+                $limit = (int) $requests['limit_day'];
+            }
+            if (isset($requests['current']) && is_numeric($requests['current'])) {
+                $used = (int) $requests['current'];
+            } elseif (isset($requests['used']) && is_numeric($requests['used'])) {
+                $used = (int) $requests['used'];
+            }
             $msg = 'Connected to API-Football';
             if ($limit !== null && $used !== null) {
                 $msg .= ' (' . max(0, $limit - $used) . ' of ' . $limit . ' requests remaining today)';
@@ -903,9 +985,21 @@ final class ApiProviders
             }
             return ['ok' => true, 'message' => $msg];
         }
-        if ($status === 401 || $status === 403 || $hasErrors) return ['ok' => false, 'message' => 'Invalid API key'];
+
+        if ($status === 401 || $status === 403) {
+            return ['ok' => false, 'message' => 'Invalid API key'];
+        }
+        if ($hasErrors) {
+            if (str_contains($errorText, 'token') || str_contains($errorText, 'key') || str_contains($errorText, 'auth')) {
+                return ['ok' => false, 'message' => 'Invalid API key'];
+            }
+            return ['ok' => false, 'message' => 'API-Football rejected the request'];
+        }
         if ($status === 429) return ['ok' => false, 'message' => 'Rate limited — try again later'];
-        return ['ok' => false, 'message' => 'Connection failed'];
+        if ($status === 0) {
+            return ['ok' => false, 'message' => 'Could not reach API-Football (network/SSL/firewall). Check outbound HTTPS to v3.football.api-sports.io'];
+        }
+        return ['ok' => false, 'message' => 'Connection failed (HTTP ' . $status . ')'];
     }
 
     private static function testTheSportsDb(string $baseUrl, string $key): array
@@ -942,26 +1036,91 @@ final class ApiProviders
         return ['ok' => false, 'message' => 'Connection failed'];
     }
 
-    /** @return array{status:int,body:string} */
+    /**
+     * Outbound HTTP for provider connection tests.
+     *
+     * Prefer cURL when available (typical on cPanel; works when allow_url_fopen
+     * is off). Fall back to file_get_contents streams. Always returns a status
+     * so callers can distinguish network failure (0) from HTTP errors.
+     *
+     * @return array{status:int,body:string}
+     */
     public static function http(string $url, array $headers = [], ?string $body = null): array
     {
         if (is_callable(self::$http)) return (self::$http)($url, $headers, $body);
-        $hdr = "Accept: application/json\r\nUser-Agent: WINDELS-API-Management/1.0\r\n";
-        foreach ($headers as $h) $hdr .= $h . "\r\n";
+
+        $method = $body === null ? 'GET' : 'POST';
+        $headerList = ['Accept: application/json', 'User-Agent: WINDELS-API-Management/1.0'];
+        foreach ($headers as $h) {
+            $h = trim((string) $h);
+            if ($h === '') continue;
+            // Avoid duplicating Accept / User-Agent when callers pass them.
+            if (preg_match('#^(Accept|User-Agent)\s*:#i', $h)) {
+                $headerList = array_values(array_filter(
+                    $headerList,
+                    static fn(string $existing): bool => !preg_match('#^' . preg_quote(strtok($h, ':'), '#') . '\s*:#i', $existing)
+                ));
+            }
+            $headerList[] = $h;
+        }
+
+        if (function_exists('curl_init')) {
+            $ch = curl_init($url);
+            if ($ch !== false) {
+                curl_setopt_array($ch, [
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_FOLLOWLOCATION => true,
+                    CURLOPT_MAXREDIRS => 3,
+                    CURLOPT_CONNECTTIMEOUT => 8,
+                    CURLOPT_TIMEOUT => 12,
+                    CURLOPT_HTTPHEADER => $headerList,
+                    CURLOPT_USERAGENT => 'WINDELS-API-Management/1.0',
+                    CURLOPT_SSL_VERIFYPEER => true,
+                    CURLOPT_SSL_VERIFYHOST => 2,
+                    CURLOPT_ENCODING => '',
+                ]);
+                if ($method === 'POST') {
+                    curl_setopt($ch, CURLOPT_POST, true);
+                    curl_setopt($ch, CURLOPT_POSTFIELDS, (string) $body);
+                }
+                $raw = curl_exec($ch);
+                $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                $errno = curl_errno($ch);
+                curl_close($ch);
+                if ($raw !== false) {
+                    return ['status' => $status > 0 ? $status : ($errno ? 0 : 0), 'body' => (string) $raw];
+                }
+                // Fall through to streams if cURL failed to produce a body and
+                // reported a transport error — some hosts mis-configure cURL CA.
+                if ($status > 0) {
+                    return ['status' => $status, 'body' => ''];
+                }
+            }
+        }
+
+        if (!ini_get('allow_url_fopen')) {
+            return ['status' => 0, 'body' => ''];
+        }
+
+        $hdr = '';
+        foreach ($headerList as $h) $hdr .= $h . "\r\n";
         $http = [
-            'method' => $body === null ? 'GET' : 'POST',
-            'timeout' => 8,
+            'method' => $method,
+            'timeout' => 12,
             'ignore_errors' => true,
             'header' => $hdr,
         ];
         if ($body !== null) $http['content'] = $body;
-        $ctx = stream_context_create(['http' => $http, 'ssl' => ['verify_peer' => true, 'verify_peer_name' => true]]);
+        $ctx = stream_context_create([
+            'http' => $http,
+            'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
+        ]);
         $raw = @file_get_contents($url, false, $ctx);
         $status = 0;
         foreach ($http_response_header ?? [] as $line) {
             if (preg_match('#HTTP/\S+\s+(\d+)#', $line, $m)) { $status = (int) $m[1]; break; }
         }
-        return ['status' => $status, 'body' => (string) $raw];
+        return ['status' => $status, 'body' => is_string($raw) ? $raw : ''];
     }
 
     private static function hydrate(array $row, bool $withSecrets): array
