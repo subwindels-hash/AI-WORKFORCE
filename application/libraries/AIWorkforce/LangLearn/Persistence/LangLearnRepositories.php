@@ -20,6 +20,10 @@ interface LangLearnRepository
     /** @return array<int, array<string, mixed>> */
     public function listProfilesByUser(int $userId): array;
 
+    /** Persist the learning + native language codes for a user (one row per user). */
+    public function setLanguageCodes(int $userId, string $languageCode, string $nativeLanguage): bool;
+    public function getLanguageCodes(int $userId): ?array;
+
     /** Insert-or-update by id. state/result accept arrays (encoded as JSON). */
     public function saveAssessment(array $assessment): array;
     public function findAssessment(string $id): ?array;

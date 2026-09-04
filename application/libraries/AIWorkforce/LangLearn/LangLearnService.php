@@ -173,6 +173,18 @@ class LangLearnService
         ], $this->repo->listProfilesByUser($userId));
     }
 
+    /** Persist the learning + native language codes for a user. */
+    public function setLanguageCodes(int $userId, string $languageCode, string $nativeLanguage): bool
+    {
+        return $this->repo->setLanguageCodes($userId, $languageCode, $nativeLanguage);
+    }
+
+    /** Retrieve the stored language codes for a user, if any. */
+    public function getLanguageCodes(int $userId): ?array
+    {
+        return $this->repo->getLanguageCodes($userId);
+    }
+
     // ---------------------------------------------------------- assessment
 
     /** Start an adaptive assessment for the profile's language. */

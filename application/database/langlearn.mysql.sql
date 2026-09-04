@@ -28,6 +28,17 @@ CREATE TABLE IF NOT EXISTS user_language_profiles (
   UNIQUE KEY uq_profile_user_language (user_id, language_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS user_language_preferences (
+  id               INT AUTO_INCREMENT PRIMARY KEY,
+  user_id          INT NOT NULL,
+  language_code    VARCHAR(8) NOT NULL,
+  native_language  VARCHAR(8) NOT NULL,
+  created_at       VARCHAR(32) NOT NULL,
+  updated_at       VARCHAR(32) NOT NULL,
+  UNIQUE KEY uq_ulpref_user (user_id),
+  KEY idx_ulpref_lang (language_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS language_assessments (
   id           VARCHAR(36) PRIMARY KEY,
   profile_id   INT NOT NULL,

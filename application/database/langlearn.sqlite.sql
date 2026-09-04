@@ -10,6 +10,11 @@ CREATE TABLE IF NOT EXISTS user_language_profiles (
  status TEXT NOT NULL DEFAULT 'ACTIVE', daily_minutes INTEGER NOT NULL DEFAULT 20, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
  UNIQUE(user_id, language_code)
 );
+CREATE TABLE IF NOT EXISTS user_language_preferences (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, language_code TEXT NOT NULL,
+ native_language TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+ UNIQUE(user_id)
+);
 CREATE TABLE IF NOT EXISTS language_assessments (
  id TEXT PRIMARY KEY, profile_id INTEGER NOT NULL, user_id INTEGER NOT NULL, language_code TEXT NOT NULL,
  status TEXT NOT NULL DEFAULT 'IN_PROGRESS', state TEXT NOT NULL, result TEXT,

@@ -470,4 +470,24 @@ class Api_lang_learning extends Api_controller
         catch (Throwable $e) { $this->fail($e); }
     }
 
+    /**
+     * Persist the teacher UI's language selection to the user's profile so the
+     * learning language / native language choice carries across the teacher page,
+     * listening, speaking, vocabulary, etc. Called on every select change.
+     */
+    public function save_lang_codes()
+    {
+        $user = $this->guard();
+        if (!$user) return;
+        $body = $this->jsonBody();
+        $langCode = strtolower(trim((string) ($body['language_code'] ?? '')));
+        $nativeCode = strtolower(trim((string) ($body['native_language'] ?? '')));
+        if ($langCode === '' || $nativeCode === '') {
+            return $this->jsonError('body must be {language_code: isoCode, native_language: isoCode}');
+        }
+        try {
+            $this->json(['ok' => $this->platform->langlearn->setLanguageCodes((int) $user['id'], $langCode, $nativeCode)]);
+        } catch (Throwable $e) { $this->fail($e); }
+    }
+
 }
