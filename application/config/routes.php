@@ -234,6 +234,17 @@ $route['api/system/features'] = 'api_system/features';
 $route['api/agents/status'] = 'api_agents/status';
 $route['api/agents/dispatch'] = 'api_agents/dispatch';
 $route['api/agents/cloudflare_status'] = 'api_agents/cloudflare_status';
+
+// Agent Platform API
+$route['api/agent-platform/execute'] = 'api_agent_platform/execute';
+$route['api/agent-platform/tool'] = 'api_agent_platform/tool';
+$route['api/agent-platform/workflow'] = 'api_agent_platform/workflow';
+$route['api/agent-platform/workflow/(:any)'] = 'api_agent_platform/workflow_status/$1';
+$route['api/agent-platform/sessions'] = 'api_agent_platform/sessions';
+$route['api/agent-platform/observability'] = 'api_agent_platform/observability';
+$route['api/agent-platform/status'] = 'api_agent_platform/status';
+$route['api/agent-platform/tools'] = 'api_agent_platform/tools';
+$route['api/agent-platform/agents'] = 'api_agent_platform/agents';
 $route['api/brokers'] = 'api_system/brokers';
 $route['api/brokers/mt5/account'] = 'api_system/mt5_account';
 $route['api/brokers/mt5/quote'] = 'api_system/mt5_quote';
