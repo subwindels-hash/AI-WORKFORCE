@@ -226,6 +226,22 @@ class Api_controller extends MY_Controller
         'api_chat/respond' => true,
         'api_system/status' => true,
         'api_system/features' => true,
+        // Lottery Intelligence — public READ-only endpoints (historical data only, no mutations)
+        'api_lottery/status' => true,
+        'api_lottery/dashboard' => true,
+        'api_lottery/lotteries' => true,
+        'api_lottery/rules' => true,
+        'api_lottery/draws' => true,
+        'api_lottery/statistics' => true,
+        'api_lottery/analyze' => true,
+        'api_lottery/combinations' => true,
+        'api_lottery/system' => true,
+        'api_lottery/backtests' => true,
+        'api_lottery/models' => true,
+        'api_lottery/performance' => true,
+        'api_lottery/providers' => true,
+        'api_lottery/health' => true,
+        'api_lottery/jobs' => true,
     ];
 
     public function __construct()

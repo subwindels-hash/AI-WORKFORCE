@@ -5,7 +5,7 @@ require_once APPPATH . 'core/App_Controller.php';
 /**
  * AI Workforce Console — user-facing agent interaction page.
  * 
- * Users can interact with specialist AI agents powered by Cloudflare Workers AI:
+ * Users can interact with specialist AI agents powered by Windels AI:
  *   - General Agent — General knowledge and assistance
  *   - Market Agent — Crypto and forex market analysis
  *   - Sports Agent — Sports statistics and analysis
@@ -50,11 +50,11 @@ class Workforce extends App_Controller
 
         // Check LLM provider configuration
         $llmStatus = \AIWorkforce\ApiProviders::publicStatus('llm');
-        $cloudflareConfigured = !empty($llmStatus['configured']);
+        $windelsAIConfigured = !empty($llmStatus['configured']);
 
         $data['agents'] = $agentList;
         $data['agentCount'] = count($agentList);
-        $data['cloudflareConfigured'] = $cloudflareConfigured;
+        $data['windelsAIConfigured'] = $windelsAIConfigured;
         $data['llmStatus'] = $llmStatus;
 
         $this->load->view('layout/header', $data);

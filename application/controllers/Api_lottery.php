@@ -81,29 +81,29 @@ class Api_lottery extends Api_controller
         $this->json($out);
     }
 
-    // ------------------------------------------------------------- read-only
+    // ------------------------------------------------------------- public read-only
     public function lotteries()
     {
-        if (!$this->requirePermission('lottery.view', false)) return;
+        // Public endpoint
         $this->json(['lotteries' => $this->platform->lottery->status()['lotteries']]);
     }
 
     public function rules()
     {
-        if (!$this->requirePermission('lottery.view', false)) return;
+        // Public endpoint
         $this->json(['rules' => $this->platform->lottery->status()['rules']]);
     }
 
     public function draws()
     {
-        if (!$this->requirePermission('lottery.view', false)) return;
+        // Public endpoint
         $g = $this->input->get(NULL, true) ?: [];
         $this->json(['draws' => $this->platform->lottery->listDraws((int) ($g['limit'] ?: 50), $g['from'] ?? null, $g['to'] ?? null)]);
     }
 
     public function show_draw(string $id)
     {
-        if (!$this->requirePermission('lottery.view', false)) return;
+        // Public endpoint
         $draw = $this->platform->lottery->drawDetail((int) $id);
         if (!$draw) return $this->jsonError('draw not found', 404);
         $this->json(['draw' => $draw]);
@@ -115,10 +115,11 @@ class Api_lottery extends Api_controller
      * future draws.
      * Kinds: numbers | frequency | gap | stars | hot-cold | distribution | pairs | triplets | star-pairs
      * Window: draw count, or calendar aliases 1y / 2y / 6m (EuroMillions ~104 draws/year).
+     * PUBLIC: no authentication required for read-only historical statistics.
      */
     public function statistics(?string $kind = null)
     {
-        if (!$this->requirePermission('lottery.view', false)) return;
+        // Public endpoint - no auth required for historical statistics
         $kind = \AIWorkforce\Lottery\LotteryIntelligence::normalizeStatsKind(
             (string) ($kind !== null && $kind !== '' ? $kind : ($this->input->get('kind') ?: 'frequency'))
         );
@@ -144,19 +145,19 @@ class Api_lottery extends Api_controller
 
     public function providers()
     {
-        if (!$this->requirePermission('lottery.view', false)) return;
+        // Public endpoint
         $this->json(['providers' => $this->AIWorkforce_model->lottery->listProviders()]);
     }
 
     public function health()
     {
-        if (!$this->requirePermission('lottery.view', false)) return;
+        // Public endpoint
         $this->json($this->platform->lottery->providerHealth());
     }
 
     public function jobs()
     {
-        if (!$this->requirePermission('lottery.view', false)) return;
+        // Public endpoint
         $g = $this->input->get(NULL, true) ?: [];
         $this->json(['jobs' => $this->AIWorkforce_model->lottery->listJobRuns(!empty($g['jobType']) ? (string) $g['jobType'] : null, (int) ($g['limit'] ?: 50))]);
     }
@@ -164,10 +165,11 @@ class Api_lottery extends Api_controller
     /**
      * Phase 13 (spec §13): full statistical profile of one line.
      * GET ?mains=1,2,3,4,5&stars=2,5  — historical observation only.
+     * PUBLIC: no authentication required.
      */
     public function analyze()
     {
-        if (!$this->requirePermission('lottery.view', false)) return;
+        // Public endpoint - no auth required
         $g = $this->input->get(NULL, true) ?: [];
         $mains = array_map('intval', array_values(array_filter(explode(',', (string) ($g['mains'] ?? '')), fn($x) => $x !== '')));
         $stars = array_map('intval', array_values(array_filter(explode(',', (string) ($g['stars'] ?? '')), fn($x) => $x !== '')));
@@ -178,17 +180,17 @@ class Api_lottery extends Api_controller
         }
     }
 
-    /** Persisted generations (spec §14/§16/§33), newest first. */
+    /** Persisted generations (spec §14/§16/§33), newest first. PUBLIC. */
     public function combinations()
     {
-        if (!$this->requirePermission('lottery.view', false)) return;
+        // Public endpoint - no auth required
         $g = $this->input->get(NULL, true) ?: [];
         $this->json(['combinations' => $this->platform->lottery->listCombinations((int) ($g['limit'] ?: 50), (int) ($g['offset'] ?: 0))]);
     }
 
     public function show_combination(string $id)
     {
-        if (!$this->requirePermission('lottery.view', false)) return;
+        // Public endpoint - no auth required
         $row = $this->platform->lottery->combinationDetail((int) $id);
         if (!$row) return $this->jsonError('combination not found', 404);
         $this->json(['combination' => $row]);
@@ -246,29 +248,80 @@ class Api_lottery extends Api_controller
      * never hardcoded. Lines are paginated (lazy enumeration); systems above
      * the synchronous limit must use POST api/lottery/system-build.
      * POST {mains: [pool], stars: [pool], page?: 0, limit?: 50}
+     * PUBLIC: no authentication required for read-only system builder.
      */
     public function system()
     {
-        if (!$this->requirePermission('lottery.view')) return;
+        // Public endpoint - no auth required for system builder.
+        // Accepts JSON body (API clients) or GET params (browser form at /lottery/system).
         $body = $this->jsonBody();
+
+        $mainsRaw = $body['mains'] ?? $this->input->get('mains');
+        $starsRaw = $body['stars'] ?? $this->input->get('stars');
+
+        $mains = is_array($mainsRaw)
+            ? $mainsRaw
+            : array_map('intval', array_values(array_filter(explode(',', (string) ($mainsRaw ?? '')), fn($x) => $x !== '')));
+        $stars = is_array($starsRaw)
+            ? $starsRaw
+            : array_map('intval', array_values(array_filter(explode(',', (string) ($starsRaw ?? '')), fn($x) => $x !== '')));
+
         try {
             $builder = $this->platform->lottery->systemBuilder;
-            $plan = $builder->plan(
-                is_array($body['mains'] ?? null) ? $body['mains'] : [],
-                is_array($body['stars'] ?? null) ? $body['stars'] : []
-            );
+            $plan = $builder->plan($mains, $stars);
+
             if ($plan['requiresBackground']) {
+                if ($this->lotteryWantsHtml()) {
+                    $this->lotteryHtml('lottery/system', [
+                        'title'  => 'EuroMillions · System builder',
+                        'plan'   => $plan,
+                        'lines'  => [],
+                        'page'   => 0,
+                        'limit'  => 50,
+                        'mains'  => $mains,
+                        'stars'  => $stars,
+                    ]);
+                    return;
+                }
                 return $this->jsonError('system has ' . $plan['totalLines'] . ' lines — above the synchronous limit (' . \AIWorkforce\Lottery\SystemBuilder::SYNC_LINE_LIMIT . '); use POST api/lottery/system-build for a background build', 409);
             }
-            $page = max(0, (int) ($body['page'] ?? 0));
+
+            $page  = max(0, (int) ($body['page'] ?? 0));
             $limit = min(\AIWorkforce\Lottery\SystemBuilder::MAX_PAGE, max(1, (int) ($body['limit'] ?: 50)));
+            $lines = $builder->page($plan['mainPool'], $plan['starPool'], $page * $limit, $limit);
+
+            if ($this->lotteryWantsHtml()) {
+                $this->lotteryHtml('lottery/system', [
+                    'title'  => 'EuroMillions · System builder',
+                    'plan'   => $plan,
+                    'lines'  => $lines,
+                    'page'   => $page,
+                    'limit'  => $limit,
+                    'mains'  => $mains,
+                    'stars'  => $stars,
+                ]);
+                return;
+            }
+
             $this->json([
-                'plan' => $plan,
-                'page' => $page,
-                'limit' => $limit,
-                'lines' => $builder->page($plan['mainPool'], $plan['starPool'], $page * $limit, $limit),
+                'plan'   => $plan,
+                'page'   => $page,
+                'limit'  => $limit,
+                'lines'  => $lines,
             ]);
         } catch (\InvalidArgumentException $e) {
+            if ($this->lotteryWantsHtml()) {
+                $this->lotteryHtml('lottery/system', [
+                    'title'  => 'EuroMillions · System builder',
+                    'plan'   => [],
+                    'lines'  => [],
+                    'page'   => 0,
+                    'limit'  => 50,
+                    'mains'  => $mains,
+                    'stars'  => $stars,
+                ]);
+                return;
+            }
             $this->jsonError($e->getMessage(), 400);
         }
     }
@@ -408,19 +461,24 @@ class Api_lottery extends Api_controller
         }
     }
 
-    /** Phase 20: persisted backtests, newest first. GET ?limit=50 */
+    /** Phase 20: persisted backtests, newest first. GET ?limit=50
+     * PUBLIC: no authentication required for read-only backtests list.
+     */
     public function backtests()
     {
-        if (!$this->requirePermission('lottery.view', false)) return;
+        // Public endpoint - no auth required for backtests list.
+        // Supports both API JSON clients and the public browser page at /lottery/backtests.
         $g = $this->input->get(NULL, true) ?: [];
         $rows = $this->platform->lottery->listBacktests((int) ($g['limit'] ?: 50));
+
         if ($this->lotteryWantsHtml()) {
             $this->lotteryHtml('lottery/backtests', [
-                'title' => 'EuroMillions · Backtests',
+                'title'    => 'EuroMillions · Backtests',
                 'backtests' => $rows,
             ]);
             return;
         }
+
         $this->json(['backtests' => $rows]);
     }
 

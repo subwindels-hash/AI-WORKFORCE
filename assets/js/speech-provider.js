@@ -96,6 +96,7 @@ class SpeechProvider {
 
   /**
    * Spoken form of the brand: Win-dels (WIN + dels). On-screen spelling stays WINDELS.
+   * Applied to every TTS utterance in this project so the brand always sounds right.
    */
   speakableText(text) {
     return String(text == null ? '' : text).replace(/\bWINDELS\b/gi, 'Win-dels');
@@ -109,59 +110,66 @@ class SpeechProvider {
     }
     const spoken = this.speakableText(text);
     const locale = opts.locale || 'en-US';
-    const run = () => {
+    const utter = new SpeechSynthesisUtterance(spoken);
+    utter.lang = locale;
+    utter.rate = typeof opts.rate === 'number' ? opts.rate : 1;
+    utter.volume = typeof opts.volume === 'number' ? opts.volume : 1;
+    utter.pitch = typeof opts.pitch === 'number' ? opts.pitch : 1;
+
+    if (opts.voice && typeof opts.voice === 'object' && opts.voice.lang) {
+      utter.voice = opts.voice;
+      utter.lang = opts.voice.lang;
+    } else if (typeof opts.voice === 'number') {
+      const voices = this.getVoicesForLocale(utter.lang);
+      if (voices[opts.voice]) {
+        utter.voice = voices[opts.voice];
+        utter.lang = voices[opts.voice].lang;
+      }
+    } else {
+      const matches = this.getVoicesForLocale(utter.lang);
+      if (matches.length) {
+        utter.voice = matches[0];
+        utter.lang = matches[0].lang;
+      } else {
+        const any = this.getSupportedVoices();
+        if (any.length) {
+          utter.voice = any[0];
+        } else if (opts.requireVoice) {
+          if (opts.onError) opts.onError(new Error('No voice for this language'));
+          return null;
+        }
+      }
+    }
+
+    if (opts.onStart) utter.onstart = opts.onStart;
+    utter.onend = () => { this._utter = null; if (opts.onEnd) opts.onEnd(); };
+    utter.onerror = (e) => { this._utter = null; if (opts.onError) opts.onError(e); };
+    this._utter = utter;
+
+    // Cancel any current speech, then resume (Chrome needs resume after cancel)
+    // and speak. Use a short delay to ensure voices are fully loaded.
+    const speakNow = () => {
       try { this.synth.cancel(); } catch (e) { /* ignore */ }
       try { this.synth.resume(); } catch (e) { /* Chrome needs resume after cancel */ }
-      const utter = new SpeechSynthesisUtterance(spoken);
-      utter.lang = locale;
-      utter.rate = typeof opts.rate === 'number' ? opts.rate : 1;
-      utter.volume = typeof opts.volume === 'number' ? opts.volume : 1;
-      utter.pitch = typeof opts.pitch === 'number' ? opts.pitch : 1;
-
-      if (opts.voice && typeof opts.voice === 'object' && opts.voice.lang) {
-        utter.voice = opts.voice;
-        utter.lang = opts.voice.lang;
-      } else if (typeof opts.voice === 'number') {
-        const voices = this.getVoicesForLocale(utter.lang);
-        if (voices[opts.voice]) {
-          utter.voice = voices[opts.voice];
-          utter.lang = voices[opts.voice].lang;
-        }
-      } else {
-        const matches = this.getVoicesForLocale(utter.lang);
-        if (matches.length) {
-          utter.voice = matches[0];
-          utter.lang = matches[0].lang;
-        } else {
-          const any = this.getSupportedVoices();
-          if (any.length) {
-            utter.voice = any[0];
-          } else if (opts.requireVoice) {
-            if (opts.onError) opts.onError(new Error('No voice for this language'));
-            return null;
-          }
-        }
-      }
-
-      if (opts.onStart) utter.onstart = opts.onStart;
-      utter.onend = () => { this._utter = null; if (opts.onEnd) opts.onEnd(); };
-      utter.onerror = (e) => { this._utter = null; if (opts.onError) opts.onError(e); };
-      this._utter = utter;
       this.synth.speak(utter);
-      // Chrome sometimes drops the first utterance until voices have loaded.
-      if (this.getSupportedVoices().length === 0) {
-        const once = () => {
-          this._voices = this.synth.getVoices();
-          this._voicesReady = true;
-          if (this._utter === utter && !this.synth.speaking) {
-            try { this.synth.speak(utter); } catch (e) { /* ignore */ }
-          }
-        };
-        this.synth.addEventListener('voiceschanged', once, { once: true });
-      }
-      return utter;
     };
-    return run();
+
+    if (this.getSupportedVoices().length === 0) {
+      // Voices not yet loaded — wait for voiceschanged, then speak.
+      const once = () => {
+        this._voices = this.synth.getVoices();
+        this._voicesReady = true;
+        this.synth.removeEventListener('voiceschanged', once);
+        speakNow();
+      };
+      this.synth.addEventListener('voiceschanged', once);
+      // Fallback: if voiceschanged doesn't fire within 1s, try anyway.
+      setTimeout(speakNow, 1000);
+    } else {
+      // Small delay to let the browser settle after cancel/resume.
+      setTimeout(speakNow, 50);
+    }
+    return utter;
   }
 
   pause() {

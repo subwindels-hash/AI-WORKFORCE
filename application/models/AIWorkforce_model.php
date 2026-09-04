@@ -1013,6 +1013,42 @@ class AIWorkforce_model extends CI_Model
                 return $this->db->where('user_id', $userId)->order_by('created_at', 'ASC')->get('user_language_profiles')->result_array();
             }
 
+            public function setLanguageCodes(int $userId, string $languageCode, string $nativeLanguage): bool {
+                $code = strtolower(trim($languageCode));
+                $native = strtolower(trim($nativeLanguage));
+                if ($code === '' || $native === '') return false;
+                // Ensure language rows exist
+                foreach ([$code, $native] as $c) {
+                    $this->db->where('code', $c)->from('languages')->limit(1);
+                    if ($this->db->count_all_results() === 0) {
+                        $this->db->insert('languages', [
+                            'code' => $c, 'name' => ucfirst($c), 'native_name' => ucfirst($c),
+                            'iso_code' => $c, 'writing_system' => 'unspecified', 'direction' => 'ltr',
+                            'features' => json_encode([]), 'active' => 1, 'updated_at' => gmdate('c'),
+                        ]);
+                    }
+                }
+                // Upsert one user language preference row
+                $existing = $this->db->get_where('user_language_preferences', ['user_id' => $userId], 1)->row_array();
+                $now = gmdate('c');
+                if ($existing) {
+                    $this->db->where('user_id', $userId)->update('user_language_preferences', [
+                        'language_code' => $code, 'native_language' => $native, 'updated_at' => $now,
+                    ]);
+                } else {
+                    $this->db->insert('user_language_preferences', [
+                        'user_id' => $userId, 'language_code' => $code, 'native_language' => $native,
+                        'created_at' => $now, 'updated_at' => $now,
+                    ]);
+                }
+                return true;
+            }
+            public function getLanguageCodes(int $userId): ?array {
+                $r = $this->db->get_where('user_language_preferences', ['user_id' => $userId], 1)->row_array();
+                if (!$r) return null;
+                return ['language_code' => $r['language_code'], 'native_language' => $r['native_language']];
+            }
+
             public function saveAssessment(array $a): array {
                 $row = $a;
                 $row['state'] = is_array($a['state'] ?? null) ? json_encode($a['state']) : $a['state'];

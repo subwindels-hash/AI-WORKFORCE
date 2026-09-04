@@ -156,7 +156,12 @@ $route['sports/(:any)/settle'] = 'sports/settle/$1';
 $route['lottery'] = 'lottery';
 $route['lottery/draw/(:num)'] = 'lottery/index';
 $route['lottery/tickets'] = 'lottery/index';
-$route['lottery/backtests'] = 'lottery/index';
+
+// Public lottery pages — rendered by Api_lottery via lotteryHtml() (no login)
+$route['lottery/statistics']     = 'api_lottery/statistics';
+$route['lottery/statistics/(:any)'] = 'api_lottery/statistics/$1';
+$route['lottery/system']         = 'api_lottery/system';
+$route['lottery/backtests']      = 'api_lottery/backtests';
 
 // Multiplier Intelligence
 $route['app/multiplier'] = 'multiplier/index';

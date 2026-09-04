@@ -151,14 +151,14 @@ $acc = $accuracy ?? [];
     <?php $intg = $integration ?? []; ?>
     <div class="mi-integration" title="Integration status with Windels AI Agents and Sports Intelligence">
       <?php
-        $cfActive = !empty($intg['cloudflare']['available']);
+        $aiAgentsActive = !empty($intg['cloudflare']['available']);
         $llmActive = !empty($intg['llm']['available']);
         $sportsActive = !empty($intg['sports']['available']);
         $regActive = !empty($intg['registered']);
       ?>
-      <span class="mi-int-pill <?= $cfActive ? 'active' : 'inactive' ?>" title="Windels AI Agents integration">
+      <span class="mi-int-pill <?= $aiAgentsActive ? 'active' : 'inactive' ?>" title="Windels AI Agents integration">
         <span class="dot"></span>
-        AI Agents <?= $cfActive ? 'Connected' : 'Standby' ?>
+        AI Agents <?= $aiAgentsActive ? 'Connected' : 'Standby' ?>
       </span>
       <span class="mi-int-pill <?= $llmActive ? 'active' : 'inactive' ?>" title="LLM model enhancement">
         <span class="dot"></span>
@@ -172,9 +172,9 @@ $acc = $accuracy ?? [];
         <span class="dot"></span>
         Agent Bus <?= $regActive ? 'Registered (9 agents)' : 'Unregistered' ?>
       </span>
-      <span class="mi-int-pill <?= $cfActive ? 'active' : 'inactive' ?>" title="6 multiplier.* MCP tools available to all agents">
+      <span class="mi-int-pill <?= $aiAgentsActive ? 'active' : 'inactive' ?>" title="6 multiplier.* MCP tools available to all agents">
         <span class="dot"></span>
-        MCP Tools <?= $cfActive ? '6 Active' : 'Standby' ?>
+        MCP Tools <?= $aiAgentsActive ? '6 Active' : 'Standby' ?>
       </span>
       <?php if ($sportsActive && !empty($intg['sports']['signals'])): ?>
         <span class="mi-int-pill active" title="Current market sentiment from sports betting odds">

@@ -121,12 +121,12 @@
     <div class="demo-panel" style="margin-bottom:20px">
       <h3>🔗 Integration Status</h3>
       <div style="display:flex;gap:12px;flex-wrap:wrap">
-        <?php $cf = $demo['cloudflare'] ?? []; ?>
-        <span class="demo-badge <?= !empty($cf['available']) ? 'demo-badge-success' : 'demo-badge-warning' ?>">
-          <?= !empty($cf['available']) ? '✓' : '○' ?> AI Agents <?= !empty($cf['available']) ? 'Connected' : 'Standby' ?>
+        <?php $aiAgents = $demo['windelsai'] ?? $demo['cloudflare'] ?? []; ?>
+        <span class="demo-badge <?= !empty($aiAgents['available']) ? 'demo-badge-success' : 'demo-badge-warning' ?>">
+          <?= !empty($aiAgents['available']) ? '✓' : '○' ?> AI Agents <?= !empty($aiAgents['available']) ? 'Connected' : 'Standby' ?>
         </span>
-        <span class="demo-badge <?= !empty($cf['llm_enhanced']) ? 'demo-badge-success' : 'demo-badge-warning' ?>">
-          <?= !empty($cf['llm_enhanced']) ? '✓' : '○' ?> LLM <?= !empty($cf['llm_enhanced']) ? 'Enhanced' : 'Standby' ?>
+        <span class="demo-badge <?= !empty($aiAgents['llm_enhanced']) ? 'demo-badge-success' : 'demo-badge-warning' ?>">
+          <?= !empty($aiAgents['llm_enhanced']) ? '✓' : '○' ?> LLM <?= !empty($aiAgents['llm_enhanced']) ? 'Enhanced' : 'Standby' ?>
         </span>
         <span class="demo-badge <?= !empty($demo['sports']) ? 'demo-badge-success' : 'demo-badge-warning' ?>">
           <?= !empty($demo['sports']) ? '✓' : '○' ?> Sports Intel <?= !empty($demo['sports']) ? 'Enriching' : 'Awaiting' ?>
@@ -273,7 +273,7 @@
         <div class="demo-flow-step">
           <div class="demo-flow-icon">🎯</div>
           <div class="demo-flow-text">
-            <div class="demo-flow-title"><?= !empty($demo['sports']) ? (strpos(json_encode($demo['cloudflare'] ?? []), 'true') !== false ? '5' : '4') : '3' ?>. Final Prediction</div>
+            <div class="demo-flow-title"><?= !empty($demo['sports']) ? (strpos(json_encode($aiAgents ?? []), 'true') !== false ? '5' : '4') : '3' ?>. Final Prediction</div>
             <div class="demo-flow-desc">Combined output: <?= e(number_format($demo['signal']['predicted'] ?? 2.0, 2)) ?>x with <?= e(number_format($demo['signal']['confidence'] ?? 50, 0)) ?>% confidence</div>
           </div>
         </div>

@@ -194,6 +194,7 @@ $flagMap = [
         </button>
         <span class="tt-swap-label">Swap</span>
       </div>
+      <div id="lang-save-status" class="tt-explain" style="grid-column:1/-1;margin-top:4px;display:none"></div>
       <label class="tt-side tt-side-mine">
         <span>My Language</span>
         <select id="tt-source" class="sel" aria-label="My language">
@@ -379,7 +380,6 @@ $flagMap = [
   'use strict';
   var CSRF = <?= json_encode((string) ($csrfToken ?? '')) ?>;
   var ENDPOINT = '/api/v1/language-learning/translate';
-  var DETECT_ENDPOINT = '/api/v1/language-learning/detect';
   var LANG_NAMES = <?= json_encode(array_map(fn($l) => $l['name'], array_combine(array_column($languages, 'code'), $languages))) ?>;
   var LOCALES = <?= json_encode($localeMap) ?>;
   var RTL_LANGS = { ar: 1, he: 1, fa: 1, ur: 1 };
@@ -387,31 +387,28 @@ $flagMap = [
   var STORE_TARGET = 'wl_lang_target';
   var STORE_MODE = 'wl_lang_mode';
 
-  var input = document.getElementById('tt-input');            // my language (right)
-  var targetInput = document.getElementById('tt-target-input'); // learning language (left)
-  var sourceSel = document.getElementById('tt-source');       // my language select (right)
-  var targetSel = document.getElementById('tt-target');       // learning select (left)
+  var input = document.getElementById('tt-input');
+  var targetInput = document.getElementById('tt-target-input');
+  var sourceSel = document.getElementById('tt-source');
+  var targetSel = document.getElementById('tt-target');
   var swapBtn = document.getElementById('tt-swap');
   var submitBtn = document.getElementById('tt-submit');
   var targetSubmitBtn = document.getElementById('tt-target-submit');
   var countEl = document.getElementById('tt-count');
   var targetCountEl = document.getElementById('tt-target-count');
 
-  // Learning (left) result elements
   var learnPlaceholder = document.getElementById('tt-learn-placeholder');
   var learnBody = document.getElementById('tt-learn-result-body');
   var learnTransEl = document.getElementById('tt-learn-translation');
   var learnOrigEl = document.getElementById('tt-learn-original');
   var learnNoteEl = document.getElementById('tt-learn-note');
 
-  // My-language (right) result elements
   var myPlaceholder = document.getElementById('tt-my-placeholder');
   var myBody = document.getElementById('tt-my-result-body');
   var myTransEl = document.getElementById('tt-my-translation');
   var myOrigEl = document.getElementById('tt-my-original');
   var myNoteEl = document.getElementById('tt-my-note');
 
-  // Chrome labels
   var learnBannerName = document.getElementById('learn-banner-name');
   var learnBannerLocale = document.getElementById('learn-banner-locale');
   var learnBannerFlag = document.getElementById('learn-banner-flag');
@@ -430,9 +427,10 @@ $flagMap = [
   var ttMineHintLang = document.getElementById('tt-mine-hint-lang');
 
   var FLAGS = <?= json_encode($flagMap) ?>;
+  var PROFILE_ID = <?= (int) ($myProfiles[0]['id'] ?? 0) ?>;
 
-  var currentLearn = null; // translation into the learning language
-  var currentMy = null;    // translation into my language
+  var currentLearn = null;
+  var currentMy = null;
   var lastDetected = '';
   var lastOriginal = '';
 
@@ -441,10 +439,7 @@ $flagMap = [
   function localeFor(code) { return LOCALES[code] || (code + '-' + code.toUpperCase()); }
 
   function remember() {
-    try {
-      sessionStorage.setItem(STORE_SRC, sourceSel.value);
-      sessionStorage.setItem(STORE_TARGET, targetSel.value);
-    } catch (e) {}
+    try { sessionStorage.setItem(STORE_SRC, sourceSel.value); sessionStorage.setItem(STORE_TARGET, targetSel.value); } catch (e) {}
   }
   function recall() {
     try {
@@ -455,9 +450,35 @@ $flagMap = [
     } catch (e) {}
   }
 
-  function refreshChrome() {
-    var learn = targetSel.value; // learning language
-    var mine = sourceSel.value;  // my language
+  // Persist language selection to the user's profile so it carries into
+  // listening, speaking, vocabulary etc., not just this teacher page.
+  function saveLanguagesToProfile() {
+    if (!PROFILE_ID) return;
+    var status = document.getElementById('lang-save-status');
+    if (!status) return;
+    status.style.display = 'block';
+    status.className = 'tt-explain';
+    status.textContent = 'Saving…';
+    fetch('/api/v1/language-learning/save-langs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF, 'Accept': 'application/json' },
+      body: JSON.stringify({ language_code: targetSel.value, native_language: sourceSel.value })
+    }).then(function (r) { return r.json().then(function (body) { if (!r.ok) throw new Error(body.error || body.message || 'save failed'); return body; }); })
+      .then(function () {
+        status.className = 'tt-explain good';
+        status.textContent = '✓ Languages saved to your profile: ' + langName(targetSel.value) + ' / ' + langName(sourceSel.value) + '.';
+        setTimeout(function () { status.style.display = 'none'; }, 4000);
+      })
+      .catch(function (err) {
+        status.className = 'tt-explain warn';
+        status.textContent = 'Could not save languages: ' + (err.message || '').replace(/^[^:]*:?\s*/, '') + '.';
+        setTimeout(function () { status.style.display = 'none'; }, 6000);
+      });
+  }
+
+  function refreshChrome(save) {
+    var learn = targetSel.value;
+    var mine = sourceSel.value;
     learnBannerName.textContent = langName(learn);
     learnBannerLocale.textContent = localeFor(learn);
     learnBannerFlag.textContent = flagFor(learn);
@@ -491,20 +512,18 @@ $flagMap = [
     targetInput.dir = rtl2 ? 'rtl' : 'ltr';
     remember();
     if (window.windelsSpeech) populateVoices(localeFor(learn));
+    if (save !== false) saveLanguagesToProfile();
   }
-  sourceSel.addEventListener('change', refreshChrome);
-  targetSel.addEventListener('change', refreshChrome);
+  sourceSel.addEventListener('change', function () { refreshChrome(true); });
+  targetSel.addEventListener('change', function () { refreshChrome(true); });
 
-  // Quick switch buttons — set the LEARNING language only
-  document.querySelectorAll('[data-quick]').forEach(function(btn){
-    btn.addEventListener('click', function(){
-      var code = btn.getAttribute('data-quick');
-      targetSel.value = code;
+  document.querySelectorAll('[data-quick]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      targetSel.value = btn.getAttribute('data-quick');
       refreshChrome();
     });
   });
 
-  // Mode selector
   var modeDesc = document.getElementById('mode-desc');
   var modeMap = {
     conversation: 'Conversation Mode: Type naturally in the language you\'re learning. If you type in your own language, the AI translates it to the language you\'re learning + explains.',
@@ -514,25 +533,24 @@ $flagMap = [
     vocabulary: 'Vocabulary Mode: 10-word authored bank per language, SRS schedule 1→3→7→14→30→90 days, quizzes deterministic.',
     grammar: 'Grammar Mode: Grammar rules with on-demand simpler explanations.'
   };
-  document.querySelectorAll('.tt-mode').forEach(function(btn){
-    btn.addEventListener('click', function(){
-      document.querySelectorAll('.tt-mode').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.tt-mode').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('.tt-mode').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       var mode = btn.getAttribute('data-mode');
       modeDesc.textContent = modeMap[mode] || '';
-      try { sessionStorage.setItem(STORE_MODE, mode); } catch(e){}
+      try { sessionStorage.setItem(STORE_MODE, mode); } catch (e) {}
     });
   });
   try {
     var savedMode = sessionStorage.getItem(STORE_MODE);
     if (savedMode && modeMap[savedMode]) {
-      document.querySelectorAll('.tt-mode').forEach(b=>b.classList.remove('active'));
+      document.querySelectorAll('.tt-mode').forEach(b => b.classList.remove('active'));
       var active = document.querySelector('.tt-mode[data-mode="' + savedMode + '"]');
       if (active) { active.classList.add('active'); modeDesc.textContent = modeMap[savedMode]; }
     }
-  } catch(e){}
+  } catch (e) {}
 
-  // Swap learning <-> my language
   swapBtn.addEventListener('click', function () {
     var oldLearn = targetSel.value;
     var newLearn = sourceSel.value;
@@ -541,20 +559,46 @@ $flagMap = [
     targetSel.value = newLearn;
     sourceSel.value = newMine;
     refreshChrome();
-    // Swap the two input texts so the flow stays intuitive
     var t = input.value; input.value = targetInput.value; targetInput.value = t;
     countEl.textContent = input.value.length + ' / 500';
     targetCountEl.textContent = targetInput.value.length + ' / 500';
-    // Re-run the appropriate direction
     if (input.value.trim()) runMyToLearn(input.value.trim());
     else if (targetInput.value.trim()) runLearnToMy(targetInput.value.trim());
   });
 
+  // ---------- Real-time translate (debounced) ----------
+  // Translate as the user types in either textarea — not just on button click.
+  // A short debounce keeps the experience responsive without hammering the API.
+  var _translateTimer = null;
+  var _pendingText = null;
+  var _pendingDir = null;
+  function scheduleAutoTranslate() {
+    if (_translateTimer) clearTimeout(_translateTimer);
+    _translateTimer = setTimeout(function () {
+      _translateTimer = null;
+      var text = _pendingText;
+      var dir = _pendingDir;
+      _pendingText = null;
+      _pendingDir = null;
+      if (!text || !dir) return;
+      if (dir === 'my') runMyToLearn(text);
+      else if (dir === 'learn') runLearnToMy(text);
+    }, 450);
+  }
+  function queueAutoTranslate(text, dir) {
+    _pendingText = text;
+    _pendingDir = dir;
+    scheduleAutoTranslate();
+  }
   input.addEventListener('input', function () {
     countEl.textContent = input.value.length + ' / 500';
+    var text = input.value.trim();
+    if (text) queueAutoTranslate(text, 'my');
   });
   targetInput.addEventListener('input', function () {
     targetCountEl.textContent = targetInput.value.length + ' / 500';
+    var text = targetInput.value.trim();
+    if (text) queueAutoTranslate(text, 'learn');
   });
 
   submitBtn.addEventListener('click', function (ev) {
@@ -576,7 +620,7 @@ $flagMap = [
     if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') { ev.preventDefault(); targetSubmitBtn.click(); }
   });
 
-  // ---------- SpeechProvider integration ----------
+  // ---------- SpeechProvider + fallback Web Speech integration ----------
   var provider = window.windelsSpeech || (window.SpeechProvider ? new window.SpeechProvider() : null);
   var ttsNote = document.getElementById('tts-note');
   var playBtn = document.getElementById('tt-play');
@@ -586,7 +630,6 @@ $flagMap = [
   var myPlayBtn = document.getElementById('tt-my-play');
   var myPauseBtn = document.getElementById('tt-my-pause');
   var myStopBtn = document.getElementById('tt-my-stop');
-  var learnVoiceNote = document.getElementById('tt-learn-voice-note');
   var voiceSel = document.getElementById('tt-voice');
   var rateSel = document.getElementById('tt-rate');
   var rateVal = document.getElementById('tt-rate-val');
@@ -629,13 +672,23 @@ $flagMap = [
     var rate = parseFloat(rateSel.value) || 1;
     var voiceIdx = parseInt(voiceSel.value, 10);
     var voice = voiceSel._matches && voiceSel._matches[voiceIdx] ? voiceSel._matches[voiceIdx] : null;
+    if (voice && typeof voice === 'object' && voice.lang) {
+      locale = voice.lang;
+    }
     var engine = provider || (window.speechSynthesis ? {
       textToSpeech: function (t, o) {
         var spoken = (window.windelsSpeech && window.windelsSpeech.speakableText) ? window.windelsSpeech.speakableText(t) : String(t).replace(/\bWINDELS\b/gi, 'Win-dels');
         var u = new SpeechSynthesisUtterance(spoken);
         u.lang = (o && o.locale) || 'en-US';
         u.rate = (o && o.rate) || 1;
+        u.volume = 1;
+        u.pitch = 1;
+        if (o && o.voice && typeof o.voice === 'object' && o.voice.lang) {
+          u.voice = o.voice;
+          u.lang = o.voice.lang;
+        }
         window.speechSynthesis.cancel();
+        try { window.speechSynthesis.resume(); } catch (e) {}
         window.speechSynthesis.speak(u);
         u.onend = o && o.onEnd;
         u.onerror = o && o.onError;
@@ -645,87 +698,138 @@ $flagMap = [
       resume: function () { try { window.speechSynthesis.resume(); } catch (e) {} },
       isPaused: function () { return !!window.speechSynthesis.paused; }
     } : null);
-    if (!engine) return;
+    if (!engine) {
+      showError('Text-to-speech is not available in this browser.');
+      return;
+    }
     engine.textToSpeech(text, {
       locale: locale,
       voice: voice,
       rate: rate,
-      onEnd: function() { playBtn.disabled = false; stopBtn.disabled = true; myStopBtn.disabled = true; if (pauseBtn) pauseBtn.disabled = true; if (myPauseBtn) myPauseBtn.disabled = true; },
-      onError: function() { playBtn.disabled = false; stopBtn.disabled = true; myStopBtn.disabled = true; if (pauseBtn) pauseBtn.disabled = true; if (myPauseBtn) myPauseBtn.disabled = true; }
+      onEnd: function () {
+        markSpeaking(false);
+      },
+      onError: function () {
+        markSpeaking(false);
+        showError('Speech playback failed.');
+      }
     });
-    playBtn.disabled = false;
-    stopBtn.disabled = false;
-    myStopBtn.disabled = false;
-    if (pauseBtn) pauseBtn.disabled = false;
-    if (myPauseBtn) myPauseBtn.disabled = false;
   }
+
+  function markSpeaking(on) {
+    playBtn.disabled = on;
+    if (pauseBtn) { pauseBtn.disabled = !on; pauseBtn.textContent = on ? '⏸ Pause' : '▶ Resume'; }
+    stopBtn.disabled = !on;
+    myStopBtn.disabled = !on;
+    if (myPauseBtn) myPauseBtn.disabled = !on;
+  }
+
+  // Register Listen/Play/Replay/Stop/Pause handlers — works with both the
+  // SpeechProvider and the fallback Web Speech engine.
+  function registerVoiceHandlers() {
+    playBtn.addEventListener('click', function () {
+      var item = speakableNow();
+      if (!item) { showError('Type a sentence or tap Translate first, then Listen.'); return; }
+      speak(item.text, item.locale);
+      markSpeaking(true);
+    });
+    replayBtn.addEventListener('click', function () {
+      var item = speakableNow();
+      if (!item) return;
+      speak(item.text, item.locale);
+      markSpeaking(true);
+    });
+    myPlayBtn.addEventListener('click', function () {
+      if (currentMy && currentMy.translation) {
+        speak(currentMy.translation, currentMy.targetLocale || localeFor(sourceSel.value));
+        markSpeaking(true);
+      }
+    });
+    if (pauseBtn) pauseBtn.addEventListener('click', function () {
+      if (!provider) {
+        if (window.speechSynthesis && window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+          pauseBtn.textContent = '⏸ Pause';
+        } else if (window.speechSynthesis) {
+          window.speechSynthesis.pause();
+          pauseBtn.textContent = '▶ Resume';
+        }
+        return;
+      }
+      if (provider.isPaused()) { provider.resume(); pauseBtn.textContent = '⏸ Pause'; }
+      else { provider.pause(); pauseBtn.textContent = '▶ Resume'; }
+    });
+    if (myPauseBtn) myPauseBtn.addEventListener('click', function () {
+      if (!provider) {
+        if (window.speechSynthesis && window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+          myPauseBtn.textContent = '⏸ Pause';
+        } else if (window.speechSynthesis) {
+          window.speechSynthesis.pause();
+          myPauseBtn.textContent = '▶ Resume';
+        }
+        return;
+      }
+      if (provider.isPaused()) { provider.resume(); myPauseBtn.textContent = '⏸ Pause'; }
+      else { provider.pause(); myPauseBtn.textContent = '▶ Resume'; }
+    });
+    stopBtn.addEventListener('click', function () {
+      if (provider) provider.stop();
+      else if (window.speechSynthesis) window.speechSynthesis.cancel();
+      markSpeaking(false);
+      playBtn.disabled = false;
+    });
+    myStopBtn.addEventListener('click', function () {
+      if (provider) provider.stop();
+      else if (window.speechSynthesis) window.speechSynthesis.cancel();
+      markSpeaking(false);
+      playBtn.disabled = false;
+    });
+    if (lessonListen) lessonListen.addEventListener('click', function () {
+      speak(lessonAi.textContent, localeFor(targetSel.value));
+    });
+    rateSel.addEventListener('input', function () { rateVal.textContent = (parseFloat(rateSel.value) || 1).toFixed(1) + '×'; });
+    document.querySelectorAll('[data-speed]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var sp = btn.getAttribute('data-speed');
+        rateSel.value = sp;
+        rateVal.textContent = parseFloat(sp).toFixed(1) + '×';
+        document.querySelectorAll('[data-speed]').forEach(b => b.classList.remove('primary'));
+        btn.classList.add('primary');
+      });
+    });
+  }
+
+  registerVoiceHandlers();
 
   if (provider) {
     var health = provider.healthCheck();
     if (!health.tts) {
       ttsNote.style.display = 'block';
       ttsNote.textContent = 'Text-to-speech not available in this browser. Translation still works — nothing is faked.';
-      [playBtn, stopBtn, replayBtn, lessonListen, myPlayBtn, myStopBtn].forEach(function(b){ if(b) b.disabled = true; });
+      [playBtn, stopBtn, replayBtn, lessonListen, myPlayBtn, myStopBtn].forEach(function (b) { if (b) b.disabled = true; });
     } else {
-      setTimeout(function(){ populateVoices(localeFor(targetSel.value)); }, 500);
+      setTimeout(function () { populateVoices(localeFor(targetSel.value)); }, 500);
       if (provider.synth) {
-        provider.synth.onvoiceschanged = function(){ populateVoices(localeFor(targetSel.value)); };
+        provider.synth.onvoiceschanged = function () { populateVoices(localeFor(targetSel.value)); };
       }
-      function markSpeaking(on) {
-        playBtn.disabled = on;
-        if (pauseBtn) { pauseBtn.disabled = !on; pauseBtn.textContent = '⏸ Pause'; }
-        stopBtn.disabled = !on;
-        if (myPauseBtn) myPauseBtn.disabled = !on;
-        myStopBtn.disabled = !on;
-      }
-      playBtn.addEventListener('click', function () {
-        var item = speakableNow();
-        if (!item) { showError('Type a sentence or tap Translate first, then Listen.'); return; }
-        speak(item.text, item.locale);
-        markSpeaking(true);
+    }
+  } else if (window.speechSynthesis) {
+    // Fallback: use browser voices
+    var bv = window.speechSynthesis.getVoices();
+    voiceSel.disabled = !bv.length;
+    if (bv.length) {
+      bv.forEach(function (v, i) {
+        var o = document.createElement('option');
+        o.value = i;
+        o.textContent = v.name + ' (' + v.lang + ')';
+        voiceSel.appendChild(o);
       });
-      replayBtn.addEventListener('click', function () {
-        var item = speakableNow();
-        if (!item) return;
-        speak(item.text, item.locale);
-        markSpeaking(true);
-      });
-      myPlayBtn.addEventListener('click', function () {
-        if (currentMy && currentMy.translation) {
-          speak(currentMy.translation, currentMy.targetLocale || localeFor(sourceSel.value));
-          markSpeaking(true);
-        }
-      });
-      if (pauseBtn) pauseBtn.addEventListener('click', function () {
-        if (!provider) return;
-        if (provider.isPaused()) { provider.resume(); pauseBtn.textContent = '⏸ Pause'; }
-        else { provider.pause(); pauseBtn.textContent = '▶ Resume'; }
-      });
-      if (myPauseBtn) myPauseBtn.addEventListener('click', function () {
-        if (!provider) return;
-        if (provider.isPaused()) { provider.resume(); myPauseBtn.textContent = '⏸ Pause'; }
-        else { provider.pause(); myPauseBtn.textContent = '▶ Resume'; }
-      });
-      stopBtn.addEventListener('click', function () { provider.stop(); markSpeaking(false); playBtn.disabled = false; });
-      myStopBtn.addEventListener('click', function () { provider.stop(); markSpeaking(false); playBtn.disabled = false; });
-      if (lessonListen) {
-        lessonListen.addEventListener('click', function(){ speak(lessonAi.textContent, localeFor(targetSel.value)); });
-      }
-      rateSel.addEventListener('input', function () { rateVal.textContent = (parseFloat(rateSel.value) || 1).toFixed(1) + '×'; });
-      document.querySelectorAll('[data-speed]').forEach(function(btn){
-        btn.addEventListener('click', function(){
-          var sp = btn.getAttribute('data-speed');
-          rateSel.value = sp;
-          rateVal.textContent = parseFloat(sp).toFixed(1) + '×';
-          document.querySelectorAll('[data-speed]').forEach(b=>b.classList.remove('primary'));
-          btn.classList.add('primary');
-        });
-      });
+      voiceSel._matches = bv;
     }
   }
 
-  // STT via SpeechProvider (learning-language speaking practice)
-  var SR = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  // STT via SpeechProvider
   var sttNote = document.getElementById('stt-note');
   var micBtn = document.getElementById('tt-mic');
   var transcriptInput = document.getElementById('tt-transcript');
@@ -764,13 +868,13 @@ $flagMap = [
       locale: currentLearn.targetLocale || localeFor(targetSel.value),
       holdUntilStop: true,
       minListenMs: 30000,
-      onStatus: function(msg){ micStatus.textContent = msg; },
-      onResult: function(transcript){
+      onStatus: function (msg) { micStatus.textContent = msg; },
+      onResult: function (transcript) {
         transcriptInput.value = transcript;
         micStatus.textContent = 'Heard you — still listening for more. Tap Stop when you are finished.';
         syncMicState();
       },
-      onError: function(ev){
+      onError: function (ev) {
         var code = ev.error || ev.message || '';
         if (code === 'no-speech' || code === 'aborted') {
           micStatus.textContent = 'Still listening — speak when you are ready, or tap Stop when you are finished.';
@@ -780,7 +884,7 @@ $flagMap = [
         if (micStopBtn) micStopBtn.disabled = true;
         micStatus.textContent = 'Speech engine error: ' + code;
       },
-      onEnd: function(info){
+      onEnd: function (info) {
         micBtn.textContent = '🎤 Speak now';
         if (micStopBtn) micStopBtn.disabled = true;
         var got = String((info && info.transcript) || transcriptInput.value || '').trim();
@@ -827,10 +931,8 @@ $flagMap = [
 
   document.querySelectorAll('.tt-example').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      var src = btn.getAttribute('data-src');
-      var tgt = btn.getAttribute('data-target');
-      sourceSel.value = src;
-      targetSel.value = tgt;
+      sourceSel.value = btn.getAttribute('data-src');
+      targetSel.value = btn.getAttribute('data-target');
       refreshChrome();
       input.value = btn.getAttribute('data-text');
       countEl.textContent = input.value.length + ' / 500';
@@ -838,7 +940,6 @@ $flagMap = [
     });
   });
 
-  // Main direction: my language (right) -> learning language (left)
   function runMyToLearn(text) {
     lastOriginal = text;
     var payload = { text: text, target: targetSel.value };
@@ -861,7 +962,6 @@ $flagMap = [
     });
   }
 
-  // Reverse direction: learning language (left) -> my language (right)
   function runLearnToMy(text) {
     var payload = { text: text, target: sourceSel.value, source: targetSel.value };
     targetSubmitBtn.disabled = true;
@@ -891,7 +991,7 @@ $flagMap = [
 
     document.getElementById('tt-mine-badge').textContent = 'From: ' + langName(t.source) + ' (your language)';
     document.getElementById('tt-learn-badge').textContent = 'To: ' + t.targetName + ' (learning)';
-    document.getElementById('tt-learn-detect-badge').textContent = 'Detected: ' + (t.detected && t.detected.name ? t.detected.name + ' ' + Math.round(t.detected.confidence*100) + '%' : langName(t.source));
+    document.getElementById('tt-learn-detect-badge').textContent = 'Detected: ' + (t.detected && t.detected.name ? t.detected.name + ' ' + Math.round(t.detected.confidence * 100) + '%' : langName(t.source));
     var mBadge = document.getElementById('tt-learn-method-badge');
     if (t.method && t.method !== 'none' && t.method !== 'same-language') { mBadge.hidden = false; mBadge.textContent = t.method; } else { mBadge.hidden = true; }
 
