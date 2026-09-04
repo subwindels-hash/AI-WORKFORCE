@@ -56,7 +56,12 @@ class SportsIntelligence
     public readonly SportsBacktester $backtester;
     public readonly FormResolver $formResolver;
 
-    public function __construct(private SportsRepository $repository, AuditRepository $audit, ?Notifier $notifications = null)
+    public function __construct(
+        private SportsRepository $repository,
+        AuditRepository $audit,
+        ?Notifier $notifications = null,
+        private ?object $providerDb = null
+    )
     {
         $this->providers = new SportsProviderManager();
         $this->quality = new DataQualityEngine();
@@ -159,8 +164,20 @@ class SportsIntelligence
      */
     private function registerFromStore(): void
     {
+        // ApiProviders::chain() requires the server-side database handle to
+        // decrypt credentials. Passing only the service name made this call
+        // throw on every request, so credentials saved in Admin → API were
+        // invisible to Sports Intelligence and multiplier enrichment.
+        $db = $this->providerDb;
+        if (!$db) {
+            // Keep compatibility with direct instantiation outside Platform.
+            $ci = function_exists('get_instance') ? get_instance() : null;
+            $db = ($ci && isset($ci->AIWorkforce_model)) ? $ci->AIWorkforce_model->db : null;
+        }
+        if (!$db) return;
+
         try {
-            $chain = \AIWorkforce\ApiProviders::chain('sports');
+            $chain = \AIWorkforce\ApiProviders::chain($db, 'sports');
         } catch (\Throwable $e) { return; }
         foreach ($chain as $cfg) {
             $driver = $cfg['driver'] ?? '';

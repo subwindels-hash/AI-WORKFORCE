@@ -114,7 +114,14 @@ class Platform
 
         $this->risk = new RiskEngine();
         $this->notifications = new \AIWorkforce\Notifications\Notifier($model->notifications);
-        $this->sports = new \AIWorkforce\Sports\SportsIntelligence($model->sports, $model->audit, $this->notifications);
+        // Pass the DB handle explicitly so Sports Intelligence can resolve
+        // encrypted provider credentials from Admin → API during bootstrap.
+        $this->sports = new \AIWorkforce\Sports\SportsIntelligence(
+            $model->sports,
+            $model->audit,
+            $this->notifications,
+            $model->db
+        );
         $officialLottery = new OfficialLotteryProvider();
         $lotteryProvider = $officialLottery->configured()
             ? $officialLottery

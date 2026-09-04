@@ -426,7 +426,11 @@ class Multiplier extends App_Controller
         
         // 5. Check SportsBettingEnrichmentProvider
         try {
-            $enrichment = new \AIWorkforce\MultiplierIntelligence\SportsBettingEnrichmentProvider();
+            // Use the platform's connected Sports Intelligence registry so
+            // this diagnostic checks the real API-Football connection too.
+            $enrichment = new \AIWorkforce\MultiplierIntelligence\SportsBettingEnrichmentProvider(
+                $this->platform->sports
+            );
             $signals = $enrichment->getEnrichmentSignals();
             $results['checks']['sports_enrichment'] = [
                 'status' => $signals['data_available'] ? 'OK' : 'AWAITING_SPORTS_CONFIG',
@@ -456,7 +460,13 @@ class Multiplier extends App_Controller
         
         // 7. Check Platform Integration
         try {
-            $integration = new \AIWorkforce\MultiplierIntelligence\MultiplierPlatformIntegration($this->platform->cloudflare);
+            // Reuse the same Sports Intelligence registry as the platform so
+            // Multiplier verification/enrichment can consume the connected
+            // Admin → API API-Football provider as well.
+            $integration = new \AIWorkforce\MultiplierIntelligence\MultiplierPlatformIntegration(
+                $this->platform->cloudflare,
+                $this->platform->sports
+            );
             $integration->register();
             $status = $integration->status();
             $results['checks']['platform_integration'] = [
