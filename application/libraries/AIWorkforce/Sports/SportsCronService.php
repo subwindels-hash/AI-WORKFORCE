@@ -76,9 +76,37 @@ class SportsCronService
         $matches = $this->repo->listMatches(['from' => $date . 'T00:00:00+00:00', 'to' => $end, 'status' => 'SCHEDULED'], 500);
         $matches = array_merge($matches, $this->repo->listMatches(['status' => 'LIVE'], 200));
         $out = []; $processed = 0; $created = 0; $errors = [];
+        // Split: matches that are round-addressable (stored round_id on a
+        // provider with the round endpoint) sync as whole matchdays in one
+        // request each; everything else keeps the per-fixture odds call.
+        $seen = []; $byRound = []; $legacy = [];
+        $sources = $this->repo->listProviders();
         foreach ($matches as $match) {
-            $providerId = (int) $match['provider_id'];
-            $provider = $this->providerById($this->repo->listProviders(), $providerId);
+            $matchKey = (string) $match['id'];
+            if (isset($seen[$matchKey])) continue;
+            $seen[$matchKey] = true;
+            $provider = $this->providerById($sources, (int) $match['provider_id']);
+            if ($provider === null) continue;
+            $roundId = (string) ($match['round_id'] ?? '');
+            if ($roundId !== '' && method_exists($provider, 'round')) {
+                $byRound[$provider->id() . ':' . $roundId][] = $match;
+            } else {
+                $legacy[] = $match;
+            }
+        }
+        foreach ($byRound as $groupKey => $groupMatches) {
+            [$providerCode, $roundId] = explode(':', (string) $groupKey, 2);
+            $provider = $this->sports->providers->provider($providerCode);
+            if ($provider === null) { $legacy = array_merge($legacy, $groupMatches); continue; }
+            $key = 'odds-round:' . $providerCode . ':' . $roundId . ':' . $date;
+            $result = $this->sports->sync->syncRound($provider, $roundId, $key, ['results' => false]);
+            foreach ($groupMatches as $match) { $out[(string) $match['id']] = $result['status']; }
+            $processed += count($groupMatches);
+            if (($result['status'] ?? '') === 'COMPLETED') $created += (int) ($result['created'] ?? 0);
+            if (($result['status'] ?? '') === 'FAILED') $errors[] = implode('; ', $result['errors'] ?? []);
+        }
+        foreach ($legacy as $match) {
+            $provider = $this->providerById($sources, (int) $match['provider_id']);
             if ($provider === null) continue;
             $key = 'odds:' . (int) $match['id'] . ':' . $date . ':' . $provider->id();
             $result = $this->sports->sync->syncOdds($provider, (string) $match['external_id'], $key);

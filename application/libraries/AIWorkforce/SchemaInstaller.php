@@ -140,6 +140,7 @@ final class SchemaInstaller
             $sqlite ? 'ALTER TABLE sports_predictions ADD COLUMN odds REAL' : 'ALTER TABLE sports_predictions ADD COLUMN odds DECIMAL(14,6) NULL',
             $sqlite ? 'ALTER TABLE sports_predictions ADD COLUMN odds_timestamp TEXT' : 'ALTER TABLE sports_predictions ADD COLUMN odds_timestamp VARCHAR(32) NULL',
             $sqlite ? 'ALTER TABLE lottery_sync_runs ADD COLUMN payload TEXT' : 'ALTER TABLE lottery_sync_runs ADD COLUMN payload MEDIUMTEXT NULL',
+            $sqlite ? 'ALTER TABLE sports_matches ADD COLUMN round_id TEXT' : 'ALTER TABLE sports_matches ADD COLUMN round_id VARCHAR(64) NULL',
             'ALTER TABLE users ADD COLUMN username ' . ($sqlite ? 'TEXT' : 'VARCHAR(64) NULL'),
             'ALTER TABLE users ADD COLUMN user_uid ' . ($sqlite ? 'TEXT' : 'CHAR(6) NULL'),
             'ALTER TABLE users ADD COLUMN profile_image ' . ($sqlite ? 'TEXT' : 'VARCHAR(255) NULL'),
@@ -210,6 +211,9 @@ final class SchemaInstaller
             $sqlite
                 ? 'CREATE INDEX IF NOT EXISTS idx_sports_matches_provider_kickoff ON sports_matches (provider_id, kickoff_at)'
                 : 'CREATE INDEX idx_sports_matches_provider_kickoff ON sports_matches (provider_id, kickoff_at)',
+            $sqlite
+                ? 'CREATE INDEX IF NOT EXISTS idx_sports_matches_round ON sports_matches (provider_id, round_id)'
+                : 'CREATE INDEX idx_sports_matches_round ON sports_matches (provider_id, round_id)',
             $sqlite
                 ? 'CREATE INDEX IF NOT EXISTS idx_sports_predictions_market ON sports_predictions (market, created_at)'
                 : 'CREATE INDEX idx_sports_predictions_market ON sports_predictions (market, created_at)',

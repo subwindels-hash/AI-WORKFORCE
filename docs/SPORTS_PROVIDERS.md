@@ -92,6 +92,17 @@ GET /api/sports/sync?provider=sportmonks&type=round&roundId=396698
 Providers without a `round()` endpoint fail the job with an explicit
 "does not support round sync" error instead of silently no-op'ing.
 
+### Cron odds job on the round path
+
+`sports_matches` stores `round_id` (nullable, indexed on `provider_id,
+round_id` — new column added via the idempotent schema upgrade), populated
+from the provider fixture payload at sync time. The cron `odds` job groups
+the day's active matches by `(provider, round_id)`: every round on a
+round-capable provider is synced once via `syncRound(..., ['results' => false])`
+(one provider request per matchday, results skipped so verified results are
+never re-written), and matches without a `round_id` — or on providers
+without the round endpoint — keep the legacy per-fixture `syncOdds` call.
+
 ## Safe operation
 
 Provider data is untrusted input. The existing normalizers, data-quality gates, confidence checks, and ticket governance remain in the pipeline. Missing odds from providers without an odds feed must not be treated as fabricated odds; those predictions should be rejected or supplied by a separately licensed odds source.

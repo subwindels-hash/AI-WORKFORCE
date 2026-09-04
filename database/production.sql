@@ -321,8 +321,8 @@ CREATE TABLE IF NOT EXISTS sports_provider_health (
 CREATE TABLE IF NOT EXISTS sports_matches (
  id BIGINT AUTO_INCREMENT PRIMARY KEY, provider_id INT NOT NULL, external_id VARCHAR(128) NOT NULL, sport VARCHAR(32) NOT NULL,
  competition VARCHAR(160) NOT NULL, home_team VARCHAR(160) NOT NULL, away_team VARCHAR(160) NOT NULL, kickoff_at VARCHAR(32) NOT NULL,
- status VARCHAR(32) NOT NULL, source_timestamp VARCHAR(32) NOT NULL, payload LONGTEXT NOT NULL, created_at VARCHAR(32) NOT NULL, updated_at VARCHAR(32) NOT NULL,
- UNIQUE KEY uq_sports_match_provider_external(provider_id, external_id), INDEX idx_sports_matches_kickoff(kickoff_at), INDEX idx_sports_matches_status(status)
+ status VARCHAR(32) NOT NULL, source_timestamp VARCHAR(32) NOT NULL, round_id VARCHAR(64) NULL, payload LONGTEXT NOT NULL, created_at VARCHAR(32) NOT NULL, updated_at VARCHAR(32) NOT NULL,
+ UNIQUE KEY uq_sports_match_provider_external(provider_id, external_id), INDEX idx_sports_matches_kickoff(kickoff_at), INDEX idx_sports_matches_status(status), INDEX idx_sports_matches_round(provider_id, round_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS sports_odds (
  id BIGINT AUTO_INCREMENT PRIMARY KEY, match_id BIGINT NOT NULL, provider_id INT NOT NULL, market VARCHAR(96) NOT NULL,

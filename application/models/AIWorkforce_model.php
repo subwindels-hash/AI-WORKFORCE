@@ -288,7 +288,7 @@ class AIWorkforce_model extends CI_Model
             }
             public function saveMatch(int $providerId, array $m): array {
                 $row = $this->db->get_where('sports_matches', ['provider_id' => $providerId, 'external_id' => $m['externalId']], 1)->row_array();
-                $data = ['sport' => $m['sport'], 'competition' => $m['competition'], 'home_team' => $m['homeTeam'], 'away_team' => $m['awayTeam'], 'kickoff_at' => $m['kickoff'], 'status' => $m['status'], 'source_timestamp' => $m['sourceTimestamp'], 'payload' => json_encode($m), 'updated_at' => gmdate('c')];
+                $data = ['sport' => $m['sport'], 'competition' => $m['competition'], 'home_team' => $m['homeTeam'], 'away_team' => $m['awayTeam'], 'kickoff_at' => $m['kickoff'], 'status' => $m['status'], 'source_timestamp' => $m['sourceTimestamp'], 'round_id' => (string) ($m['roundId'] ?? '') !== '' ? (string) $m['roundId'] : null, 'payload' => json_encode($m), 'updated_at' => gmdate('c')];
                 if ($row) { $this->db->where('id', $row['id'])->update('sports_matches', $data); return array_merge($row, $data); }
                 $this->db->insert('sports_matches', array_merge(['provider_id' => $providerId, 'external_id' => $m['externalId'], 'created_at' => gmdate('c')], $data)); return array_merge($data, ['id' => (int)$this->db->insert_id(), 'provider_id' => $providerId, 'external_id' => $m['externalId']]);
             }

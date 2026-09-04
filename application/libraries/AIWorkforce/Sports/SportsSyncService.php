@@ -53,9 +53,16 @@ class SportsSyncService
      * bookmaker odds and results together (SportMonks round endpoint).
      * Idempotent per execution key like the per-fixture sync jobs; one bad
      * fixture is counted, never hidden.
+     *
+     * $options: 'odds' (default true) persist the round's odds; 'results'
+     * (default true) persist the round's results. Callers that only refresh
+     * odds (e.g. the cron odds job) pass ['results' => false] so already
+     * verified results are never re-written.
      */
-    public function syncRound(SportsDataProvider $provider, string $roundExternalId, string $executionKey): array
+    public function syncRound(SportsDataProvider $provider, string $roundExternalId, string $executionKey, array $options = []): array
     {
+        $withOdds = (bool) ($options['odds'] ?? true);
+        $withResults = (bool) ($options['results'] ?? true);
         $source = $this->repo->ensureProvider($provider->id(), $provider->id());
         $run = ['id' => Backtester::uuid(), 'providerId' => (int) $source['id'], 'jobType' => 'ROUND', 'executionKey' => $executionKey];
         if ($this->repo->startSync($run) === null) return ['status' => 'DUPLICATE_SKIPPED', 'executionKey' => $executionKey];
@@ -67,12 +74,16 @@ class SportsSyncService
             if (!method_exists($provider, 'round')) throw new \RuntimeException('provider does not support round sync (no round endpoint)');
             $round = $provider->round($roundExternalId);
             $oddsByFixture = [];
-            foreach (($round['odds'] ?? []) as $o) {
-                if (is_array($o) && !empty($o['fixtureId'])) $oddsByFixture[(string) $o['fixtureId']][] = $o;
+            if ($withOdds) {
+                foreach (($round['odds'] ?? []) as $o) {
+                    if (is_array($o) && !empty($o['fixtureId'])) $oddsByFixture[(string) $o['fixtureId']][] = $o;
+                }
             }
             $resultsByFixture = [];
-            foreach (($round['results'] ?? []) as $r) {
-                if (is_array($r) && isset($r['externalId'])) $resultsByFixture[(string) $r['externalId']] = $r;
+            if ($withResults) {
+                foreach (($round['results'] ?? []) as $r) {
+                    if (is_array($r) && isset($r['externalId'])) $resultsByFixture[(string) $r['externalId']] = $r;
+                }
             }
             foreach (($round['fixtures'] ?? []) as $raw) {
                 $processed++;
@@ -80,7 +91,7 @@ class SportsSyncService
                     $match = SportsDataNormalizer::fixture($raw, $provider->id());
                     $existing = $this->repo->saveMatch((int) $source['id'], $match);
                     !empty($existing['created_at']) && $existing['created_at'] === $existing['updated_at'] ? $created++ : $updated++;
-                    $assessment = $this->quality->assess($match, ['oddsAvailable' => isset($oddsByFixture[$match['externalId']]), 'recentFormAvailable' => !empty($match['context']['recentForm']), 'providerReliability' => (float) ($health['reliability'] ?? 0), 'dataAgeSeconds' => 0]);
+                    $assessment = $this->quality->assess($match, ['oddsAvailable' => $withOdds && isset($oddsByFixture[$match['externalId']]), 'recentFormAvailable' => !empty($match['context']['recentForm']), 'providerReliability' => (float) ($health['reliability'] ?? 0), 'dataAgeSeconds' => 0]);
                     $this->repo->saveQuality((int) $existing['id'], $assessment);
                     // Odds and result for this fixture come from the same round call.
                     foreach (($oddsByFixture[$match['externalId']] ?? []) as $rawOdds) {

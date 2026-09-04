@@ -231,11 +231,11 @@ class SportsRepositoryStub implements \AIWorkforce\Persistence\SportsRepository
     {
         foreach ($this->matches as &$row) {
             if ((int) $row['provider_id'] === $providerId && $row['external_id'] === $m['externalId']) {
-                $row = array_merge($row, ['sport' => $m['sport'], 'competition' => $m['competition'], 'home_team' => $m['homeTeam'], 'away_team' => $m['awayTeam'], 'kickoff_at' => $m['kickoff'], 'status' => $m['status'], 'source_timestamp' => $m['sourceTimestamp'], 'payload' => $m, 'updated_at' => gmdate('c')]);
+                $row = array_merge($row, ['sport' => $m['sport'], 'competition' => $m['competition'], 'home_team' => $m['homeTeam'], 'away_team' => $m['awayTeam'], 'kickoff_at' => $m['kickoff'], 'status' => $m['status'], 'source_timestamp' => $m['sourceTimestamp'], 'round_id' => (string) ($m['roundId'] ?? '') !== '' ? (string) $m['roundId'] : null, 'payload' => $m, 'updated_at' => gmdate('c')]);
                 return $row;
             }
         }
-        $row = ['id' => ++$this->autoId, 'provider_id' => $providerId, 'external_id' => $m['externalId'], 'sport' => $m['sport'], 'competition' => $m['competition'], 'home_team' => $m['homeTeam'], 'away_team' => $m['awayTeam'], 'kickoff_at' => $m['kickoff'], 'status' => $m['status'], 'source_timestamp' => $m['sourceTimestamp'], 'payload' => $m, 'created_at' => gmdate('c'), 'updated_at' => gmdate('c')];
+        $row = ['id' => ++$this->autoId, 'provider_id' => $providerId, 'external_id' => $m['externalId'], 'sport' => $m['sport'], 'competition' => $m['competition'], 'home_team' => $m['homeTeam'], 'away_team' => $m['awayTeam'], 'kickoff_at' => $m['kickoff'], 'status' => $m['status'], 'source_timestamp' => $m['sourceTimestamp'], 'round_id' => (string) ($m['roundId'] ?? '') !== '' ? (string) $m['roundId'] : null, 'payload' => $m, 'created_at' => gmdate('c'), 'updated_at' => gmdate('c')];
         $this->matches[] = $row;
         return $row;
     }
