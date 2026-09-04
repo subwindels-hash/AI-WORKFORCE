@@ -55,7 +55,7 @@ $activity = $dashboard['recentActivity'] ?? [];
 <div class="obs-hero">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;position:relative;z-index:1">
     <div>
-      <h2>Cloudflare AI Agent Platform</h2>
+      <h2>Windels AI Agents</h2>
       <p>Edge AI inference · Multi-provider routing · Durable sessions · Tool orchestration · Workflow engine</p>
     </div>
     <span class="health-pill <?= ($health['overall'] ?? 'HEALTHY') === 'HEALTHY' ? 'healthy' : (($health['overall'] ?? '') === 'DEGRADED' ? 'degraded' : 'down') ?>">

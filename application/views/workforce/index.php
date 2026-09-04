@@ -72,7 +72,7 @@ $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
 <div class="page-head">
   <div>
     <h2>🧠 AI Workforce Console</h2>
-    <p>Interact with specialist AI agents powered by Cloudflare Workers AI — edge inference, low latency, and globally distributed.</p>
+    <p>Interact with specialist AI agents — low latency, globally distributed inference.</p>
   </div>
 </div>
 
@@ -80,8 +80,8 @@ $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
 <div class="wf-config-banner">
   <span class="icon">⚡</span>
   <div class="text">
-    <b>Cloudflare Workers AI not configured</b>
-    <p>Agents will use the local guide until a Cloudflare or compatible LLM provider is configured by an administrator.</p>
+    <b>AI provider not configured</b>
+    <p>Agents will use the local guide until a compatible LLM provider is configured by an administrator.</p>
   </div>
   <?php if (!empty($admin)): ?>
     <a class="btn small" href="/admin/api">Configure</a>
@@ -110,7 +110,7 @@ $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
   </div>
   <div class="wf-stat">
     <div class="lbl">AI Provider</div>
-    <div class="val" style="font-size:14px"><?= $cloudflareConfigured ? '<span style="color:var(--green)">● Cloudflare</span>' : '<span style="color:var(--amber)">● Local Guide</span>' ?></div>
+    <div class="val" style="font-size:14px"><?= $cloudflareConfigured ? '<span style="color:var(--green)">● Windels AI</span>' : '<span style="color:var(--amber)">● Local Guide</span>' ?></div>
   </div>
   <div class="wf-stat">
     <div class="lbl">Tool Policy</div>

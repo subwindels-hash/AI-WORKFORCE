@@ -43,7 +43,7 @@
     <!-- Header -->
     <div class="demo-header">
       <h1>🚀 Live Demo Mode</h1>
-      <p>Full Integration Showcase: Multiplier Intelligence + Cloudflare AI + Sports Intelligence + Aviator Provider</p>
+      <p>Full Integration Showcase: Multiplier Intelligence + Windels AI Agents + Sports Intelligence + Aviator Provider</p>
     </div>
 
     <?php if (!empty($demo['error'])): ?>
@@ -123,7 +123,7 @@
       <div style="display:flex;gap:12px;flex-wrap:wrap">
         <?php $cf = $demo['cloudflare'] ?? []; ?>
         <span class="demo-badge <?= !empty($cf['available']) ? 'demo-badge-success' : 'demo-badge-warning' ?>">
-          <?= !empty($cf['available']) ? '✓' : '○' ?> Cloudflare <?= !empty($cf['available']) ? 'Connected' : 'Standby' ?>
+          <?= !empty($cf['available']) ? '✓' : '○' ?> AI Agents <?= !empty($cf['available']) ? 'Connected' : 'Standby' ?>
         </span>
         <span class="demo-badge <?= !empty($cf['llm_enhanced']) ? 'demo-badge-success' : 'demo-badge-warning' ?>">
           <?= !empty($cf['llm_enhanced']) ? '✓' : '○' ?> LLM <?= !empty($cf['llm_enhanced']) ? 'Enhanced' : 'Standby' ?>
@@ -265,8 +265,8 @@
         <div class="demo-flow-step">
           <div class="demo-flow-icon">⚡</div>
           <div class="demo-flow-text">
-            <div class="demo-flow-title">4. Cloudflare LLM Enhancement</div>
-            <div class="demo-flow-desc">AI reasoning via Cloudflare Workers AI (70% statistical / 30% LLM blend)</div>
+            <div class="demo-flow-title">4. LLM Enhancement</div>
+            <div class="demo-flow-desc">AI reasoning via the LLM router (70% statistical / 30% LLM blend)</div>
           </div>
         </div>
         <?php endif; ?>
@@ -285,7 +285,7 @@
     <!-- Disclaimer -->
     <div style="margin-top:24px;padding:16px;background:rgba(245,158,11,.1);border:1px solid #f59e0b44;border-radius:12px;color:#f59e0b;font-size:11px">
       <strong>⚠️ DEMONSTRATION PURPOSE ONLY</strong> — This demo showcases the integration architecture. 
-      In production, connect to real Aviator game servers and configure Cloudflare/Sports providers for live data.
+      In production, connect to real Aviator game servers and configure AI/Sports providers for live data.
       Crash games use provably fair RNG. No prediction system can guarantee outcomes.
     </div>
   </div>

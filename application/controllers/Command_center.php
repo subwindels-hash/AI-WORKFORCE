@@ -6,7 +6,7 @@ require_once APPPATH . 'core/App_Controller.php';
  * Unified AI Command Center
  * 
  * Single dashboard showing status of all AI modules:
- * - Cloudflare AI Agent Platform
+ * - Windels AI Agents
  * - Trading Intelligence
  * - Lottery Intelligence
  * - Multiplier Intelligence
@@ -51,11 +51,11 @@ class Command_center extends App_Controller
     {
         $modules = [];
         
-        // 1. Cloudflare AI Agent Platform
+        // 1. Windels AI Agents
         try {
             $cfStatus = $this->platform->cloudflare->status();
             $modules['cloudflare'] = [
-                'name' => 'Cloudflare AI Agent Platform',
+                'name' => 'Windels AI Agents',
                 'icon' => '⚡',
                 'status' => !empty($cfStatus['modelRouter']['configured']) ? 'healthy' : 'degraded',
                 'stats' => [
@@ -67,7 +67,7 @@ class Command_center extends App_Controller
             ];
         } catch (\Throwable $e) {
             $modules['cloudflare'] = [
-                'name' => 'Cloudflare AI Agent Platform',
+                'name' => 'Windels AI Agents',
                 'icon' => '⚡',
                 'status' => 'error',
                 'error' => $e->getMessage(),
@@ -285,7 +285,7 @@ class Command_center extends App_Controller
         if (strpos($type, 'TRADING') !== false || strpos($type, 'BROKER') !== false) return 'Trading';
         if (strpos($type, 'SPORTS') !== false) return 'Sports';
         if (strpos($type, 'LANGUAGE') !== false) return 'Language';
-        if (strpos($type, 'AGENT') !== false || strpos($type, 'MODEL') !== false) return 'Cloudflare';
+        if (strpos($type, 'AGENT') !== false || strpos($type, 'MODEL') !== false) return 'AI Agents';
         if (strpos($type, 'LEAD') !== false) return 'Leads';
         return 'System';
     }

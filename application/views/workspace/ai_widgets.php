@@ -225,13 +225,13 @@ $_aiHealth = $_aiTotal > 0 ? round(($_aiHealthy / $_aiTotal) * 100, 0) : 0;
   </div>
 </section>
 
-<h2 class="section-title">Cloudflare AI agent platform</h2>
+<h2 class="section-title">Windels AI Agents</h2>
 <section class="panel" style="margin-bottom:18px">
   <div class="body">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px">
       <div>
         <h3 style="margin:0 0 4px">⚡ AI Agent Platform</h3>
-        <p class="dim" style="margin:0">Specialized AI agents working together with tools, workflows, and multi-model routing via Cloudflare Workers AI.</p>
+        <p class="dim" style="margin:0">Specialized AI agents working together with tools, workflows, and multi-model routing.</p>
       </div>
       <div style="display:flex;gap:8px">
         <a class="btn primary" href="/app/agent-platform">Open Platform</a>

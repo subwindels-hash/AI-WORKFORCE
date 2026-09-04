@@ -147,18 +147,18 @@ $acc = $accuracy ?? [];
     </div>
 
     <?php $intg = $integration ?? []; ?>
-    <div class="mi-integration" title="Integration status with Cloudflare Agent Platform and Sports Intelligence">
+    <div class="mi-integration" title="Integration status with Windels AI Agents and Sports Intelligence">
       <?php
         $cfActive = !empty($intg['cloudflare']['available']);
         $llmActive = !empty($intg['llm']['available']);
         $sportsActive = !empty($intg['sports']['available']);
         $regActive = !empty($intg['registered']);
       ?>
-      <span class="mi-int-pill <?= $cfActive ? 'active' : 'inactive' ?>" title="Cloudflare AI Agent Platform integration">
+      <span class="mi-int-pill <?= $cfActive ? 'active' : 'inactive' ?>" title="Windels AI Agents integration">
         <span class="dot"></span>
-        Cloudflare <?= $cfActive ? 'Connected' : 'Standby' ?>
+        AI Agents <?= $cfActive ? 'Connected' : 'Standby' ?>
       </span>
-      <span class="mi-int-pill <?= $llmActive ? 'active' : 'inactive' ?>" title="LLM model enhancement via Cloudflare Workers AI">
+      <span class="mi-int-pill <?= $llmActive ? 'active' : 'inactive' ?>" title="LLM model enhancement">
         <span class="dot"></span>
         LLM Enhancement <?= $llmActive ? 'Active (' . (int)($intg['llm']['providers'] ?? 0) . ' providers)' : 'Standby' ?>
       </span>
@@ -170,7 +170,7 @@ $acc = $accuracy ?? [];
         <span class="dot"></span>
         Agent Bus <?= $regActive ? 'Registered (9 agents)' : 'Unregistered' ?>
       </span>
-      <span class="mi-int-pill <?= $cfActive ? 'active' : 'inactive' ?>" title="6 multiplier.* MCP tools available to all Cloudflare agents">
+      <span class="mi-int-pill <?= $cfActive ? 'active' : 'inactive' ?>" title="6 multiplier.* MCP tools available to all agents">
         <span class="dot"></span>
         MCP Tools <?= $cfActive ? '6 Active' : 'Standby' ?>
       </span>
