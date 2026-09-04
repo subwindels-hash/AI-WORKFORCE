@@ -177,6 +177,9 @@ class ApiFootballProvider implements SportsDataProvider
         private int $timeout = 10,
         ?callable $transport = null,
     ) {
+        if (class_exists('\\AIWorkforce\\ApiProviders')) {
+            $this->baseUrl = \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl($this->baseUrl);
+        }
         $this->initTransport($timeout, $transport);
     }
 
@@ -188,6 +191,13 @@ class ApiFootballProvider implements SportsDataProvider
             $resp = $this->doRequest('/status');
             $json = $this->decodeJson($resp);
             $rateInfo = $json['response'] ?? [];
+            $requests = $rateInfo['requests'] ?? null;
+            $used = is_array($requests)
+                ? ($requests['current'] ?? $requests['used'] ?? null)
+                : $requests;
+            $limit = is_array($requests)
+                ? ($requests['limit_day'] ?? null)
+                : ($rateInfo['limit_day'] ?? null);
             return [
                 'status' => 'ONLINE',
                 'reliability' => $this->reliability(),
@@ -195,8 +205,8 @@ class ApiFootballProvider implements SportsDataProvider
                 'responseMs' => $this->lastResponseMs,
                 'lastSuccessAt' => $this->lastSuccess,
                 'lastFailureAt' => $this->lastFailure,
-                'requestsToday' => $rateInfo['requests'] ?? null,
-                'limitDaily' => $rateInfo['limit_day'] ?? null,
+                'requestsToday' => $used,
+                'limitDaily' => $limit,
             ];
         } catch (ProviderException $e) {
             return [
@@ -310,6 +320,11 @@ class ApiFootballProvider implements SportsDataProvider
             'Accept: application/json',
             'x-apisports-key: ' . $this->apiKey,
         ];
+        $host = strtolower((string) (parse_url($this->baseUrl, PHP_URL_HOST) ?? ''));
+        if (str_contains($host, 'rapidapi.com')) {
+            $headers[] = 'x-rapidapi-key: ' . $this->apiKey;
+            $headers[] = 'x-rapidapi-host: ' . $host;
+        }
         $url = rtrim($this->baseUrl, '/') . $path;
         return $this->doGet($url, $headers);
     }

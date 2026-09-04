@@ -307,6 +307,40 @@ test('chat assistant and language voice-status consume the managed store without
     }
 });
 
+test('API-Football connection test succeeds on the real nested /status payload', function () {
+    $saved = ['driver' => 'api_football', 'base_url' => 'https://www.api-football.com', 'extra' => []];
+    $seen = [];
+    \AIWorkforce\ApiProviders::$http = function (string $url, array $headers = [], ?string $body = null) use (&$seen) {
+        $seen[] = ['url' => $url, 'headers' => $headers];
+        return ['status' => 200, 'body' => json_encode([
+            'get' => 'status',
+            'errors' => [],
+            'response' => [
+                'account' => ['firstname' => 'Test'],
+                'subscription' => ['plan' => 'Free'],
+                'requests' => ['current' => 12, 'limit_day' => 100],
+            ],
+        ])];
+    };
+    try {
+        $ok = \AIWorkforce\ApiProviders::test($saved, ['api_key' => 'demo-key']);
+        assert_true($ok['ok'], json_encode($ok));
+        assert_contains('Connected to API-Football', $ok['message']);
+        assert_contains('88 of 100', $ok['message']);
+        assert_contains('v3.football.api-sports.io/status', $seen[0]['url']);
+        assert_true(in_array('x-apisports-key: demo-key', $seen[0]['headers'], true));
+    } finally {
+        \AIWorkforce\ApiProviders::$http = null;
+    }
+});
+
+test('API-Football marketing hosts normalize to the v3 API root', function () {
+    assert_equals('https://v3.football.api-sports.io', \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl('https://api-football.com'));
+    assert_equals('https://v3.football.api-sports.io', \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl('https://www.api-football.com/'));
+    assert_equals('https://v3.football.api-sports.io', \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl(''));
+    assert_equals('https://api-football-v1.p.rapidapi.com/v3', \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl('https://api-football-v1.p.rapidapi.com'));
+});
+
 test('configuring crypto market data does not authorize trading execution', function () {
     $db = fx_api_db();
     $market = \AIWorkforce\ApiProviders::save($db, [
