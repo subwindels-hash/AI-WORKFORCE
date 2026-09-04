@@ -24,6 +24,63 @@ class Api_lottery extends Api_controller
         $this->json($this->platform->lottery->status());
     }
 
+    public function dashboard()
+    {
+        $userId = $this->identity['id'] ?? null;
+        $out = [
+            'status' => 'NO_DATA',
+            'jackpot' => null,
+            'jackpotFormatted' => '—',
+            'nextEstimated' => null,
+            'lastDraw' => null,
+            'recentDraws' => [],
+            'imported' => 0,
+            'myTicketsCount' => 0,
+            'rules' => ['mains' => 5, 'mainMax' => 50, 'stars' => 2, 'starMax' => 12],
+            'lotteries' => [['code' => 'euromillions', 'name' => 'EuroMillions']],
+        ];
+        
+        try {
+            $status = $this->platform->lottery->status();
+            $out['status'] = $status['status'] ?? 'NO_DATA';
+            $out['jackpot'] = $status['jackpot'] ?? null;
+            $out['nextEstimated'] = $status['nextEstimated'] ?? null;
+            $out['lastDraw'] = $status['lastDraw'] ?? null;
+            $out['imported'] = $status['imported'] ?? 0;
+            $out['rules'] = $status['rules'] ?? $out['rules'];
+            $out['lotteries'] = $status['lotteries'] ?? $out['lotteries'];
+            
+            // Format jackpot
+            if ($out['jackpot'] !== null) {
+                $jp = (float) $out['jackpot'];
+                if ($jp >= 1000000) {
+                    $out['jackpotFormatted'] = '€' . number_format($jp / 1000000, 1) . 'M';
+                } elseif ($jp >= 1000) {
+                    $out['jackpotFormatted'] = '€' . number_format($jp / 1000, 0) . 'K';
+                } else {
+                    $out['jackpotFormatted'] = '€' . number_format($jp, 0);
+                }
+            }
+            
+            // Get recent draws
+            $out['recentDraws'] = $this->platform->lottery->listDraws(3, null, null);
+            
+            // Get user's tickets count
+            if ($userId) {
+                try {
+                    $myTickets = $this->platform->lottery->listMyTickets((int)$userId, 100);
+                    $out['myTicketsCount'] = count($myTickets);
+                } catch (\Throwable $e) {
+                    $out['myTicketsCount'] = 0;
+                }
+            }
+        } catch (\Throwable $e) {
+            // Return defaults on error
+        }
+        
+        $this->json($out);
+    }
+
     // ------------------------------------------------------------- read-only
     public function lotteries()
     {

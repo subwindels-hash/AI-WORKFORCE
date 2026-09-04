@@ -199,6 +199,7 @@ $route['api/sports/correlation'] = 'api_sports/correlation_monitor';
 
 // WINDELS Lottery Intelligence (EuroMillions first; provider-neutral)
 $route['api/lottery/status'] = 'api_lottery/status';
+$route['api/lottery/dashboard'] = 'api_lottery/dashboard';
 $route['api/lottery/lotteries'] = 'api_lottery/lotteries';
 $route['api/lottery/rules'] = 'api_lottery/rules';
 $route['api/lottery/draws'] = 'api_lottery/draws';

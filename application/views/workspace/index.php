@@ -100,8 +100,141 @@ $mode = $status['tradingMode'] ?? null;
 </div></section>
 
 <h2 class="section-title">Lottery intelligence</h2>
-<section class="panel" style="margin-bottom:18px"><div class="body" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap"><div><h3 style="margin:0 0 6px">EuroMillions jackpot</h3><div style="font-size:24px;font-weight:700;color:var(--brand)"><?= e($lotteryStatus['jackpot'] ?? '—') ?></div><p class="dim" style="margin:4px 0 0">Next draw: <span id="lottery-next-draw"><?= e($lotteryStatus['nextEstimated'] ?? 'Not available') ?></span> · <span id="lottery-countdown">calculating…</span> · <?= (int)($lotteryStatus['imported'] ?? 0) ?> verified draws</p></div><div style="display:flex;gap:8px"><a class="btn primary" href="/lottery">Open Lottery Intelligence</a><a class="btn" href="/lottery#generator">Generate numbers</a></div><?php $lastLotteryDraw = $lotteryStatus['lastDraw'] ?? null; if (is_array($lastLotteryDraw)): ?><div style="width:100%;margin-top:10px"><span class="dim">Latest verified result</span><div><?php foreach ((array)($lastLotteryDraw['numbers']['main'] ?? $lastLotteryDraw['mainNumbers'] ?? []) as $n): ?><span class="badge b-amber" style="margin-right:4px"><?= e((string)$n) ?></span><?php endforeach; ?><?php foreach ((array)($lastLotteryDraw['numbers']['stars'] ?? $lastLotteryDraw['stars'] ?? $lastLotteryDraw['bonusNumbers'] ?? []) as $n): ?><span class="badge b-blue" style="margin-right:4px">★ <?= e((string)$n) ?></span><?php endforeach; ?></div></div><?php endif; ?></div></div></section>
-<script>(function(){var raw=<?= json_encode($lotteryStatus['nextEstimated'] ?? null) ?>,el=document.getElementById('lottery-countdown');if(!el||!raw)return;var t=Date.parse(raw);if(!isFinite(t)){el.textContent='draw time unavailable';return;}function tick(){var d=Math.max(0,t-Date.now()),h=Math.floor(d/36e5),m=Math.floor(d%36e5/6e4),s=Math.floor(d%6e4/1e3);el.textContent=d?'in '+h+'h '+m+'m '+s+'s':'draw time reached';}tick();setInterval(tick,1000);})();</script>
+<section class="panel lottery-widget" style="margin-bottom:18px">
+  <div class="body">
+    <!-- Header with Jackpot & Quick Actions -->
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px">
+      <div>
+        <h3 style="margin:0 0 6px">🎰 EuroMillions Lottery Intelligence</h3>
+        <p class="dim" style="margin:0">AI-powered lottery analysis, number generation, and verified draw data — all in one place.</p>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <a class="btn primary" href="/lottery">Open Lottery Intel</a>
+        <a class="btn" href="/lottery#generator">Generate Numbers</a>
+        <a class="btn" href="/lottery#draws">View All Draws</a>
+        <?php if (($lotteryWidget['myTicketsCount'] ?? 0) > 0): ?>
+          <a class="btn" href="/lottery#tickets">My Tickets (<?= (int)$lotteryWidget['myTicketsCount'] ?>)</a>
+        <?php endif; ?>
+      </div>
+    </div>
+    
+    <!-- Jackpot Display with Countdown -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px">
+      <!-- Jackpot Card -->
+      <div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:var(--radius);padding:20px;color:#fff">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;opacity:.9;margin-bottom:6px">Current Jackpot</div>
+        <div style="font-size:32px;font-weight:700;margin-bottom:4px"><?= e($lotteryWidget['jackpotFormatted'] ?? '—') ?></div>
+        <div style="font-size:12px;opacity:.9"><?= (int)($lotteryWidget['imported'] ?? 0) ?> verified draws imported</div>
+      </div>
+      
+      <!-- Countdown Card -->
+      <div style="background:var(--panel2);border:1px solid var(--line);border-radius:var(--radius);padding:20px">
+        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Next Draw</div>
+        <div id="lottery-next-draw-full" style="font-size:14px;color:var(--text);margin-bottom:12px"><?= e($lotteryWidget['nextEstimated'] ?? 'Not available') ?></div>
+        <div style="display:flex;gap:12px" id="lottery-countdown-cards">
+          <div style="flex:1;text-align:center">
+            <div id="lc-days" style="font-size:28px;font-weight:700;color:var(--brand)">—</div>
+            <div style="font-size:10px;color:var(--dim);text-transform:uppercase">Days</div>
+          </div>
+          <div style="flex:1;text-align:center">
+            <div id="lc-hours" style="font-size:28px;font-weight:700;color:var(--brand)">—</div>
+            <div style="font-size:10px;color:var(--dim);text-transform:uppercase">Hours</div>
+          </div>
+          <div style="flex:1;text-align:center">
+            <div id="lc-mins" style="font-size:28px;font-weight:700;color:var(--brand)">—</div>
+            <div style="font-size:10px;color:var(--dim);text-transform:uppercase">Minutes</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Recent Results -->
+    <?php if (!empty($lotteryWidget['recentDraws'])): ?>
+    <div style="margin-bottom:18px">
+      <h4 style="margin:0 0 10px;font-size:14px;font-weight:600">Recent Draw Results</h4>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+        <?php foreach (array_slice($lotteryWidget['recentDraws'], 0, 3) as $draw): ?>
+          <?php 
+            $mainNums = $draw['numbers']['main'] ?? $draw['mainNumbers'] ?? [];
+            $starNums = $draw['numbers']['stars'] ?? $draw['stars'] ?? $draw['bonusNumbers'] ?? [];
+            $drawDate = substr($draw['draw_date'] ?? $draw['drawDate'] ?? '', 0, 10);
+          ?>
+          <div style="background:var(--panel2);border:1px solid var(--line);border-radius:var(--radius-sm);padding:12px">
+            <div style="font-size:11px;color:var(--dim);margin-bottom:8px"><?= e($drawDate) ?></div>
+            <div style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap">
+              <?php foreach ($mainNums as $n): ?>
+                <span style="background:#f5a62322;color:var(--amber);padding:3px 7px;border-radius:4px;font-size:12px;font-weight:600"><?= e((string)$n) ?></span>
+              <?php endforeach; ?>
+            </div>
+            <?php if (!empty($starNums)): ?>
+            <div style="display:flex;gap:4px;flex-wrap:wrap">
+              <?php foreach ($starNums as $n): ?>
+                <span style="background:#3b82f622;color:var(--brand);padding:3px 7px;border-radius:4px;font-size:12px;font-weight:600">★ <?= e((string)$n) ?></span>
+              <?php endforeach; ?>
+            </div>
+            <?php endif; ?>
+          </div>
+        <?php endforeach; ?>
+      </div>
+    </div>
+    <?php endif; ?>
+    
+    <!-- Latest Result (if available) -->
+    <?php $lastDraw = $lotteryWidget['lastDraw'] ?? null; ?>
+    <?php if (is_array($lastDraw)): ?>
+      <?php 
+        $mainNums = $lastDraw['numbers']['main'] ?? $lastDraw['mainNumbers'] ?? [];
+        $starNums = $lastDraw['numbers']['stars'] ?? $lastDraw['stars'] ?? $lastDraw['bonusNumbers'] ?? [];
+        $drawDate = substr($lastDraw['draw_date'] ?? $lastDraw['drawDate'] ?? '', 0, 10);
+      ?>
+      <div style="background:var(--panel2);border-left:3px solid var(--brand);border-radius:var(--radius-sm);padding:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:12px;color:var(--dim)">Latest verified result (<?= e($drawDate) ?>)</span>
+        </div>
+        <div style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap">
+          <?php foreach ($mainNums as $n): ?>
+            <span class="badge b-amber" style="margin-right:4px"><?= e((string)$n) ?></span>
+          <?php endforeach; ?>
+          <?php foreach ($starNums as $n): ?>
+            <span class="badge b-blue" style="margin-right:4px">★ <?= e((string)$n) ?></span>
+          <?php endforeach; ?>
+        </div>
+      </div>
+    <?php endif; ?>
+  </div>
+</section>
+
+<!-- Countdown Timer Script -->
+<script>
+(function(){
+  var raw = <?= json_encode($lotteryWidget['nextEstimated'] ?? null) ?>;
+  if (!raw) return;
+  var target = Date.parse(raw);
+  if (!isFinite(target)) {
+    document.getElementById('lottery-next-draw-full').textContent = 'Draw time unavailable';
+    return;
+  }
+  
+  function updateCountdown() {
+    var now = Date.now();
+    var diff = Math.max(0, target - now);
+    var days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    var hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    var mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    
+    document.getElementById('lc-days').textContent = days;
+    document.getElementById('lc-hours').textContent = hours;
+    document.getElementById('lc-mins').textContent = mins;
+    
+    if (diff === 0) {
+      document.getElementById('lottery-next-draw-full').textContent = 'Draw time reached!';
+    }
+  }
+  
+  updateCountdown();
+  setInterval(updateCountdown, 60000); // Update every minute
+})();
+</script>
 
 <h2 class="section-title">Recent activity &amp; alerts</h2>
 <div class="grid cols-main">
