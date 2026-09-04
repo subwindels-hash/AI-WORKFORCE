@@ -62,6 +62,8 @@ $s = $stats ?? [];
   </div>
 </div>
 
+<section class="panel" style="margin-top:16px"><h3>Cloudflare Agent Runtime</h3><div class="body"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))"><div><div class="dim">Workers AI provider</div><b><?= !empty($agentRuntime['cloudflareConfigured']) ? 'Configured' : 'Not configured' ?></b></div><div><div class="dim">Registered agents</div><b><?= count($agentRuntime['registeredAgents'] ?? []) ?></b></div><div><div class="dim">Sensitive tools</div><b>Approval required</b></div></div><p class="dim" style="margin:10px 0 0"><?= e($agentRuntime['toolPolicy'] ?? '') ?></p><p style="margin:10px 0 0"><a class="btn" href="/admin/api">Manage AI providers</a></p></div></section>
+
 <div class="grid cols-main" style="margin-top:16px">
   <section class="panel">
     <h3>Recent registrations</h3>
