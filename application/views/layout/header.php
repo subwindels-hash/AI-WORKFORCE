@@ -68,6 +68,7 @@ $isActive = function(array $keys) use ($active): bool {
 
   <!-- Required: Other Tools -->
   <p class="sidebar-label">Other Tools</p>
+  <a href="/app/trading" class="<?= $active === 'trading' ? 'active' : '' ?>" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18V6M4 18h16M7 15l3-4 3 2 4-6"/></svg><span>My Trading</span></a>
   <a href="/execution" class="<?= $active === 'execution' ? 'active' : '' ?>" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg><span>Execution</span></a>
   <a href="/brokers" class="<?= $active === 'brokers' ? 'active' : '' ?> sidebar-sub" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V8l7-4 7 4v13"/><path d="M9 21v-6h6v6"/></svg><span>Brokers</span></a>
   <a href="/risk" class="<?= $active === 'risk' ? 'active' : '' ?> sidebar-sub" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 4 3.5 7.5 8 9 4.5-1.5 8-5 8-9V6z"/><path d="M9 12l2 2 4-4"/></svg><span>Risk Center</span></a>
