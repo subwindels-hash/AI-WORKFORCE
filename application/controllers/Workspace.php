@@ -142,7 +142,24 @@ class Workspace extends App_Controller
             'accuracy50' => null,
             'totalPredictions' => 0,
             'historyCount' => 0,
+            'integration' => [
+                'cloudflare' => false,
+                'llm' => false,
+                'sports' => false,
+            ],
         ];
+
+        // Check integration status
+        try {
+            if (isset($this->platform->multiplierIntegration)) {
+                $intStatus = $this->platform->multiplierIntegration->status();
+                $out['integration']['cloudflare'] = $intStatus['bridge_available'];
+                $out['integration']['llm'] = $intStatus['llm_enhancement'];
+                $out['integration']['sports'] = $intStatus['enrichment_available'];
+            }
+        } catch (\Throwable $e) {
+            // Non-critical
+        }
 
         try {
             $provider = new \AIWorkforce\MultiplierIntelligence\SimulationProvider();

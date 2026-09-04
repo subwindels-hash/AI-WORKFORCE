@@ -115,6 +115,13 @@ $acc = $accuracy ?? [];
 .mi-pulse-dot{width:10px;height:10px;border-radius:50%;background:#22c55e;position:relative;display:inline-block}
 .mi-pulse-dot::before{content:'';position:absolute;inset:0;border-radius:50%;background:#22c55e;animation:pulse-ring 1.5s ease-out infinite}
 
+/* ═══ Integration Status ═════════════════════════════════════════ */
+.mi-integration{display:flex;gap:8px;flex-wrap:wrap;padding:10px 14px;background:rgba(15,23,42,.5);border-radius:10px;border:1px solid #1e293b;margin-bottom:16px}
+.mi-int-pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:20px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.mi-int-pill.active{background:#22c55e22;color:#22c55e;border:1px solid #22c55e44}
+.mi-int-pill.inactive{background:#64748b22;color:#94a3b8;border:1px solid #64748b44}
+.mi-int-pill .dot{width:6px;height:6px;border-radius:50%;background:currentColor;box-shadow:0 0 6px currentColor}
+
 @media(max-width:1200px){.mi-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:768px){.mi-grid{grid-template-columns:1fr}.mi-signal-value{font-size:60px}}
 </style>
@@ -137,6 +144,41 @@ $acc = $accuracy ?? [];
         <b>EDUCATIONAL PURPOSE ONLY</b> — This system uses statistical analysis for demonstration. Crash games are inherently random. 
         No system can guarantee predictions. Past performance does not guarantee future results. Never risk more than you can afford to lose.
       </div>
+    </div>
+
+    <?php $intg = $integration ?? []; ?>
+    <div class="mi-integration" title="Integration status with Cloudflare Agent Platform and Sports Intelligence">
+      <?php
+        $cfActive = !empty($intg['cloudflare']['available']);
+        $llmActive = !empty($intg['llm']['available']);
+        $sportsActive = !empty($intg['sports']['available']);
+        $regActive = !empty($intg['registered']);
+      ?>
+      <span class="mi-int-pill <?= $cfActive ? 'active' : 'inactive' ?>" title="Cloudflare AI Agent Platform integration">
+        <span class="dot"></span>
+        Cloudflare <?= $cfActive ? 'Connected' : 'Standby' ?>
+      </span>
+      <span class="mi-int-pill <?= $llmActive ? 'active' : 'inactive' ?>" title="LLM model enhancement via Cloudflare Workers AI">
+        <span class="dot"></span>
+        LLM Enhancement <?= $llmActive ? 'Active (' . (int)($intg['llm']['providers'] ?? 0) . ' providers)' : 'Standby' ?>
+      </span>
+      <span class="mi-int-pill <?= $sportsActive ? 'active' : 'inactive' ?>" title="Sports Intelligence enrichment (api-football, thesportsdb, sportmonks)">
+        <span class="dot"></span>
+        Sports Intel <?= $sportsActive ? 'Enriching' : 'Awaiting Config' ?>
+      </span>
+      <span class="mi-int-pill <?= $regActive ? 'active' : 'inactive' ?>" title="9 specialist agents registered with AgentCommunicationBus">
+        <span class="dot"></span>
+        Agent Bus <?= $regActive ? 'Registered (9 agents)' : 'Unregistered' ?>
+      </span>
+      <span class="mi-int-pill <?= $cfActive ? 'active' : 'inactive' ?>" title="6 multiplier.* MCP tools available to all Cloudflare agents">
+        <span class="dot"></span>
+        MCP Tools <?= $cfActive ? '6 Active' : 'Standby' ?>
+      </span>
+      <?php if ($sportsActive && !empty($intg['sports']['signals'])): ?>
+        <span class="mi-int-pill active" title="Current market sentiment from sports betting odds">
+          📊 Sentiment: <?= e(strtoupper($intg['sports']['signals']['sentiment'] ?? 'neutral')) ?>
+        </span>
+      <?php endif; ?>
     </div>
     
     <!-- Main Signal Display -->

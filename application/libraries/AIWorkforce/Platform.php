@@ -59,6 +59,7 @@ class Platform
     public \AIWorkforce\LangLearn\TeacherCoach $langcoach;
     public \AIWorkforce\LangLearn\Translator $translator;
     public \AIWorkforce\Cloudflare\AgentPlatform $cloudflare;
+    public \AIWorkforce\MultiplierIntelligence\MultiplierPlatformIntegration $multiplierIntegration;
 
     /** True when AI_WORKFORCE_DISABLE_REAL_PROVIDERS=1 forces the simulated feed. */
     private bool $disableRealProviders = false;
@@ -80,6 +81,7 @@ class Platform
             ['language', ['language.analyzePronunciation']],
             ['trading', ['broker.getAccount', 'broker.getPositions']],
             ['video', ['video.create']],
+            ['multiplier', ['multiplier.getCurrentMultiplier', 'multiplier.getHistory', 'multiplier.generateSignal', 'multiplier.getAccuracy', 'multiplier.listAgents', 'multiplier.analyzeRound']],
         ] as [$role, $tools]) {
             // Use EnhancedCloudflareAgent for multi-model Cloudflare support,
             // falling back to CloudflareSpecialistAgent if the enhanced class is unavailable.
@@ -158,6 +160,31 @@ class Platform
             null, // Approval handler — set by ExecutionSupervisor when needed
             $this->agents
         );
+
+        // ── Multiplier Intelligence + Cloudflare Integration ───────
+        // Wires Multiplier specialist agents into the Cloudflare platform:
+        // - Registers MultiplierSpecialistAgent with orchestrator (for CommunicationBus dispatch)
+        // - Registers 6 multiplier.* MCP tools (available to ALL Cloudflare agents)
+        // - Connects Sports Intelligence enrichment (api-football/thesportsdb/sportmonks)
+        // - Enables LLM enhancement via ModelRouter (70% stat / 30% LLM blend)
+        try {
+            $this->multiplierIntegration = new \AIWorkforce\MultiplierIntelligence\MultiplierPlatformIntegration(
+                $this->cloudflare,
+                $this->sports ?? null
+            );
+            $this->multiplierIntegration->register();
+
+            // Register the dedicated MultiplierAnalyst specialist agent
+            if ($this->multiplierIntegration->agent()) {
+                $this->agents->register($this->multiplierIntegration->agent());
+            }
+        } catch (\Throwable $e) {
+            // Multiplier integration is non-critical — don't break platform bootstrap
+            $auditFn('INTEGRATION_WARNING', null, 'multiplier', [
+                'component' => 'MultiplierPlatformIntegration',
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**

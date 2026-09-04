@@ -362,6 +362,21 @@ $_aiHealth = $_aiTotal > 0 ? round(($_aiHealthy / $_aiTotal) * 100, 0) : 0;
       <div style="font-size:10px;color:var(--dim);margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
         ⚠️ Educational purpose only — crash games are random. No prediction is guaranteed.
       </div>
+      <?php $mIntg = $multiplierWidget['integration'] ?? []; ?>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
+        <span class="statuspill" style="font-size:10px;<?= !empty($mIntg['cloudflare']) ? 'border-color:var(--green)' : '' ?>">
+          <i class="pill-dot" style="<?= !empty($mIntg['cloudflare']) ? 'background:var(--green)' : 'background:var(--dim)' ?>"></i>
+          Cloudflare <?= !empty($mIntg['cloudflare']) ? 'Active' : 'Standby' ?>
+        </span>
+        <span class="statuspill" style="font-size:10px;<?= !empty($mIntg['llm']) ? 'border-color:var(--green)' : '' ?>">
+          <i class="pill-dot" style="<?= !empty($mIntg['llm']) ? 'background:var(--green)' : 'background:var(--dim)' ?>"></i>
+          LLM <?= !empty($mIntg['llm']) ? 'Enhanced' : 'Standby' ?>
+        </span>
+        <span class="statuspill" style="font-size:10px;<?= !empty($mIntg['sports']) ? 'border-color:var(--green)' : '' ?>">
+          <i class="pill-dot" style="<?= !empty($mIntg['sports']) ? 'background:var(--green)' : 'background:var(--dim)' ?>"></i>
+          Sports Intel <?= !empty($mIntg['sports']) ? 'Enriching' : 'Awaiting' ?>
+        </span>
+      </div>
     </div>
     <?php else: ?>
     <p class="dim">No signals generated yet. <a href="/multiplier">Open Multiplier Intelligence →</a></p>

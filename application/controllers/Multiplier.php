@@ -52,17 +52,109 @@ class Multiplier extends App_Controller
         $engine = $this->engine();
         $dashboard = $engine->dashboard();
         
-        // Generate initial signal
-        $signal = $engine->generateSignal();
+        // Use Cloudflare-enhanced signal if integration is available
+        $signal = $this->enhancedSignal($engine);
         
         $data['dashboard'] = $dashboard;
         $data['signal'] = $signal;
         $data['accuracy'] = $engine->accuracyStats(100);
         $data['history'] = $engine->provider()->history(20);
         
+        // Integration status for UI display
+        $data['integration'] = $this->integrationStatus();
+        
         $this->load->view('layout/header', $data);
         $this->load->view('multiplier/index', $data);
         $this->load->view('layout/footer');
+    }
+    
+    /**
+     * Get integration status for UI display
+     */
+    private function integrationStatus(): array
+    {
+        $status = [
+            'cloudflare' => ['available' => false, 'enhanced' => false, 'agents' => 0, 'tools' => 0],
+            'sports' => ['available' => false, 'signals' => [], 'weight' => 0.15],
+            'llm' => ['available' => false, 'providers' => 0],
+            'registered' => false,
+        ];
+        
+        // Check Cloudflare integration
+        try {
+            if (isset($this->platform->multiplierIntegration)) {
+                $integration = $this->platform->multiplierIntegration;
+                $integrationStatus = $integration->status();
+                $status['cloudflare']['available'] = $integrationStatus['bridge_available'];
+                $status['cloudflare']['enhanced'] = $integrationStatus['llm_enhancement'];
+                $status['cloudflare']['agents'] = 9;
+                $status['cloudflare']['tools'] = 6;
+                $status['registered'] = $integrationStatus['registered'];
+            }
+        } catch (\Throwable $e) {
+            // Non-critical
+        }
+        
+        // Check LLM provider
+        try {
+            $modelRouter = $this->platform->cloudflare->modelRouter();
+            if ($modelRouter->configured()) {
+                $routerStatus = $modelRouter->status();
+                $status['llm']['available'] = true;
+                $status['llm']['providers'] = count($routerStatus['providers'] ?? []);
+            }
+        } catch (\Throwable $e) {
+            // Non-critical
+        }
+        
+        // Check Sports enrichment
+        try {
+            if (isset($this->platform->multiplierIntegration) && $this->platform->multiplierIntegration->enrichment()) {
+                $enrichment = $this->platform->multiplierIntegration->enrichment();
+                $signals = $enrichment->getEnrichmentSignals();
+                $status['sports']['available'] = $signals['data_available'];
+                $status['sports']['signals'] = [
+                    'sentiment' => $signals['market_sentiment'] ?? 'neutral',
+                    'activity' => $signals['event_activity'] ?? 'normal',
+                ];
+                $status['sports']['weight'] = $enrichment->getEnrichmentWeight();
+            }
+        } catch (\Throwable $e) {
+            // Non-critical
+        }
+        
+        return $status;
+    }
+    
+    /**
+     * Generate an enhanced signal using Cloudflare + Sports enrichment if available
+     */
+    private function enhancedSignal(MultiplierIntelligenceEngine $engine): array
+    {
+        $signal = $engine->generateSignal();
+        
+        // Apply Sports enrichment if available
+        try {
+            if (isset($this->platform->multiplierIntegration) && $this->platform->multiplierIntegration->enrichment()) {
+                $enrichment = $this->platform->multiplierIntegration->enrichment();
+                $signal = $enrichment->enrichPrediction($signal);
+            }
+        } catch (\Throwable $e) {
+            // Enrichment is non-critical
+        }
+        
+        // Mark as Cloudflare-enhanced if integration is active
+        try {
+            if (isset($this->platform->multiplierIntegration)) {
+                $intStatus = $this->platform->multiplierIntegration->status();
+                $signal['cloudflare_enhanced'] = $intStatus['llm_enhancement'];
+                $signal['sports_enriched'] = $intStatus['enrichment_available'];
+            }
+        } catch (\Throwable $e) {
+            // Non-critical
+        }
+        
+        return $signal;
     }
     
     /**

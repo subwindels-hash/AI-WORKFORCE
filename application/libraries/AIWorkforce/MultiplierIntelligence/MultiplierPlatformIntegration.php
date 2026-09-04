@@ -88,6 +88,10 @@ use AIWorkforce\Agents\AgentOrchestrator;
 class MultiplierPlatformIntegration
 {
     private AgentPlatform $platform;
+    
+    /** @var \AIWorkforce\Sports\SportsIntelligence|null */
+    private $sportsIntel;
+    
     private bool $registered = false;
     
     /** @var MultiplierSpecialistAgent|null */
@@ -99,9 +103,10 @@ class MultiplierPlatformIntegration
     /** @var SportsBettingEnrichmentProvider|null */
     private ?SportsBettingEnrichmentProvider $enrichment = null;
     
-    public function __construct(AgentPlatform $platform)
+    public function __construct(AgentPlatform $platform, $sportsIntel = null)
     {
         $this->platform = $platform;
+        $this->sportsIntel = $sportsIntel;
     }
     
     /**
@@ -209,14 +214,7 @@ class MultiplierPlatformIntegration
      */
     private function getSportsIntelligence()
     {
-        // Try to access sports intelligence through platform
-        try {
-            // This would typically be: $this->platform->sports
-            // But we need to check what's available in the Platform class
-            return null; // Will be set up when Platform exposes sports
-        } catch (\Throwable $e) {
-            return null;
-        }
+        return $this->sportsIntel;
     }
     
     /**
