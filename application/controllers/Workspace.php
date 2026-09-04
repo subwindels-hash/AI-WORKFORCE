@@ -203,14 +203,14 @@ class Workspace extends App_Controller
         try {
             $cfStatus = $this->platform->cloudflare->status();
             $modules['cloudflare'] = [
-                'name' => 'AI Agent Platform',
+                'name' => 'Windels AI Agents',
                 'icon' => '⚡',
                 'status' => !empty($cfStatus['modelRouter']['configured']) ? 'healthy' : 'degraded',
                 'agents' => count($cfStatus['communicationBus']['availableAgents'] ?? []),
                 'tools' => $cfStatus['toolRegistry']['totalTools'] ?? 0,
             ];
         } catch (\Throwable $e) {
-            $modules['cloudflare'] = ['name' => 'AI Agent Platform', 'icon' => '⚡', 'status' => 'error'];
+            $modules['cloudflare'] = ['name' => 'Windels AI Agents', 'icon' => '⚡', 'status' => 'error'];
         }
         
         // Multiplier Intelligence

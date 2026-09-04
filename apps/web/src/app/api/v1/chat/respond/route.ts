@@ -1,6 +1,18 @@
 import { NextResponse } from "next/server";
 
-const localGuide = (message: string) => { const value = message.toLowerCase(); if (value.includes("duplicate")) return "Open Intelligence to review duplicate candidates. Provider plus stable source ID is the primary identity rule; merge decisions need a human."; if (value.includes("export")) return "Use Intelligence for a formula-safe CSV or JSON export. Every export is recorded in the activity ledger."; if (value.includes("admin") || value.includes("user")) return "Use Account to review your session. Administrators can use Admin to create members, change roles, and deactivate access."; if (value.includes("search") || value.includes("lead")) return "Use Discover to search a city, category, or business type. A configured provider is required and empty results are never filled with fake businesses."; return "I can guide you through Discover, Pipeline, Collections, Intelligence, exports, and access control."; };
+const localGuide = (message: string) => {
+  const value = message.toLowerCase();
+  if (value.includes("language") || value.includes("teacher")) return "AI Language Teacher is at /app/languages/teacher; My Languages is /app/languages. Use lessons, translation, listening, speaking practice, and SRS vocabulary. Speaking scores use real transcripts and are never invented.";
+  if (value.includes("lead") || value.includes("discover")) return "Lead Discovery is at /leads and Pipeline is at /lead-pipeline. Search real businesses through a configured provider; empty results are never filled with fake leads. Review duplicates and export stored records from Intelligence.";
+  if (value.includes("sport")) return "Sports Intel is at /sports. Fixtures and odds appear only from connected providers; the platform does not invent matches or odds.";
+  if (value.includes("lottery") || value.includes("euromillion")) return "EuroMillions is at /lottery. Statistics, systems, tickets, and backtests use historical or explicitly labelled data. Official draws require a configured feed and analysis is not a prediction.";
+  if (value.includes("trading") || value.includes("paper") || value.includes("broker")) return "Trading starts in ANALYSIS_ONLY with the kill switch active. Use /paper for simulation, /strategy for research, /execution for governed routing, /brokers for connectors, and /risk for limits. Agents never bypass risk controls or place broker orders directly.";
+  if (value.includes("multiplier") || value.includes("crash") || value.includes("aviator")) return "Multiplier AI is at /multiplier. It analyses live crash history from Bustabit or the configured real provider. If the feed is unavailable it shows NO_DATA; simulated rounds are not substituted.";
+  if (value.includes("agent") || value.includes("workforce")) return "Windels AI Agents are at /app/workforce, with platform health at /app/agent-platform. Agents cover market, sports, lottery, language, trading, leads, and video. Tool actions require approval and are audited.";
+  if (value.includes("dashboard") || value.includes("home")) return "Dashboard is at /dashboard and shows the platform overview. Widgets stay empty when their real provider is unavailable; the system does not invent results.";
+  if (value.includes("account") || value.includes("profile") || value.includes("password")) return "Manage your profile and security at /account. Alerts are at /notifications and support messages are at /messages.";
+  return "I am WINDELS Assistant for AI-WORKFORCE. I can explain Dashboard, Windels AI Agents, AI Language Teacher, Languages, Lead Discovery, Pipeline, Sports, EuroMillions, Trading, Multiplier AI, Risk, Brokers, and Account. Tell me which area you want to use and I will give the exact path and real-data rules.";
+};
 
 export async function POST(request: Request) {
   const input = await request.json().catch(() => ({})) as { message?: unknown; history?: unknown };
@@ -10,7 +22,7 @@ export async function POST(request: Request) {
     try {
       const response = await fetch(`${target.replace(/\/$/, "")}/api/v1/chat/respond`, { method: "POST", signal: AbortSignal.timeout(8_000), headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
       if (response.ok) return NextResponse.json(await response.json());
-    } catch { /* The local guide is the safe offline fallback. */ }
+    } catch { /* grounded local guide is the safe fallback */ }
   }
-  return NextResponse.json({ message: localGuide(input.message.trim()), provider: "next-local-guide", grounded: true, disclaimer: "Product guidance only; the API service is unavailable or no AI provider is configured." });
+  return NextResponse.json({ message: localGuide(input.message.trim()), provider: "next-local-guide", grounded: true, disclaimer: "Product guidance only; no private records were exposed to the assistant." });
 }

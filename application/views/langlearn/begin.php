@@ -11,7 +11,7 @@
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 
 <div class="panel">
-  <h3><?= e($language['name']) ?> <span class="dim"><?= e($language['native_name'] ?? '') ?></span></h3>
+  <h3>Language I’m learning: <?= e($language['name']) ?> <span class="dim"><?= e($language['native_name'] ?? '') ?></span></h3>
   <div class="body" style="padding-top:12px">
     <p class="dim" style="font-size:13px">ISO <?= e($language['iso_code'] ?? $language['code']) ?> · <?= e($language['writing_system'] ?? '') ?> · <?= e(strtoupper($language['direction'] ?? 'ltr')) ?></p>
     <form method="post" action="/app/languages/start" style="display:grid;gap:12px;max-width:520px;margin-top:12px">
@@ -24,7 +24,7 @@
           <?php endforeach; ?>
         </select>
       </label>
-      <label class="fld">Explain things to me in
+      <label class="fld">My language (explanations)
         <select class="sel" name="explanationLanguage">
           <?php foreach ($explanationLanguages as $el): ?>
             <option value="<?= e($el['code']) ?>" <?= (($existing['explanation_language'] ?? 'en') === $el['code'] || (($existing['explanation_language'] ?? '') === '' && $el['code'] === 'en')) ? 'selected' : '' ?>><?= e($el['name']) ?></option>
