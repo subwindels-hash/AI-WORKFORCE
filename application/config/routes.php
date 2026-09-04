@@ -158,6 +158,15 @@ $route['lottery/draw/(:num)'] = 'lottery/index';
 $route['lottery/tickets'] = 'lottery/index';
 $route['lottery/backtests'] = 'lottery/index';
 
+// Multiplier Intelligence
+$route['app/multiplier'] = 'multiplier/index';
+$route['multiplier'] = 'multiplier';
+$route['multiplier/generate_signal'] = 'multiplier/generate_signal';
+$route['multiplier/live'] = 'multiplier/live';
+$route['multiplier/dashboard'] = 'multiplier/dashboard_data';
+$route['multiplier/accuracy'] = 'multiplier/accuracy';
+$route['multiplier/validate'] = 'multiplier/validate';
+
 // ---- JSON API (spec §17 subset for Phases 1–3) ---------------------------
 $route['api/system/status'] = 'api_system/status';
 $route['api/auth/login'] = 'api_auth/login';
