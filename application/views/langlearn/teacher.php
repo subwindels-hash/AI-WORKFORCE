@@ -430,6 +430,7 @@ $flagMap = [
   var ttMineHintLang = document.getElementById('tt-mine-hint-lang');
 
   var FLAGS = <?= json_encode($flagMap) ?>;
+  var PROFILE_ID = <?= (int) ($myProfiles[0]['id'] ?? 0) ?>;
 
   var currentLearn = null; // translation into the learning language
   var currentMy = null;    // translation into my language
@@ -557,6 +558,29 @@ $flagMap = [
     targetCountEl.textContent = targetInput.value.length + ' / 500';
   });
 
+  // ---------- Real-time translate (debounced) ----------
+  // Translate as the user types — not just on button click. A short debounce
+  // keeps the experience responsive without hammering the API on every key.
+  var _translateTimer = null;
+  var _translatePending = false;
+  function scheduleAutoTranslate() {
+    if (_translateTimer) clearTimeout(_translateTimer);
+    _translateTimer = setTimeout(function () {
+      _translateTimer = null;
+      if (_translatePending) {
+        _translatePending = false;
+        var text = input.value.trim();
+        if (text) runMyToLearn(text);
+      }
+    }, 450);
+  }
+  function queueAutoTranslate() {
+    _translatePending = true;
+    scheduleAutoTranslate();
+  }
+  input.addEventListener('input', function () { queueAutoTranslate(); });
+  targetInput.addEventListener('input', function () { queueAutoTranslate(); });
+
   submitBtn.addEventListener('click', function (ev) {
     ev.preventDefault();
     var text = input.value.trim();
@@ -635,7 +659,14 @@ $flagMap = [
         var u = new SpeechSynthesisUtterance(spoken);
         u.lang = (o && o.locale) || 'en-US';
         u.rate = (o && o.rate) || 1;
+        u.volume = 1;
+        u.pitch = 1;
+        if (o && o.voice && typeof o.voice === 'object' && o.voice.lang) {
+          u.voice = o.voice;
+          u.lang = o.voice.lang;
+        }
         window.speechSynthesis.cancel();
+        try { window.speechSynthesis.resume(); } catch (e) { /* Chrome sometimes needs resume */ }
         window.speechSynthesis.speak(u);
         u.onend = o && o.onEnd;
         u.onerror = o && o.onError;
