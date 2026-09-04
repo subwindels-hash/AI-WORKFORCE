@@ -340,7 +340,63 @@ test('API-Football marketing hosts normalize to the v3 API root', function () {
     assert_equals('https://v3.football.api-sports.io', \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl('http://football.com'));
     assert_equals('https://v3.football.api-sports.io', \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl('football.com'));
     assert_equals('https://v3.football.api-sports.io', \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl(''));
+    assert_equals('https://v3.football.api-sports.io', \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl('[http://football.com](http://football.com)'));
+    assert_equals('https://v3.football.api-sports.io', \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl('dashboard.api-football.com'));
+    assert_equals('https://v3.football.api-sports.io', \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl('https://api-football.com/docs'));
     assert_equals('https://api-football-v1.p.rapidapi.com/v3', \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl('https://api-football-v1.p.rapidapi.com'));
+    assert_equals('https://api-football-v1.p.rapidapi.com/v3', \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl('http://api-football-v1.p.rapidapi.com'));
+});
+
+test('API-Football connection test rejects invalid keys and reports network failures clearly', function () {
+    \AIWorkforce\ApiProviders::$http = function (string $url, array $headers = [], ?string $body = null) {
+        return ['status' => 200, 'body' => json_encode([
+            'get' => 'status',
+            'errors' => ['token' => 'Error/Missing application key'],
+            'response' => [],
+        ])];
+    };
+    try {
+        $bad = \AIWorkforce\ApiProviders::test(
+            ['driver' => 'api_football', 'base_url' => 'http://football.com', 'extra' => []],
+            ['api_key' => 'bad-key']
+        );
+        assert_false($bad['ok']);
+        assert_equals('Invalid API key', $bad['message']);
+
+        \AIWorkforce\ApiProviders::$http = function () {
+            return ['status' => 0, 'body' => ''];
+        };
+        $down = \AIWorkforce\ApiProviders::test(
+            ['driver' => 'api_football', 'base_url' => '', 'extra' => []],
+            ['api_key' => 'any-key']
+        );
+        assert_false($down['ok']);
+        assert_contains('Could not reach API-Football', $down['message']);
+    } finally {
+        \AIWorkforce\ApiProviders::$http = null;
+    }
+});
+
+test('saving API-Football with a marketing base URL rewrites it to the v3 API root', function () {
+    $db = fx_api_db();
+    $saved = \AIWorkforce\ApiProviders::save($db, [
+        'service' => 'sports',
+        'driver' => 'api_football',
+        'label' => 'AF rewrite',
+        'role' => 'unused',
+        'enabled' => 0,
+        'base_url' => 'http://football.com',
+        'api_key' => 'sports-key-1234',
+    ], null, 1, true);
+    $id = (int) ($saved['id'] ?? 0);
+    try {
+        assert_true($id > 0);
+        assert_equals('https://v3.football.api-sports.io', $saved['base_url']);
+        $fresh = \AIWorkforce\ApiProviders::find($db, $id);
+        assert_equals('https://v3.football.api-sports.io', $fresh['base_url'] ?? null);
+    } finally {
+        fx_api_cleanup([$id]);
+    }
 });
 
 test('configuring crypto market data does not authorize trading execution', function () {
