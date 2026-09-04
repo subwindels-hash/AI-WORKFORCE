@@ -62,7 +62,7 @@ final class ApiProviders
                 'label' => 'Translation',
                 'group' => 'Language Learning',
                 'kind' => 'data',
-                'drivers' => ['openai_compatible', 'libretranslate', 'custom_http'],
+                'drivers' => ['openai_compatible', 'cloudflare_workers_ai', 'libretranslate', 'custom_http'],
             ],
             'stt' => [
                 'label' => 'Speech-to-Text',
