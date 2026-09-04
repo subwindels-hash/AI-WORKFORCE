@@ -68,7 +68,7 @@ final class ApiProviders
                 'label' => 'Speech-to-Text',
                 'group' => 'Language Learning',
                 'kind' => 'data',
-                'drivers' => ['openai_compatible', 'browser_webspeech', 'custom_http'],
+                'drivers' => ['cloudflare_workers_ai', 'openai_compatible', 'browser_webspeech', 'custom_http'],
             ],
             'tts' => [
                 'label' => 'Text-to-Speech',
@@ -99,6 +99,30 @@ final class ApiProviders
                 'group' => 'AI Trading',
                 'kind' => 'action',
                 'drivers' => ['custom_http'],
+            ],
+            'text_embeddings' => [
+                'label' => 'Text Embeddings / Vector Search',
+                'group' => 'AI Workforce',
+                'kind' => 'data',
+                'drivers' => ['cloudflare_workers_ai', 'openai_compatible', 'custom_http'],
+            ],
+            'image_generation' => [
+                'label' => 'Image Generation',
+                'group' => 'AI Workforce',
+                'kind' => 'data',
+                'drivers' => ['cloudflare_workers_ai', 'custom_http'],
+            ],
+            'summarization' => [
+                'label' => 'Text Summarization',
+                'group' => 'AI Workforce',
+                'kind' => 'data',
+                'drivers' => ['cloudflare_workers_ai', 'openai_compatible', 'custom_http'],
+            ],
+            'classification' => [
+                'label' => 'Text Classification / Sentiment',
+                'group' => 'AI Workforce',
+                'kind' => 'data',
+                'drivers' => ['cloudflare_workers_ai', 'openai_compatible', 'custom_http'],
             ],
         ];
     }

@@ -27,10 +27,36 @@ class Admin extends App_Controller
         $data = $this->base('Admin Dashboard', 'dashboard');
         $data['stats'] = $this->portal->dashboardStats();
         $data['smtp'] = \AIWorkforce\Mailer::configSummary();
+        // Initialize Cloudflare agent runtime if configured
+        $cloudflareRuntime = null;
+        try {
+            $llmConfig = \AIWorkforce\ApiProviders::activeConfig('llm');
+            if ($llmConfig && ($llmConfig['driver'] ?? '') === 'cloudflare_workers_ai') {
+                $cloudflareRuntime = new \AIWorkforce\CloudflareAgentRuntime([
+                    'account_id' => $llmConfig['account_id'] ?? '',
+                    'token' => $llmConfig['secrets']['token'] ?? '',
+                    'gateway' => $llmConfig['extra']['gateway'] ?? null,
+                ]);
+            }
+        } catch (\Throwable $e) {
+            // Cloudflare not configured
+        }
+        
         $data['agentRuntime'] = [
             'cloudflareConfigured' => \AIWorkforce\ApiProviders::publicStatus('llm')['configured'],
-            'registeredAgents' => array_keys($this->platform->agents->agents()),
+            'cloudflareRuntime' => $cloudflareRuntime ? $cloudflareRuntime->status() : null,
+            'registeredAgents' => $cloudflareRuntime ? array_keys($cloudflareRuntime->agents()) : array_keys($this->platform->agents->agents()),
+            'registeredTools' => $cloudflareRuntime ? array_keys($cloudflareRuntime->tools()) : [],
             'toolPolicy' => 'Approval required for broker.submitTrade and lottery.purchaseTicket',
+            'availableServices' => [
+                'text_generation' => 'Cloudflare Workers AI supports Llama 3.1, Mistral, Gemma, Phi-2',
+                'embeddings' => 'BGE embeddings for semantic search',
+                'image_generation' => 'Stable Diffusion XL, Dreamshaper',
+                'speech_recognition' => 'Whisper for transcription',
+                'translation' => 'M2M100 supports 100+ languages',
+                'summarization' => 'BART for text summarization',
+                'classification' => 'Sentiment analysis and zero-shot classification',
+            ],
         ];
         $this->render('admin/index', $data);
     }

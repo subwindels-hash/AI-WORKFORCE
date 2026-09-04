@@ -62,7 +62,99 @@ $s = $stats ?? [];
   </div>
 </div>
 
-<section class="panel" style="margin-top:16px"><h3>Cloudflare Agent Runtime</h3><div class="body"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))"><div><div class="dim">Workers AI provider</div><b><?= !empty($agentRuntime['cloudflareConfigured']) ? 'Configured' : 'Not configured' ?></b></div><div><div class="dim">Registered agents</div><b><?= count($agentRuntime['registeredAgents'] ?? []) ?></b></div><div><div class="dim">Sensitive tools</div><b>Approval required</b></div></div><p class="dim" style="margin:10px 0 0"><?= e($agentRuntime['toolPolicy'] ?? '') ?></p><p style="margin:10px 0 0"><a class="btn" href="/admin/api">Manage AI providers</a></p></div></section>
+<section class="panel" style="margin-top:16px">
+  <h3>🤖 Cloudflare Agent Runtime</h3>
+  <div class="body">
+    <?php if (!empty($agentRuntime['cloudflareRuntime'])): ?>
+      <!-- Cloudflare Runtime Active -->
+      <div style="background:linear-gradient(135deg,#f6821f22 0%,#fbad4122 100%);border:1px solid #f6821f44;border-radius:var(--radius);padding:16px;margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+          <span style="font-size:32px">⚡</span>
+          <div>
+            <h4 style="margin:0;color:#f6821f;font-size:16px">Cloudflare Workers AI Active</h4>
+            <p class="dim" style="margin:2px 0 0;font-size:12px">Edge AI inference powered by Cloudflare's global network</p>
+          </div>
+        </div>
+        
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px">
+          <div style="background:#ffffff11;border-radius:var(--radius-sm);padding:12px">
+            <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">Account ID</div>
+            <div style="font-size:14px;font-weight:600;color:#fff"><?= e($agentRuntime['cloudflareRuntime']['accountId'] ?? '—') ?></div>
+          </div>
+          <div style="background:#ffffff11;border-radius:var(--radius-sm);padding:12px">
+            <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">Agents</div>
+            <div style="font-size:14px;font-weight:600;color:#fff"><?= count($agentRuntime['registeredAgents'] ?? []) ?></div>
+          </div>
+          <div style="background:#ffffff11;border-radius:var(--radius-sm);padding:12px">
+            <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">Tools</div>
+            <div style="font-size:14px;font-weight:600;color:#fff"><?= count($agentRuntime['registeredTools'] ?? []) ?></div>
+          </div>
+          <div style="background:#ffffff11;border-radius:var(--radius-sm);padding:12px">
+            <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">Tool Policy</div>
+            <div style="font-size:14px;font-weight:600;color:#fff">Approval Required</div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Registered Agents -->
+      <?php if (!empty($agentRuntime['registeredAgents'])): ?>
+      <div style="margin-bottom:16px">
+        <h4 style="margin:0 0 8px;font-size:13px;font-weight:600">Registered AI Agents</h4>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <?php foreach ($agentRuntime['registeredAgents'] as $agent): ?>
+            <span style="background:#f6821f22;color:#f6821f;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600"><?= e(ucfirst(str_replace('_', ' ', $agent))) ?></span>
+          <?php endforeach; ?>
+        </div>
+      </div>
+      <?php endif; ?>
+      
+      <!-- Available Services -->
+      <?php if (!empty($agentRuntime['availableServices'])): ?>
+      <div style="margin-bottom:16px">
+        <h4 style="margin:0 0 8px;font-size:13px;font-weight:600">Supported AI Capabilities</h4>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px">
+          <?php foreach ($agentRuntime['availableServices'] as $service => $description): ?>
+            <div style="background:var(--panel2);border-radius:var(--radius-sm);padding:10px">
+              <div style="font-size:12px;font-weight:600;color:#fff;margin-bottom:2px"><?= e(ucfirst(str_replace('_', ' ', $service))) ?></div>
+              <div style="font-size:11px;color:var(--dim)"><?= e($description) ?></div>
+            </div>
+          <?php endforeach; ?>
+        </div>
+      </div>
+      <?php endif; ?>
+      
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <a class="btn primary" href="/admin/api">Manage AI Providers</a>
+        <a class="btn" href="https://developers.cloudflare.com/workers-ai/" target="_blank">Cloudflare AI Docs</a>
+      </div>
+      
+    <?php else: ?>
+      <!-- Cloudflare Not Configured -->
+      <div style="text-align:center;padding:30px 0">
+        <div style="font-size:48px;margin-bottom:12px">⚡</div>
+        <h4 style="margin:0 0 8px;color:var(--text)">Cloudflare Workers AI Not Configured</h4>
+        <p class="dim" style="margin:0 0 16px;font-size:13px">
+          Enable edge AI inference with Cloudflare Workers AI for LLMs, embeddings, image generation, and more.
+        </p>
+        <a class="btn primary" href="/admin/api/create">Configure Cloudflare</a>
+      </div>
+      
+      <div style="margin-top:16px;padding:14px;background:var(--panel2);border-radius:var(--radius-sm)">
+        <h5 style="margin:0 0 8px;font-size:12px;font-weight:600">What you get with Cloudflare Workers AI:</h5>
+        <ul style="margin:0;padding-left:20px;font-size:12px;color:var(--dim);line-height:1.8">
+          <li><strong>Text Generation</strong> — Llama 3.1, Mistral, Gemma, Phi-2</li>
+          <li><strong>Embeddings</strong> — BGE for semantic search and RAG</li>
+          <li><strong>Image Generation</strong> — Stable Diffusion XL</li>
+          <li><strong>Speech Recognition</strong> — Whisper transcription</li>
+          <li><strong>Translation</strong> — 100+ languages with M2M100</li>
+          <li><strong>Summarization</strong> — BART text summarization</li>
+          <li><strong>Classification</strong> — Sentiment analysis</li>
+          <li><strong>Edge Inference</strong> — Low latency, global distribution</li>
+        </ul>
+      </div>
+    <?php endif; ?>
+  </div>
+</section>
 
 <div class="grid cols-main" style="margin-top:16px">
   <section class="panel">
