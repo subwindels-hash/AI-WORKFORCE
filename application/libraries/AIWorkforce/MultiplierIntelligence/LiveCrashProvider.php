@@ -24,10 +24,12 @@ class LiveCrashProvider extends AbstractCrashGameProvider
     private ?string $sourceUrl = null;
     private float $fetchedAt = 0;
     private int $ttlSeconds = 8;
+    private bool $diskCache;
 
     public function __construct(array $config = [], ?callable $transport = null)
     {
         parent::__construct($config);
+        $this->diskCache = $transport === null && empty($config['disable_cache']);
         $this->transport = $transport ?? [$this, 'defaultTransport'];
     }
 
@@ -219,10 +221,15 @@ class LiveCrashProvider extends AbstractCrashGameProvider
                 $this->rounds = $parsed['rounds'];
                 $this->live = $parsed['live'];
                 $this->sourceUrl = $endpoint['url'];
+                $this->writeCache();
                 return;
             } catch (\Throwable $e) {
                 $this->lastError = $e->getMessage();
             }
+        }
+
+        if ($this->loadCache()) {
+            return;
         }
 
         if ($this->rounds === []) {
@@ -264,8 +271,67 @@ class LiveCrashProvider extends AbstractCrashGameProvider
             'method' => 'GET',
             'headers' => ['Accept: application/json', 'User-Agent: AI_WORKFORCE/0.3'],
         ];
+        $out[] = [
+            'url' => 'https://www.bustabit.com/api/games?limit=100',
+            'method' => 'GET',
+            'headers' => ['Accept: application/json', 'User-Agent: AI_WORKFORCE/0.3'],
+        ];
+        $out[] = [
+            'url' => 'https://api.nanogames.io/crash/recent',
+            'method' => 'GET',
+            'headers' => ['Accept: application/json', 'User-Agent: AI_WORKFORCE/0.3'],
+        ];
 
         return $out;
+    }
+
+    private function cachePath(): string
+    {
+        if (!empty($this->config['cachePath'])) {
+            return (string) $this->config['cachePath'];
+        }
+        $dir = defined('APPPATH') ? rtrim(APPPATH, '/') . '/cache' : sys_get_temp_dir();
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+        return $dir . '/crash_live_history.json';
+    }
+
+    private function writeCache(): void
+    {
+        if (!$this->diskCache || $this->rounds === []) {
+            return;
+        }
+        $payload = json_encode([
+            'source' => $this->sourceUrl,
+            'savedAt' => gmdate('c'),
+            'rounds' => $this->rounds,
+            'live' => $this->live,
+        ]);
+        if ($payload) {
+            @file_put_contents($this->cachePath(), $payload, LOCK_EX);
+        }
+    }
+
+    private function loadCache(): bool
+    {
+        if (!$this->diskCache) {
+            return false;
+        }
+        $raw = @file_get_contents($this->cachePath());
+        if ($raw === false || $raw === '') {
+            return false;
+        }
+        $json = json_decode($raw, true);
+        $rounds = $json['rounds'] ?? [];
+        if (!is_array($rounds) || $rounds === []) {
+            return false;
+        }
+        $this->rounds = $rounds;
+        $this->live = is_array($json['live'] ?? null) ? $json['live'] : null;
+        $this->sourceUrl = (string) ($json['source'] ?? 'disk-cache');
+        $this->lastError = null;
+        return true;
     }
 
     private function defaultTransport(string $url, array $opts): ?string

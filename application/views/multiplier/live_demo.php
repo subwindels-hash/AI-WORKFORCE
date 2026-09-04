@@ -42,8 +42,8 @@
   <div class="demo-container">
     <!-- Header -->
     <div class="demo-header">
-      <h1>🚀 Live Demo Mode</h1>
-      <p>Full Integration Showcase: Multiplier Intelligence + Windels AI Agents + Sports Intelligence + Aviator Provider</p>
+      <h1>🚀 Live Crash Analysis</h1>
+      <p>Live crash history + Windels AI Agents + Sports Intelligence — no simulated rounds</p>
     </div>
 
     <?php if (!empty($demo['error'])): ?>
@@ -58,7 +58,7 @@
       <div class="demo-panel">
         <h3>
           <span style="width:8px;height:8px;border-radius:50%;background:#ef4444;box-shadow:0 0 8px #ef4444"></span>
-          Live Aviator Round
+          Live Crash Round
         </h3>
         <?php $live = $demo['aviator']['live_round'] ?? []; ?>
         <div class="demo-live">
@@ -138,7 +138,7 @@
           ✓ MCP Tools 6 Active
         </span>
         <span class="demo-badge demo-badge-info">
-          🎮 Aviator Provider: <?= e(strtoupper($demo['aviator']['health']['mode'] ?? 'demo')) ?>
+          🎮 Crash feed: <?= e(strtoupper($demo['aviator']['health']['mode'] ?? 'live')) ?>
         </span>
       </div>
     </div>
@@ -147,7 +147,7 @@
     <div class="demo-grid" style="grid-template-columns:1fr 1fr">
       <!-- Aviator Statistics -->
       <div class="demo-panel">
-        <h3>📊 Aviator Statistics</h3>
+        <h3>📊 Live Crash Statistics</h3>
         <?php $stats = $demo['aviator']['stats'] ?? []; ?>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           <div class="demo-stat">
@@ -241,8 +241,8 @@
         <div class="demo-flow-step">
           <div class="demo-flow-icon">🎮</div>
           <div class="demo-flow-text">
-            <div class="demo-flow-title">1. Aviator Provider</div>
-            <div class="demo-flow-desc">Fetches live multiplier data and round history (<?= e(count($demo['aviator']['history'] ?? [])) ?> rounds)</div>
+            <div class="demo-flow-title">1. Live crash provider</div>
+            <div class="demo-flow-desc">Fetches real multiplier history (<?= e(count($demo['aviator']['history'] ?? [])) ?> rounds)</div>
           </div>
         </div>
         <div class="demo-flow-step">
@@ -284,9 +284,7 @@
 
     <!-- Disclaimer -->
     <div style="margin-top:24px;padding:16px;background:rgba(245,158,11,.1);border:1px solid #f59e0b44;border-radius:12px;color:#f59e0b;font-size:11px">
-      <strong>⚠️ DEMONSTRATION PURPOSE ONLY</strong> — This demo showcases the integration architecture. 
-      In production, connect to real Aviator game servers and configure AI/Sports providers for live data.
-      Crash games use provably fair RNG. No prediction system can guarantee outcomes.
+      <strong>⚠️ EDUCATIONAL ANALYSIS</strong> — Rounds come from a live crash feed. Crash games use provably fair RNG. No prediction system can guarantee outcomes.
     </div>
   </div>
 </div>

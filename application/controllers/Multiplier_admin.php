@@ -263,16 +263,16 @@ class Multiplier_admin extends App_Controller
     {
         return [
             [
-                'code' => 'simulation',
-                'name' => 'Simulation (Demo)',
+                'code' => 'bustabit',
+                'name' => 'Bustabit (Live)',
                 'enabled' => true,
-                'description' => 'Generates realistic demo data using geometric distribution',
+                'description' => 'Public Bustabit crash history — real completed rounds, no demo data',
             ],
             [
-                'code' => 'aviator_demo',
-                'name' => 'Aviator Demo Adapter',
+                'code' => 'simulation',
+                'name' => 'Simulation (tests only)',
                 'enabled' => false,
-                'description' => 'Demo adapter for Aviator game (requires configuration)',
+                'description' => 'Geometric demo generator — not used by the member dashboard',
             ],
         ];
     }

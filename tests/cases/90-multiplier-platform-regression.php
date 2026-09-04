@@ -110,7 +110,7 @@ test('engine returns NO_DATA instead of fabricating demo multipliers', function 
     $transport = static function () {
         return json_encode(['data' => ['games' => []]]);
     };
-    $provider = new LiveCrashProvider([], $transport);
+    $provider = new LiveCrashProvider(['disable_cache' => true], $transport);
     $engine = new AIWorkforce\MultiplierIntelligence\MultiplierIntelligenceEngine($provider);
     $signal = $engine->generateSignal();
     assert_equals('NO_DATA', $signal['status'] ?? null);
