@@ -106,22 +106,35 @@
       .finally(function () { button.disabled = false; });
   });
 
-  var speech = window.windelsSpeech || (window.SpeechProvider ? new window.SpeechProvider() : null);
-  var statusEl = document.getElementById('ai_workforce-chat-voice-status');
-  var micBtn = document.getElementById('ai_workforce-chat-mic');
-  if (speech && micBtn && input) {
+  function attachVoice() {
+    var speech = window.windelsSpeech || (window.SpeechProvider ? new window.SpeechProvider() : null);
+    var statusEl = document.getElementById('ai_workforce-chat-voice-status');
+    var micBtn = document.getElementById('ai_workforce-chat-mic');
+    var micStop = document.getElementById('ai_workforce-chat-mic-stop');
+    if (!speech || !micBtn || !input) {
+      if (micBtn && !speech) micBtn.hidden = true;
+      if (micStop && !speech) micStop.hidden = true;
+      return speech;
+    }
+    if (micBtn.dataset.bound === '1') return speech;
+    micBtn.dataset.bound = '1';
     speech.bindMic(micBtn, input, {
       locale: 'en-GB',
       idleLabel: '🎤 Speak',
-      recordingLabel: 'Recording… Stop',
+      recordingLabel: '🎤 Listening…',
+      stopButton: micStop,
+      minListenMs: 30000,
       onStatus: function (msg) {
         if (!statusEl) return;
         statusEl.hidden = !msg;
         statusEl.textContent = msg || '';
       }
     });
-  } else if (micBtn) {
-    micBtn.hidden = true;
+    return speech;
+  }
+  var speech = attachVoice();
+  if (!speech && !window.SpeechProvider) {
+    document.addEventListener('DOMContentLoaded', function () { speech = attachVoice(); });
   }
 
   root.addEventListener('click', function (ev) {

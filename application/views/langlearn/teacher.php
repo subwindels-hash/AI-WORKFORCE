@@ -631,7 +631,8 @@ $flagMap = [
     var voice = voiceSel._matches && voiceSel._matches[voiceIdx] ? voiceSel._matches[voiceIdx] : null;
     var engine = provider || (window.speechSynthesis ? {
       textToSpeech: function (t, o) {
-        var u = new SpeechSynthesisUtterance(t);
+        var spoken = (window.windelsSpeech && window.windelsSpeech.speakableText) ? window.windelsSpeech.speakableText(t) : String(t).replace(/\bWINDELS\b/gi, 'Win-dels');
+        var u = new SpeechSynthesisUtterance(spoken);
         u.lang = (o && o.locale) || 'en-US';
         u.rate = (o && o.rate) || 1;
         window.speechSynthesis.cancel();

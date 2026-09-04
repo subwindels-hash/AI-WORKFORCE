@@ -29,8 +29,14 @@ class TextToSpeechProvider
      * @param string $language Language code (optional)
      * @return array Audio data (base64) or error
      */
+    public static function speakableText(string $text): string
+    {
+        return (string) preg_replace('/\bWINDELS\b/i', 'Win-dels', $text);
+    }
+
     public function synthesize(string $text, ?string $voice = null, ?string $language = null): array
     {
+        $text = self::speakableText($text);
         return match($this->driver) {
             'cloudflare_workers_ai' => $this->synthesizeWithCloudflare($text, $voice, $language),
             'openai_compatible' => $this->synthesizeWithOpenAI($text, $voice, $language),

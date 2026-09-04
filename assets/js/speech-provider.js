@@ -402,5 +402,5 @@ class SpeechProvider {
 
 if (typeof window !== 'undefined') {
   window.SpeechProvider = SpeechProvider;
-  window.windelsSpeech = new SpeechProvider();
+  window.windelsSpeech = window.windelsSpeech || new SpeechProvider();
 }
