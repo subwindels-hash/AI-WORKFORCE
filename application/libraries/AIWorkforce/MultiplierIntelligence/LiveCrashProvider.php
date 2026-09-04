@@ -29,7 +29,7 @@ class LiveCrashProvider extends AbstractCrashGameProvider
     public function __construct(array $config = [], ?callable $transport = null)
     {
         parent::__construct($config);
-        $this->diskCache = $transport === null && empty($config['disable_cache']);
+        $this->diskCache = empty($config['disable_cache']) && ($transport === null || !empty($config['cachePath']));
         $this->transport = $transport ?? [$this, 'defaultTransport'];
     }
 
