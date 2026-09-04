@@ -179,6 +179,108 @@ class Multiplier extends App_Controller
     }
     
     /**
+     * Live Demo Mode - Showcases full integration
+     * 
+     * Demonstrates:
+     * - Multiplier Intelligence with 9 agents
+     * - Cloudflare AI enhancement (if configured)
+     * - Sports Intelligence enrichment (if configured)
+     * - Real-time Aviator provider data
+     * - Full data flow visualization
+     */
+    public function live_demo()
+    {
+        $data = $this->base('Live Demo - Multiplier Intelligence', 'multiplier');
+        
+        try {
+            // 1. Initialize Aviator Provider
+            $aviatorProvider = new \AIWorkforce\MultiplierIntelligence\AviatorProvider();
+            $aviatorHealth = $aviatorProvider->health();
+            $aviatorStats = $aviatorProvider->stats();
+            
+            // 2. Start a live round
+            $aviatorProvider->startRound();
+            $liveRound = $aviatorProvider->updateMultiplier();
+            
+            // 3. Get Multiplier Intelligence analysis
+            $engine = new \AIWorkforce\MultiplierIntelligence\MultiplierIntelligenceEngine($aviatorProvider);
+            $dashboard = $engine->dashboard();
+            $signal = $engine->generateSignal();
+            
+            // 4. Apply Sports Intelligence enrichment (if available)
+            $sportsEnrichment = null;
+            if (isset($this->platform->multiplierIntegration) && $this->platform->multiplierIntegration->enrichment()) {
+                $enrichment = $this->platform->multiplierIntegration->enrichment();
+                $signal = $enrichment->enrichPrediction($signal);
+                $sportsEnrichment = $enrichment->getEnrichmentSignals();
+            }
+            
+            // 5. Check Cloudflare integration
+            $cloudflareStatus = [
+                'available' => false,
+                'llm_enhanced' => false,
+                'agents' => 0,
+                'tools' => 0,
+            ];
+            if (isset($this->platform->multiplierIntegration)) {
+                $intStatus = $this->platform->multiplierIntegration->status();
+                $cloudflareStatus = [
+                    'available' => $intStatus['bridge_available'],
+                    'llm_enhanced' => $intStatus['llm_enhancement'],
+                    'agents' => 9,
+                    'tools' => 6,
+                    'registered' => $intStatus['registered'],
+                ];
+            }
+            
+            // 6. Get agent breakdown
+            $agents = [];
+            foreach ($signal['agents'] ?? [] as $agent) {
+                $agents[] = [
+                    'name' => $agent['agent_name'] ?? 'Unknown',
+                    'type' => $agent['agent_type'] ?? 'unknown',
+                    'estimate' => $agent['estimate'] ?? 0,
+                    'confidence' => $agent['confidence'] ?? 0,
+                    'reasoning' => $agent['reasoning'] ?? '',
+                ];
+            }
+            
+            // 7. Get recent history
+            $history = $aviatorProvider->history(20);
+            
+            $data['demo'] = [
+                'aviator' => [
+                    'health' => $aviatorHealth,
+                    'stats' => $aviatorStats,
+                    'live_round' => $liveRound,
+                    'history' => $history,
+                ],
+                'signal' => [
+                    'predicted' => $signal['predictedMultiplier'] ?? 2.0,
+                    'confidence' => ($signal['confidence'] ?? 0.5) * 100,
+                    'risk' => $signal['risk'] ?? 'MEDIUM',
+                    'agents' => $agents,
+                    'sports_enrichment' => $signal['sports_enrichment'] ?? null,
+                    'cloudflare_enhanced' => $signal['cloudflare_enhanced'] ?? false,
+                ],
+                'sports' => $sportsEnrichment,
+                'cloudflare' => $cloudflareStatus,
+                'accuracy' => $engine->accuracyStats(100),
+            ];
+            
+        } catch (\Throwable $e) {
+            $data['demo'] = [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ];
+        }
+        
+        $this->load->view('layout/header', $data);
+        $this->load->view('multiplier/live_demo', $data);
+        $this->load->view('layout/footer');
+    }
+    
+    /**
      * Test sports enrichment with real providers
      */
     public function test_sports_enrichment()

@@ -168,6 +168,7 @@ $route['multiplier/accuracy'] = 'multiplier/accuracy';
 $route['multiplier/validate'] = 'multiplier/validate';
 $route['multiplier/verify'] = 'multiplier/verify_integration';
 $route['multiplier/test-sports'] = 'multiplier/test_sports_enrichment';
+$route['multiplier/demo'] = 'multiplier/live_demo';
 $route['multiplier/admin'] = 'multiplier_admin/index';
 $route['multiplier/stream/live'] = 'multiplier_stream/live';
 $route['multiplier/stream/signals'] = 'multiplier_stream/signals';
