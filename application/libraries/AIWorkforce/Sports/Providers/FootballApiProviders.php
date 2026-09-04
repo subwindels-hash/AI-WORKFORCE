@@ -735,9 +735,29 @@ class SportMonksProvider implements SportsDataProvider
         if (!empty($query['league'])) $params['leagues'] = (string) $query['league'];
         $filter = 'starts_between:' . $from . ',' . $to;
         $includes = 'participants;scores;league;venue;referee';
-        $qs = http_build_query(array_merge($params, ['include' => $includes]));
-        $resp = $this->doRequest('/fixtures?filter[' . $filter . ']&' . $qs);
-        $rows = $this->extractList($this->decodeJson($resp));
+        // /fixtures paginates (25 per page by default). Follow the cursor
+        // until has_more=false so a busy multi-league day is not silently
+        // truncated to the first page. Hard cap: 40 pages (2000 fixtures).
+        $rows = [];
+        $cursor = null;
+        $pages = 0;
+        do {
+            $pageParams = $params;
+            if ($cursor !== null) {
+                $pageParams['cursor'] = $cursor;
+            } else {
+                $pageParams['per_page'] = 50;
+            }
+            $qs = http_build_query(array_merge($pageParams, ['include' => $includes]));
+            $resp = $this->doRequest('/fixtures?filter[' . $filter . ']&' . $qs);
+            $json = $this->decodeJson($resp);
+            $rows = array_merge($rows, $this->extractList($json));
+            $pagination = $json['pagination'] ?? [];
+            $cursor = (!empty($pagination['has_more']) && !empty($pagination['next_cursor']))
+                ? (string) $pagination['next_cursor']
+                : null;
+            $pages++;
+        } while ($cursor !== null && $pages < 40);
         return $this->mapFixtures($rows);
     }
 

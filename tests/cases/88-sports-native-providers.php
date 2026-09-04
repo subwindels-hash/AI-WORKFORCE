@@ -271,6 +271,45 @@ test('sportmonks maps fixtures correctly', function () {
     assert_equals('Round 5', $f['round']);
 });
 
+test('sportmonks fixtures follows the pagination cursor across pages', function () {
+    $fx = fn(int $i) => ['id' => 100 + $i, 'starting_at' => '2026-09-15T12:00:00Z',
+        'participants' => [['name' => 'H' . $i, 'meta' => ['location' => 'home']], ['name' => 'A' . $i, 'meta' => ['location' => 'away']]],
+        'league' => ['name' => 'L'], 'season' => ['id' => 2026]];
+    $urls = [];
+    $transport = function (string $url, array $headers) use (&$urls, $fx) {
+        $urls[] = $url;
+        if (str_contains($url, 'cursor=c1')) {
+            return ['status' => 200, 'body' => json_encode(['data' => [$fx(2)], 'pagination' => ['has_more' => false, 'next_cursor' => null]])];
+        }
+        return ['status' => 200, 'body' => json_encode(['data' => [$fx(0), $fx(1)], 'pagination' => ['has_more' => true, 'next_cursor' => 'c1']])];
+    };
+    $p = new SportMonksProvider('token', 'https://api.test', 10, $transport);
+    $fixtures = $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15']);
+    assert_equals(3, count($fixtures), 'fixtures from both pages are combined');
+    assert_equals(2, count($urls));
+    assert_true(str_contains($urls[0], 'per_page=50'), 'first request sets the page size');
+    assert_false(str_contains($urls[0], 'cursor='), 'first request has no cursor');
+    assert_true(str_contains($urls[1], 'cursor=c1'), 'second request follows the cursor');
+    assert_false(str_contains($urls[1], 'per_page='), 'cursor requests must not combine per_page (the API rejects the combination)');
+});
+
+test('sportmonks fixtures pagination is bounded even when has_more stays true', function () {
+    $n = 0;
+    $transport = function (string $url, array $headers) use (&$n) {
+        $n++;
+        return ['status' => 200, 'body' => json_encode([
+            'data' => [['id' => $n, 'starting_at' => '2026-09-15T12:00:00Z',
+                        'participants' => [['name' => 'H', 'meta' => ['location' => 'home']], ['name' => 'A', 'meta' => ['location' => 'away']]],
+                        'league' => ['name' => 'L'], 'season' => ['id' => 2026]]],
+            'pagination' => ['has_more' => true, 'next_cursor' => 'c' . $n],
+        ])];
+    };
+    $p = new SportMonksProvider('t', 'https://api.test', 10, $transport);
+    $fixtures = $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15']);
+    assert_equals(40, $n, 'hard cap of 40 pages stops the loop');
+    assert_equals(40, count($fixtures));
+});
+
 test('sportmonks maps live status codes correctly', function () {
     $body = json_encode(['data' => [
         ['id' => 1, 'starting_at' => '2026-09-15T19:00:00Z', 'status' => 7,

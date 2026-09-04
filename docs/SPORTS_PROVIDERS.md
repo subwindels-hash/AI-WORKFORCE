@@ -43,6 +43,15 @@ TheSportsDB uses the numeric key as part of the URL path (`/api/v1/json/{key}/..
 
 SportMonks uses the token query parameter and the Football API v3 endpoints. Fixtures use participants, scores, and league includes, and are mapped using participant location (`home`/`away`). Ensure the token has access to the leagues and includes used by the deployment.
 
+### Pagination
+
+`SportMonksProvider::fixtures()` follows the v3 cursor pagination of
+`GET /fixtures` (the endpoint defaults to 25 fixtures per page): the first
+request sets `per_page=50`, subsequent requests pass `next_cursor` until
+`has_more` is false, with a hard cap of 40 pages (2000 fixtures) so a
+busy multi-league day is never silently truncated to the first page. The
+round endpoints do not paginate.
+
 ### Round-based bulk fetch
 
 `SportMonksProvider::round($roundExternalId)` retrieves an entire matchday in **one request** via `GET /rounds/{id}` with nested includes (`fixtures`, `fixtures.odds`, `fixtures.odds.market`, `fixtures.odds.bookmaker`, `fixtures.participants`, `fixtures.scores`, `fixtures.venue`, `fixtures.state`, `league`, `league.country`). It returns:
