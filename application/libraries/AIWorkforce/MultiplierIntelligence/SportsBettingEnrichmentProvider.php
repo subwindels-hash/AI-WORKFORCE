@@ -168,17 +168,23 @@ class SportsBettingEnrichmentProvider
         if ($this->sportsIntel === null) return [];
         
         try {
-            // Use the Sports Intelligence service to get fixtures
-            // This works with api-football, thesportsdb, sportmonks
-            if (method_exists($this->sportsIntel, 'liveFixtures')) {
-                return $this->sportsIntel->liveFixtures(20);
+            // Use the SportsProviderManager to get fixtures with fallback
+            // This automatically uses api-football, thesportsdb, or sportmonks
+            $providers = $this->sportsIntel->providers;
+            if (!$providers->configured()) {
+                return [];
             }
             
-            if (method_exists($this->sportsIntel, 'upcomingFixtures')) {
-                return $this->sportsIntel->upcomingFixtures([
-                    'limit' => 20,
-                    'sport' => 'football',
+            // Get today's fixtures using provider fallback chain
+            $result = $providers->withFallback('fixtures', function ($provider) {
+                return $provider->fixtures([
+                    'from' => gmdate('Y-m-d'),
+                    'to' => gmdate('Y-m-d'),
                 ]);
+            });
+            
+            if (!empty($result['ok']) && !empty($result['result'])) {
+                return $result['result'];
             }
         } catch (\Throwable $e) {
             // Non-critical, return empty
@@ -194,24 +200,46 @@ class SportsBettingEnrichmentProvider
     {
         if (empty($fixtures) || $this->sportsIntel === null) return [];
         
+        $providers = $this->sportsIntel->providers;
+        if (!$providers->configured()) return [];
+        
         $totalOdds = 0;
         $count = 0;
         $oddsVariance = [];
         
         foreach (array_slice($fixtures, 0, 10) as $f) {
             try {
-                $fixtureId = $f['id'] ?? $f['fixture_id'] ?? null;
+                $fixtureId = $f['id'] ?? $f['fixture_id'] ?? $f['fixtureExternalId'] ?? null;
                 if (!$fixtureId) continue;
                 
-                $odds = null;
-                if (method_exists($this->sportsIntel, 'getOdds')) {
-                    $odds = $this->sportsIntel->getOdds($fixtureId);
+                // Use provider fallback to get odds
+                $result = $providers->withFallback('odds', function ($provider) use ($fixtureId) {
+                    return $provider->odds($fixtureId);
+                });
+                
+                $odds = [];
+                if (!empty($result['ok']) && !empty($result['result'])) {
+                    $odds = $result['result'];
                 }
                 
                 if (!empty($odds)) {
-                    // Extract implied probabilities
-                    $homeProb = $odds['home']['implied_probability'] ?? $odds['home_prob'] ?? null;
-                    $awayProb = $odds['away']['implied_probability'] ?? $odds['away_prob'] ?? null;
+                    // Extract implied probabilities from odds
+                    // Odds format varies by provider, but we look for home/away probabilities
+                    $homeProb = null;
+                    $awayProb = null;
+                    
+                    // Try different odds structures
+                    if (isset($odds['home']['implied_probability'])) {
+                        $homeProb = (float) $odds['home']['implied_probability'];
+                    } elseif (isset($odds['home']['odds'])) {
+                        $homeProb = 1.0 / (float) $odds['home']['odds'];
+                    }
+                    
+                    if (isset($odds['away']['implied_probability'])) {
+                        $awayProb = (float) $odds['away']['implied_probability'];
+                    } elseif (isset($odds['away']['odds'])) {
+                        $awayProb = 1.0 / (float) $odds['away']['odds'];
+                    }
                     
                     if ($homeProb !== null && $awayProb !== null) {
                         // Favorite strength indicates market confidence

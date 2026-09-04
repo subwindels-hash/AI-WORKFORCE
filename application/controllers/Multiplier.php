@@ -179,6 +179,65 @@ class Multiplier extends App_Controller
     }
     
     /**
+     * Test sports enrichment with real providers
+     */
+    public function test_sports_enrichment()
+    {
+        try {
+            // Get Sports Intelligence service
+            $sportsIntel = $this->platform->sports ?? null;
+            if (!$sportsIntel) {
+                header('Content-Type: application/json');
+                echo json_encode(['ok' => false, 'error' => 'Sports Intelligence not available']);
+                return;
+            }
+            
+            // Check provider status
+            $providerStatus = $sportsIntel->providers->health();
+            
+            // Create enrichment provider
+            $enrichment = new \AIWorkforce\MultiplierIntelligence\SportsBettingEnrichmentProvider($sportsIntel);
+            
+            // Get enrichment signals
+            $signals = $enrichment->getEnrichmentSignals();
+            
+            // Get fixtures directly to show what's available
+            $fixtures = [];
+            if ($sportsIntel->providers->configured()) {
+                $result = $sportsIntel->providers->withFallback('fixtures', function ($provider) {
+                    return $provider->fixtures([
+                        'from' => gmdate('Y-m-d'),
+                        'to' => gmdate('Y-m-d'),
+                    ]);
+                });
+                if (!empty($result['ok'])) {
+                    $fixtures = array_slice($result['result'] ?? [], 0, 5);
+                }
+            }
+            
+            $response = [
+                'ok' => true,
+                'timestamp' => date('c'),
+                'providers' => $providerStatus,
+                'enrichment_signals' => $signals,
+                'sample_fixtures' => $fixtures,
+                'enrichment_weight' => $enrichment->getEnrichmentWeight(),
+            ];
+            
+            header('Content-Type: application/json');
+            echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            
+        } catch (\Throwable $e) {
+            header('Content-Type: application/json');
+            echo json_encode([
+                'ok' => false,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+        }
+    }
+    
+    /**
      * Verify integration with Cloudflare Agent Platform and Sports Intelligence
      */
     public function verify_integration()
