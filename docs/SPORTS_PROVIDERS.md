@@ -45,6 +45,14 @@ headline number for the ranked metric — and the full per-season `statistics`
 profile as a keyed map. Unsupported `type` values throw instead of guessing a
 path.
 
+Exposed to the API as
+`GET /api/sports/topplayers?league=61&season=2020&type=yellow_cards`
+(`sports.view`). `provider` is optional — when omitted, the first configured
+provider with top-player support serves the request (health-aware fallback),
+and the response reports which provider answered. Results are cached per
+(provider, league, season, type) for 15 minutes to protect the provider's
+daily request quota (`?cache=0` bypasses).
+
 ## TheSportsDB notes
 
 TheSportsDB uses the numeric key as part of the URL path (`/api/v1/json/{key}/...`). The adapter uses the soccer events-by-day endpoint and maps `idEvent`, `strHomeTeam`, `strAwayTeam`, `strLeague`, and `dateEvent`.

@@ -207,6 +207,7 @@ $route['api/sports/providers'] = 'api_sports/providers';
 $route['api/sports/providers/(:num)/toggle'] = 'api_sports/toggle_provider/$1';
 $route['api/sports/provider-drivers'] = 'api_sports/provider_drivers';
 $route['api/sports/sync'] = 'api_sports/sync_provider';
+$route['api/sports/topplayers'] = 'api_sports/top_players';
 $route['api/sports/models'] = 'api_sports/models';
 $route['api/sports/models/performance'] = 'api_sports/model_performance';
 $route['api/sports/calibrations'] = 'api_sports/calibrations';

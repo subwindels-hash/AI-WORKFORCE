@@ -15,6 +15,12 @@ defined('BASEPATH') or exit('No direct script access allowed');
  */
 class Api_sports extends Api_controller
 {
+    /** Season-level top-player lists change a few times a week; cache them to
+     * protect the provider's daily request quota from repeated UI loads. */
+    private const TOP_PLAYERS_CACHE_TTL = 900;
+    /** @var array<string,array{at:int,data:array}> */
+    private static array $topPlayersCache = [];
+
     // ---------------------------------------------------------------- public
     public function status()
     {
@@ -269,6 +275,43 @@ class Api_sports extends Api_controller
         $this->json(['alerts' => $alerts, 'note' => 'Tickets are optimized to stay under the configured correlation cap; these rows document measured pairwise classes.']);
     }
 
+    /**
+     * Top players for a league + season from a native provider.
+     * GET /api/sports/topplayers?league=61&season=2020&type=yellow_cards[&provider=api-football][&cache=0]
+     *
+     * provider is optional — when omitted, the first configured provider with
+     * top-player support is used (health-aware fallback). The response reports
+     * which provider served it. Cached per (provider, league, season, type)
+     * for 15 minutes; ?cache=0 bypasses.
+     */
+    public function top_players()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $league = trim((string) ($g['league'] ?? ''));
+        $season = trim((string) ($g['season'] ?? ''));
+        if ($league === '' || $season === '') return $this->jsonError('league and season are required');
+        $type = trim((string) ($g['type'] ?? 'scorers'));
+        $providerId = trim((string) ($g['provider'] ?? ''));
+        if ($providerId === '') $providerId = null;
+        $bypass = isset($g['cache']) && (string) $g['cache'] === '0';
+        $cacheKey = md5(implode('|', [$providerId ?? '', $league, $season, $type]));
+        if (!$bypass && isset(self::$topPlayersCache[$cacheKey]) && (time() - self::$topPlayersCache[$cacheKey]['at']) < self::TOP_PLAYERS_CACHE_TTL) {
+            $this->json(self::$topPlayersCache[$cacheKey]['data'], 200);
+            return;
+        }
+        try {
+            $data = $this->platform->sports->topPlayers($providerId, $league, $season, $type);
+            $data['cachedFor'] = self::TOP_PLAYERS_CACHE_TTL;
+            if (!$bypass) self::$topPlayersCache[$cacheKey] = ['at' => time(), 'data' => $data];
+            $this->json($data, 200);
+        } catch (\InvalidArgumentException $e) {
+            $this->jsonError($e->getMessage(), 422);
+        } catch (\Throwable $e) {
+            $this->jsonError($e->getMessage(), 409);
+        }
+    }
+
     // ------------------------------------------------------------------ admin
     public function update_configuration()
     {
@@ -473,7 +516,7 @@ class Api_sports extends Api_controller
             'api-football' => [
                 'label' => 'API-Football (api-football.com)',
                 'docs' => 'https://www.api-football.com/documentation-v3',
-                'capabilities' => ['fixtures', 'odds', 'results', 'standings', 'team_statistics', 'leagues'],
+                'capabilities' => ['fixtures', 'odds', 'results', 'standings', 'team_statistics', 'top_players', 'leagues'],
                 'envKey' => 'WINDELS_API_FOOTBALL_KEY',
                 'configured' => $this->platform->sports->providers->provider('api-football') !== null,
             ],

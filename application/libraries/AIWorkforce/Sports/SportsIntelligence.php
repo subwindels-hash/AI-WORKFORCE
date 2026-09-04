@@ -227,6 +227,35 @@ class SportsIntelligence
         return array_merge($report, ['filter' => $filter]);
     }
 
+    /**
+     * Top players for a league + season from a native provider that supports it
+     * (api-football /players/top* — scorers, assists, yellow cards, red cards).
+     *
+     * @param string|null $providerId explicit provider id ('api-football'), or
+     *        null to walk the configured providers (health-aware fallback chain)
+     *        and use the first one with a topPlayers() method
+     * @throws \InvalidArgumentException when no configured provider can serve it
+     * @throws ProviderException upstream failure from the selected provider
+     */
+    public function topPlayers(?string $providerId, string $leagueId, string $season, string $type): array
+    {
+        if ($providerId !== null) {
+            $provider = $this->providers->provider($providerId);
+            if (!$provider) throw new \InvalidArgumentException('provider not registered: ' . $providerId);
+            if (!method_exists($provider, 'topPlayers')) throw new \InvalidArgumentException('provider does not support top players: ' . $providerId);
+            return ['provider' => $provider->id()] + $provider->topPlayers($leagueId, $season, $type);
+        }
+        $attempt = $this->providers->withFallback('topPlayers', function ($p) use ($leagueId, $season, $type) {
+            if (!method_exists($p, 'topPlayers')) throw new ProviderException('top players not supported', ProviderException::DATA_ERROR);
+            return $p->topPlayers($leagueId, $season, $type);
+        });
+        if (empty($attempt['ok'])) {
+            $failed = implode(', ', array_keys($attempt['failures'] ?? [])) ?: 'none configured';
+            throw new \InvalidArgumentException("no configured provider can serve top players ({$failed})");
+        }
+        return ['provider' => $attempt['provider']] + $attempt['result'];
+    }
+
     public function status(): array
     {
         $providers = [];
