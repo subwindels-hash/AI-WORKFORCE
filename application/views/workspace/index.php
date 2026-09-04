@@ -273,7 +273,7 @@ $_aiHealth = $_aiTotal > 0 ? round(($_aiHealthy / $_aiTotal) * 100, 0) : 0;
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">
       <?php foreach ($aiModules ?? [] as $key => $module): ?>
         <?php $_link = '/command-center';
-        if ($key === 'cloudflare') $_link = '/app/agent-platform';
+        if ($key === 'windelsai') $_link = '/app/agent-platform';
         elseif ($key === 'multiplier') $_link = '/multiplier';
         elseif ($key === 'lottery') $_link = '/lottery';
         elseif ($key === 'trading') $_link = '/app/trading';
@@ -496,33 +496,33 @@ $_aiHealth = $_aiTotal > 0 ? round(($_aiHealthy / $_aiTotal) * 100, 0) : 0;
     
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:14px">
       <div style="background:var(--panel2);border-radius:var(--radius-sm);padding:12px 14px">
-        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">AI Agents</div>
-        <div style="font-size:20px;font-weight:700;color:#fff"><?= (int)($cloudflareWidget['totalAgents'] ?? 0) ?></div>
+        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">Windels AI Agents</div>
+        <div style="font-size:20px;font-weight:700;color:#fff"><?= (int)($windelsAI['totalAgents'] ?? 0) ?></div>
       </div>
       <div style="background:var(--panel2);border-radius:var(--radius-sm);padding:12px 14px">
         <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">MCP Tools</div>
-        <div style="font-size:20px;font-weight:700;color:#fff"><?= (int)($cloudflareWidget['totalTools'] ?? 0) ?></div>
+        <div style="font-size:20px;font-weight:700;color:#fff"><?= (int)($windelsAI['totalTools'] ?? 0) ?></div>
       </div>
       <div style="background:var(--panel2);border-radius:var(--radius-sm);padding:12px 14px">
         <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">Model Providers</div>
-        <div style="font-size:20px;font-weight:700;color:#fff"><?= count($cloudflareWidget['modelProviders'] ?? []) ?></div>
+        <div style="font-size:20px;font-weight:700;color:#fff"><?= count($windelsAI['modelProviders'] ?? []) ?></div>
       </div>
       <div style="background:var(--panel2);border-radius:var(--radius-sm);padding:12px 14px">
         <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">Platform Status</div>
-        <div style="font-size:20px;font-weight:700;color:var(--green)"><?= !empty($cloudflareWidget['totalAgents']) ? 'LIVE' : '—' ?></div>
+        <div style="font-size:20px;font-weight:700;color:var(--green)"><?= !empty($windelsAI['totalAgents']) ? 'LIVE' : '—' ?></div>
       </div>
     </div>
     
-    <?php if (!empty($cloudflareWidget['agents'])): ?>
+    <?php if (!empty($windelsAI['agents'])): ?>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <?php foreach (array_slice($cloudflareWidget['agents'], 0, 6) as $agent): ?>
+      <?php foreach (array_slice($windelsAI['agents'], 0, 6) as $agent): ?>
         <span class="statuspill" style="font-size:10px">
           <i class="pill-dot" style="background:var(--green)"></i>
           <?= e(is_array($agent) ? ($agent['name'] ?? $agent['id'] ?? 'Agent') : (string)$agent) ?>
         </span>
       <?php endforeach; ?>
-      <?php if (($cloudflareWidget['totalAgents'] ?? 0) > 6): ?>
-        <span class="statuspill" style="font-size:10px;opacity:.6">+<?= (int)$cloudflareWidget['totalAgents'] - 6 ?> more</span>
+      <?php if (($windelsAI['totalAgents'] ?? 0) > 6): ?>
+        <span class="statuspill" style="font-size:10px;opacity:.6">+<?= (int)$windelsAI['totalAgents'] - 6 ?> more</span>
       <?php endif; ?>
     </div>
     <?php endif; ?>

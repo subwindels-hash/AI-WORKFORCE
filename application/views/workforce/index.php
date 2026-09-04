@@ -1,5 +1,5 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed');
-/** @var array $agents @var int $agentCount @var bool $cloudflareConfigured @var array $llmStatus */
+/** @var array $agents @var int $agentCount @var bool $windelsAIConfigured @var array $llmStatus */
 $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">';
 ?>
 <style>
@@ -76,7 +76,7 @@ $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
   </div>
 </div>
 
-<?php if (!$cloudflareConfigured): ?>
+<?php if (!$windelsAIConfigured): ?>
 <div class="wf-config-banner">
   <span class="icon">⚡</span>
   <div class="text">
@@ -92,7 +92,7 @@ $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
 <!-- Hero -->
 <div class="wf-hero">
   <h2>Meet Your AI Workforce</h2>
-  <p><?= e($agentCount) ?> specialist agents ready to assist with market analysis, trading, language learning, lead discovery, and more. All powered by edge AI for instant responses.</p>
+  <p><?= e($agentCount) ?> specialist agents ready to assist with market analysis, trading, language learning, lead discovery, and more. All powered by Windels AI for instant responses.</p>
   <div class="wf-hero-pills">
     <span class="wf-hero-pill">⚡ Edge AI</span>
     <span class="wf-hero-pill">🔒 Approved Tools Only</span>
@@ -110,7 +110,7 @@ $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
   </div>
   <div class="wf-stat">
     <div class="lbl">AI Provider</div>
-    <div class="val" style="font-size:14px"><?= $cloudflareConfigured ? '<span style="color:var(--green)">● Windels AI</span>' : '<span style="color:var(--amber)">● Local Guide</span>' ?></div>
+    <div class="val" style="font-size:14px"><?= $windelsAIConfigured ? '<span style="color:var(--green)">● Windels AI</span>' : '<span style="color:var(--amber)">● Local Guide</span>' ?></div>
   </div>
   <div class="wf-stat">
     <div class="lbl">Tool Policy</div>
@@ -214,7 +214,7 @@ window.selectAgent = function(name, label, icon) {
   document.getElementById('wf-suggestions').style.display = 'none';
   document.getElementById('chat-input').focus();
   if (messages.length === 0) {
-    addMessage('assistant', 'Hello! I\'m your ' + label + '. How can I help you today?');
+    addMessage('assistant', 'Hello! I\\'m your ' + label + '. How can I help you today?');
   }
   document.getElementById('wf-chat').scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
@@ -235,7 +235,7 @@ function addMessage(role, text) {
   var body = document.getElementById('chat-body');
   var div = document.createElement('div');
   div.className = 'wf-msg ' + role;
-  div.innerHTML = '<div class="wf-bubble">' + escapeHtml(text).replace(/\n/g, '<br>') + '</div>';
+  div.innerHTML = '<div class="wf-bubble">' + escapeHtml(text).replace(/\\n/g, '<br>') + '</div>';
   body.appendChild(div);
   body.scrollTop = body.scrollHeight;
 }

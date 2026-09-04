@@ -38,7 +38,7 @@ class Workspace extends App_Controller
             'aiModules' => $this->aiModulesData(),
             'languageWidget' => $this->languageWidgetData((int) $user['id']),
             'sportsWidget' => $this->sportsWidgetData(),
-            'cloudflareWidget' => $this->cloudflareWidgetData(),
+            'windelsAI' => $this->windelsAIWidgetData(),
         ];
         $this->load->view('layout/header', $data);
         $this->load->view('workspace/index', $data);
@@ -199,10 +199,10 @@ class Workspace extends App_Controller
     {
         $modules = [];
         
-        // Cloudflare AI Agent Platform
+        // Windels AI Agent Platform
         try {
             $cfStatus = $this->platform->cloudflare->status();
-            $modules['cloudflare'] = [
+            $modules['windelsai'] = [
                 'name' => 'Windels AI Agents',
                 'icon' => '⚡',
                 'status' => !empty($cfStatus['modelRouter']['configured']) ? 'healthy' : 'degraded',
@@ -210,7 +210,7 @@ class Workspace extends App_Controller
                 'tools' => $cfStatus['toolRegistry']['totalTools'] ?? 0,
             ];
         } catch (\Throwable $e) {
-            $modules['cloudflare'] = ['name' => 'Windels AI Agents', 'icon' => '⚡', 'status' => 'error'];
+            $modules['windelsai'] = ['name' => 'Windels AI Agents', 'icon' => '⚡', 'status' => 'error'];
         }
         
         // Multiplier Intelligence
@@ -317,7 +317,7 @@ class Workspace extends App_Controller
         return $out;
     }
 
-    private function cloudflareWidgetData(): array
+    private function windellsAIWidgetData(): array
     {
         $out = [
             'agents' => [],
@@ -333,7 +333,7 @@ class Workspace extends App_Controller
             $out['totalTools'] = $status['toolRegistry']['totalTools'] ?? 0;
             $out['modelProviders'] = $status['modelRouter']['providers'] ?? [];
         } catch (\Throwable $e) {
-            // Cloudflare widget is non-critical
+            // Windels AI widget is non-critical
         }
         
         return $out;
