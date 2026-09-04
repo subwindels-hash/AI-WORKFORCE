@@ -11,7 +11,7 @@ const offlineReply = (text: string) => {
   if (value.includes("export")) return "Use Intelligence for a formula-safe CSV or JSON export. Every export is recorded in the activity ledger.";
   if (value.includes("admin") || value.includes("user")) return "Use Account to review your session. Administrators are routed securely after login based on backend role — no public Admin Login button is shown.";
   if (value.includes("search") || value.includes("lead")) return "Use Discover to search a city, category, or business type. A configured provider is required and empty results are never filled with fake businesses.";
-  return "I can guide you through AI Workforce, Language Teacher, Leads, Trading, and other tools in WINDELS AI WORKFORCE. The live assistant API is temporarily unavailable, so this local guide is answering safely.";
+  return "I am WINDELS Assistant for AI-WORKFORCE. Ask about Dashboard (/dashboard), Windels AI Agents (/app/workforce), AI Language Teacher (/app/languages/teacher), Languages (/app/languages), Lead Discovery (/leads), Pipeline (/lead-pipeline), Sports (/sports), EuroMillions (/lottery), Trading (/app/trading), Multiplier AI (/multiplier), Risk, Brokers, or Account. The live API is unavailable, so this grounded local guide is answering safely.";
 };
 export function AssistantWidget() {
   const [open, setOpen] = useState(false);
