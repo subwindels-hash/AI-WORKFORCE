@@ -922,3 +922,82 @@ test('api-football topPlayers tolerates nested season-statistics objects', funct
     assert_equals(20, $first['statistics']['Fouls Committed']);
     assert_equals(1, $first['statistics']['Penalty Scored']);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 5. API-FOOTBALL PAGINATION (paging.current < paging.total → page=N)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function afFixtureRow(int $id, string $home, string $away): array
+{
+    return [
+        'fixture' => ['id' => $id, 'date' => '2026-09-15T19:00:00+00:00', 'status' => ['short' => 'NS']],
+        'teams' => ['home' => ['id' => 1, 'name' => $home], 'away' => ['id' => 2, 'name' => $away]],
+        'league' => ['id' => 39, 'name' => 'Premier League', 'season' => 2026],
+    ];
+}
+
+function afPageBody(array $rows, int $current, int $total): string
+{
+    return json_encode(['errors' => [], 'results' => count($rows), 'paging' => ['current' => $current, 'total' => $total], 'response' => $rows]);
+}
+
+function afOddsRow(string $bookmaker, float $odd): array
+{
+    return [
+        'fixture' => ['id' => 777],
+        'bookmakers' => [['name' => $bookmaker, 'bets' => [['name' => 'Match Result', 'values' => [['value' => 'Home', 'odd' => $odd]]]]]],
+    ];
+}
+
+test('api-football fixtures follow paging.total to the last page', function () {
+    $urls = [];
+    $pages = [
+        afPageBody([afFixtureRow(1, 'A', 'B'), afFixtureRow(2, 'C', 'D')], 1, 2),
+        afPageBody([afFixtureRow(3, 'E', 'F')], 2, 2),
+    ];
+    $transport = function (string $url, array $headers) use (&$urls, $pages): array {
+        $urls[] = $url;
+        preg_match('/page=(\d+)/', $url, $m);
+        $n = isset($m[1]) ? (int) $m[1] : 1;
+        return ['status' => 200, 'body' => $pages[$n - 1] ?? $pages[count($pages) - 1]];
+    };
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, $transport);
+    $fixtures = $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15']);
+
+    assert_equals(3, count($fixtures), 'all pages combined, none truncated');
+    assert_equals(2, count($urls), 'exactly two page requests');
+    assert_true(str_contains($urls[0], 'page=1'), 'first request is page 1');
+    assert_true(str_contains($urls[1], 'page=2'), 'follows to page 2');
+});
+
+test('api-football odds follow paging (10 rows/page upstream)', function () {
+    $urls = [];
+    $pages = [
+        afPageBody([afOddsRow('BookA', 2.1), afOddsRow('BookB', 2.2)], 1, 2),
+        afPageBody([afOddsRow('BookC', 2.3)], 2, 2),
+    ];
+    $transport = function (string $url, array $headers) use (&$urls, $pages): array {
+        $urls[] = $url;
+        preg_match('/page=(\d+)/', $url, $m);
+        $n = isset($m[1]) ? (int) $m[1] : 1;
+        return ['status' => 200, 'body' => $pages[$n - 1] ?? $pages[count($pages) - 1]];
+    };
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, $transport);
+    $odds = $p->odds('777');
+
+    assert_equals(3, count($odds), 'odds rows from every page kept');
+    assert_equals(['BookA', 'BookB', 'BookC'], array_map(fn($o) => $o['bookmaker'], $odds));
+    assert_equals(2, count($urls), 'second odds page fetched');
+    assert_true(str_contains($urls[0], 'fixture=777'), 'fixture filter preserved');
+});
+
+test('api-football pagination is bounded when paging.total misbehaves', function () {
+    $urls = [];
+    $transport = function (string $url, array $headers) use (&$urls): array {
+        $urls[] = $url;
+        return ['status' => 200, 'body' => afPageBody([afFixtureRow(1, 'A', 'B')], 1, 999)];
+    };
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, $transport);
+    $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15']);
+    assert_equals(40, count($urls), 'hard cap of 40 pages prevents an endless loop');
+});

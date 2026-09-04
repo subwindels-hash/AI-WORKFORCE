@@ -274,16 +274,15 @@ class ApiFootballProvider implements SportsDataProvider
         if (!empty($query['league'])) $params['league'] = (string) $query['league'];
         if (!empty($query['season'])) $params['season'] = (string) $query['season'];
         if (!empty($query['status'])) $params['status'] = (string) $query['status'];
-        $qs = http_build_query($params);
-        $resp = $this->doRequest('/fixtures?' . $qs);
-        $rows = $this->extractList($this->decodeJson($resp));
+        $rows = $this->fetchAllPages('/fixtures', $params);
         return $this->mapFixtures($rows);
     }
 
     public function odds(string $fixtureExternalId): array
     {
-        $resp = $this->doRequest('/odds?fixture=' . rawurlencode($fixtureExternalId));
-        $rows = $this->extractList($this->decodeJson($resp));
+        // /odds paginates at 10 rows per page — a fixture with many bookmaker
+        // markets needs several pages; following them keeps the odds complete.
+        $rows = $this->fetchAllPages('/odds', ['fixture' => $fixtureExternalId]);
         return $this->mapOdds($rows);
     }
 
@@ -481,15 +480,39 @@ class ApiFootballProvider implements SportsDataProvider
     public function leagues(?string $country = null): array
     {
         $params = $country ? ['country' => $country] : [];
-        $qs = http_build_query($params);
-        $resp = $this->doRequest('/leagues' . ($qs ? '?' . $qs : ''));
-        $rows = $this->extractList($this->decodeJson($resp));
+        $rows = $this->fetchAllPages('/leagues', $params);
         return array_map(fn($r) => [
             'leagueId' => (string) ($r['league']['id'] ?? ''),
             'name' => $r['league']['name'] ?? '',
             'country' => $r['country']['name'] ?? '',
             'seasons' => array_map(fn($s) => (string) ($s['year'] ?? ''), $r['seasons'] ?? []),
         ], $rows);
+    }
+
+    /**
+     * Fetch every page of a paginated list endpoint.
+     *
+     * api-football v3 list endpoints (fixtures, odds, leagues, ...) report
+     * `paging: {current, total}` in each response and are paged with the
+     * `page` parameter (50/page for fixtures, 10/page for odds, ...). Reading
+     * only the first page silently truncates busy days, full-season queries
+     * and fixtures with many bookmaker markets. Follow the pages until
+     * current >= total, hard-capped at 40 pages so a bad `total` cannot loop.
+     */
+    private function fetchAllPages(string $path, array $params, int $maxPages = 40): array
+    {
+        $rows = [];
+        $page = 1;
+        do {
+            $resp = $this->doRequest($path . '?' . http_build_query($params + ['page' => $page]));
+            $json = $this->decodeJson($resp);
+            $rows = array_merge($rows, $this->extractList($json));
+            $paging = is_array($json['paging'] ?? null) ? $json['paging'] : [];
+            $current = (int) ($paging['current'] ?? $page);
+            $total = (int) ($paging['total'] ?? 1);
+            $page++;
+        } while ($current < $total && $page <= $maxPages);
+        return $rows;
     }
 
     private function doRequest(string $path): array

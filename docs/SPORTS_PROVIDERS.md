@@ -35,6 +35,13 @@ All upstream responses are converted to the internal fixture, odds, and result s
 
 API-Football uses the `x-apisports-key` header. Its odds response is flattened into the internal market/selection/decimalOdds shape. The provider's plan and quota determine which leagues and odds markets are available.
 
+**Pagination:** the v3 list endpoints paginate with the `page` parameter and
+report `paging: {current, total}` in every response (fixtures: 50/page,
+odds: 10/page). `fixtures()`, `odds()` and `leagues()` follow the pages
+until `current >= total` (hard cap: 40 pages), so busy days, full-season
+queries and fixtures with many bookmaker markets are not silently truncated
+to the first page.
+
 `ApiFootballProvider::topPlayers(leagueId, season, type)` wraps the four
 top-player endpoints of the Players tag
 (`/players/topscorers`, `/players/topassists`, `/players/topyellowcards`,
