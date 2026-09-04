@@ -261,7 +261,15 @@ class Command_center extends App_Controller
         // Try to get recent activities from audit log
         try {
             $recent = \AIWorkforce\MemberAudit::forMembers($this->platform->model->audit->recent(80));
-            foreach (array_slice($recent, 0, 20) as $r) {
+            foreach (array_slice($recent, 0, 80) as $r) {
+                // Member Command Center must never expose the administrator
+                // audit stream (provider tests, admin logins, user changes,
+                // contact handling, or other ADMIN_* events). Admins retain
+                // the full activity view in Admin → Logs.
+                $type = (string) ($r['type'] ?? 'UNKNOWN');
+                if (!$this->isAdmin($this->identity) && (str_starts_with($type, 'ADMIN_') || $type === 'CONTACT_INQUIRY')) {
+                    continue;
+                }
                 $activities[] = [
                     'time' => $r['created_at'] ?? $r['at'] ?? '',
                     'type' => $r['type'] ?? 'UNKNOWN',
