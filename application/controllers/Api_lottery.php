@@ -252,26 +252,76 @@ class Api_lottery extends Api_controller
      */
     public function system()
     {
-        // Public endpoint - no auth required for system builder
+        // Public endpoint - no auth required for system builder.
+        // Accepts JSON body (API clients) or GET params (browser form at /lottery/system).
         $body = $this->jsonBody();
+
+        $mainsRaw = $body['mains'] ?? $this->input->get('mains');
+        $starsRaw = $body['stars'] ?? $this->input->get('stars');
+
+        $mains = is_array($mainsRaw)
+            ? $mainsRaw
+            : array_map('intval', array_values(array_filter(explode(',', (string) ($mainsRaw ?? '')), fn($x) => $x !== '')));
+        $stars = is_array($starsRaw)
+            ? $starsRaw
+            : array_map('intval', array_values(array_filter(explode(',', (string) ($starsRaw ?? '')), fn($x) => $x !== '')));
+
         try {
             $builder = $this->platform->lottery->systemBuilder;
-            $plan = $builder->plan(
-                is_array($body['mains'] ?? null) ? $body['mains'] : [],
-                is_array($body['stars'] ?? null) ? $body['stars'] : []
-            );
+            $plan = $builder->plan($mains, $stars);
+
             if ($plan['requiresBackground']) {
+                if ($this->lotteryWantsHtml()) {
+                    $this->lotteryHtml('lottery/system', [
+                        'title'  => 'EuroMillions · System builder',
+                        'plan'   => $plan,
+                        'lines'  => [],
+                        'page'   => 0,
+                        'limit'  => 50,
+                        'mains'  => $mains,
+                        'stars'  => $stars,
+                    ]);
+                    return;
+                }
                 return $this->jsonError('system has ' . $plan['totalLines'] . ' lines — above the synchronous limit (' . \AIWorkforce\Lottery\SystemBuilder::SYNC_LINE_LIMIT . '); use POST api/lottery/system-build for a background build', 409);
             }
-            $page = max(0, (int) ($body['page'] ?? 0));
+
+            $page  = max(0, (int) ($body['page'] ?? 0));
             $limit = min(\AIWorkforce\Lottery\SystemBuilder::MAX_PAGE, max(1, (int) ($body['limit'] ?: 50)));
+            $lines = $builder->page($plan['mainPool'], $plan['starPool'], $page * $limit, $limit);
+
+            if ($this->lotteryWantsHtml()) {
+                $this->lotteryHtml('lottery/system', [
+                    'title'  => 'EuroMillions · System builder',
+                    'plan'   => $plan,
+                    'lines'  => $lines,
+                    'page'   => $page,
+                    'limit'  => $limit,
+                    'mains'  => $mains,
+                    'stars'  => $stars,
+                ]);
+                return;
+            }
+
             $this->json([
-                'plan' => $plan,
-                'page' => $page,
-                'limit' => $limit,
-                'lines' => $builder->page($plan['mainPool'], $plan['starPool'], $page * $limit, $limit),
+                'plan'   => $plan,
+                'page'   => $page,
+                'limit'  => $limit,
+                'lines'  => $lines,
             ]);
         } catch (\InvalidArgumentException $e) {
+            if ($this->lotteryWantsHtml()) {
+                $this->lotteryHtml('lottery/system', [
+                    'title'  => 'EuroMillions · System builder',
+                    'plan'   => [],
+                    'lines'  => [],
+                    'page'   => 0,
+                    'limit'  => 50,
+                    'mains'  => $mains,
+                    'stars'  => $stars,
+                ]);
+                return;
+            }
             $this->jsonError($e->getMessage(), 400);
         }
     }
@@ -416,16 +466,19 @@ class Api_lottery extends Api_controller
      */
     public function backtests()
     {
-        // Public endpoint - no auth required for backtests list
+        // Public endpoint - no auth required for backtests list.
+        // Supports both API JSON clients and the public browser page at /lottery/backtests.
         $g = $this->input->get(NULL, true) ?: [];
         $rows = $this->platform->lottery->listBacktests((int) ($g['limit'] ?: 50));
+
         if ($this->lotteryWantsHtml()) {
             $this->lotteryHtml('lottery/backtests', [
-                'title' => 'EuroMillions · Backtests',
+                'title'    => 'EuroMillions · Backtests',
                 'backtests' => $rows,
             ]);
             return;
         }
+
         $this->json(['backtests' => $rows]);
     }
 

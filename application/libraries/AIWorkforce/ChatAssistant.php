@@ -12,6 +12,7 @@ final class ChatAssistant
 {
     private const SYSTEM = <<<'TXT'
 You are WINDELS Assistant for WINDELS AI WORKFORCE (also called WINDELS AI OS).
+Pronounce WINDELS as "Win-dels" (two syllables: Win + dels). Never expand the name — it is a name, not an acronym.
 Full source: https://github.com/subwindels-hash/AI-WORKFORCE
 
 You explain how the signed-in platform works. Be specific: name the page and path.
@@ -179,9 +180,9 @@ TXT;
     private function answerGreeting(bool $signedIn): string
     {
         if ($signedIn) {
-            return 'I am WINDELS Assistant for AI WORKFORCE. Ask about a module and I will tell you the path and how it actually behaves — Dashboard, Command Center, Windels AI Agents, Languages, Leads, Trading, Sports, EuroMillions, Multiplier AI, or Account.';
+            return 'I am WINDELS Assistant (pronounced "Win-dels") for AI WORKFORCE. Ask about a module and I will tell you the path and how it actually behaves — Dashboard, Command Center, Windels AI Agents, Languages, Leads, Trading, Sports, EuroMillions, Multiplier AI, or Account.';
         }
-        return 'I am WINDELS Assistant. Sign in to use the workspace. I can explain Dashboard, Windels AI Agents, the AI Language Teacher, Lead Discovery, Trading (analysis-only by default), Sports Intel, EuroMillions and Multiplier AI. I do not invent prices, draws or businesses.';
+        return 'I am WINDELS Assistant (pronounced "Win-dels"). Sign in to use the workspace. I can explain Dashboard, Windels AI Agents, the AI Language Teacher, Lead Discovery, Trading (analysis-only by default), Sports Intel, EuroMillions and Multiplier AI. I do not invent prices, draws or businesses.';
     }
 
     private function answerPlatform(): string
