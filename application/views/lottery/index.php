@@ -80,7 +80,7 @@ window.__AI_LOTTERY_STATE__ = <?= $stateJson ?>;
       <div class="lottery-card">
         <h3>Next draw ${statusBadge}</h3>
         <div class="lottery-jackpot">${e(s.jackpot || '—')}</div>
-        <div class="lottery-meta">provider: ${e(s.provider || 'none')} · imported ${e(s.imported||0)} verified draws</div>
+        <div class="lottery-meta">provider: ${e((s.provider && s.provider.id) || s.providerLabel || s.provider || 'none')} · imported ${e(s.imported||s.drawsTracked||0)} verified draws</div>
         <div class="lottery-actions">
           <a class="btn primary" href="/api/lottery/generate" data-lottery-generate>Generate 5 AI lines</a>
           <a class="btn" href="/lottery/tickets">My tickets</a>

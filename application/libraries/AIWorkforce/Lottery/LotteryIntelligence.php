@@ -64,6 +64,14 @@ class LotteryIntelligence
         $health = $this->provider->health();
         $enabled = $health['state'] === 'ONLINE';
         $last = $this->repo->listDraws(['lotteryCode' => self::LOTTERY], 1);
+        $lastDraw = $last !== [] ? $this->presentDraw($last[0]) : null;
+        $jackpot = $lastDraw['jackpot'] ?? null;
+        $jpInfo = $this->provider->jackpotInfo();
+        if (is_array($jpInfo) && ($jpInfo['value'] ?? null) !== null && ($jpInfo['value'] ?? '') !== '') {
+            $jackpot = $jpInfo['value'];
+        }
+        $imported = $this->drawCount();
+        $uiStatus = $enabled ? 'ONLINE' : (($health['state'] ?? '') === 'UNCONFIGURED' ? 'NO_DATA' : (string) ($health['state'] ?? 'NO_DATA'));
         return [
             'module' => 'lottery-intelligence',
             'activeLottery' => self::LOTTERY,
@@ -74,14 +82,48 @@ class LotteryIntelligence
                 'main' => ['count' => $this->rules->mainCount(), 'min' => $this->rules->mainMin(), 'max' => $this->rules->mainMax()],
                 'stars' => ['count' => $this->rules->starCount(), 'min' => $this->rules->starMin(), 'max' => $this->rules->starMax()],
                 'schedule' => $this->rules->drawSchedule(),
+                'mains' => $this->rules->mainCount(),
+                'mainMax' => $this->rules->mainMax(),
+                'starMax' => $this->rules->starMax(),
             ],
             'provider' => $health,
+            'providerLabel' => (string) ($health['message'] ?? $this->provider->id()),
             'engine' => $enabled ? self::ENGINE_ACTIVE : self::ENGINE_DISABLED,
             'modelVersion' => self::MODEL_VERSION,
-            'drawsTracked' => $this->drawCount(),
-            'lastDraw' => $last !== [] ? $last[0] : null,
+            'drawsTracked' => $imported,
+            'lastDraw' => $lastDraw,
             'disclaimer' => LotteryStatisticsEngine::DISCLAIMER,
+            // Dashboard / widget aliases (views/lottery/index.php)
+            'status' => $uiStatus,
+            'jackpot' => $jackpot,
+            'imported' => $imported,
+            'nextEstimated' => $this->nextDrawHint(),
         ];
+    }
+
+    /** Next EuroMillions draw day (Tue/Fri) as a hint — not a guaranteed official date. */
+    private function nextDrawHint(): ?string
+    {
+        $days = $this->rules->drawSchedule()['days'] ?? [2, 5];
+        $ts = time();
+        for ($i = 0; $i < 8; $i++) {
+            $t = $ts + $i * 86400;
+            if (in_array((int) gmdate('w', $t), $days, true)) return gmdate('Y-m-d', $t);
+        }
+        return null;
+    }
+
+    /** @param array<string,mixed> $row */
+    public function presentDraw(array $row): array
+    {
+        $payload = is_array($row['payload'] ?? null) ? $row['payload'] : [];
+        $mains = array_map('intval', (array) ($payload['main'] ?? []));
+        $stars = array_map('intval', (array) ($payload['stars'] ?? []));
+        $row['numbers'] = ['main' => $mains, 'stars' => $stars];
+        $row['main_numbers'] = $mains;
+        $row['lucky_stars'] = $stars;
+        $row['draw_no'] = $row['external_id'] ?? ($row['id'] ?? '');
+        return $row;
     }
 
     public function drawCount(): int

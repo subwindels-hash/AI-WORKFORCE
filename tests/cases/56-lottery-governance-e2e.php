@@ -85,9 +85,12 @@ test('lottery db: end-to-end import, stats and idempotent cron through real pers
         // status reflects the live module state
         $s = $intel->status();
         assert_equals('ACTIVE', $s['engine']);
+        assert_equals('ONLINE', $s['status']);
         assert_equals('ONLINE', $s['provider']['state']);
         assert_true($s['provider']['synthetic'], 'sandbox clearly labeled synthetic in status');
         assert_equals($model->lottery->countDraws('EUROMILLIONS'), $s['drawsTracked']);
+        assert_equals($s['drawsTracked'], $s['imported']);
+        assert_true(isset($s['lastDraw']['numbers']['main']), 'last draw exposes numbers.main for the dashboard');
     } finally {
         putenv('WINDELS_LOTTERY_SANDBOX');
     }
