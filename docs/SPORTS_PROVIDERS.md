@@ -23,17 +23,27 @@ A provider is registered only when its credential exists. Multiple configured pr
 
 ## Capabilities
 
-| Provider | Fixtures | Results | Odds |
-|---|---:|---:|---:|
-| API-Football | Yes | Yes | Yes, via the odds endpoint |
-| TheSportsDB | Yes | Yes | No bookmaker odds endpoint |
-| SportMonks | Yes (incl. full-round bulk fetch) | Yes | Yes, per fixture and per round (odds add-on) |
+| Provider | Fixtures | Results | Odds | Top players |
+|---|---:|---:|---:|---:|
+| API-Football | Yes | Yes | Yes, via the odds endpoint | Yes (scorers / assists / yellow cards / red cards) |
+| TheSportsDB | Yes | Yes | No bookmaker odds endpoint | No |
+| SportMonks | Yes (incl. full-round bulk fetch) | Yes | Yes, per fixture and per round (odds add-on) | No |
 
 All upstream responses are converted to the internal fixture, odds, and result shapes before they reach the normalizers and persistence layer. The provider adapters do not expose credentials to the frontend.
 
 ## API-Football notes
 
 API-Football uses the `x-apisports-key` header. Its odds response is flattened into the internal market/selection/decimalOdds shape. The provider's plan and quota determine which leagues and odds markets are available.
+
+`ApiFootballProvider::topPlayers(leagueId, season, type)` wraps the four
+top-player endpoints of the Players tag
+(`/players/topscorers`, `/players/topassists`, `/players/topyellowcards`,
+`/players/topredcards`). `league` and `season` are required upstream; the
+response is normalized to ranked entries (`rank`, `playerId`, `name`,
+`position`, `nationality`, `team`, `teamId`, `photo`) plus `value` — the
+headline number for the ranked metric — and the full per-season `statistics`
+profile as a keyed map. Unsupported `type` values throw instead of guessing a
+path.
 
 ## TheSportsDB notes
 

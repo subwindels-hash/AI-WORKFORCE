@@ -784,3 +784,141 @@ test('sportmonks fixture output passes through SportsDataNormalizer', function (
     assert_equals('200', $normalized['externalId']);
     assert_equals('Chelsea', $normalized['homeTeam']);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 4. API-FOOTBALL TOP PLAYERS (/players/top* — Players tag)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** api-football /players/top* response (Players tag) — canonical shape. */
+function topPlayersBody(array $league = ['id' => 61, 'name' => 'Ligue 1', 'country' => 'France', 'season' => 2020]): string
+{
+    return json_encode([
+        'get' => 'players/topyellowcards',
+        'parameters' => ['league' => '61', 'season' => '2020'],
+        'errors' => [],
+        'results' => 2,
+        'response' => [
+            [
+                'league' => $league,
+                'player' => [
+                    'id' => 1901, 'name' => "Steven N'Zonzi", 'position' => 'Midfielder',
+                    'nationality' => 'France', 'height' => '183 cm', 'weight' => '77 kg',
+                    'injured' => false, 'photo' => 'https://media.api-sports.io/football/players/1901.png',
+                    'team' => ['id' => 13, 'name' => 'Rennes', 'code' => 'REN'],
+                ],
+                'statistics' => [
+                    ['type' => 'Played', 'value' => 25],
+                    ['type' => 'Goals', 'value' => 2],
+                    ['type' => 'Assists', 'value' => 4],
+                    ['type' => 'Yellow Cards', 'value' => 7],
+                    ['type' => 'Red Cards', 'value' => 0],
+                ],
+            ],
+            [
+                'league' => $league,
+                'player' => [
+                    'id' => 2055, 'name' => 'Hernán Pérez', 'position' => 'Defender',
+                    'nationality' => 'Spain',
+                    'team' => ['id' => 56, 'name' => 'Marseille', 'code' => 'OM'],
+                ],
+                'statistics' => [
+                    ['type' => 'Played', 'value' => 24],
+                    ['type' => 'Yellow Cards', 'value' => 7],
+                ],
+            ],
+        ],
+    ]);
+}
+
+test('api-football topPlayers maps the topyellowcards response', function () {
+    $urls = [];
+    $transport = function (string $url, array $headers) use (&$urls): array {
+        $urls[] = $url;
+        return ['status' => 200, 'body' => topPlayersBody()];
+    };
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, $transport);
+    $top = $p->topPlayers('61', '2020', 'yellow_cards');
+
+    assert_equals('https://api.test/players/topyellowcards?league=61&season=2020', $urls[0], 'topyellowcards URL');
+    assert_equals('61', $top['leagueId']);
+    assert_equals('2020', $top['season']);
+    assert_equals('yellow_cards', $top['type']);
+    assert_equals('Ligue 1', $top['league']);
+    assert_equals(2, count($top['players']));
+
+    $first = $top['players'][0];
+    assert_equals(1, $first['rank'], 'ranked order');
+    assert_equals('1901', $first['playerId']);
+    assert_equals("Steven N'Zonzi", $first['name']);
+    assert_equals('Midfielder', $first['position']);
+    assert_equals('France', $first['nationality']);
+    assert_equals('Rennes', $first['team']);
+    assert_equals('13', $first['teamId']);
+    assert_equals(7, $first['value'], 'headline = yellow cards');
+    assert_equals(7, $first['statistics']['Yellow Cards']);
+    assert_equals(25, $first['statistics']['Played'], 'full profile kept');
+    assert_equals(2, $first['statistics']['Goals']);
+
+    $second = $top['players'][1];
+    assert_equals(2, $second['rank']);
+    assert_equals(7, $second['value']);
+});
+
+test('api-football topPlayers covers all four documented types', function () {
+    $cases = [
+        ['scorers', 'topscorers', 'Goals', 25],
+        ['assists', 'topassists', 'Assists', 9],
+        ['yellow_cards', 'topyellowcards', 'Yellow Cards', 7],
+        ['red_cards', 'topredcards', 'Red Cards', 3],
+    ];
+    foreach ($cases as [$type, $path, $headline, $expected]) {
+        $urls = [];
+        $stats = [['type' => 'Played', 'value' => 20], ['type' => $headline, 'value' => $expected]];
+        $body = json_encode(['response' => [[
+            'league' => ['id' => 39, 'name' => 'Premier League'],
+            'player' => ['id' => 3507, 'name' => 'Test Player', 'team' => ['id' => 50, 'name' => 'City']],
+            'statistics' => $stats,
+        ]]]);
+        $transport = function (string $url, array $headers) use (&$urls, $body): array {
+            $urls[] = $url;
+            return ['status' => 200, 'body' => $body];
+        };
+        $p = new ApiFootballProvider('k', 'https://api.test', 10, $transport);
+        $top = $p->topPlayers('39', '2026', $type);
+        assert_true(str_contains($urls[0], '/players/' . $path), "{$type} hits /players/{$path} (got {$urls[0]})");
+        assert_equals($expected, $top['players'][0]['value'], "{$type} headline value");
+    }
+});
+
+test('api-football topPlayers rejects unsupported types', function () {
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, makeTransport(200, '{}'));
+    assert_throws(
+        ProviderException::class,
+        fn() => $p->topPlayers('61', '2020', 'goals'),
+        'unknown type must not fabricate a path'
+    );
+});
+
+test('api-football topPlayers tolerates nested season-statistics objects', function () {
+    $body = json_encode(['response' => [[
+        'league' => ['id' => 39, 'name' => 'Premier League'],
+        'player' => ['id' => 7, 'name' => 'Nested Player', 'team' => ['id' => 85, 'name' => 'PSG']],
+        'statistics' => [[
+            'played' => ['total' => 30],
+            'goals' => ['total' => 3],
+            'cards' => ['yellow' => 6, 'red' => 0, 'yellowred' => 1],
+            'fouls' => ['drawn' => 10, 'committed' => 20],
+            'penalty' => ['won' => 2, 'scored' => 1, 'missed' => 0, 'saved' => 0],
+        ]],
+    ]]]);
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, makeTransport(200, $body));
+    $top = $p->topPlayers('39', '2026', 'scorers');
+
+    $first = $top['players'][0];
+    assert_equals(3, $first['value'], 'headline from nested goals.total');
+    assert_equals(6, $first['statistics']['Yellow Cards']);
+    assert_equals(1, $first['statistics']['Yellow-Red Cards']);
+    assert_equals(30, $first['statistics']['Played']);
+    assert_equals(20, $first['statistics']['Fouls Committed']);
+    assert_equals(1, $first['statistics']['Penalty Scored']);
+});

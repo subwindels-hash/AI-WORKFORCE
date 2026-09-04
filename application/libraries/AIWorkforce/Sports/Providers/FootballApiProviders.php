@@ -344,6 +344,139 @@ class ApiFootballProvider implements SportsDataProvider
         return $out;
     }
 
+    /**
+     * Top players for a league + season (api-football /players/top*).
+     *
+     * Docs: https://www.api-football.com/documentation-v3 (Players tag)
+     *   'scorers'      → /players/topscorers
+     *   'assists'      → /players/topassists
+     *   'yellow_cards' → /players/topyellowcards
+     *   'red_cards'    → /players/topredcards
+     *
+     * `league` and `season` are required by the API. The response holds the
+     * top 20 players in ranked order, each with their full per-season
+     * statistical profile — sourced from the provider, never fabricated.
+     *
+     * @param string $leagueId
+     * @param string $season
+     * @param string $type scorers|assists|yellow_cards|red_cards
+     * @return array{leagueId:string, season:string, type:string, league:?string,
+     *               players:array<int,array<string,mixed>>}
+     */
+    public function topPlayers(string $leagueId, string $season, string $type = 'scorers'): array
+    {
+        $path = match ($type) {
+            'scorers' => 'topscorers',
+            'assists' => 'topassists',
+            'yellow_cards' => 'topyellowcards',
+            'red_cards' => 'topredcards',
+            default => throw new ProviderException('unsupported top players type: ' . $type, ProviderException::DATA_ERROR),
+        };
+        $resp = $this->doRequest('/players/' . $path . '?league=' . rawurlencode($leagueId) . '&season=' . rawurlencode($season));
+        $rows = $this->extractList($this->decodeJson($resp));
+        $out = ['leagueId' => $leagueId, 'season' => $season, 'type' => $type, 'league' => null, 'players' => []];
+        $rank = 0;
+        foreach ($rows as $r) {
+            $player = is_array($r['player'] ?? null) ? $r['player'] : [];
+            $name = trim((string) ($player['name'] ?? ''));
+            if ($name === '') continue;
+            $league = is_array($r['league'] ?? null) ? $r['league'] : [];
+            if ($out['league'] === null && trim((string) ($league['name'] ?? '')) !== '') {
+                $out['league'] = (string) $league['name'];
+            }
+            $rank++;
+            $stats = $this->mapPlayerStatistics($r['statistics'] ?? [], $type);
+            $out['players'][] = [
+                'rank' => $rank,
+                'playerId' => (string) ($player['id'] ?? ''),
+                'name' => $name,
+                'position' => (string) ($player['position'] ?? ''),
+                'nationality' => (string) ($player['nationality'] ?? ''),
+                'team' => (string) ($player['team']['name'] ?? ''),
+                'teamId' => (string) ($player['team']['id'] ?? ''),
+                'photo' => $player['photo'] ?? null,
+                'value' => $stats['value'],
+                'statistics' => $stats['profile'],
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Normalize a top-players statistics payload into a keyed profile plus the
+     * headline number for the ranked metric.
+     *
+     * Canonical shape: a list of {"type": "Yellow Cards", "value": 7} entries.
+     * Some v3 payloads embed a season-statistics object instead ({"cards":
+     * {"yellow": 7, ...}}) — the known keys of that shape are flattened too.
+     */
+    private function mapPlayerStatistics(mixed $statistics, string $type): array
+    {
+        $profile = [];
+        if (is_array($statistics) && array_is_list($statistics)) {
+            foreach ($statistics as $entry) {
+                if (!is_array($entry)) continue;
+                $val = $this->statValue($entry['value'] ?? null);
+                if (isset($entry['type']) && $val !== null) {
+                    $profile[trim((string) $entry['type'])] = $val;
+                } else {
+                    $profile += $this->flattenSeasonStatistics($entry);
+                }
+            }
+        } elseif (is_array($statistics)) {
+            $profile = $this->flattenSeasonStatistics($statistics);
+        }
+        $headline = match ($type) {
+            'scorers' => 'Goals',
+            'assists' => 'Assists',
+            'yellow_cards' => 'Yellow Cards',
+            'red_cards' => 'Red Cards',
+            default => null,
+        };
+        return ['profile' => $profile, 'value' => $headline !== null ? ($profile[$headline] ?? null) : null];
+    }
+
+    /** Flatten the known keys of a nested season-statistics object. */
+    private function flattenSeasonStatistics(array $s): array
+    {
+        $out = [];
+        $flat = ['played' => 'Played', 'goals' => 'Goals', 'assists' => 'Assists'];
+        foreach ($flat as $key => $label) {
+            $v = $s[$key] ?? null;
+            if (is_array($v)) $v = $v['total'] ?? null;
+            $val = $this->statValue($v);
+            if ($val !== null) $out[$label] = $val;
+        }
+        $cards = is_array($s['cards'] ?? null) ? $s['cards'] : [];
+        $cardMap = ['yellow' => 'Yellow Cards', 'red' => 'Red Cards', 'yellowred' => 'Yellow-Red Cards'];
+        foreach ($cardMap as $key => $label) {
+            $val = $this->statValue($cards[$key] ?? null);
+            if ($val !== null) $out[$label] = $val;
+        }
+        $fouls = is_array($s['fouls'] ?? null) ? $s['fouls'] : [];
+        $foulMap = ['drawn' => 'Fouls Drawn', 'committed' => 'Fouls Committed'];
+        foreach ($foulMap as $key => $label) {
+            $val = $this->statValue($fouls[$key] ?? null);
+            if ($val !== null) $out[$label] = $val;
+        }
+        $penalty = is_array($s['penalty'] ?? null) ? $s['penalty'] : [];
+        $penaltyMap = ['won' => 'Penalty Won', 'scored' => 'Penalty Scored', 'missed' => 'Penalty Missed', 'saved' => 'Penalty Saved'];
+        foreach ($penaltyMap as $key => $label) {
+            $val = $this->statValue($penalty[$key] ?? null);
+            if ($val !== null) $out[$label] = $val;
+        }
+        return $out;
+    }
+
+    /** int|float when numeric (whole numbers stay ints), null otherwise. */
+    private function statValue(mixed $v): int|float|null
+    {
+        if (!is_numeric($v)) return null;
+        $f = (float) $v;
+        if (!is_finite($f)) return null;
+        return ($f == floor($f)) ? (int) $f : $f;
+    }
+
     /** Fetch available leagues for football. */
     public function leagues(?string $country = null): array
     {
