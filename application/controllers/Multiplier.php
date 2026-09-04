@@ -456,7 +456,13 @@ class Multiplier extends App_Controller
         
         // 7. Check Platform Integration
         try {
-            $integration = new \AIWorkforce\MultiplierIntelligence\MultiplierPlatformIntegration($this->platform->cloudflare);
+            // Reuse the same Sports Intelligence registry as the platform so
+            // Multiplier verification/enrichment can consume the connected
+            // Admin → API API-Football provider as well.
+            $integration = new \AIWorkforce\MultiplierIntelligence\MultiplierPlatformIntegration(
+                $this->platform->cloudflare,
+                $this->platform->sports
+            );
             $integration->register();
             $status = $integration->status();
             $results['checks']['platform_integration'] = [
