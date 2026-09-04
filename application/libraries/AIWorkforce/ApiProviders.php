@@ -644,6 +644,13 @@ final class ApiProviders
         $enabled = !empty($input['enabled']) ? 1 : 0;
         $environment = in_array($input['environment'] ?? '', ['live', 'sandbox'], true) ? $input['environment'] : 'live';
         $baseUrl = trim((string) ($input['base_url'] ?? ''));
+        // API-Football's public/marketing hosts (including football.com) are
+        // not API origins. Canonicalize them before validation so a copied
+        // http://football.com URL cannot be saved and later tested as a dead
+        // website endpoint.
+        if ($driver === 'api_football' && $baseUrl !== '') {
+            $baseUrl = self::normalizeApiFootballBaseUrl($baseUrl);
+        }
         if ($baseUrl !== '' && !preg_match('#^https://#i', $baseUrl)) {
             throw new \InvalidArgumentException('Base URL must use HTTPS.');
         }
@@ -854,7 +861,10 @@ final class ApiProviders
     {
         $base = rtrim(trim($baseUrl), '/');
         if ($base === '') return 'https://v3.football.api-sports.io';
-        $host = strtolower((string) (parse_url($base, PHP_URL_HOST) ?? ''));
+        // parse_url treats a bare hostname as a path. Accept it because
+        // provider settings are often pasted without a scheme.
+        $urlForParsing = preg_match('#^https?://#i', $base) ? $base : 'https://' . $base;
+        $host = strtolower((string) (parse_url($urlForParsing, PHP_URL_HOST) ?? ''));
         if ($host === 'api-football.com' || $host === 'www.api-football.com' || $host === 'dashboard.api-football.com' || $host === 'football.com' || $host === 'www.football.com') {
             return 'https://v3.football.api-sports.io';
         }

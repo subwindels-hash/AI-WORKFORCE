@@ -337,6 +337,8 @@ test('API-Football connection test succeeds on the real nested /status payload',
 test('API-Football marketing hosts normalize to the v3 API root', function () {
     assert_equals('https://v3.football.api-sports.io', \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl('https://api-football.com'));
     assert_equals('https://v3.football.api-sports.io', \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl('https://www.api-football.com/'));
+    assert_equals('https://v3.football.api-sports.io', \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl('http://football.com'));
+    assert_equals('https://v3.football.api-sports.io', \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl('football.com'));
     assert_equals('https://v3.football.api-sports.io', \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl(''));
     assert_equals('https://api-football-v1.p.rapidapi.com/v3', \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl('https://api-football-v1.p.rapidapi.com'));
 });
