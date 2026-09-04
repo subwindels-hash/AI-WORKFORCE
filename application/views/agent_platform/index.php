@@ -47,7 +47,9 @@ $activity = $dashboard['recentActivity'] ?? [];
   </div>
   <div style="display:flex;gap:8px">
     <a class="btn" href="/app/workforce">Agent Console</a>
+    <?php if (!empty($admin)): ?>
     <a class="btn" href="/admin/api">AI Providers</a>
+    <?php endif; ?>
   </div>
 </div>
 

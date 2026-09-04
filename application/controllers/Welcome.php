@@ -18,7 +18,7 @@ class Welcome extends App_Controller
             'run' => null,
             'watch' => [],
             'error' => null,
-            'events' => $this->platform->model->audit->recent(12),
+            'events' => array_slice(\AIWorkforce\MemberAudit::forMembers($this->platform->model->audit->recent(40)), 0, 12),
             'notice' => $this->session->flashdata('notice'),
             'modeError' => $this->session->flashdata('modeError'),
             'history' => $this->platform->model->analysis->history(8),
