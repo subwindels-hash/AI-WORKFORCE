@@ -54,7 +54,50 @@ $mode = $status['tradingMode'] ?? null;
 </div>
 
 <h2 class="section-title">Trading intelligence</h2>
-<section class="panel" style="margin-bottom:18px"><div class="body" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap"><div><h3 style="margin:0 0 6px">Connect your trading platform</h3><p class="dim" style="margin:0">Review AI signals, monitor positions, and route only approved trades through the supervised execution pipeline.</p></div><div style="display:flex;gap:8px"><a class="btn primary" href="/app/trading">Open My Trading</a><a class="btn" href="/brokers">Connect broker</a></div></div></section>
+<section class="panel" style="margin-bottom:18px"><div class="body">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px">
+    <div>
+      <h3 style="margin:0 0 4px">My Trading Dashboard</h3>
+      <p class="dim" style="margin:0">Connect your trading platforms and execute trades with AI intelligence — all under risk controls and approval governance.</p>
+    </div>
+    <div style="display:flex;gap:8px">
+      <a class="btn primary" href="/app/trading">Open My Trading</a>
+      <a class="btn" href="/brokers">Manage brokers</a>
+    </div>
+  </div>
+  <?php $tw = $tradingWidget ?? []; ?>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:14px">
+    <div style="background:var(--panel2);border-radius:var(--radius-sm);padding:12px 14px">
+      <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">Portfolio Equity</div>
+      <div style="font-size:20px;font-weight:700;color:#fff">$<?= number_format((float)($tw['totalEquity'] ?? 0), 2) ?></div>
+    </div>
+    <div style="background:var(--panel2);border-radius:var(--radius-sm);padding:12px 14px">
+      <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">Unrealized P&amp;L</div>
+      <?php $pnl = (float)($tw['totalPnl'] ?? 0); ?>
+      <div style="font-size:20px;font-weight:700;color:<?= $pnl > 0 ? 'var(--green)' : ($pnl < 0 ? 'var(--red)' : 'var(--dim)') ?>"><?= $pnl >= 0 ? '+' : '' ?>$<?= number_format($pnl, 2) ?></div>
+    </div>
+    <div style="background:var(--panel2);border-radius:var(--radius-sm);padding:12px 14px">
+      <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">Open Positions</div>
+      <div style="font-size:20px;font-weight:700;color:#fff"><?= (int)($tw['openPositions'] ?? 0) ?></div>
+    </div>
+    <div style="background:var(--panel2);border-radius:var(--radius-sm);padding:12px 14px">
+      <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">Connected Brokers</div>
+      <div style="font-size:20px;font-weight:700;color:#fff"><?= (int)($tw['connectedBrokers'] ?? 0) ?> / <?= (int)($tw['totalBrokers'] ?? 0) ?></div>
+    </div>
+  </div>
+  <?php if (!empty($tw['brokers'])): ?>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <?php foreach ($tw['brokers'] as $b): ?>
+      <span class="statuspill" style="<?= !empty($b['connected']) ? '' : 'opacity:.5' ?>">
+        <i class="pill-dot" style="<?= !empty($b['connected']) ? 'background:var(--green)' : 'background:var(--dim)' ?>"></i>
+        <?= e(ucfirst($b['broker'])) ?><?= !empty($b['label']) ? ' — ' . e($b['label']) : '' ?>
+      </span>
+    <?php endforeach; ?>
+  </div>
+  <?php elseif (($tw['totalBrokers'] ?? 0) === 0): ?>
+  <p class="dim">No brokers connected yet. <a href="/brokers">Connect a platform →</a></p>
+  <?php endif; ?>
+</div></section>
 
 <h2 class="section-title">Lottery intelligence</h2>
 <section class="panel" style="margin-bottom:18px"><div class="body" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap"><div><h3 style="margin:0 0 6px">EuroMillions jackpot</h3><div style="font-size:24px;font-weight:700;color:var(--brand)"><?= e($lotteryStatus['jackpot'] ?? '—') ?></div><p class="dim" style="margin:4px 0 0">Next draw: <span id="lottery-next-draw"><?= e($lotteryStatus['nextEstimated'] ?? 'Not available') ?></span> · <span id="lottery-countdown">calculating…</span> · <?= (int)($lotteryStatus['imported'] ?? 0) ?> verified draws</p></div><div style="display:flex;gap:8px"><a class="btn primary" href="/lottery">Open Lottery Intelligence</a><a class="btn" href="/lottery#generator">Generate numbers</a></div><?php $lastLotteryDraw = $lotteryStatus['lastDraw'] ?? null; if (is_array($lastLotteryDraw)): ?><div style="width:100%;margin-top:10px"><span class="dim">Latest verified result</span><div><?php foreach ((array)($lastLotteryDraw['numbers']['main'] ?? $lastLotteryDraw['mainNumbers'] ?? []) as $n): ?><span class="badge b-amber" style="margin-right:4px"><?= e((string)$n) ?></span><?php endforeach; ?><?php foreach ((array)($lastLotteryDraw['numbers']['stars'] ?? $lastLotteryDraw['stars'] ?? $lastLotteryDraw['bonusNumbers'] ?? []) as $n): ?><span class="badge b-blue" style="margin-right:4px">★ <?= e((string)$n) ?></span><?php endforeach; ?></div></div><?php endif; ?></div></div></section>

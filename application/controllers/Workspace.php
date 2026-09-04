@@ -33,6 +33,7 @@ class Workspace extends App_Controller
             'notice' => $this->session->flashdata('notice'),
             'error' => $this->session->flashdata('error'),
             'lotteryStatus' => $this->lotteryDashboardStatus(),
+            'tradingWidget' => $this->tradingWidgetData((int) $user['id']),
         ];
         $this->load->view('layout/header', $data);
         $this->load->view('workspace/index', $data);
@@ -43,5 +44,36 @@ class Workspace extends App_Controller
     {
         try { return $this->platform->lottery->status(); }
         catch (Throwable $e) { return ['status' => 'NO_DATA', 'jackpot' => null, 'nextEstimated' => null, 'lastDraw' => null, 'imported' => 0]; }
+    }
+
+    private function tradingWidgetData(int $userId): array
+    {
+        $out = ['totalEquity' => 0, 'totalPnl' => 0, 'openPositions' => 0, 'connectedBrokers' => 0, 'totalBrokers' => 0, 'brokers' => []];
+        try {
+            $connections = $this->platform->userBrokers->listForUser($userId);
+            $out['totalBrokers'] = count($connections);
+            foreach ($connections as $row) {
+                $card = ['broker' => $row['broker'], 'label' => $row['label'] ?? '', 'connected' => !empty($row['enabled'])];
+                if (!empty($row['enabled'])) {
+                    $out['connectedBrokers']++;
+                    try {
+                        $c = $this->platform->userBrokers->buildConnector($row);
+                        if ($c) {
+                            $a = $c->account();
+                            $out['totalEquity'] += (float) ($a['equity'] ?? $a['balance'] ?? 0);
+                            $card['equity'] = $a['equity'] ?? $a['balance'] ?? null;
+                            $card['currency'] = $a['currency'] ?? '';
+                            if (method_exists($c, 'positions')) {
+                                $pos = (array) $c->positions();
+                                $out['openPositions'] += count($pos);
+                                foreach ($pos as $p) $out['totalPnl'] += (float) ($p['unrealizedPnl'] ?? $p['pnl'] ?? 0);
+                            }
+                        }
+                    } catch (\Throwable $e) { $card['error'] = 'unavailable'; }
+                }
+                $out['brokers'][] = $card;
+            }
+        } catch (\Throwable $e) { /* trading widget is non-critical */ }
+        return $out;
     }
 }
