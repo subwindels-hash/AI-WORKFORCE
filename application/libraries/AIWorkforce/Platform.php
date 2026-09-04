@@ -69,6 +69,19 @@ class Platform
             $model->audit->emit($type, "Agent {$agent} execution {$id}", ['executionId' => $id, 'agent' => $agent, 'data' => $data], 'agent');
         });
 
+        foreach ([
+            ['general', []],
+            ['market', ['crypto.getPrice', 'forex.getRate']],
+            ['sports', ['sports.getFixtures', 'sports.getMatchStats']],
+            ['lead_discovery', []],
+            ['lottery', ['lottery.getResults', 'lottery.generateCombinations']],
+            ['language', ['language.analyzePronunciation']],
+            ['trading', ['broker.getAccount', 'broker.getPositions']],
+            ['video', ['video.create']],
+        ] as [$role, $tools]) {
+            $this->agents->register(new \AIWorkforce\Agents\CloudflareSpecialistAgent($role, $tools));
+        }
+
         $this->providers = new ProviderManager();
         $this->disableRealProviders = $disableRealProviders;
         $this->registerMarketDataProviders();
