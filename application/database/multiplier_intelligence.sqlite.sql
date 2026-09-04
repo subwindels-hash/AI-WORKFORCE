@@ -33,5 +33,6 @@ INSERT OR IGNORE INTO crash_game_models (code, name, version, description) VALUE
 INSERT OR IGNORE INTO crash_game_models (code, name, version, description) VALUES ('SEQUENCE-LSTM-v1', 'Sequence LSTM', '1.0', 'Sequence analysis with LSTM-style patterns');
 INSERT OR IGNORE INTO crash_game_models (code, name, version, description) VALUES ('MIXED-ENSEMBLE-v1', 'Mixed Ensemble', '1.0', 'Combined output from all specialist agents');
 INSERT OR IGNORE INTO crash_game_models (code, name, version, description) VALUES ('ANOMALY-AWARE-v1', 'Anomaly Aware', '1.0', 'Model that adjusts for detected anomalies');
-INSERT OR IGNORE INTO crash_game_providers (code, name, enabled) VALUES ('simulation', 'Simulation (Demo Data)', 1);
+INSERT OR IGNORE INTO crash_game_providers (code, name, enabled) VALUES ('bustabit', 'Bustabit (Live)', 1);
+INSERT OR IGNORE INTO crash_game_providers (code, name, enabled) VALUES ('simulation', 'Simulation (Demo Data)', 0);
 INSERT OR IGNORE INTO crash_game_providers (code, name, enabled) VALUES ('aviator_demo', 'Aviator Demo Adapter', 0);

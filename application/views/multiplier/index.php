@@ -132,7 +132,9 @@ $acc = $accuracy ?? [];
     <div class="mi-header">
       <h1><span class="logo">🚀</span> AI MULTIPLIER INTELLIGENCE <span class="mi-badge">WINDELS AI OS</span></h1>
       <div style="display:flex;gap:12px;align-items:center">
-        <span style="color:#94a3b8;font-size:11px">Provider: <b style="color:#e2e8f0"><?= e($provider['name'] ?? 'Simulation') ?></b></span>
+        <span style="color:#94a3b8;font-size:11px">Provider: <b style="color:#e2e8f0"><?= e($provider['name'] ?? 'Live') ?></b></span>
+        <?php $liveMode = ($provider['metadata']['mode'] ?? '') === 'live'; ?>
+        <span class="mi-badge" style="<?= $liveMode ? '' : 'background:linear-gradient(90deg,#f59e0b,#d97706)' ?>"><?= $liveMode ? 'LIVE DATA' : 'FEED OFFLINE' ?></span>
         <span class="mi-pulse-dot"></span>
       </div>
     </div>
@@ -141,7 +143,7 @@ $acc = $accuracy ?? [];
     <div class="mi-disclaimer">
       <span style="font-size:14px">⚠️</span>
       <div>
-        <b>EDUCATIONAL PURPOSE ONLY</b> — This system uses statistical analysis for demonstration. Crash games are inherently random. 
+        <b>LIVE ANALYSIS</b> — Rounds are pulled from a real crash provider (not simulated). Crash games are inherently random.
         No system can guarantee predictions. Past performance does not guarantee future results. Never risk more than you can afford to lose.
       </div>
     </div>
@@ -186,7 +188,7 @@ $acc = $accuracy ?? [];
       <div class="mi-signal-status" id="signal-status">
         <span class="mi-pulse-dot"></span> <?= e($signal['status'] ?? 'ACTIVE') ?>
       </div>
-      <div class="mi-signal-value" id="signal-value"><?= e(number_format($signal['predictedMultiplier'] ?? 0, 2)) ?>x</div>
+      <div class="mi-signal-value" id="signal-value"><?= ($signal['status'] ?? '') === 'NO_DATA' ? '—' : e(number_format($signal['predictedMultiplier'] ?? 0, 2)) . 'x' ?></div>
       <div class="mi-signal-label">NEXT SIGNAL ESTIMATE</div>
       <div class="mi-signal-range">
         <div class="mi-range-item">
@@ -326,7 +328,7 @@ $acc = $accuracy ?? [];
       <p><b>📊 HOW IT WORKS:</b> <?= count($agents) ?> specialist AI agents analyze historical patterns, statistical distributions, sequences, anomalies, and risk to produce an ensemble prediction with confidence scoring.</p>
       <p><b>⚠️ IMPORTANT:</b> Crash games use provably-fair random algorithms. <b>No AI system can predict random outcomes with certainty.</b> This platform demonstrates statistical analysis methodology, not guaranteed prediction.</p>
       <p><b>🎯 ACCURACY:</b> We transparently track all predictions against actual outcomes. The accuracy statistics above reflect real performance — never fabricated.</p>
-      <p><b>🔒 PROVIDER:</b> Currently using <b><?= e($provider['name'] ?? 'Simulation') ?></b> — <?= e($provider['metadata']['disclaimer'] ?? 'Demo data') ?></p>
+      <p><b>🔒 PROVIDER:</b> Currently using <b><?= e($provider['name'] ?? 'Live') ?></b> — <?= e($provider['metadata']['disclaimer'] ?? 'Live crash history') ?></p>
     </div>
   </div>
 </div>
@@ -378,7 +380,7 @@ $acc = $accuracy ?? [];
       .then(function(d){
         if (d.ok && d.signal) {
           var s = d.signal;
-          document.getElementById('signal-value').textContent = s.predictedMultiplier.toFixed(2) + 'x';
+          document.getElementById('signal-value').textContent = s.status === 'NO_DATA' || s.predictedMultiplier == null ? '—' : (Number(s.predictedMultiplier).toFixed(2) + 'x');
           document.getElementById('signal-min').textContent = (s.predictedMin || 0).toFixed(2) + 'x';
           document.getElementById('signal-max').textContent = (s.predictedMax || 0).toFixed(2) + 'x';
           document.getElementById('signal-conf').textContent = Math.round(s.confidence * 100) + '%';

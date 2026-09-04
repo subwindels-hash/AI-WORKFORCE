@@ -154,7 +154,7 @@ class MultiplierPlatformIntegration
         // Create the specialist agent
         $this->agent = new MultiplierSpecialistAgent(
             'MultiplierAnalyst',
-            new SimulationProvider(),
+            CrashProviderFactory::make(),
             $this->enrichment,
             $modelRouter
         );
@@ -202,7 +202,7 @@ class MultiplierPlatformIntegration
         if ($this->agent !== null) {
             $this->agent = new MultiplierSpecialistAgent(
                 'MultiplierAnalyst',
-                new SimulationProvider(),
+                CrashProviderFactory::make(),
                 $this->enrichment,
                 $this->platform->modelRouter()
             );
@@ -239,7 +239,7 @@ class MultiplierPlatformIntegration
      */
     public function generateEnhancedSignal(array $options = []): array
     {
-        $provider = new SimulationProvider();
+        $provider = CrashProviderFactory::make();
         $engine = new MultiplierIntelligenceEngine($provider);
         
         // 1. Base statistical signal
@@ -253,7 +253,7 @@ class MultiplierPlatformIntegration
         // 3. Apply LLM enhancement via Cloudflare
         if ($this->bridge !== null && $this->bridge->isLLMEnhancementEnabled()) {
             $cfSignal = $this->bridge->generateCloudflareSignal([
-                'provider' => $options['provider'] ?? 'simulation',
+                'provider' => $options['provider'] ?? 'bustabit',
             ]);
             $signal['cloudflare_enhanced'] = true;
             $signal['cloudflare_data'] = $cfSignal;

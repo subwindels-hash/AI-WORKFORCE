@@ -2,7 +2,7 @@
 defined('BASEPATH') or exit('No direct script access allowed');
 require_once APPPATH . 'core/App_Controller.php';
 
-use AIWorkforce\MultiplierIntelligence\SimulationProvider;
+use AIWorkforce\MultiplierIntelligence\CrashProviderFactory;
 use AIWorkforce\MultiplierIntelligence\MultiplierIntelligenceEngine;
 
 /**
@@ -32,18 +32,7 @@ class Multiplier extends App_Controller
 
     private function engine(): MultiplierIntelligenceEngine
     {
-        // Use simulation provider by default
-        $provider = new SimulationProvider();
-        
-        // Generate some historical data if empty
-        if (empty($provider->allRounds())) {
-            for ($i = 0; $i < 100; $i++) {
-                $provider->startRound();
-                // Simulate round progression
-                usleep(1000);
-                $provider->endRound();
-            }
-        }
+        $provider = CrashProviderFactory::fromPlatform($this->platform);
         
         // Get database from platform model
         $db = null;
@@ -206,13 +195,18 @@ class Multiplier extends App_Controller
         
         try {
             // 1. Initialize Aviator Provider
-            $aviatorProvider = new \AIWorkforce\MultiplierIntelligence\AviatorProvider();
+            $aviatorProvider = CrashProviderFactory::fromPlatform($this->platform);
             $aviatorHealth = $aviatorProvider->health();
-            $aviatorStats = $aviatorProvider->stats();
+            $aviatorStats = method_exists($aviatorProvider, 'stats') ? $aviatorProvider->stats() : [];
             
-            // 2. Start a live round
-            $aviatorProvider->startRound();
-            $liveRound = $aviatorProvider->updateMultiplier();
+            $liveRound = method_exists($aviatorProvider, 'updateMultiplier')
+                ? $aviatorProvider->updateMultiplier()
+                : [
+                    'currentMultiplier' => $aviatorProvider->currentMultiplier() ?? 1.0,
+                    'roundId' => ($aviatorProvider->latestRound()['roundId'] ?? null),
+                    'inRound' => $aviatorProvider->isInRound(),
+                    'elapsedMs' => 0,
+                ];
             
             // 3. Get Multiplier Intelligence analysis
             $engine = new \AIWorkforce\MultiplierIntelligence\MultiplierIntelligenceEngine($aviatorProvider);
@@ -364,7 +358,7 @@ class Multiplier extends App_Controller
         
         // 1. Check Multiplier Intelligence Engine
         try {
-            $provider = new \AIWorkforce\MultiplierIntelligence\SimulationProvider();
+            $provider = CrashProviderFactory::fromPlatform($this->platform);
             $engine = new \AIWorkforce\MultiplierIntelligence\MultiplierIntelligenceEngine($provider);
             $signal = $engine->generateSignal();
             $results['checks']['multiplier_engine'] = [
@@ -496,7 +490,7 @@ class Multiplier extends App_Controller
             $provider = $engine->provider();
             
             // Update current round
-            if ($provider instanceof SimulationProvider) {
+            if (method_exists($provider, 'updateMultiplier')) {
                 $provider->updateMultiplier();
             }
             

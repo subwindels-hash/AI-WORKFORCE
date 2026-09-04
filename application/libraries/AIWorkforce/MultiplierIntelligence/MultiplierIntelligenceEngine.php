@@ -87,9 +87,28 @@ class MultiplierIntelligenceEngine
         $startTime = microtime(true);
         $signalId = 'sig_' . bin2hex(random_bytes(8));
         
-        // 1. Fetch data
+        // 1. Fetch data — never invent rounds if the live feed is empty
         $history = $this->provider->history(200);
         $multipliers = array_column($history, 'multiplier');
+        if (count($multipliers) < 5) {
+            return [
+                'signalId' => $signalId,
+                'modelCode' => $modelCode ?? 'MIXED-ENSEMBLE-v1',
+                'modelName' => 'Mixed Ensemble',
+                'provider' => $this->provider->code(),
+                'predictedMultiplier' => null,
+                'predictedMin' => null,
+                'predictedMax' => null,
+                'confidence' => 0,
+                'risk' => 'EXTREME',
+                'agents' => [],
+                'features' => ['count' => count($multipliers)],
+                'latencyMs' => round((microtime(true) - $startTime) * 1000),
+                'status' => 'NO_DATA',
+                'generatedAt' => gmdate('c'),
+                'disclaimer' => 'Live crash history unavailable. No demo data is used.',
+            ];
+        }
         
         // Extract features
         $features = $this->extractFeatures($multipliers);

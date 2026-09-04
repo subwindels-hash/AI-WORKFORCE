@@ -162,15 +162,7 @@ class Workspace extends App_Controller
         }
 
         try {
-            $provider = new \AIWorkforce\MultiplierIntelligence\SimulationProvider();
-            
-            // Generate some historical data if needed
-            if (empty($provider->allRounds())) {
-                for ($i = 0; $i < 50; $i++) {
-                    $provider->startRound();
-                    $provider->endRound();
-                }
-            }
+            $provider = \AIWorkforce\MultiplierIntelligence\CrashProviderFactory::fromPlatform($this->platform);
             
             $engine = new \AIWorkforce\MultiplierIntelligence\MultiplierIntelligenceEngine($provider);
             $dashboard = $engine->dashboard();

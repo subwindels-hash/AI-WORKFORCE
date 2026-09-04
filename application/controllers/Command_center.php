@@ -77,7 +77,7 @@ class Command_center extends App_Controller
         
         // 2. Multiplier Intelligence
         try {
-            $provider = new \AIWorkforce\MultiplierIntelligence\SimulationProvider();
+            $provider = \AIWorkforce\MultiplierIntelligence\CrashProviderFactory::fromPlatform($this->platform);
             $engine = new \AIWorkforce\MultiplierIntelligence\MultiplierIntelligenceEngine($provider);
             $dashboard = $engine->dashboard();
             
