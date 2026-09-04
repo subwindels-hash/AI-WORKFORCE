@@ -13,6 +13,7 @@ class Trading extends App_Controller
         foreach($connections as $row){ if(empty($row['enabled'])) continue; try { $c=$this->platform->userBrokers->buildConnector($row); if(!$c) continue; $a=$c->account(); $a['broker']=$row['broker']; $a['label']=$row['label']; $accounts[]=$a; if(method_exists($c,'positions')) foreach((array)$c->positions() as $p) {$p['broker']=$row['broker']; $positions[]=$p;} } catch(\Throwable $e) { $accounts[]=['broker'=>$row['broker'],'label'=>$row['label'],'error'=>'Unavailable']; } }
         $data['connections']=$connections; $data['accounts']=$accounts; $data['positions']=$positions;
         $data['executions']=$this->platform->execution->executions(15); $data['proposals']=$this->platform->execution->proposals(null,15);
+        $data['riskLimits']=\AIWorkforce\ExecutionSupervisor::automationLimits($this->platform->state());
         $data['analysis']=$this->platform->providers->getAllHealth();
         $this->load->view('layout/header',$data); $this->load->view('trading/index',$data); $this->load->view('layout/footer');
     }
