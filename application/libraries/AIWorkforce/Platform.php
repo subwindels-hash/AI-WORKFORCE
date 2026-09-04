@@ -37,6 +37,7 @@ use AIWorkforce\Strategies\TradingStrategy;
 class Platform
 {
     public readonly ProviderManager $providers;
+    public readonly \AIWorkforce\Agents\AgentOrchestrator $agents;
     public readonly BrokerManager $brokers;
     public readonly UserBrokerConnections $userBrokers;
     public readonly ExecutionSupervisor $execution;
@@ -64,6 +65,9 @@ class Platform
     public function __construct(\AIWorkforce_model $model, bool $disableRealProviders = false)
     {
         $this->model = $model;
+        $this->agents = new \AIWorkforce\Agents\AgentOrchestrator(function (string $type, ?string $id, string $agent, array $data) use ($model): void {
+            $model->audit->emit($type, "Agent {$agent} execution {$id}", ['executionId' => $id, 'agent' => $agent, 'data' => $data], 'agent');
+        });
 
         $this->providers = new ProviderManager();
         $this->disableRealProviders = $disableRealProviders;
