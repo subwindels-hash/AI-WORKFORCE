@@ -257,30 +257,35 @@ class Command_center extends App_Controller
     private function getRecentActivity(): array
     {
         $activities = [];
-        
-        // Try to get recent activities from audit log
+
+        // Try to get recent activities from audit log.
+        // Member Command Center must never expose the administrator audit
+        // stream (provider tests, admin logins, user changes, contact
+        // handling, or other ADMIN_* / operator-only events). Admins retain
+        // the full activity view in Admin → Logs.
         try {
             $recent = \AIWorkforce\MemberAudit::forMembers($this->platform->model->audit->recent(80));
+            $isAdmin = $this->isAdmin($this->identity);
             foreach (array_slice($recent, 0, 80) as $r) {
-                // Member Command Center must never expose the administrator
-                // audit stream (provider tests, admin logins, user changes,
-                // contact handling, or other ADMIN_* events). Admins retain
-                // the full activity view in Admin → Logs.
                 $type = (string) ($r['type'] ?? 'UNKNOWN');
-                if (!$this->isAdmin($this->identity) && (str_starts_with($type, 'ADMIN_') || $type === 'CONTACT_INQUIRY')) {
+
+                // Double-guard: MemberAudit already stripped admin-only events,
+                // but keep an explicit gate here in case MemberAudit is bypassed.
+                if (!$isAdmin && \AIWorkforce\MemberAudit::isAdminOnly($type)) {
                     continue;
                 }
+
                 $activities[] = [
-                    'time' => $r['created_at'] ?? $r['at'] ?? '',
-                    'type' => $r['type'] ?? 'UNKNOWN',
+                    'time'    => $r['created_at'] ?? $r['at'] ?? '',
+                    'type'    => $r['type'] ?? 'UNKNOWN',
                     'summary' => $r['summary'] ?? '',
-                    'module' => $this->inferModule($r['type'] ?? ''),
+                    'module'  => $this->inferModule($r['type'] ?? ''),
                 ];
             }
         } catch (\Throwable $e) {
             // Skip if audit log unavailable
         }
-        
+
         return $activities;
     }
     
