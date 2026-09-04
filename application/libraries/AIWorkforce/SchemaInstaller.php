@@ -23,6 +23,7 @@ final class SchemaInstaller
         'admin_portal',
         'admin_inbox',
         'direct_messages',
+        'multiplier_intelligence',
     ];
 
     /** Every table created by the module files. Installers verify this list. */
@@ -52,6 +53,9 @@ final class SchemaInstaller
         'contact_messages', 'contact_message_replies', 'email_templates',
         'direct_messages',
         'user_broker_connections',
+        'crash_game_providers', 'crash_game_provider_health', 'crash_game_rounds',
+        'crash_game_models', 'crash_game_predictions', 'crash_game_agent_executions',
+        'crash_game_accuracy_snapshots', 'crash_game_active_signals',
     ];
 
     /** Representative tables — if any are missing, re-apply CREATE IF NOT EXISTS. */

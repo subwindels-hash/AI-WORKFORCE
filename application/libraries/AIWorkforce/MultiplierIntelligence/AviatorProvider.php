@@ -223,7 +223,39 @@ class AviatorProvider implements CrashGameProviderInterface
     {
         return $this->inRound;
     }
-    
+
+    /**
+     * CrashGameProviderInterface: the demo runtime is always ready; the
+     * production API path is ready once an API key is present.
+     */
+    public function isConfigured(): bool
+    {
+        return $this->demoMode || !empty($this->apiKey);
+    }
+
+    /**
+     * CrashGameProviderInterface: live multiplier while a round is running.
+     */
+    public function currentMultiplier(): ?float
+    {
+        return $this->inRound ? round($this->currentMultiplier, 2) : null;
+    }
+
+    /**
+     * CrashGameProviderInterface: game metadata.
+     */
+    public function metadata(): array
+    {
+        return [
+            'game' => 'aviator',
+            'mode' => $this->demoMode ? 'demo' : 'production',
+            'disclaimer' => 'DEMO ONLY - Simulated Aviator data, not real game data',
+            'houseEdge' => $this->houseEdge,
+            'totalRounds' => count($this->rounds),
+            'baseUrl' => $this->baseUrl,
+        ];
+    }
+
     /**
      * Generate crash point using geometric distribution
      * This mimics real Aviator's provably fair algorithm

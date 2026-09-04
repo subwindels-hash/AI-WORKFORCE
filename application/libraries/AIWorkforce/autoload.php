@@ -15,6 +15,8 @@ $priority = [
     $ai_workforceDir . '/Persistence/Repositories.php',      // repository interfaces
     $ai_workforceDir . '/Brokers/BrokerConnector.php',       // broker interface + manager
     $ai_workforceDir . '/Brokers/TradingConnector.php',      // order-capable broker interface
+    $ai_workforceDir . '/MultiplierIntelligence/CrashGameProvider.php', // crash-game interface + abstract base (before AviatorProvider)
+    $ai_workforceDir . '/MultiplierIntelligence/AbstractMultiplierAgent.php', // multiplier agent interface + abstract base
     $ai_workforceDir . '/Agents/AgentHelperTrait.php',       // trait
     $ai_workforceDir . '/Strategies/BuiltinStrategies.php',  // TradingStrategy interface + builtins
     $ai_workforceDir . '/Providers/CryptoExchangeProvider.php', // shared base for exchange REST providers (before subclasses)

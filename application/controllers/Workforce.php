@@ -17,6 +17,18 @@ require_once APPPATH . 'core/App_Controller.php';
  */
 class Workforce extends App_Controller
 {
+    /** Shared layout scaffolding (title, nav state, platform status banner). */
+    private function base(string $title, string $active): array
+    {
+        $state = $this->platform->state();
+        return [
+            'title' => $title, 'active' => $active,
+            'status' => ['tradingMode' => $state['tradingMode'], 'killSwitch' => $state['killSwitch'],
+                'providers' => $this->platform->providers->getAllHealth()],
+            'notice' => $this->session->flashdata('notice'), 'error' => $this->session->flashdata('error'),
+        ];
+    }
+
     public function index()
     {
         $user = $this->identity;
