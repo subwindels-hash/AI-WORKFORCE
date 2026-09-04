@@ -54,6 +54,7 @@ class SportsIntelligence
     public readonly ModelPerformanceService $modelPerformance;
     public readonly ModelDriftMonitor $driftMonitor;
     public readonly SportsBacktester $backtester;
+    public readonly FormResolver $formResolver;
 
     public function __construct(private SportsRepository $repository, AuditRepository $audit, ?Notifier $notifications = null)
     {
@@ -75,10 +76,11 @@ class SportsIntelligence
         $this->settlement = new TicketSettlementService($repository, $this->results, $audit);
         $this->resultVerifier = new PersistedResultVerifier($repository, $audit);
         $this->performance = new PerformanceAnalytics();
-        $this->sync = new SportsSyncService($repository, $audit, $this->quality);
+        $this->formResolver = new FormResolver();
+        $this->sync = new SportsSyncService($repository, $audit, $this->quality, $this->formResolver);
         $this->configuration = new ConfigurationService($repository, $audit);
         $this->pipeline = new PredictionPipeline($this->matchIntelligence, $this->features, $this->predictions, $this->value, $this->risk, $this->correlation, $this->confidence);
-        $this->dailyTickets = new DailyTicketService($repository, $audit, $this->providers, $this->configuration, $this->quality, $this->pipeline, new TicketOptimizer($this->correlation), $this->governance, $this->decisions);
+        $this->dailyTickets = new DailyTicketService($repository, $audit, $this->providers, $this->configuration, $this->quality, $this->pipeline, new TicketOptimizer($this->correlation), $this->governance, $this->decisions, $this->formResolver);
         $this->providerHealth = new ProviderHealthMonitor();
         $this->modelPerformance = new ModelPerformanceService($repository, $audit);
         $this->driftMonitor = new ModelDriftMonitor($repository, $audit, $notifications);

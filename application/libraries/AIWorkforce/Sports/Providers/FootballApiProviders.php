@@ -98,6 +98,68 @@ trait HttpTransport
     {
         return round(1 - $this->errorRate(), 4);
     }
+
+    /**
+     * Normalize a provider-specific market name to the pipeline's canonical names.
+     * The prediction pipeline expects: TOTAL_GOALS, MATCH_RESULT, BOTH_TEAMS_SCORE, etc.
+     */
+    protected static function normalizeMarket(string $raw): string
+    {
+        $r = strtolower(trim($raw));
+        // Total Goals / Over-Under
+        if (preg_match('/over.?under|total.?goals|goals.?over|goals.?total/', $r)) return 'TOTAL_GOALS';
+        // Match Result / 1X2 / Match Winner
+        if (preg_match('/match.?result|match.?winner|1x2|full.?time.?result|result/', $r)) return 'MATCH_RESULT';
+        // Both Teams to Score
+        if (preg_match('/both.?teams|btts|goal.*goal/', $r)) return 'BOTH_TEAMS_SCORE';
+        // Double Chance
+        if (preg_match('/double.?chance/', $r)) return 'DOUBLE_CHANCE';
+        // Correct Score
+        if (preg_match('/correct.?score|exact.?score/', $r)) return 'CORRECT_SCORE';
+        // Half Time / HT
+        if (preg_match('/half.?time|ht/', $r) && preg_match('/over|under|goal/', $r)) return 'HALF_TIME_GOALS';
+        // Return as-is but uppercased
+        return strtoupper(preg_replace('/[^A-Za-z0-9_]/', '_', $raw));
+    }
+
+    /**
+     * Normalize a provider-specific selection name to the pipeline's canonical names.
+     * For TOTAL_GOALS: OVER_1_5, UNDER_1_5, OVER_2_5, UNDER_2_5, etc.
+     * For MATCH_RESULT: HOME, DRAW, AWAY
+     */
+    protected static function normalizeSelection(string $market, string $raw): string
+    {
+        $r = strtolower(trim($raw));
+        if ($market === 'TOTAL_GOALS' || $market === 'HALF_TIME_GOALS') {
+            // Match "Over 1.5", "Over 1,5", "Over1.5", "1.5 Over", etc.
+            if (preg_match('/over.*?(\d+[.,]\d+)/', $r, $m)) {
+                $line = str_replace(',', '.', $m[1]);
+                return 'OVER_' . str_replace('.', '_', $line);
+            }
+            if (preg_match('/under.*?(\d+[.,]\d+)/', $r, $m)) {
+                $line = str_replace(',', '.', $m[1]);
+                return 'UNDER_' . str_replace('.', '_', $line);
+            }
+            if (preg_match('/(\d+[.,]\d+).*over/', $r, $m)) {
+                $line = str_replace(',', '.', $m[1]);
+                return 'OVER_' . str_replace('.', '_', $line);
+            }
+            if (preg_match('/(\d+[.,]\d+).*under/', $r, $m)) {
+                $line = str_replace(',', '.', $m[1]);
+                return 'UNDER_' . str_replace('.', '_', $line);
+            }
+        }
+        if ($market === 'MATCH_RESULT') {
+            if (preg_match('/home|1$/', $r)) return 'HOME';
+            if (preg_match('/draw|x$/', $r)) return 'DRAW';
+            if (preg_match('/away|2$/', $r)) return 'AWAY';
+        }
+        if ($market === 'BOTH_TEAMS_SCORE') {
+            if (preg_match('/yes|1/', $r)) return 'YES';
+            if (preg_match('/no|0/', $r)) return 'NO';
+        }
+        return strtoupper(preg_replace('/[^A-Za-z0-9_.]/', '_', $raw));
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -295,9 +357,11 @@ class ApiFootballProvider implements SportsDataProvider
                 foreach (($bookmaker['bets'] ?? []) as $bet) {
                     foreach (($bet['values'] ?? []) as $v) {
                         if (!isset($v['odd'])) continue;
+                        $market = self::normalizeMarket((string) ($bet['name'] ?? 'UNKNOWN'));
+                        $selection = self::normalizeSelection($market, (string) ($v['value'] ?? ''));
                         $out[] = [
-                            'market' => (string) ($bet['name'] ?? 'UNKNOWN'),
-                            'selection' => (string) ($v['value'] ?? ''),
+                            'market' => $market,
+                            'selection' => $selection,
                             'decimalOdds' => (float) $v['odd'],
                             'observedAt' => gmdate('c'),
                             'bookmaker' => (string) ($bookmaker['name'] ?? ''),
@@ -748,9 +812,11 @@ class SportMonksProvider implements SportsDataProvider
             $selection = $r['selection'] ?? [];
             $bookmaker = $r['bookmaker'] ?? [];
             if (!isset($selection['value']) || !isset($r['value'])) continue;
+            $normalizedMarket = self::normalizeMarket((string) ($market['name'] ?? 'UNKNOWN'));
+            $normalizedSelection = self::normalizeSelection($normalizedMarket, (string) ($selection['value'] ?? ''));
             $out[] = [
-                'market' => (string) ($market['name'] ?? 'UNKNOWN'),
-                'selection' => (string) ($selection['value'] ?? ''),
+                'market' => $normalizedMarket,
+                'selection' => $normalizedSelection,
                 'decimalOdds' => (float) $r['value'],
                 'observedAt' => gmdate('c'),
                 'bookmaker' => (string) ($bookmaker['name'] ?? ''),
