@@ -159,6 +159,8 @@ $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
   </div>
   <div class="wf-chat-body" id="chat-body"></div>
   <div class="wf-chat-foot">
+    <button type="button" id="wf-chat-mic" class="wf-chat-mic" aria-label="Tap to speak">🎤 Tap to Speak</button>
+    <button type="button" id="wf-chat-mic-stop" class="wf-chat-mic-stop" disabled>⏹ Stop</button>
     <textarea id="chat-input" placeholder="Ask the agent a question..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"></textarea>
     <button id="chat-send" onclick="sendMessage()"><?= $ic ?><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg> Send</button>
   </div>
@@ -307,5 +309,91 @@ document.getElementById('chat-input').addEventListener('input', function() {
   this.style.height = 'auto';
   this.style.height = Math.min(this.scrollHeight, 120) + 'px';
 });
+
+// ---------- WINDELS Assistant speech wiring ----------
+(function(){
+  var speech = window.windelsSpeech || (window.SpeechProvider ? new window.SpeechProvider() : null);
+  var micBtn = document.getElementById('wf-chat-mic');
+  var micStop = document.getElementById('wf-chat-mic-stop');
+  var chatInput = document.getElementById('chat-input');
+  if (!speech || !micBtn || !chatInput) return;
+
+  // Wire 🎤 Tap to Speak with 30s min wait + Stop button.
+  speech.bindMic(micBtn, chatInput, {
+    locale: 'en-GB',
+    idleLabel: '🎤 Tap to Speak',
+    recordingLabel: '🎤 Listening…',
+    stopButton: micStop,
+    minListenMs: 30000,
+    onStatus: function(msg) {
+      var s = document.getElementById('chat-status');
+      if (s) s.textContent = msg || 'Ready to assist';
+    }
+  });
+
+  // Add 🔊 Listen button to every assistant message bubble.
+  function addListenButton(bubble, text) {
+    if (!text || !speech.healthCheck().tts) return;
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'wf-listen-btn';
+    btn.textContent = '🔊 Listen';
+    btn.setAttribute('data-wf-listen', text);
+    btn.style.cssText = 'margin-top:6px;font-size:11px;padding:2px 8px;background:var(--panel2);border:1px solid var(--line2);border-radius:6px;color:var(--muted);cursor:pointer;';
+    bubble.appendChild(btn);
+  }
+
+  // Override addMessage to inject Listen buttons on assistant messages.
+  var origAddMessage = addMessage;
+  addMessage = function(role, text) {
+    origAddMessage(role, text);
+    var body = document.getElementById('chat-body');
+    var lastMsg = body.lastElementChild;
+    if (lastMsg && role === 'assistant') {
+      var bubble = lastMsg.querySelector('.wf-bubble');
+      if (bubble) addListenButton(bubble, text);
+    }
+  };
+
+  // Click handler for 🔊 Listen buttons on assistant messages.
+  document.getElementById('chat-body').addEventListener('click', function(ev){
+    var btn = ev.target.closest('[data-wf-listen]');
+    if (!btn || !speech) return;
+    ev.preventDefault();
+    var text = btn.getAttribute('data-wf-listen');
+    if (!text) return;
+    if (speech.isSpeaking() && btn.classList.contains('is-playing')) {
+      speech.stop();
+      btn.classList.remove('is-playing');
+      btn.textContent = '🔊 Listen';
+      return;
+    }
+    btn.classList.add('is-playing');
+    btn.textContent = '⏹ Stop';
+    speech.textToSpeech(text, {
+      locale: 'en-GB',
+      onEnd: function(){ btn.classList.remove('is-playing'); btn.textContent = '🔊 Listen'; },
+      onError: function(){ btn.classList.remove('is-playing'); btn.textContent = '🔊 Listen'; }
+    });
+  });
+
+  // Also add Listen to the initial greeting when selectAgent is called.
+  var origSelectAgent = window.selectAgent;
+  if (origSelectAgent) {
+    window.selectAgent = function(name, label, icon) {
+      origSelectAgent(name, label, icon);
+      setTimeout(function(){
+        var body = document.getElementById('chat-body');
+        var lastMsg = body.lastElementChild;
+        if (lastMsg && lastMsg.classList.contains('wf-msg') && lastMsg.classList.contains('assistant')) {
+          var bubble = lastMsg.querySelector('.wf-bubble');
+          if (bubble) {
+            var txt = bubble.textContent.replace(/<br>/g, '\n').trim();
+            addListenButton(bubble, txt);
+          }
+        }
+      }, 0);
+    };
+  }
 })();
 </script>
