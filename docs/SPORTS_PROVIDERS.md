@@ -77,6 +77,21 @@ bulk-fetches each matchday's odds with one `round()` call per round
 fixtures the round fetch did not cover (no `roundId`, or a failed round
 request). Odds already persisted for a match are never re-fetched.
 
+### Round sync job
+
+`SportsSyncService::syncRound($provider, $roundExternalId, $executionKey)`
+bulk-syncs a whole matchday in one provider request — fixtures, odds and
+results are persisted from the single `round()` payload (idempotent per
+execution key, job type `ROUND`, audited as `SPORTS_ROUND_SYNC_*`). It is
+exposed through the sync endpoint:
+
+```
+GET /api/sports/sync?provider=sportmonks&type=round&roundId=396698
+```
+
+Providers without a `round()` endpoint fail the job with an explicit
+"does not support round sync" error instead of silently no-op'ing.
+
 ## Safe operation
 
 Provider data is untrusted input. The existing normalizers, data-quality gates, confidence checks, and ticket governance remain in the pipeline. Missing odds from providers without an odds feed must not be treated as fabricated odds; those predictions should be rejected or supplied by a separately licensed odds source.

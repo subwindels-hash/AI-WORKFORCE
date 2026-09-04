@@ -427,6 +427,8 @@ class Api_sports extends Api_controller
     /**
      * Sync fixtures/odds/results from a specific named provider.
      * GET /api/sports/sync?provider=api-football&type=fixtures&from=2026-09-01&to=2026-09-07
+     * type=round bulk-syncs a whole matchday (fixtures + odds + results) in
+     * one provider request: ?provider=sportmonks&type=round&roundId=396698
      */
     public function sync_provider()
     {
@@ -448,8 +450,11 @@ class Api_sports extends Api_controller
             } elseif ($type === 'results') {
                 if (empty($g['fixtureId'])) return $this->jsonError('fixtureId is required for results sync');
                 $result = $this->platform->sports->sync->syncResults($provider, (string) $g['fixtureId'], 'api-sync-results-' . $providerId . '-' . gmdate('YmdHis'));
+            } elseif ($type === 'round') {
+                if (empty($g['roundId'])) return $this->jsonError('roundId is required for round sync (resolve with the provider season rounds)');
+                $result = $this->platform->sports->sync->syncRound($provider, (string) $g['roundId'], 'api-sync-round-' . $providerId . '-' . $g['roundId'] . '-' . gmdate('YmdHis'));
             } else {
-                return $this->jsonError('type must be fixtures, odds, or results');
+                return $this->jsonError('type must be fixtures, odds, results, or round');
             }
             $this->json(['sync' => $result, 'provider' => $providerId, 'type' => $type]);
         } catch (\Throwable $e) {
