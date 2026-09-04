@@ -56,6 +56,9 @@ $mode = $status['tradingMode'] ?? null;
 <h2 class="section-title">Trading intelligence</h2>
 <section class="panel" style="margin-bottom:18px"><div class="body" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap"><div><h3 style="margin:0 0 6px">Connect your trading platform</h3><p class="dim" style="margin:0">Review AI signals, monitor positions, and route only approved trades through the supervised execution pipeline.</p></div><div style="display:flex;gap:8px"><a class="btn primary" href="/app/trading">Open My Trading</a><a class="btn" href="/brokers">Connect broker</a></div></div></section>
 
+<h2 class="section-title">Lottery intelligence</h2>
+<section class="panel" style="margin-bottom:18px"><div class="body" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap"><div><h3 style="margin:0 0 6px">EuroMillions jackpot</h3><div style="font-size:24px;font-weight:700;color:var(--brand)"><?= e($lotteryStatus['jackpot'] ?? '—') ?></div><p class="dim" style="margin:4px 0 0">Next draw: <?= e($lotteryStatus['nextEstimated'] ?? 'Not available') ?> · <?= (int)($lotteryStatus['imported'] ?? 0) ?> verified draws</p></div><div style="display:flex;gap:8px"><a class="btn primary" href="/lottery">Open Lottery Intelligence</a><a class="btn" href="/lottery#generator">Generate numbers</a></div></div></section>
+
 <h2 class="section-title">Recent activity &amp; alerts</h2>
 <div class="grid cols-main">
   <section class="panel">

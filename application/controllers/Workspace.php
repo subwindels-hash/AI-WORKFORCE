@@ -32,9 +32,16 @@ class Workspace extends App_Controller
             'latestMessage' => $this->AIWorkforce_model->messages->latestForUser((int) $user['id']),
             'notice' => $this->session->flashdata('notice'),
             'error' => $this->session->flashdata('error'),
+            'lotteryStatus' => $this->lotteryDashboardStatus(),
         ];
         $this->load->view('layout/header', $data);
         $this->load->view('workspace/index', $data);
         $this->load->view('layout/footer');
+    }
+
+    private function lotteryDashboardStatus(): array
+    {
+        try { return $this->platform->lottery->status(); }
+        catch (Throwable $e) { return ['status' => 'NO_DATA', 'jackpot' => null, 'nextEstimated' => null, 'lastDraw' => null, 'imported' => 0]; }
     }
 }
