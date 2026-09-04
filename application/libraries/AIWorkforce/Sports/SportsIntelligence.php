@@ -4,11 +4,14 @@ namespace AIWorkforce\Sports;
 use AIWorkforce\Notifications\Notifier;
 use AIWorkforce\Persistence\AuditRepository;
 use AIWorkforce\Persistence\SportsRepository;
+use AIWorkforce\Sports\Providers\ApiFootballProvider;
 use AIWorkforce\Sports\Providers\HttpSportsProvider;
 use AIWorkforce\Sports\Providers\FootballApiProvider;
 use AIWorkforce\Sports\Providers\ProviderException;
 use AIWorkforce\Sports\Providers\SandboxSportsProvider;
+use AIWorkforce\Sports\Providers\SportMonksProvider;
 use AIWorkforce\Sports\Providers\SportsProviderManager;
+use AIWorkforce\Sports\Providers\TheSportsDbProvider;
 
 /**
  * WINDELS Sports Intelligence — domain service container (spec §2/§43).
@@ -116,6 +119,9 @@ class SportsIntelligence
                 $this->providers->register(new FootballApiProvider($id, $base, $key, $kind, (int)(getenv('WINDELS_SPORTS_HTTP_TIMEOUT') ?: 10)));
             }
         }
+        // Also discover native providers from the central ApiProviders store
+        // (Admin → API). These can coexist with or supplement env-based keys.
+        $this->registerFromStore();
         if ($this->mode() === 'SANDBOX' && getenv('WINDELS_SPORTS_SANDBOX') === '1') {
             $this->providers->register(new SandboxSportsProvider());
         }
@@ -131,12 +137,54 @@ class SportsIntelligence
         }
         $managed = \AIWorkforce\ApiProviders::resolve('sports');
         if (is_array($managed) && !empty($managed['base_url']) && filter_var($managed['base_url'], FILTER_VALIDATE_URL)) {
-            $this->providers->register(new HttpSportsProvider(
-                'managed-sports-' . (int) ($managed['id'] ?? 0),
-                rtrim((string) $managed['base_url'], '/'),
-                (string) ($managed['secrets']['token'] ?? $managed['secrets']['api_key'] ?? ''),
-                (int) ($managed['extra']['timeout'] ?? 10)
-            ));
+            $driver = $managed['driver'] ?? '';
+            // Skip native drivers here — they are registered via registerFromStore()
+            if (!in_array($driver, ['api_football', 'thesportsdb', 'sportmonks'], true)) {
+                $this->providers->register(new HttpSportsProvider(
+                    'managed-sports-' . (int) ($managed['id'] ?? 0),
+                    rtrim((string) $managed['base_url'], '/'),
+                    (string) ($managed['secrets']['token'] ?? $managed['secrets']['api_key'] ?? ''),
+                    (int) ($managed['extra']['timeout'] ?? 10)
+                ));
+            }
+        }
+    }
+
+    /**
+     * Discover and register native sports providers from the central
+     * ApiProviders store (Admin → API). This allows operators to manage
+     * provider credentials through the dashboard rather than environment files.
+     */
+    private function registerFromStore(): void
+    {
+        try {
+            $chain = \AIWorkforce\ApiProviders::chain('sports');
+        } catch (\Throwable $e) { return; }
+        foreach ($chain as $cfg) {
+            $driver = $cfg['driver'] ?? '';
+            $id = (int) ($cfg['id'] ?? 0);
+            $timeout = (int) ($cfg['extra']['timeout'] ?? 10);
+            $secrets = $cfg['secrets'] ?? [];
+            $key = $secrets['api_key'] ?? $secrets['token'] ?? '';
+            if ($key === '') continue;
+            try {
+                if ($driver === 'api_football') {
+                    $base = $cfg['base_url'] ?: 'https://v3.football.api-sports.io';
+                    $this->providers->register(new ApiFootballProvider(
+                        $key, rtrim($base, '/'), $timeout
+                    ));
+                } elseif ($driver === 'thesportsdb') {
+                    $base = $cfg['base_url'] ?: 'https://www.thesportsdb.com/api/v1/json';
+                    $this->providers->register(new TheSportsDbProvider(
+                        $key, rtrim($base, '/'), $timeout
+                    ));
+                } elseif ($driver === 'sportmonks') {
+                    $base = $cfg['base_url'] ?: 'https://api.sportmonks.com/v3/football';
+                    $this->providers->register(new SportMonksProvider(
+                        $key, rtrim($base, '/'), $timeout
+                    ));
+                }
+            } catch (\Throwable $e) { /* skip invalid store entries silently */ }
         }
     }
 

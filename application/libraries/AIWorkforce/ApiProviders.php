@@ -32,7 +32,7 @@ final class ApiProviders
                 'label' => 'Sports Intelligence',
                 'group' => 'Sports Intelligence',
                 'kind' => 'data',
-                'drivers' => ['http_sports', 'custom_http'],
+                'drivers' => ['api_football', 'thesportsdb', 'sportmonks', 'http_sports', 'custom_http'],
             ],
             'lottery' => [
                 'label' => 'Lottery / EuroMillions',
@@ -119,6 +119,30 @@ final class ApiProviders
                 'label' => 'Apollo.io',
                 'fields' => [
                     $f('api_key', 'API Key', true, true, 'Apollo.io API key (Settings → API → API Keys). B2B people + company enrichment.'),
+                ],
+            ],
+            'api_football' => [
+                'label' => 'API-Football (api-football.com)',
+                'fields' => [
+                    $f('base_url', 'Base URL', false, false, 'Defaults to https://v3.football.api-sports.io'),
+                    $f('api_key', 'API Key (x-apisports-key)', true, true, 'Get yours at https://dashboard.api-football.com/'),
+                    $f('timeout', 'Timeout (seconds)', false, false),
+                ],
+            ],
+            'thesportsdb' => [
+                'label' => 'TheSportsDB (thesportsdb.com)',
+                'fields' => [
+                    $f('base_url', 'Base URL', false, false, 'Defaults to https://www.thesportsdb.com/api/v1/json'),
+                    $f('api_key', 'API Key (tier key)', true, true, 'Free tier = "3"; get a paid key at https://www.thesportsdb.com'),
+                    $f('timeout', 'Timeout (seconds)', false, false),
+                ],
+            ],
+            'sportmonks' => [
+                'label' => 'SportMonks (sportmonks.com)',
+                'fields' => [
+                    $f('base_url', 'Base URL', false, false, 'Defaults to https://api.sportmonks.com/v3/football'),
+                    $f('api_key', 'API Token', true, true, 'Get yours at https://my.sportmonks.com/'),
+                    $f('timeout', 'Timeout (seconds)', false, false),
                 ],
             ],
             'http_sports' => [
@@ -709,6 +733,9 @@ final class ApiProviders
                 'ibkr_gateway'   => self::testGet(($base !== '' ? $base : 'https://localhost:5000') . '/v1/api/tickle'),
                 'frankfurter' => self::testGet(($base !== '' ? $base : 'https://api.frankfurter.dev') . '/v1/latest?base=EUR&symbols=USD'),
                 'http_sports' => self::testGet(($base !== '' ? $base : '') . '/health', $secrets['token'] ?? $secrets['api_key'] ?? ''),
+                'api_football' => self::testApiFootball(($base !== '' ? $base : 'https://v3.football.api-sports.io'), $secrets['api_key'] ?? ''),
+                'thesportsdb' => self::testTheSportsDb(($base !== '' ? $base : 'https://www.thesportsdb.com/api/v1/json'), $secrets['api_key'] ?? '3'),
+                'sportmonks' => self::testSportMonks(($base !== '' ? $base : 'https://api.sportmonks.com/v3/football'), $secrets['api_key'] ?? ''),
                 'official_lottery' => self::testGet((string) ($extra['health_url'] ?? ($base . '/health')), $secrets['token'] ?? $secrets['api_key'] ?? ''),
                 'libretranslate' => self::testGet(($base !== '' ? $base : '') . '/languages'),
                 'openai_compatible' => self::testOpenAi($base, (string) ($secrets['api_key'] ?? '')),
@@ -794,6 +821,59 @@ final class ApiProviders
         $resp = self::http($models, ['Authorization: Bearer ' . $key]);
         $status = (int) ($resp['status'] ?? 0);
         return ['ok' => $status >= 200 && $status < 400, 'message' => ($status >= 200 && $status < 400) ? 'Connected' : 'Connection failed'];
+    }
+
+    private static function testApiFootball(string $baseUrl, string $key): array
+    {
+        if ($key === '') return ['ok' => false, 'message' => 'An API key is required. Register at https://dashboard.api-football.com/'];
+        $url = rtrim($baseUrl !== '' ? $baseUrl : 'https://v3.football.api-sports.io', '/') . '/status';
+        $resp = self::http($url, ['Accept: application/json', 'x-apisports-key: ' . $key]);
+        $status = (int) ($resp['status'] ?? 0);
+        if ($status >= 200 && $status < 400) {
+            $decoded = json_decode($resp['body'] ?? '', true);
+            $remaining = $decoded['response']['requests']['limit_day'] ?? null;
+            $used = $decoded['response']['requests'] ?? null;
+            $msg = 'Connected to API-Football';
+            if ($remaining !== null) $msg .= ' (' . ($remaining - ($used ?? 0)) . ' requests remaining today)';
+            return ['ok' => true, 'message' => $msg];
+        }
+        if ($status === 401 || $status === 403) return ['ok' => false, 'message' => 'Invalid API key'];
+        if ($status === 429) return ['ok' => false, 'message' => 'Rate limited — try again later'];
+        return ['ok' => false, 'message' => 'Connection failed'];
+    }
+
+    private static function testTheSportsDb(string $baseUrl, string $key): array
+    {
+        $url = rtrim($baseUrl !== '' ? $baseUrl : 'https://www.thesportsdb.com/api/v1/json', '/') . '/' . rawurlencode($key) . '/all_sports.php';
+        $resp = self::http($url, ['Accept: application/json']);
+        $status = (int) ($resp['status'] ?? 0);
+        $decoded = json_decode($resp['body'] ?? '', true);
+        if ($status >= 200 && $status < 400) {
+            if (!empty($decoded['sports'])) {
+                $tier = $key === '3' ? 'Free tier' : 'Premium tier';
+                return ['ok' => true, 'message' => 'Connected to TheSportsDB (' . $tier . ')'];
+            }
+            if (isset($decoded['error'])) return ['ok' => false, 'message' => 'Invalid API key or tier'];
+            return ['ok' => true, 'message' => 'Connected to TheSportsDB'];
+        }
+        if ($status === 401 || $status === 403) return ['ok' => false, 'message' => 'Invalid API key'];
+        return ['ok' => false, 'message' => 'Connection failed'];
+    }
+
+    private static function testSportMonks(string $baseUrl, string $key): array
+    {
+        if ($key === '') return ['ok' => false, 'message' => 'An API token is required. Register at https://my.sportmonks.com/'];
+        $url = rtrim($baseUrl !== '' ? $baseUrl : 'https://api.sportmonks.com/v3/football', '/') . '/leagues?api_token=' . rawurlencode($key);
+        $resp = self::http($url, ['Accept: application/json']);
+        $status = (int) ($resp['status'] ?? 0);
+        $decoded = json_decode($resp['body'] ?? '', true);
+        if ($status >= 200 && $status < 400 && !empty($decoded['data'])) {
+            $count = count($decoded['data']);
+            return ['ok' => true, 'message' => 'Connected to SportMonks (' . $count . ' leagues available)'];
+        }
+        if ($status === 401 || $status === 403) return ['ok' => false, 'message' => 'Invalid API token'];
+        if ($status === 429) return ['ok' => false, 'message' => 'Rate limited — try again later'];
+        return ['ok' => false, 'message' => 'Connection failed'];
     }
 
     /** @return array{status:int,body:string} */

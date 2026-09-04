@@ -423,4 +423,76 @@ class Api_sports extends Api_controller
         } catch (\InvalidArgumentException $e) { $this->jsonError($e->getMessage(), 404); }
         catch (\Throwable $e) { $this->jsonError($e->getMessage(), 409); }
     }
+
+    /**
+     * Sync fixtures/odds/results from a specific named provider.
+     * GET /api/sports/sync?provider=api-football&type=fixtures&from=2026-09-01&to=2026-09-07
+     */
+    public function sync_provider()
+    {
+        $user = $this->requirePermission('sports.manage');
+        if (!$user) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $providerId = (string) ($g['provider'] ?? '');
+        $type = (string) ($g['type'] ?? 'fixtures');
+        if ($providerId === '') return $this->jsonError('provider is required (e.g. api-football, thesportsdb, sportmonks)');
+        $provider = $this->platform->sports->providers->provider($providerId);
+        if (!$provider) return $this->jsonError('provider not registered: ' . $providerId, 404);
+        try {
+            if ($type === 'fixtures') {
+                $query = ['from' => $g['from'] ?? gmdate('Y-m-d'), 'to' => $g['to'] ?? $g['from'] ?? gmdate('Y-m-d')];
+                $result = $this->platform->sports->sync->syncFixtures($provider, $query, 'api-sync-' . $providerId . '-' . gmdate('YmdHis'));
+            } elseif ($type === 'odds') {
+                if (empty($g['fixtureId'])) return $this->jsonError('fixtureId is required for odds sync');
+                $result = $this->platform->sports->sync->syncOdds($provider, (string) $g['fixtureId'], 'api-sync-odds-' . $providerId . '-' . gmdate('YmdHis'));
+            } elseif ($type === 'results') {
+                if (empty($g['fixtureId'])) return $this->jsonError('fixtureId is required for results sync');
+                $result = $this->platform->sports->sync->syncResults($provider, (string) $g['fixtureId'], 'api-sync-results-' . $providerId . '-' . gmdate('YmdHis'));
+            } else {
+                return $this->jsonError('type must be fixtures, odds, or results');
+            }
+            $this->json(['sync' => $result, 'provider' => $providerId, 'type' => $type]);
+        } catch (\Throwable $e) {
+            $this->jsonError($e->getMessage(), 409);
+        }
+    }
+
+    /**
+     * List available native sports provider drivers and their connection status.
+     * GET /api/sports/provider-drivers
+     */
+    public function provider_drivers()
+    {
+        if (!$this->requirePermission('sports.view')) return;
+        $drivers = [
+            'api-football' => [
+                'label' => 'API-Football (api-football.com)',
+                'docs' => 'https://www.api-football.com/documentation-v3',
+                'capabilities' => ['fixtures', 'odds', 'results', 'standings', 'team_statistics', 'leagues'],
+                'envKey' => 'WINDELS_API_FOOTBALL_KEY',
+                'configured' => $this->platform->sports->providers->provider('api-football') !== null,
+            ],
+            'thesportsdb' => [
+                'label' => 'TheSportsDB (thesportsdb.com)',
+                'docs' => 'https://www.thesportsdb.com/api',
+                'capabilities' => ['fixtures', 'results', 'leagues', 'teams'],
+                'notes' => 'No odds endpoint on any tier',
+                'envKey' => 'WINDELS_THESPORTSDB_KEY',
+                'configured' => $this->platform->sports->providers->provider('thesportsdb') !== null,
+            ],
+            'sportmonks' => [
+                'label' => 'SportMonks (sportmonks.com)',
+                'docs' => 'https://docs.sportmonks.com/football/v3',
+                'capabilities' => ['fixtures', 'odds', 'results', 'standings', 'lineups', 'leagues'],
+                'notes' => 'Odds require the optional odds add-on subscription',
+                'envKey' => 'WINDELS_SPORTMONKS_TOKEN',
+                'configured' => $this->platform->sports->providers->provider('sportmonks') !== null,
+            ],
+        ];
+        $liveHealth = $this->platform->sports->providers->health();
+        foreach ($drivers as $id => &$driver) {
+            $driver['health'] = $liveHealth[$id] ?? null;
+        }
+        $this->json(['drivers' => $drivers]);
+    }
 }
