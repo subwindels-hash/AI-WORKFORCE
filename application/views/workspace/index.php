@@ -53,6 +53,13 @@ $mode = $status['tradingMode'] ?? null;
   </a>
 </div>
 
+<h2 class="section-title">Trading intelligence</h2>
+<section class="panel" style="margin-bottom:18px"><div class="body" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap"><div><h3 style="margin:0 0 6px">Connect your trading platform</h3><p class="dim" style="margin:0">Review AI signals, monitor positions, and route only approved trades through the supervised execution pipeline.</p></div><div style="display:flex;gap:8px"><a class="btn primary" href="/app/trading">Open My Trading</a><a class="btn" href="/brokers">Connect broker</a></div></div></section>
+
+<h2 class="section-title">Lottery intelligence</h2>
+<section class="panel" style="margin-bottom:18px"><div class="body" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap"><div><h3 style="margin:0 0 6px">EuroMillions jackpot</h3><div style="font-size:24px;font-weight:700;color:var(--brand)"><?= e($lotteryStatus['jackpot'] ?? '—') ?></div><p class="dim" style="margin:4px 0 0">Next draw: <span id="lottery-next-draw"><?= e($lotteryStatus['nextEstimated'] ?? 'Not available') ?></span> · <span id="lottery-countdown">calculating…</span> · <?= (int)($lotteryStatus['imported'] ?? 0) ?> verified draws</p></div><div style="display:flex;gap:8px"><a class="btn primary" href="/lottery">Open Lottery Intelligence</a><a class="btn" href="/lottery#generator">Generate numbers</a></div><?php $lastLotteryDraw = $lotteryStatus['lastDraw'] ?? null; if (is_array($lastLotteryDraw)): ?><div style="width:100%;margin-top:10px"><span class="dim">Latest verified result</span><div><?php foreach ((array)($lastLotteryDraw['numbers']['main'] ?? $lastLotteryDraw['mainNumbers'] ?? []) as $n): ?><span class="badge b-amber" style="margin-right:4px"><?= e((string)$n) ?></span><?php endforeach; ?><?php foreach ((array)($lastLotteryDraw['numbers']['stars'] ?? $lastLotteryDraw['stars'] ?? $lastLotteryDraw['bonusNumbers'] ?? []) as $n): ?><span class="badge b-blue" style="margin-right:4px">★ <?= e((string)$n) ?></span><?php endforeach; ?></div></div><?php endif; ?></div></div></section>
+<script>(function(){var raw=<?= json_encode($lotteryStatus['nextEstimated'] ?? null) ?>,el=document.getElementById('lottery-countdown');if(!el||!raw)return;var t=Date.parse(raw);if(!isFinite(t)){el.textContent='draw time unavailable';return;}function tick(){var d=Math.max(0,t-Date.now()),h=Math.floor(d/36e5),m=Math.floor(d%36e5/6e4),s=Math.floor(d%6e4/1e3);el.textContent=d?'in '+h+'h '+m+'m '+s+'s':'draw time reached';}tick();setInterval(tick,1000);})();</script>
+
 <h2 class="section-title">Recent activity &amp; alerts</h2>
 <div class="grid cols-main">
   <section class="panel">

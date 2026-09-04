@@ -37,6 +37,7 @@ use AIWorkforce\Strategies\TradingStrategy;
 class Platform
 {
     public readonly ProviderManager $providers;
+    public readonly \AIWorkforce\Agents\AgentOrchestrator $agents;
     public readonly BrokerManager $brokers;
     public readonly UserBrokerConnections $userBrokers;
     public readonly ExecutionSupervisor $execution;
@@ -64,6 +65,22 @@ class Platform
     public function __construct(\AIWorkforce_model $model, bool $disableRealProviders = false)
     {
         $this->model = $model;
+        $this->agents = new \AIWorkforce\Agents\AgentOrchestrator(function (string $type, ?string $id, string $agent, array $data) use ($model): void {
+            $model->audit->emit($type, "Agent {$agent} execution {$id}", ['executionId' => $id, 'agent' => $agent, 'data' => $data], 'agent');
+        });
+
+        foreach ([
+            ['general', []],
+            ['market', ['crypto.getPrice', 'forex.getRate']],
+            ['sports', ['sports.getFixtures', 'sports.getMatchStats']],
+            ['lead_discovery', []],
+            ['lottery', ['lottery.getResults', 'lottery.generateCombinations']],
+            ['language', ['language.analyzePronunciation']],
+            ['trading', ['broker.getAccount', 'broker.getPositions']],
+            ['video', ['video.create']],
+        ] as [$role, $tools]) {
+            $this->agents->register(new \AIWorkforce\Agents\CloudflareSpecialistAgent($role, $tools));
+        }
 
         $this->providers = new ProviderManager();
         $this->disableRealProviders = $disableRealProviders;

@@ -5,6 +5,7 @@ use AIWorkforce\Notifications\Notifier;
 use AIWorkforce\Persistence\AuditRepository;
 use AIWorkforce\Persistence\SportsRepository;
 use AIWorkforce\Sports\Providers\HttpSportsProvider;
+use AIWorkforce\Sports\Providers\FootballApiProvider;
 use AIWorkforce\Sports\Providers\ProviderException;
 use AIWorkforce\Sports\Providers\SandboxSportsProvider;
 use AIWorkforce\Sports\Providers\SportsProviderManager;
@@ -100,6 +101,21 @@ class SportsIntelligence
     /** Register providers from environment configuration only — no secrets in code. */
     private function registerProviders(): void
     {
+        // First-class vendor adapters. Each is optional and only registered when
+        // its server-side key is present; this makes fallback and health status
+        // work consistently across all three vendors.
+        $vendors = [
+            ['api-football', 'WINDELS_API_FOOTBALL_KEY', 'https://v3.football.api-sports.io', 'api-football'],
+            ['thesportsdb', 'WINDELS_THESPORTSDB_KEY', 'https://www.thesportsdb.com/api/v1/json', 'thesportsdb'],
+            ['sportmonks', 'WINDELS_SPORTMONKS_TOKEN', 'https://api.sportmonks.com/v3/football', 'sportmonks'],
+        ];
+        foreach ($vendors as [$id, $keyName, $defaultBase, $kind]) {
+            $key = getenv($keyName);
+            if (is_string($key) && $key !== '') {
+                $base = (string)(getenv('WINDELS_'.strtoupper(str_replace('-', '_', $id)).'_BASE_URL') ?: $defaultBase);
+                $this->providers->register(new FootballApiProvider($id, $base, $key, $kind, (int)(getenv('WINDELS_SPORTS_HTTP_TIMEOUT') ?: 10)));
+            }
+        }
         if ($this->mode() === 'SANDBOX' && getenv('WINDELS_SPORTS_SANDBOX') === '1') {
             $this->providers->register(new SandboxSportsProvider());
         }

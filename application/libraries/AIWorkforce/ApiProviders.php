@@ -62,7 +62,7 @@ final class ApiProviders
                 'label' => 'Translation',
                 'group' => 'Language Learning',
                 'kind' => 'data',
-                'drivers' => ['openai_compatible', 'libretranslate', 'custom_http'],
+                'drivers' => ['openai_compatible', 'cloudflare_workers_ai', 'libretranslate', 'custom_http'],
             ],
             'stt' => [
                 'label' => 'Speech-to-Text',
@@ -80,13 +80,13 @@ final class ApiProviders
                 'label' => 'Language AI tutor',
                 'group' => 'Language Learning',
                 'kind' => 'data',
-                'drivers' => ['openai_compatible', 'custom_http'],
+                'drivers' => ['openai_compatible', 'cloudflare_workers_ai', 'custom_http'],
             ],
             'llm' => [
                 'label' => 'AI / LLM services',
                 'group' => 'AI Workforce',
                 'kind' => 'data',
-                'drivers' => ['openai_compatible', 'custom_http'],
+                'drivers' => ['openai_compatible', 'cloudflare_workers_ai', 'custom_http'],
             ],
             'pronunciation' => [
                 'label' => 'Pronunciation scoring',
@@ -195,6 +195,16 @@ final class ApiProviders
                 'label' => 'Frankfurter / ECB forex',
                 'fields' => [
                     $f('base_url', 'Base URL', false, false, 'Defaults to https://api.frankfurter.dev'),
+                ],
+            ],
+            'cloudflare_workers_ai' => [
+                'label' => 'Cloudflare Workers AI',
+                'fields' => [
+                    $f('account_id', 'Cloudflare Account ID', false, true, 'Cloudflare dashboard → Account ID'),
+                    $f('base_url', 'AI Gateway / API base URL', false, false, 'Defaults to https://api.cloudflare.com/client/v4/accounts/{account}/ai/run'),
+                    $f('token', 'Cloudflare API token', true, true, 'Token needs Workers AI: Read permission; use a restricted token.'),
+                    $f('model', 'Workers AI model', false, true, 'e.g. @cf/meta/llama-3.1-8b-instruct'),
+                    $f('gateway', 'AI Gateway name', false, false, 'Optional gateway for observability, caching and rate limits'),
                 ],
             ],
             'openai_compatible' => [
@@ -702,6 +712,7 @@ final class ApiProviders
                 'official_lottery' => self::testGet((string) ($extra['health_url'] ?? ($base . '/health')), $secrets['token'] ?? $secrets['api_key'] ?? ''),
                 'libretranslate' => self::testGet(($base !== '' ? $base : '') . '/languages'),
                 'openai_compatible' => self::testOpenAi($base, (string) ($secrets['api_key'] ?? '')),
+                'cloudflare_workers_ai' => self::testCloudflare($row, $secrets),
                 'browser_webspeech' => ['ok' => true, 'message' => 'Browser Web Speech needs no server credential.'],
                 'custom_http' => self::testGet($base . ((string) ($extra['health_path'] ?? '/health')), $secrets['token'] ?? $secrets['api_key'] ?? ''),
                 default => ['ok' => false, 'message' => 'No test is defined for this provider.'],
@@ -761,6 +772,18 @@ final class ApiProviders
         if ($status >= 200 && $status < 400) return ['ok' => true, 'message' => 'Connected'];
         if ($status === 401 || $status === 403) return ['ok' => false, 'message' => 'Invalid API key'];
         return ['ok' => false, 'message' => 'Connection failed'];
+    }
+
+    private static function testCloudflare(array $row, array $secrets): array
+    {
+        $account = (string)($row['account_id'] ?? ''); $token = (string)($secrets['token'] ?? '');
+        $extra = is_array($row['extra'] ?? null) ? $row['extra'] : [];
+        $model = (string)($extra['model'] ?? '@cf/meta/llama-3.1-8b-instruct');
+        if ($account === '' || $token === '') return ['ok'=>false,'message'=>'Cloudflare account ID and token are required.'];
+        $url = rtrim((string)($row['base_url'] ?? ''), '/');
+        if ($url === '') $url = 'https://api.cloudflare.com/client/v4/accounts/'.rawurlencode($account).'/ai/run/'.rawurlencode($model);
+        $r = self::http($url, ['Authorization: Bearer '.$token, 'Content-Type: application/json'], json_encode(['prompt'=>'Reply with OK.']));
+        $status=(int)($r['status']??0); return ['ok'=>$status>=200&&$status<400,'message'=>$status>=200&&$status<400?'Connected':'Connection failed'];
     }
 
     private static function testOpenAi(string $url, string $key): array
@@ -829,11 +852,19 @@ final class ApiProviders
 
     public static function openaiChat(array $cfg, array $messages, int $maxTokens = 260): ?string
     {
+        $driver = (string)($cfg['driver'] ?? '');
         $url = trim((string) ($cfg['base_url'] ?? ''));
-        $key = (string) ($cfg['secrets']['api_key'] ?? '');
         $model = (string) ($cfg['extra']['model'] ?? '');
+        $key = (string) ($cfg['secrets']['api_key'] ?? $cfg['secrets']['token'] ?? '');
+        if ($driver === 'cloudflare_workers_ai') {
+            $account = (string)($cfg['account_id'] ?? '');
+            if ($url === '') $url = 'https://api.cloudflare.com/client/v4/accounts/'.rawurlencode($account).'/ai/run/'.rawurlencode($model);
+            if ($account !== '' && ($cfg['extra']['gateway'] ?? '') !== '') $url = 'https://gateway.ai.cloudflare.com/v1/'.rawurlencode($account).'/'.rawurlencode((string)$cfg['extra']['gateway']).'/workers-ai/'.rawurlencode($model);
+        }
         if ($url === '' || $key === '' || $model === '') return null;
-        $body = json_encode(['model' => $model, 'messages' => $messages, 'temperature' => 0.2, 'max_tokens' => $maxTokens], JSON_UNESCAPED_SLASHES);
+        $body = $driver === 'cloudflare_workers_ai'
+            ? json_encode(['messages' => $messages, 'max_tokens' => $maxTokens], JSON_UNESCAPED_SLASHES)
+            : json_encode(['model' => $model, 'messages' => $messages, 'temperature' => 0.2, 'max_tokens' => $maxTokens], JSON_UNESCAPED_SLASHES);
         $resp = self::http($url, ['Content-Type: application/json', 'Authorization: Bearer ' . $key], $body);
         $payload = json_decode($resp['body'] ?? '', true);
         $answer = $payload['choices'][0]['message']['content'] ?? null;

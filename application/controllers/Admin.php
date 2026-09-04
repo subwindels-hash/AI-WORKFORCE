@@ -27,6 +27,11 @@ class Admin extends App_Controller
         $data = $this->base('Admin Dashboard', 'dashboard');
         $data['stats'] = $this->portal->dashboardStats();
         $data['smtp'] = \AIWorkforce\Mailer::configSummary();
+        $data['agentRuntime'] = [
+            'cloudflareConfigured' => \AIWorkforce\ApiProviders::publicStatus('llm')['configured'],
+            'registeredAgents' => array_keys($this->platform->agents->agents()),
+            'toolPolicy' => 'Approval required for broker.submitTrade and lottery.purchaseTicket',
+        ];
         $this->render('admin/index', $data);
     }
 
