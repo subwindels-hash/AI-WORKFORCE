@@ -143,7 +143,9 @@ class AgentPlatform
             'sessionManager' => $this->sessionManager?->stats() ?? ['configured' => false],
             'workflowEngine' => $this->workflowEngine?->stats() ?? ['configured' => false],
             'communicationBus' => [
-                'availableAgents' => $this->agentOrchestrator ? count($this->agentOrchestrator->agents()) : 0,
+                // List of agent roles — every consumer (workspace widgets,
+                // command center) treats this as an array (count/array_slice).
+                'availableAgents' => $this->agentOrchestrator ? array_keys($this->agentOrchestrator->agents()) : [],
             ],
         ];
     }

@@ -94,8 +94,10 @@ test('api-football maps odds correctly', function () {
     $p = new ApiFootballProvider('k', 'https://api.test', 10, makeTransport(200, $body));
     $odds = $p->odds('123');
     assert_equals(3, count($odds));
-    assert_equals('Match Winner', $odds[0]['market']);
-    assert_equals('Home', $odds[0]['selection']);
+    // Providers emit the pipeline's canonical market/selection keys
+    // (see 89-sports-odds-form-e2e.php: 'Match Winner' → MATCH_RESULT / HOME).
+    assert_equals('MATCH_RESULT', $odds[0]['market']);
+    assert_equals('HOME', $odds[0]['selection']);
     assert_equals(1.85, $odds[0]['decimalOdds']);
     assert_equals('Bet365', $odds[0]['bookmaker']);
 });
@@ -321,8 +323,9 @@ test('sportmonks maps odds with optional add-on', function () {
     $p = new SportMonksProvider('t', 'https://api.test', 10, makeTransport(200, $body));
     $odds = $p->odds('100');
     assert_equals(2, count($odds));
-    assert_equals('Full Time Result', $odds[0]['market']);
-    assert_equals('Home', $odds[0]['selection']);
+    // Canonical market keys ('Full Time Result' → MATCH_RESULT / HOME).
+    assert_equals('MATCH_RESULT', $odds[0]['market']);
+    assert_equals('HOME', $odds[0]['selection']);
     assert_equals(1.85, $odds[0]['decimalOdds']);
     assert_equals('William Hill', $odds[0]['bookmaker']);
 });
@@ -376,12 +379,17 @@ test('provider manager falls back through native providers in order', function (
     $down = new ApiFootballProvider('bad', 'https://api.test', 10, makeTransport(401));
     $down->health(); // trigger offline state
 
-    $apiFootballFixture = json_encode(['response' => [
-        ['fixture' => ['id' => 1, 'date' => '2026-09-15T12:00:00Z', 'status' => ['short' => 'NS']],
-         'teams' => ['home' => ['id' => 1, 'name' => 'Home'], 'away' => ['id' => 2, 'name' => 'Away']],
-         'league' => ['id' => 1, 'name' => 'League', 'season' => 2026]],
+    // SportMonks-shaped payload for the SportMonks mock (its own parsing is
+    // covered above); only the manager's fallback ORDER is under test here.
+    $sportmonksFixture = json_encode(['data' => [
+        ['id' => 1, 'starting_at' => '2026-09-15T12:00:00+00:00', 'status' => 6,
+         'participants' => [
+             ['id' => 1, 'name' => 'Home', 'meta' => ['location' => 'home']],
+             ['id' => 2, 'name' => 'Away', 'meta' => ['location' => 'away']],
+         ],
+         'league' => ['id' => 1, 'name' => 'League'], 'season' => ['id' => 2026]],
     ]]);
-    $sm = new SportMonksProvider('token', 'https://api.test', 10, makeTransport(200, $apiFootballFixture));
+    $sm = new SportMonksProvider('token', 'https://api.test', 10, makeTransport(200, $sportmonksFixture));
     $sm->health(); // should be ONLINE
 
     $manager->register($down);

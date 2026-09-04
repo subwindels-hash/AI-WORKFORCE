@@ -1,0 +1,37 @@
+-- SQLite mirror of multiplier_intelligence.mysql.sql.
+-- WINDELS AI Multiplier Intelligence: crash-game analytics module.
+CREATE TABLE IF NOT EXISTS crash_game_providers (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 0, config_json TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_cg_providers_enabled ON crash_game_providers(enabled);
+CREATE TABLE IF NOT EXISTS crash_game_provider_health (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, status TEXT NOT NULL, latency_ms INTEGER, detail TEXT, checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_cg_provider_health_provider ON crash_game_provider_health(provider_id);
+CREATE INDEX IF NOT EXISTS idx_cg_provider_health_checked ON crash_game_provider_health(checked_at);
+CREATE TABLE IF NOT EXISTS crash_game_rounds (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, round_id TEXT NOT NULL, game_code TEXT NOT NULL DEFAULT 'aviator', multiplier REAL NOT NULL, started_at TEXT NOT NULL, crashed_at TEXT, duration_ms INTEGER, verified INTEGER NOT NULL DEFAULT 0, raw_data_json TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(provider_id, round_id));
+CREATE INDEX IF NOT EXISTS idx_cg_rounds_game ON crash_game_rounds(game_code);
+CREATE INDEX IF NOT EXISTS idx_cg_rounds_started ON crash_game_rounds(started_at);
+CREATE INDEX IF NOT EXISTS idx_cg_rounds_multiplier ON crash_game_rounds(multiplier);
+CREATE INDEX IF NOT EXISTS idx_cg_rounds_verified ON crash_game_rounds(verified);
+CREATE TABLE IF NOT EXISTS crash_game_models (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, version TEXT NOT NULL DEFAULT '1.0', description TEXT, config_json TEXT, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_cg_models_enabled ON crash_game_models(enabled);
+CREATE TABLE IF NOT EXISTS crash_game_predictions (id INTEGER PRIMARY KEY AUTOINCREMENT, model_id INTEGER NOT NULL, provider_id INTEGER NOT NULL, round_id TEXT, predicted_multiplier REAL NOT NULL, predicted_min REAL, predicted_max REAL, confidence REAL NOT NULL DEFAULT 0.0, risk_level TEXT NOT NULL DEFAULT 'MEDIUM' CHECK (risk_level IN ('LOW','MEDIUM','HIGH','EXTREME')), signal_type TEXT NOT NULL DEFAULT 'MULTIPLIER', agents_json TEXT, features_json TEXT, predicted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, actual_multiplier REAL, actual_at TEXT, error_value REAL, error_pct REAL, validated INTEGER NOT NULL DEFAULT 0, validated_at TEXT);
+CREATE INDEX IF NOT EXISTS idx_cg_predictions_model ON crash_game_predictions(model_id);
+CREATE INDEX IF NOT EXISTS idx_cg_predictions_provider ON crash_game_predictions(provider_id);
+CREATE INDEX IF NOT EXISTS idx_cg_predictions_predicted ON crash_game_predictions(predicted_at);
+CREATE INDEX IF NOT EXISTS idx_cg_predictions_validated ON crash_game_predictions(validated);
+CREATE INDEX IF NOT EXISTS idx_cg_predictions_confidence ON crash_game_predictions(confidence);
+CREATE TABLE IF NOT EXISTS crash_game_agent_executions (id INTEGER PRIMARY KEY AUTOINCREMENT, prediction_id INTEGER, agent_type TEXT NOT NULL, agent_name TEXT NOT NULL, input_json TEXT, output_json TEXT, confidence REAL, latency_ms INTEGER, status TEXT NOT NULL DEFAULT 'COMPLETED', executed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_cg_executions_prediction ON crash_game_agent_executions(prediction_id);
+CREATE INDEX IF NOT EXISTS idx_cg_executions_agent ON crash_game_agent_executions(agent_type);
+CREATE INDEX IF NOT EXISTS idx_cg_executions_executed ON crash_game_agent_executions(executed_at);
+CREATE TABLE IF NOT EXISTS crash_game_accuracy_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, model_id INTEGER NOT NULL, window_size INTEGER NOT NULL, window_type TEXT NOT NULL DEFAULT 'LAST_N' CHECK (window_type IN ('LAST_N','TIME_RANGE')), total_predictions INTEGER NOT NULL DEFAULT 0, validated_predictions INTEGER NOT NULL DEFAULT 0, accuracy_pct REAL, avg_error REAL, avg_confidence REAL, best_confidence REAL, worst_error REAL, snapshot_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_cg_snapshots_model ON crash_game_accuracy_snapshots(model_id);
+CREATE INDEX IF NOT EXISTS idx_cg_snapshots_at ON crash_game_accuracy_snapshots(snapshot_at);
+CREATE TABLE IF NOT EXISTS crash_game_active_signals (id INTEGER PRIMARY KEY AUTOINCREMENT, prediction_id INTEGER NOT NULL, provider_id INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'ANALYZING' CHECK (status IN ('ANALYZING','ACTIVE','EXPIRED','HIT','MISSED')), signal_json TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, expires_at TEXT, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_cg_signals_status ON crash_game_active_signals(status);
+CREATE INDEX IF NOT EXISTS idx_cg_signals_expires ON crash_game_active_signals(expires_at);
+INSERT OR IGNORE INTO crash_game_models (code, name, version, description) VALUES ('STATISTICAL-BASELINE-v1', 'Statistical Baseline', '1.0', 'Pure statistical analysis using historical distributions');
+INSERT OR IGNORE INTO crash_game_models (code, name, version, description) VALUES ('PATTERN-ENSEMBLE-v1', 'Pattern Ensemble', '1.0', 'Ensemble of pattern detection agents');
+INSERT OR IGNORE INTO crash_game_models (code, name, version, description) VALUES ('SEQUENCE-LSTM-v1', 'Sequence LSTM', '1.0', 'Sequence analysis with LSTM-style patterns');
+INSERT OR IGNORE INTO crash_game_models (code, name, version, description) VALUES ('MIXED-ENSEMBLE-v1', 'Mixed Ensemble', '1.0', 'Combined output from all specialist agents');
+INSERT OR IGNORE INTO crash_game_models (code, name, version, description) VALUES ('ANOMALY-AWARE-v1', 'Anomaly Aware', '1.0', 'Model that adjusts for detected anomalies');
+INSERT OR IGNORE INTO crash_game_providers (code, name, enabled) VALUES ('simulation', 'Simulation (Demo Data)', 1);
+INSERT OR IGNORE INTO crash_game_providers (code, name, enabled) VALUES ('aviator_demo', 'Aviator Demo Adapter', 0);
