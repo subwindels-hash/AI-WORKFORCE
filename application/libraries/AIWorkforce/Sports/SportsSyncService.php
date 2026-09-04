@@ -9,7 +9,12 @@ use AIWorkforce\Sports\Providers\SportsDataProvider;
 /** Idempotent fixture ingestion. Provider exceptions and malformed records are counted, never hidden. */
 class SportsSyncService
 {
-    public function __construct(private SportsRepository $repo, private AuditRepository $audit, private DataQualityEngine $quality) {}
+    private FormResolver $formResolver;
+
+    public function __construct(private SportsRepository $repo, private AuditRepository $audit, private DataQualityEngine $quality, ?FormResolver $formResolver = null)
+    {
+        $this->formResolver = $formResolver ?? new FormResolver();
+    }
 
     public function syncResults(SportsDataProvider $provider, string $fixtureExternalId, string $executionKey): array
     {
@@ -53,14 +58,17 @@ class SportsSyncService
             $health = $provider->health();
             $this->repo->saveHealth((int) $source['id'], array_merge($health, ['status' => $health['status'] ?? 'DATA_ERROR']));
             if (($health['status'] ?? '') !== 'ONLINE') throw new \RuntimeException('provider is not ONLINE');
-            foreach ($provider->fixtures($query) as $raw) {
+            $rawFixtures = $provider->fixtures($query);
+            // Enrich fixtures with recentForm context from team statistics
+            $rawFixtures = $this->formResolver->enrich($provider, $rawFixtures);
+            foreach ($rawFixtures as $raw) {
                 $processed++;
                 try {
                     $match = SportsDataNormalizer::fixture($raw, $provider->id());
                     $existing = $this->repo->saveMatch((int) $source['id'], $match);
                     // Repository upserts; source payload decides whether this was logically created/updated.
                     !empty($existing['created_at']) && $existing['created_at'] === $existing['updated_at'] ? $created++ : $updated++;
-                    $assessment = $this->quality->assess($match, ['oddsAvailable' => false, 'recentFormAvailable' => false, 'providerReliability' => (float) ($health['reliability'] ?? 0), 'dataAgeSeconds' => 0]);
+                    $assessment = $this->quality->assess($match, ['oddsAvailable' => false, 'recentFormAvailable' => !empty($match['context']['recentForm']), 'providerReliability' => (float) ($health['reliability'] ?? 0), 'dataAgeSeconds' => 0]);
                     $this->repo->saveQuality((int) $existing['id'], $assessment);
                 } catch (\Throwable $e) { $invalid++; $errors[] = mb_substr($e->getMessage(), 0, 200); }
             }

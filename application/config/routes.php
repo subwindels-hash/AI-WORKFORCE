@@ -117,7 +117,19 @@ $route['execution/execute'] = 'execution/execute';
 $route['execution/limits'] = 'execution/limits';
 $route['execution/(:any)/decide'] = 'execution/decide/$1';
 $route['execution/(:any)/route'] = 'execution/route/$1';
-$route['app/trading'] = 'trading';
+$route['app/trading'] = 'trading/index';
+$route['app/workforce'] = 'workforce/index';
+$route['app/agent-platform'] = 'agent_platform/index';
+$route['workforce'] = 'workforce';
+$route['agent-platform'] = 'agent_platform';
+$route['app/trading/submit_order'] = 'trading/submit_order';
+$route['app/trading/close_position'] = 'trading/close_position';
+$route['app/trading/widget_data'] = 'trading/widget_data';
+$route['app/trading/signals'] = 'trading/signals';
+$route['app/trading/chart_data'] = 'trading/chart_data';
+$route['app/trading/risk_dashboard'] = 'trading/risk_dashboard';
+$route['app/trading/performance'] = 'trading/performance';
+$route['app/trading/toggle_kill_switch'] = 'trading/toggle_kill_switch';
 $route['trading'] = 'trading';
 $route['brokers'] = 'brokers';
 $route['brokers/sim-toggle'] = 'brokers/sim_toggle';
@@ -146,6 +158,25 @@ $route['lottery/draw/(:num)'] = 'lottery/index';
 $route['lottery/tickets'] = 'lottery/index';
 $route['lottery/backtests'] = 'lottery/index';
 
+// Multiplier Intelligence
+$route['app/multiplier'] = 'multiplier/index';
+$route['multiplier'] = 'multiplier';
+$route['multiplier/generate_signal'] = 'multiplier/generate_signal';
+$route['multiplier/live'] = 'multiplier/live';
+$route['multiplier/dashboard'] = 'multiplier/dashboard_data';
+$route['multiplier/accuracy'] = 'multiplier/accuracy';
+$route['multiplier/validate'] = 'multiplier/validate';
+$route['multiplier/verify'] = 'multiplier/verify_integration';
+$route['multiplier/test-sports'] = 'multiplier/test_sports_enrichment';
+$route['multiplier/demo'] = 'multiplier/live_demo';
+$route['multiplier/admin'] = 'multiplier_admin/index';
+$route['multiplier/stream/live'] = 'multiplier_stream/live';
+$route['multiplier/stream/signals'] = 'multiplier_stream/signals';
+
+// AI Command Center
+$route['command-center'] = 'command_center/index';
+$route['ai-command-center'] = 'command_center/index';
+
 // ---- JSON API (spec §17 subset for Phases 1–3) ---------------------------
 $route['api/system/status'] = 'api_system/status';
 $route['api/auth/login'] = 'api_auth/login';
@@ -169,6 +200,8 @@ $route['api/sports/results'] = 'api_sports/results';
 $route['api/sports/results/verify'] = 'api_sports/verify_result';
 $route['api/sports/providers'] = 'api_sports/providers';
 $route['api/sports/providers/(:num)/toggle'] = 'api_sports/toggle_provider/$1';
+$route['api/sports/provider-drivers'] = 'api_sports/provider_drivers';
+$route['api/sports/sync'] = 'api_sports/sync_provider';
 $route['api/sports/models'] = 'api_sports/models';
 $route['api/sports/models/performance'] = 'api_sports/model_performance';
 $route['api/sports/calibrations'] = 'api_sports/calibrations';
@@ -189,6 +222,7 @@ $route['api/sports/correlation'] = 'api_sports/correlation_monitor';
 
 // WINDELS Lottery Intelligence (EuroMillions first; provider-neutral)
 $route['api/lottery/status'] = 'api_lottery/status';
+$route['api/lottery/dashboard'] = 'api_lottery/dashboard';
 $route['api/lottery/lotteries'] = 'api_lottery/lotteries';
 $route['api/lottery/rules'] = 'api_lottery/rules';
 $route['api/lottery/draws'] = 'api_lottery/draws';
@@ -218,6 +252,18 @@ $route['api/lottery/sync'] = 'api_lottery/sync';
 $route['api/system/features'] = 'api_system/features';
 $route['api/agents/status'] = 'api_agents/status';
 $route['api/agents/dispatch'] = 'api_agents/dispatch';
+$route['api/agents/cloudflare_status'] = 'api_agents/cloudflare_status';
+
+// Agent Platform API
+$route['api/agent-platform/execute'] = 'api_agent_platform/execute';
+$route['api/agent-platform/tool'] = 'api_agent_platform/tool';
+$route['api/agent-platform/workflow'] = 'api_agent_platform/workflow';
+$route['api/agent-platform/workflow/(:any)'] = 'api_agent_platform/workflow_status/$1';
+$route['api/agent-platform/sessions'] = 'api_agent_platform/sessions';
+$route['api/agent-platform/observability'] = 'api_agent_platform/observability';
+$route['api/agent-platform/status'] = 'api_agent_platform/status';
+$route['api/agent-platform/tools'] = 'api_agent_platform/tools';
+$route['api/agent-platform/agents'] = 'api_agent_platform/agents';
 $route['api/brokers'] = 'api_system/brokers';
 $route['api/brokers/mt5/account'] = 'api_system/mt5_account';
 $route['api/brokers/mt5/quote'] = 'api_system/mt5_quote';

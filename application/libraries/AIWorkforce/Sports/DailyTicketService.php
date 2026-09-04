@@ -20,6 +20,8 @@ use AIWorkforce\Sports\Providers\SportsProviderManager;
  */
 class DailyTicketService
 {
+    private FormResolver $formResolver;
+
     public function __construct(
         private SportsRepository $repo,
         private AuditRepository $audit,
@@ -29,8 +31,11 @@ class DailyTicketService
         private PredictionPipeline $pipeline,
         private TicketOptimizer $optimizer,
         private TicketGovernance $governance,
-        private DecisionRecorder $decisions
-    ) {}
+        private DecisionRecorder $decisions,
+        ?FormResolver $formResolver = null,
+    ) {
+        $this->formResolver = $formResolver ?? new FormResolver();
+    }
 
     public function runDaily(?string $date = null, ?string $executionKey = null): array
     {
@@ -68,8 +73,10 @@ class DailyTicketService
                 } else {
                     $provider = $attempt['provider'];
                     $providerId = (int) $this->repo->ensureProvider($provider, $provider)['id'];
+                    // Enrich raw fixtures with recentForm from team statistics
+                    $enrichedFixtures = $this->formResolver->enrich($this->providers->provider($provider), $attempt['result']);
                     $candidates = [];
-                    foreach ($attempt['result'] as $rawFixture) {
+                    foreach ($enrichedFixtures as $rawFixture) {
                         try {
                             $match = SportsDataNormalizer::fixture($rawFixture, $provider);
                             $saved = $this->repo->saveMatch($providerId, $match);

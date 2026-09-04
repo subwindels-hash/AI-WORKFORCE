@@ -27,10 +27,54 @@ class Admin extends App_Controller
         $data = $this->base('Admin Dashboard', 'dashboard');
         $data['stats'] = $this->portal->dashboardStats();
         $data['smtp'] = \AIWorkforce\Mailer::configSummary();
+        // Initialize Cloudflare agent runtime if configured
+        $cloudflareRuntime = null;
+        try {
+            $llmConfig = \AIWorkforce\ApiProviders::activeConfig('llm');
+            if ($llmConfig && ($llmConfig['driver'] ?? '') === 'cloudflare_workers_ai') {
+                $cloudflareRuntime = new \AIWorkforce\CloudflareAgentRuntime([
+                    'account_id' => $llmConfig['account_id'] ?? '',
+                    'token' => $llmConfig['secrets']['token'] ?? '',
+                    'gateway' => $llmConfig['extra']['gateway'] ?? null,
+                ]);
+            }
+        } catch (\Throwable $e) {
+            // Cloudflare not configured
+        }
+
+        // Get Cloudflare platform status (new unified platform)
+        $cfPlatformStatus = [];
+        try {
+            $cfPlatformStatus = $this->platform->cloudflare->status();
+        } catch (\Throwable $e) {
+            // Platform not yet initialized
+        }
+        
         $data['agentRuntime'] = [
             'cloudflareConfigured' => \AIWorkforce\ApiProviders::publicStatus('llm')['configured'],
-            'registeredAgents' => array_keys($this->platform->agents->agents()),
+            'cloudflareRuntime' => $cloudflareRuntime ? $cloudflareRuntime->status() : null,
+            'platformStatus' => $cfPlatformStatus,
+            'registeredAgents' => $cloudflareRuntime ? array_keys($cloudflareRuntime->agents()) : array_keys($this->platform->agents->agents()),
+            'registeredTools' => $cloudflareRuntime ? array_keys($cloudflareRuntime->tools()) : [],
             'toolPolicy' => 'Approval required for broker.submitTrade and lottery.purchaseTicket',
+            'availableServices' => [
+                'text_generation' => 'Llama 3.1 (8B/70B), Mistral, Gemma, Phi-2 via Workers AI',
+                'embeddings' => 'BGE Base/Large for semantic search and RAG',
+                'image_generation' => 'Stable Diffusion XL, Dreamshaper',
+                'speech_recognition' => 'Whisper and Whisper Large v3',
+                'translation' => 'M2M100 — 100+ languages',
+                'summarization' => 'BART text summarization',
+                'classification' => 'Sentiment and zero-shot classification',
+                'object_detection' => 'DETR ResNet-50 for computer vision',
+            ],
+            'platformComponents' => [
+                'Model Router' => 'Multi-provider failover with rate limiting and cost tracking',
+                'MCP Tool Registry' => 'Centralized tool discovery with 15+ registered tools',
+                'Agent Sessions' => 'Durable conversations with history and state',
+                'Workflow Engine' => 'Long-running tasks with retry and scheduling',
+                'Communication Bus' => 'Agent-to-agent delegation and routing',
+                'Observability' => 'Full monitoring dashboard with traces',
+            ],
         ];
         $this->render('admin/index', $data);
     }
