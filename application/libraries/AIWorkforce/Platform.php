@@ -58,6 +58,7 @@ class Platform
     public \AIWorkforce\LangLearn\AdaptiveLearningService $adaptive;
     public \AIWorkforce\LangLearn\TeacherCoach $langcoach;
     public \AIWorkforce\LangLearn\Translator $translator;
+    public \AIWorkforce\Cloudflare\AgentPlatform $cloudflare;
 
     /** True when AI_WORKFORCE_DISABLE_REAL_PROVIDERS=1 forces the simulated feed. */
     private bool $disableRealProviders = false;
@@ -65,9 +66,10 @@ class Platform
     public function __construct(\AIWorkforce_model $model, bool $disableRealProviders = false)
     {
         $this->model = $model;
-        $this->agents = new \AIWorkforce\Agents\AgentOrchestrator(function (string $type, ?string $id, string $agent, array $data) use ($model): void {
+        $auditFn = function (string $type, ?string $id, string $agent, array $data) use ($model): void {
             $model->audit->emit($type, "Agent {$agent} execution {$id}", ['executionId' => $id, 'agent' => $agent, 'data' => $data], 'agent');
-        });
+        };
+        $this->agents = new \AIWorkforce\Agents\AgentOrchestrator($auditFn);
 
         foreach ([
             ['general', []],
@@ -147,6 +149,14 @@ class Platform
         $this->monitor = new \AIWorkforce\Portfolio\PortfolioRiskMonitor(
             $model->paper, $this->paper, $this->risk, $this->brokers, $model->audit, $model->state,
             $this->notifications
+        );
+
+        // ── Cloudflare AI Agent Platform ───────────────────────────
+        $this->cloudflare = new \AIWorkforce\Cloudflare\AgentPlatform(
+            $model->db,
+            $auditFn,
+            null, // Approval handler — set by ExecutionSupervisor when needed
+            $this->agents
         );
     }
 
