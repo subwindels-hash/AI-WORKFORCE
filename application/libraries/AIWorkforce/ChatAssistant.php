@@ -12,23 +12,51 @@ final class ChatAssistant
 {
     private const SYSTEM = <<<'TXT'
 You are WINDELS Assistant for WINDELS AI WORKFORCE (also called WINDELS AI OS).
-You explain how the signed-in platform works. Be specific: name the page and path.
+Full source: https://github.com/subwindels-hash/AI-WORKFORCE
 
-Product map (member sidebar):
-- Dashboard (/dashboard) — home widgets: lottery jackpot, trading, language, sports, agents. Empty modules stay empty.
-- AI Command Center (/command-center) — health of all AI modules in one place.
-- AI Workforce (/analysis) — multi-agent market analysis (technical, structure, forex, crypto, sentiment, consensus, debate). Chart LIVE badge is earned from provenance, never assumed.
-- Windels AI Agents (/app/workforce) — chat with specialist agents (market, sports, lottery, language, trading, leads, video). Observability at /app/agent-platform.
-- AI Teacher (/app/languages/teacher) and My Languages (/app/languages) — 20+ languages, real profiles, assessment from authored banks, SRS vocab, listening via browser TTS, speaking via SpeechRecognition. Pronunciation scores are never faked.
-- Lead Discovery (/leads) and Pipeline (/lead-pipeline) — search city/category; configured Places (or similar) required; empty results are never filled with fake businesses. Duplicates: provider + stable source ID; human merge.
-- Paper Trading (/paper), Strategy Lab (/strategy), Analytics (/journal) — paper orders run kill switch → mode → risk engine. Paper is simulation.
-- My Trading (/app/trading), Execution (/execution), Brokers (/brokers), Risk Center (/risk) — 15-step execution supervisor; ANALYSIS_ONLY + kill switch on by default; agents never call brokers.
-- Sports Intel (/sports) — fixtures and odds from connected sports data when available; no fixtures invented.
-- EuroMillions (/lottery) — historical observations only, not predictions; official draws need a configured feed. Tickets, statistics, system builder, backtests stay on that hub.
-- Multiplier AI (/multiplier) — live crash-history analysis (Bustabit by default). No demo multipliers silently substituted. Crash games are RNG; analysis is educational.
+You explain how the signed-in platform works. Be specific: name the page and path.
+NEVER repeat the same information in a conversation. Each reply should be fresh and useful.
+
+PRODUCT MAP (member sidebar after sign-in):
+- Dashboard (/dashboard) — home widgets: lottery jackpot, trading equity, paper accounts, language profiles, sports providers, Windels AI Agents. Empty modules stay empty (no fake data).
+- AI Command Center (/command-center) — health of ALL AI modules: Windels AI Agents, Multiplier AI, Lottery Intel, Trading Intel, Sports Intel, Language AI, Lead Discovery.
+- AI Workforce (/analysis) — multi-agent market analysis: technical, market structure, forex, crypto, sentiment, consensus, adversarial debate. Chart LIVE badge requires non-synthetic, fresh, undelayed provenance.
+- Windels AI Agents (/app/workforce) — chat with 9 specialist agents (Market, Sports, Lottery, Language, Trading, Lead Scout, Video). Observability at /app/agent-platform. Tools need approval; audit trail records dispatches. AGENTS NEVER CALL BROKERS.
+- AI Language Teacher (/app/languages/teacher), My Languages (/app/languages) — 20+ languages, real profiles, assessment from authored banks, SRS vocabulary, browser TTS listening, SpeechRecognition speaking. Pronunciation scores from real transcripts, NEVER fabricated.
+- Lead Discovery (/leads), Pipeline (/lead-pipeline) — search city/category. Configured Places provider required. Empty results NOT filled with fake businesses. Duplicates: provider + stable source ID; human merge required.
+- Paper Trading (/paper), Strategy Lab (/strategy), Analytics (/journal) — paper orders run kill switch → mode → risk engine. Paper is SIMULATION. Strategy Lab backtests and requires paper evidence before live approval.
+- My Trading (/app/trading), Execution (/execution), Brokers (/brokers), Risk Center (/risk) — 15-step execution supervisor. ANALYSIS_ONLY + kill switch ON by default. Agents analyze; never place broker orders. Brokers: MT5, OANDA, Alpaca, IBKR, exchanges.
+- Sports Intel (/sports) — fixtures and odds from connected sports data. No fixtures invented when feed missing. Predictions model-stamped, never mixed with demo.
+- EuroMillions (/lottery) — HISTORICAL OBSERVATIONS ONLY, not predictions. Every valid line has same chance. Official draws need configured feed. Tickets, statistics (frequency/hot-cold/gaps), system builder, backtests on this hub. Actual ticket results separate from backtests/sandbox.
+- Multiplier AI (/multiplier) — LIVE crash-history analysis (Bustabit by default, or WINDELS_CRASH_HISTORY_URL). 9 specialist agents produce ensemble estimate with confidence + risk. NO demo multipliers silently substituted. If live feed down → NO_DATA. Crash games use RNG; educational analysis, not guaranteed prediction.
 - Alerts (/notifications), Messages (/messages), My Account (/account), Help (/faq).
 
-Honesty: never invent prices, draws, businesses, fixtures or crash results. Say when a provider or administrator must configure something. Keep replies concise and practical. Do not reveal or link administrator login URLs.
+HONESTY RULES (NEVER VIOLATE):
+- NEVER invent prices, draws, businesses, fixtures, crash results, or prediction accuracy
+- NEVER claim future prediction ability for lottery, crashes, or markets
+- Say when a provider/administrator must configure something
+- If you don't know, say so — don't make things up
+- Keep replies CONCISE but COMPLETE — answer what was asked, don't repeat
+
+MODULE DETAILS (know these cold):
+
+DASHBOARD: Shows real widget values only. Lottery shows jackpot if configured feed has data. Trading shows paper equity. Language shows profile count. Sports shows provider count. Windels AI Agents shows agent/tool counts. If a widget has no data, it stays empty — no placeholders, no fake numbers.
+
+LEAD DISCOVERY: Search by city, category, business type. Requires configured Places provider (Google Places or similar). Results come from real provider data — each lead has provider + stable source ID for identity. Empty results are NOT filled with fake businesses. Duplicate detection: same provider + source ID = potential duplicate, reviewed in Intelligence, human confirms merge.
+
+LANGUAGES: Catalog includes Dutch, Spanish, French, German, English, Italian, Portuguese, and more. Create profile → assessment from authored banks → lessons + SRS vocabulary → listening (browser TTS) + speaking (SpeechRecognition, scores from real transcript). Pronunciation scores never faked.
+
+TRADING: Default boot state is ANALYSIS_ONLY + kill switch active. Paper Trading simulates orders through FULL risk chain (kill switch → mode → stop-loss → Risk Engine). Strategy Lab backtests strategies on paper data. My Trading shows positions. Execution runs 15-step supervisor before any routing. Brokers need healthy connector; missing bridge = ROUTING_BLOCKED.
+
+SPORTS: Fixtures/odds from connected sports data providers. No fixtures invented. When no feed, module shows no matches. Predictions when enabled are stamped with model version, never mixed with demo.
+
+EUROMILLIONS: Frequency/hot-cold/gaps/distribution are HISTORICAL OBSERVATIONS — the engine explicitly states every valid line has equal probability. Official draws only after configured feed ingests and verifies. System builder computes C(N,5)×C(S,2) lines, never hardcoded. Backtests include mandatory random baseline for comparison.
+
+MULTIPLIER: Uses LiveCrashProvider (Bustabit public feed by default). 9 agents: historical, pattern, probability, sequence, anomaly, risk, validation, performance, prediction. Ensemble estimate with confidence + risk level. NO demo data substitution. Educational analysis only — crashes use provably-fair RNG.
+
+ACCOUNT: Profile, security, password management. Messages with support at /messages. Alerts at /notifications. Sign in from homepage; register if new. Public pages never expose admin login.
+
+If asked about anything not listed, say: "That's not a module I have details on. Try asking about Dashboard, Command Center, Windels AI Agents, Languages, Lead Discovery, Trading, Sports, EuroMillions, Multiplier AI, or Account."
 TXT;
 
     public function respond(string $message, ?array $user = null): array
@@ -71,26 +99,26 @@ TXT;
         return match ($topic) {
             'greeting' => $this->answerGreeting($signedIn),
             'platform' => $this->answerPlatform(),
-            'dashboard' => 'Open Dashboard at /dashboard after you sign in. It shows real widgets only — lottery jackpot, paper equity, language profiles, sports providers and Windels AI Agents. If a provider is not configured the widget stays empty instead of inventing numbers.',
-            'command' => 'AI Command Center (/command-center) is the single status board for Windels AI Agents, Multiplier AI, Lottery, Trading, Sports, Language and Lead Discovery. Status is healthy / degraded / error from live checks, not placeholders.',
-            'agents' => 'Windels AI Agents live at /app/workforce. Pick a specialist (Market, Sports, Lottery, Language, Trading, Lead Scout, Video) and send an instruction. Tools need approval; the audit trail records dispatches. Platform health is at /app/agent-platform. Agents never call brokers.',
-            'analysis' => 'AI Workforce analysis is /analysis. Technical, market-structure, forex, crypto and sentiment agents vote, then consensus and an adversarial debate can only reduce conviction — they never manufacture a trade. The chart LIVE badge requires non-synthetic, fresh, undelayed provenance.',
-            'language' => 'Open AI Teacher at /app/languages/teacher or My Languages at /app/languages. Create a profile for a catalog language (Dutch, Spanish, French, German, English, and more). Assessment, lessons and SRS vocabulary use authored banks. Listening uses the browser voice; speaking scores word accuracy from a real transcript. Pronunciation scores are never invented.',
-            'leads' => 'Lead Discovery is /leads. Search a city, category or business type. Google Places (or another configured provider) must be enabled in Admin → API; empty provider results are never replaced with fake businesses. Identity is provider + stable source ID. Review duplicates in Intelligence; merges need a human. Pipeline at /lead-pipeline is the Kanban for those real leads.',
-            'pipeline' => 'Pipeline (/lead-pipeline) is the Kanban/table for leads you already discovered. Change status, assign a member, add a note. It does not invent businesses — those come from Lead Discovery after a provider search.',
-            'export' => 'Export leads from Lead Discovery or Intelligence as formula-safe CSV/JSON. Every export is written to the audit history. Nothing is exported that was not stored from a real provider.',
-            'duplicate' => 'Open Lead Discovery Intelligence to review duplicate candidates. Primary identity is provider plus stable source ID. Secondary signals never auto-merge; a human must confirm.',
-            'trading' => 'Trading defaults to ANALYSIS_ONLY with the kill switch on. Paper Trading (/paper) simulates orders through the full risk chain (kill switch → mode → stop-loss → Risk Engine). Strategy Lab (/strategy) backtests and requires paper evidence before live approval. My Trading is /app/trading. Agents analyse; they never place broker orders.',
-            'paper' => 'Paper Trading (/paper) is simulation: accounts, orders, fills and strategy deployments. Every order still hits the kill switch, trading mode and Risk Engine. Nothing leaves the process. Synthetic prices require an explicit audited flag and stay labelled SIMULATION.',
-            'execution' => 'Execution (/execution) runs the 15-step Trade Execution Supervisor: kill switch, mode, strategy lifecycle, broker health, freshness, duplicates, risk, then human approval or a configured automation envelope. Routing only happens through a verified connector. Brokers are at /brokers; limits at /risk.',
-            'brokers' => 'Brokers (/brokers) lists your connections (MT5, OANDA, Alpaca, IBKR, exchanges). Order routing needs a healthy, demo-gated connector unless live is explicitly allowed. A missing bridge is ROUTING_BLOCKED — the platform does not pretend a terminal exists.',
-            'risk' => 'Risk Center (/risk) holds limits, kill switch and the Portfolio Risk Monitor (exposure, leverage, correlated positions, drawdown, daily loss, broker disconnect). The Risk Engine can veto any paper or live order. Default boot: ANALYSIS_ONLY + kill switch active.',
-            'sports' => 'Sports Intel is /sports. Fixtures and odds come from connected sports data. With no feed the module stays off and shows no invented matches. Predictions, when enabled, are model-stamped and never mixed with demo data.',
-            'lottery' => 'EuroMillions is /lottery. Frequency, hot/cold and gaps are historical observations, not predictions — the engine states that every valid line has the same chance. Official draws appear only after a configured feed is ingested and verified. Build tickets, statistics, systems and backtests on that hub. Actual ticket results stay separate from backtests and sandbox data.',
-            'multiplier' => 'Multiplier AI is /multiplier. It analyses live crash-game history (Bustabit public feed by default, or WINDELS_CRASH_HISTORY_URL). Nine specialist agents produce an ensemble estimate with confidence and risk. If the live feed is down you see NO_DATA — simulated rounds are not substituted. Crash games use RNG; this is educational analysis, not a guaranteed next crash.',
-            'account' => 'My Account is /account (profile, security, password). Messages with support are /messages. Alerts are /notifications. Sign in from the homepage; register if you do not have an account. Public pages never link an administrator login.',
-            'admin' => 'WINDELS AI WORKFORCE only exposes the normal member sign-in on the public site. Administrator tools (API providers, users, notifications) are behind a private entry after a privileged session. I will not publish that URL. Members use /account.',
-            'help' => 'Help/FAQ is /faq. For how a module works, name it (agents, languages, leads, trading, sports, EuroMillions, multiplier) and I will give the path and the honesty rules for that area.',
+            'dashboard' => 'Dashboard (/dashboard) shows real widget values only — lottery jackpot (if feed configured), paper equity, language profiles count, sports providers count, Windels AI Agents count. Empty widgets stay empty, never filled with fake numbers.',
+            'command' => 'AI Command Center (/command-center) shows health of ALL AI modules: Windels AI Agents, Multiplier AI, Lottery Intel, Trading Intel, Sports Intel, Language AI, Lead Discovery. Status is healthy/degraded/error from live checks, not placeholders.',
+            'agents' => 'Windels AI Agents (/app/workforce) — chat with 9 specialist agents: Market, Sports, Lottery, Language, Trading, Lead Scout, Video. Tools need approval; audit trail records dispatches. AGENTS NEVER CALL BROKERS. Platform health at /app/agent-platform.',
+            'analysis' => 'AI Workforce (/analysis) — multi-agent market analysis: technical, market structure, forex, crypto, sentiment agents vote, then consensus + adversarial debate (can only reduce conviction, never manufacture trades). Chart LIVE badge requires non-synthetic, fresh, undelayed provenance.',
+            'language' => 'AI Language Teacher (/app/languages/teacher), My Languages (/app/languages) — 20+ languages. Create profile → assessment from authored banks → lessons + SRS vocabulary → browser TTS listening + SpeechRecognition speaking. Pronunciation scores from REAL transcripts, never fabricated.',
+            'leads' => 'Lead Discovery (/leads) — search city/category/business type. Requires configured Places provider (Google Places or similar). Results from REAL provider data — each lead has provider + stable source ID. Empty results NOT filled with fake businesses. Duplicates reviewed in Intelligence; human confirms merge.',
+            'pipeline' => 'Pipeline (/lead-pipeline) — Kanban/table for leads already discovered. Change status, assign member, add notes. Does NOT invent businesses — those come from Lead Discovery after provider search.',
+            'export' => 'Export leads from Lead Discovery or Intelligence as formula-safe CSV/JSON. Every export written to audit history. Nothing exported that was not stored from a real provider.',
+            'duplicate' => 'Open Lead Discovery Intelligence to review duplicate candidates. Primary identity: provider + stable source ID. Secondary signals never auto-merge; human must confirm.',
+            'trading' => 'Trading defaults to ANALYSIS_ONLY + kill switch ON. Paper Trading (/paper) simulates orders through FULL risk chain. Strategy Lab (/strategy) backtests, requires paper evidence before live approval. My Trading (/app/trading) shows positions. Agents analyze; never place broker orders.',
+            'paper' => 'Paper Trading (/paper) — SIMULATION: accounts, orders, fills, strategy deployments. Every order hits kill switch, trading mode, Risk Engine. Nothing leaves the process. Synthetic prices require explicit audited flag, stay labelled SIMULATION.',
+            'execution' => 'Execution (/execution) — 15-step Trade Execution Supervisor: kill switch, mode, strategy lifecycle, broker health, freshness, duplicates, risk, then human approval or configured automation envelope. Routing only through verified connector.',
+            'brokers' => 'Brokers (/brokers) — connections: MT5, OANDA, Alpaca, IBKR, exchanges. Order routing needs healthy, demo-gated connector unless live explicitly allowed. Missing bridge = ROUTING_BLOCKED.',
+            'risk' => 'Risk Center (/risk) — limits, kill switch, Portfolio Risk Monitor (exposure, leverage, correlated positions, drawdown, daily loss, broker disconnect). Risk Engine can veto any paper/live order. Default boot: ANALYSIS_ONLY + kill switch active.',
+            'sports' => 'Sports Intel (/sports) — fixtures/odds from connected sports data. No fixtures invented when feed missing. Predictions, when enabled, stamped with model version, never mixed with demo.',
+            'lottery' => 'EuroMillions (/lottery) — HISTORICAL OBSERVATIONS ONLY, NOT predictions. Every valid line has equal probability. Official draws only after configured feed ingests + verifies. Statistics (frequency/hot-cold/gaps/distribution), system builder (computes C(N,5)×C(S,2)), backtests with mandatory random baseline. Actual ticket results separate from backtests/sandbox.',
+            'multiplier' => 'Multiplier AI (/multiplier) — LIVE crash-history analysis (Bustabit public feed by default, or WINDELS_CRASH_HISTORY_URL). 9 specialist agents produce ensemble estimate with confidence + risk. NO demo multipliers silently substituted — if live feed down → NO_DATA. Crash games use provably-fair RNG; educational analysis, not guaranteed prediction.',
+            'account' => 'My Account (/account) — profile, security, password. Messages with support at /messages. Alerts at /notifications. Sign in from homepage; register if new. Public pages never expose admin login.',
+            'admin' => 'WINDELS AI WORKFORCE only exposes normal member sign-in on public site. Administrator tools (API providers, users, notifications) behind private entry after privileged session. I will not publish that URL. Members use /account.',
+            'help' => 'Help/FAQ is /faq. For how a module works, name it specifically (e.g., "EuroMillions tickets", "paper trading kill switch", "language teacher Dutch", "lead search", "multiplier live feed") and I will give the exact path and honesty rules.',
             default => $this->answerFallback($value),
         };
     }
@@ -115,28 +143,28 @@ TXT;
     private function matchTopic(string $value): string
     {
         $topics = [
-            'greeting' => ['hello', 'hi ', 'hi,', "hi'", 'hey', 'good morning', 'good afternoon', 'good evening', 'thanks', 'thank you'],
-            'platform' => ['what is windels', 'what is this', 'about the platform', 'ai workforce', 'windels ai', 'what can you do', 'what do you do', 'who are you', 'tell me about', 'overview', 'full details', 'this product'],
-            'command' => ['command center', 'command-center'],
-            'agents' => ['windels ai agent', 'ai agent', 'workforce console', 'specialist agent', '/app/workforce', 'agent platform'],
-            'analysis' => ['analysis', 'consensus', 'candlestick', 'market data', '/analysis'],
-            'language' => ['language', 'teacher', 'dutch', 'spanish', 'vocabulary', 'cefr', 'pronunciation', 'lesson'],
-            'leads' => ['lead', 'discover', 'google places', 'business search', 'places'],
-            'pipeline' => ['pipeline', 'kanban'],
-            'export' => ['export', 'csv', 'json download'],
-            'duplicate' => ['duplicate', 'merge lead'],
-            'paper' => ['paper trad', 'paper account', 'simulate order'],
-            'execution' => ['execution', 'supervisor', 'approve trade', 'kill switch'],
-            'brokers' => ['broker', 'mt5', 'metatrader', 'oanda', 'alpaca', 'ibkr'],
-            'risk' => ['risk center', 'risk engine', 'drawdown', 'exposure'],
-            'trading' => ['trad', 'strategy lab', 'journal', 'kill switch', 'analysis_only', 'forex', 'crypto'],
-            'sports' => ['sport', 'fixture', 'football', 'premier league'],
-            'lottery' => ['lottery', 'euromillions', 'euro millions', 'lucky star', 'ticket'],
-            'multiplier' => ['multiplier', 'crash game', 'aviator', 'bustabit'],
+            'greeting' => ['hello', 'hi ', 'hi,', "hi'", 'hey', 'good morning', 'good afternoon', 'good evening', 'thanks', 'thank you', 'greetings'],
+            'platform' => ['what is windels', 'what is this', 'about the platform', 'ai workforce', 'windels ai', 'what can you do', 'what do you do', 'who are you', 'tell me about', 'overview', 'full details', 'this product', 'explain', 'describe', 'introduction', 'what is', 'your platform'],
+            'command' => ['command center', 'command-center', 'all modules', 'module health', 'AI status'],
+            'agents' => ['windels ai agent', 'ai agent', 'workforce console', 'specialist agent', '/app/workforce', 'agent platform', 'agent chat', 'talk to agent'],
+            'analysis' => ['analysis', 'consensus', 'candlestick', 'market data', '/analysis', 'market analysis', 'technical analysis', 'ai workforce analysis'],
+            'language' => ['language', 'teacher', 'dutch', 'spanish', 'vocabulary', 'cefr', 'pronunciation', 'lesson', 'speak', 'learn language', 'language learning', 'my languages'],
+            'leads' => ['lead', 'discover', 'google places', 'business search', 'places', 'find business', 'search business', 'lead discovery'],
+            'pipeline' => ['pipeline', 'kanban', 'lead pipeline', 'manage leads'],
+            'export' => ['export', 'csv', 'json download', 'download leads'],
+            'duplicate' => ['duplicate', 'merge lead', 'merge duplicate', 'intelligence'],
+            'paper' => ['paper trad', 'paper account', 'simulate order', 'paper trading', 'simulation'],
+            'execution' => ['execution', 'supervisor', 'approve trade', 'kill switch', 'trade execution', 'execution supervisor'],
+            'brokers' => ['broker', 'mt5', 'metatrader', 'oanda', 'alpaca', 'ibkr', 'connect broker', 'brokers'],
+            'risk' => ['risk center', 'risk engine', 'drawdown', 'exposure', 'risk management', 'portfolio risk'],
+            'trading' => ['trad', 'strategy lab', 'journal', 'kill switch', 'analysis_only', 'forex', 'crypto', 'trading dashboard', 'paper trading', 'strategy', 'trading account'],
+            'sports' => ['sport', 'fixture', 'football', 'premier league', 'sports intel', 'sports intelligence', 'odds', 'sports data'],
+            'lottery' => ['lottery', 'euromillions', 'euro millions', 'lucky star', 'ticket', 'lottery intel', 'frequency', 'hot cold', 'gap', 'distribution', 'system builder', 'wheel', 'backtest'],
+            'multiplier' => ['multiplier', 'crash game', 'aviator', 'bustabit', 'crash', 'multiplier ai', 'live crash'],
             'admin' => ['admin', 'administrator', 'super admin'],
-            'account' => ['account', 'password', 'sign in', 'login', 'register', 'message', 'notification', 'alert'],
-            'dashboard' => ['dashboard', 'home widget', '/dashboard'],
-            'help' => ['help', 'faq', 'how do i', 'where do i'],
+            'account' => ['account', 'password', 'sign in', 'login', 'register', 'message', 'notification', 'alert', 'profile', 'security', 'my account'],
+            'dashboard' => ['dashboard', 'home widget', '/dashboard', 'home', 'widgets', 'summary'],
+            'help' => ['help', 'faq', 'how do i', 'where do i', 'guide', 'which module'],
         ];
         foreach ($topics as $topic => $needles) {
             foreach ($needles as $needle) {
