@@ -88,6 +88,13 @@ class SpeechProvider {
     return map[code] || 'Voice input is not available right now. You can still type.';
   }
 
+  /**
+   * Spoken form of the brand: Win-dels (WIN + dels). On-screen spelling stays WINDELS.
+   */
+  speakableText(text) {
+    return String(text == null ? '' : text).replace(/\bWINDELS\b/gi, 'Win-dels');
+  }
+
   textToSpeech(text, opts) {
     opts = opts || {};
     if (!this.synth || !text) {
@@ -95,7 +102,7 @@ class SpeechProvider {
       return null;
     }
     this.synth.cancel();
-    const utter = new SpeechSynthesisUtterance(text);
+    const utter = new SpeechSynthesisUtterance(this.speakableText(text));
     utter.lang = opts.locale || 'en-US';
     utter.rate = typeof opts.rate === 'number' ? opts.rate : 1;
     utter.volume = typeof opts.volume === 'number' ? opts.volume : 1;
