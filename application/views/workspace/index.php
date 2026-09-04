@@ -53,6 +53,9 @@ $mode = $status['tradingMode'] ?? null;
   </a>
 </div>
 
+<h2 class="section-title">Trading intelligence</h2>
+<section class="panel" style="margin-bottom:18px"><div class="body" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap"><div><h3 style="margin:0 0 6px">Connect your trading platform</h3><p class="dim" style="margin:0">Review AI signals, monitor positions, and route only approved trades through the supervised execution pipeline.</p></div><div style="display:flex;gap:8px"><a class="btn primary" href="/app/trading">Open My Trading</a><a class="btn" href="/brokers">Connect broker</a></div></div></section>
+
 <h2 class="section-title">Recent activity &amp; alerts</h2>
 <div class="grid cols-main">
   <section class="panel">
