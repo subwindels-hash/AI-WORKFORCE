@@ -101,39 +101,61 @@ class SpeechProvider {
       if (opts.onError) opts.onError(new Error('TTS not available'));
       return null;
     }
-    this.synth.cancel();
-    const utter = new SpeechSynthesisUtterance(this.speakableText(text));
-    utter.lang = opts.locale || 'en-US';
-    utter.rate = typeof opts.rate === 'number' ? opts.rate : 1;
-    utter.volume = typeof opts.volume === 'number' ? opts.volume : 1;
-    utter.pitch = typeof opts.pitch === 'number' ? opts.pitch : 1;
+    const spoken = this.speakableText(text);
+    const locale = opts.locale || 'en-US';
+    const run = () => {
+      try { this.synth.cancel(); } catch (e) { /* ignore */ }
+      try { this.synth.resume(); } catch (e) { /* Chrome needs resume after cancel */ }
+      const utter = new SpeechSynthesisUtterance(spoken);
+      utter.lang = locale;
+      utter.rate = typeof opts.rate === 'number' ? opts.rate : 1;
+      utter.volume = typeof opts.volume === 'number' ? opts.volume : 1;
+      utter.pitch = typeof opts.pitch === 'number' ? opts.pitch : 1;
 
-    if (opts.voice && typeof opts.voice === 'object' && opts.voice.lang) {
-      utter.voice = opts.voice;
-      utter.lang = opts.voice.lang;
-    } else if (typeof opts.voice === 'number') {
-      const voices = this.getVoicesForLocale(utter.lang);
-      if (voices[opts.voice]) {
-        utter.voice = voices[opts.voice];
-        utter.lang = voices[opts.voice].lang;
+      if (opts.voice && typeof opts.voice === 'object' && opts.voice.lang) {
+        utter.voice = opts.voice;
+        utter.lang = opts.voice.lang;
+      } else if (typeof opts.voice === 'number') {
+        const voices = this.getVoicesForLocale(utter.lang);
+        if (voices[opts.voice]) {
+          utter.voice = voices[opts.voice];
+          utter.lang = voices[opts.voice].lang;
+        }
+      } else {
+        const matches = this.getVoicesForLocale(utter.lang);
+        if (matches.length) {
+          utter.voice = matches[0];
+          utter.lang = matches[0].lang;
+        } else {
+          const any = this.getSupportedVoices();
+          if (any.length) {
+            utter.voice = any[0];
+          } else if (opts.requireVoice) {
+            if (opts.onError) opts.onError(new Error('No voice for this language'));
+            return null;
+          }
+        }
       }
-    } else {
-      const matches = this.getVoicesForLocale(utter.lang);
-      if (matches.length) {
-        utter.voice = matches[0];
-        utter.lang = matches[0].lang;
-      } else if (opts.requireVoice) {
-        if (opts.onError) opts.onError(new Error('No voice for this language'));
-        return null;
-      }
-    }
 
-    if (opts.onStart) utter.onstart = opts.onStart;
-    utter.onend = () => { this._utter = null; if (opts.onEnd) opts.onEnd(); };
-    utter.onerror = (e) => { this._utter = null; if (opts.onError) opts.onError(e); };
-    this._utter = utter;
-    this.synth.speak(utter);
-    return utter;
+      if (opts.onStart) utter.onstart = opts.onStart;
+      utter.onend = () => { this._utter = null; if (opts.onEnd) opts.onEnd(); };
+      utter.onerror = (e) => { this._utter = null; if (opts.onError) opts.onError(e); };
+      this._utter = utter;
+      this.synth.speak(utter);
+      // Chrome sometimes drops the first utterance until voices have loaded.
+      if (this.getSupportedVoices().length === 0) {
+        const once = () => {
+          this._voices = this.synth.getVoices();
+          this._voicesReady = true;
+          if (this._utter === utter && !this.synth.speaking) {
+            try { this.synth.speak(utter); } catch (e) { /* ignore */ }
+          }
+        };
+        this.synth.addEventListener('voiceschanged', once, { once: true });
+      }
+      return utter;
+    };
+    return run();
   }
 
   pause() {
