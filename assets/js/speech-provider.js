@@ -17,6 +17,12 @@ class SpeechProvider {
     this._utter = null;
     this._rec = null;
     this._recording = false;
+    this._listenUserStop = false;
+    this._listenHold = false;
+    this._listenOpts = null;
+    this._listenAccum = '';
+    this._listenStartedAt = 0;
+    this._listenRestartTimer = null;
     if (this.synth) {
       this._voices = this.synth.getVoices();
       if (this._voices.length === 0) {
@@ -78,7 +84,7 @@ class SpeechProvider {
       'not-allowed': 'Microphone access was blocked. Allow the microphone in your browser settings to speak.',
       'permission-denied': 'Microphone access was blocked. Allow the microphone in your browser settings to speak.',
       'NotAllowedError': 'Microphone access was blocked. Allow the microphone in your browser settings to speak.',
-      'no-speech': 'Nothing was heard. Try speaking a little closer to the microphone.',
+      'no-speech': 'Still listening — speak when you are ready, or tap Stop when you are finished.',
       'audio-capture': 'No microphone was found on this device.',
       'network': 'Speech recognition needs a network connection in this browser.',
       'service-not-allowed': 'Speech recognition is not allowed in this browser.',
@@ -182,34 +188,106 @@ class SpeechProvider {
       if (opts.onError) opts.onError(new Error('STT not available'));
       return null;
     }
-    this.stopListening();
+    if (this._listenRestartTimer) {
+      clearTimeout(this._listenRestartTimer);
+      this._listenRestartTimer = null;
+    }
+    if (this._rec) {
+      try { this._rec.onend = null; this._rec.stop(); } catch (e) { /* ignore */ }
+      this._rec = null;
+    }
+    this._listenUserStop = false;
+    this._listenOpts = opts;
+    this._listenHold = opts.holdUntilStop !== false;
+    this._listenMinMs = typeof opts.minListenMs === 'number' ? opts.minListenMs : 30000;
+    this._listenStartedAt = Date.now();
+    this._listenAccum = '';
+    this._recording = true;
+    return this._openRecognition();
+  }
+
+  _openRecognition() {
+    const opts = this._listenOpts || {};
+    if (!this.SR || this._listenUserStop) return null;
     const rec = new this.SR();
     rec.lang = opts.locale || 'en-US';
-    rec.interimResults = !!opts.interimResults;
+    rec.interimResults = opts.interimResults !== false;
     rec.maxAlternatives = opts.maxAlternatives || 1;
-    rec.continuous = !!opts.continuous;
+    rec.continuous = true;
     rec.onresult = (ev) => {
-      let transcript = '';
+      let interim = '';
+      let finals = '';
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
-        transcript += ev.results[i][0] ? ev.results[i][0].transcript : '';
+        const piece = ev.results[i][0] ? ev.results[i][0].transcript : '';
+        if (ev.results[i].isFinal) finals += piece + ' ';
+        else interim += piece;
       }
-      if (opts.onResult) opts.onResult(transcript.trim(), ev);
+      if (finals.trim()) {
+        this._listenAccum = (this._listenAccum + ' ' + finals).replace(/\s+/g, ' ').trim();
+      }
+      const shown = (this._listenAccum + (interim ? ' ' + interim : '')).replace(/\s+/g, ' ').trim();
+      if (opts.onResult && shown) opts.onResult(shown, ev);
     };
-    rec.onerror = (ev) => { this._recording = false; if (opts.onError) opts.onError(ev); };
-    rec.onend = () => { this._recording = false; this._rec = null; if (opts.onEnd) opts.onEnd(); };
-    rec.onstart = () => { this._recording = true; if (opts.onStart) opts.onStart(); };
+    rec.onerror = (ev) => {
+      const code = ev && ev.error ? ev.error : '';
+      if (code === 'no-speech' || code === 'aborted') {
+        if (this._listenHold && !this._listenUserStop) {
+          if (opts.onStatus) opts.onStatus('Still listening — speak when you are ready, or tap Stop when you are finished.');
+          return;
+        }
+      }
+      if (!this._listenHold || this._listenUserStop) {
+        this._recording = false;
+        if (opts.onError) opts.onError(ev);
+      } else if (opts.onStatus) {
+        opts.onStatus(this.friendlySttError(ev));
+      }
+    };
+    rec.onend = () => {
+      this._rec = null;
+      if (this._listenUserStop) {
+        this._recording = false;
+        if (opts.onEnd) opts.onEnd({ reason: 'stop', transcript: this._listenAccum });
+        return;
+      }
+      if (this._listenHold) {
+        const elapsed = Date.now() - this._listenStartedAt;
+        if (opts.onStatus) {
+          opts.onStatus(elapsed < this._listenMinMs
+            ? 'Still listening — no speech yet. Keep going, or tap Stop when you are finished.'
+            : 'Still listening for more. Tap Stop when you have finished talking.');
+        }
+        this._listenRestartTimer = setTimeout(() => {
+          this._listenRestartTimer = null;
+          if (!this._listenUserStop) this._openRecognition();
+        }, 180);
+        return;
+      }
+      this._recording = false;
+      if (opts.onEnd) opts.onEnd({ reason: 'end', transcript: this._listenAccum });
+    };
+    rec.onstart = () => {
+      this._recording = true;
+      if (opts.onStart) opts.onStart();
+    };
     try {
       rec.start();
       this._rec = rec;
     } catch (e) {
-      this._recording = false;
-      if (opts.onError) opts.onError(e);
-      return null;
+      this._listenRestartTimer = setTimeout(() => {
+        this._listenRestartTimer = null;
+        if (!this._listenUserStop) this._openRecognition();
+      }, 400);
     }
     return rec;
   }
 
   stopListening() {
+    this._listenUserStop = true;
+    if (this._listenRestartTimer) {
+      clearTimeout(this._listenRestartTimer);
+      this._listenRestartTimer = null;
+    }
     if (this._rec) {
       try { this._rec.stop(); } catch (e) { /* already stopped */ }
       this._rec = null;
@@ -219,14 +297,15 @@ class SpeechProvider {
 
   /**
    * Wire a microphone button to an input/textarea.
-   * Button labels: "🎤 Tap to Speak" → "Recording..." → "Stop"
+   * Listens through silence for at least 30s; only ends when the user taps Stop.
    */
   bindMic(button, input, opts) {
     opts = opts || {};
     if (!button || !input) return;
     const idle = opts.idleLabel || '🎤 Tap to Speak';
-    const recLabel = opts.recordingLabel || 'Recording… Stop';
+    const recLabel = opts.recordingLabel || '🎤 Listening…';
     const status = opts.onStatus || function () {};
+    const stopBtn = typeof opts.stopButton === 'string' ? document.querySelector(opts.stopButton) : opts.stopButton;
     const self = this;
     button.type = 'button';
     if (!button.textContent.trim()) button.textContent = idle;
@@ -235,11 +314,16 @@ class SpeechProvider {
       button.classList.remove('is-recording');
       button.setAttribute('aria-pressed', 'false');
       button.textContent = idle;
+      if (stopBtn) stopBtn.disabled = true;
     };
     const setRec = () => {
       button.classList.add('is-recording');
       button.setAttribute('aria-pressed', 'true');
       button.textContent = recLabel;
+      if (stopBtn) {
+        stopBtn.hidden = false;
+        stopBtn.disabled = false;
+      }
     };
 
     if (!this.SR) {
@@ -248,41 +332,71 @@ class SpeechProvider {
         button.disabled = true;
         button.title = 'Voice input is not available in this browser.';
       }
+      if (stopBtn) stopBtn.hidden = true;
       return;
     }
 
-    button.addEventListener('click', function (ev) {
-      ev.preventDefault();
-      if (self._recording) {
-        self.stopListening();
-        setIdle();
-        status('Stopped.');
-        return;
-      }
+    const finish = function (msg) {
+      setIdle();
+      status(msg);
+    };
+
+    const startListen = function () {
       const locale = typeof opts.localeFor === 'function' ? opts.localeFor() : (opts.locale || 'en-GB');
       setRec();
-      status('Listening… speak now.');
+      status('Listening… take your time. Silence does not end this. Tap Stop when you have finished talking.');
       self.speechToText({
         locale: locale,
         interimResults: true,
+        holdUntilStop: true,
+        minListenMs: opts.minListenMs || 30000,
+        onStatus: status,
         onResult: function (transcript) {
           if (!transcript) return;
           if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') {
             input.value = transcript;
             input.dispatchEvent(new Event('input', { bubbles: true }));
           }
-          status('Recognized. Review and send.');
+          status('Heard you — still listening for more. Tap Stop when you are finished.');
         },
         onError: function (err) {
-          setIdle();
-          status(self.friendlySttError(err));
+          const code = err && (err.error || err.message);
+          if (code === 'no-speech' || code === 'aborted') {
+            status('Still listening — speak when you are ready, or tap Stop when you are finished.');
+            return;
+          }
+          finish(self.friendlySttError(err));
         },
-        onEnd: function () {
-          setIdle();
-          if (!String(input.value || '').trim()) status('Nothing was captured. Tap to speak again.');
+        onEnd: function (info) {
+          const got = String((info && info.transcript) || input.value || '').trim();
+          if (info && info.reason === 'stop') {
+            finish(got ? 'Stopped. Review what was captured.' : 'Stopped. Nothing was captured — tap Speak to try again.');
+          } else {
+            finish(got ? 'Listening ended. Review what was captured.' : 'Still waiting — tap Speak to listen again.');
+          }
         },
       });
+    };
+
+    button.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      if (self._recording) {
+        self.stopListening();
+        finish(String(input.value || '').trim() ? 'Stopped. Review what was captured.' : 'Stopped.');
+        return;
+      }
+      startListen();
     });
+
+    if (stopBtn) {
+      stopBtn.type = 'button';
+      stopBtn.disabled = true;
+      stopBtn.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        self.stopListening();
+        finish(String(input.value || '').trim() ? 'Stopped. Review what was captured.' : 'Stopped.');
+      });
+    }
   }
 }
 

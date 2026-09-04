@@ -29,6 +29,7 @@ $locale = $lcodes[$langCode ?? 'en'] ?? 'en-GB';
         <input type="hidden" name="provider" value="browser_webspeech">
         <div class="inline" style="flex-wrap:wrap">
           <button class="btn small primary stt-btn" type="button" data-target="tr-<?= e($p['id']) ?>">🎤 Speak now (<?= e($locale) ?>)</button>
+          <button class="btn small stt-stop" type="button" disabled>⏹ Stop</button>
           <input class="sel stt-transcript" id="tr-<?= e($p['id']) ?>" name="transcript" type="text" placeholder="Transcript from your speech engine…" readonly style="min-width:240px" autocomplete="off">
           <button class="btn small">submit</button>
         </div>

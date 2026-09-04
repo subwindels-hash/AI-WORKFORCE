@@ -21,6 +21,7 @@ $locale = \AIWorkforce\LangLearn\Translator::LOCALES[$langCode] ?? 'en-GB';
       <form method="post" action="/app/languages/c/<?= e($view['sessionId']) ?>/say" class="inline" style="margin-top:8px">
         <input class="sel" id="conv-text" type="text" name="text" required placeholder="Reply in the language… (auto-detected, target stays <?= e($langCode) ?>)" autocomplete="off" style="min-width:240px">
         <button class="btn" type="button" id="conv-mic">🎤 Tap to Speak</button>
+        <button class="btn" type="button" id="conv-mic-stop" disabled>⏹ Stop</button>
         <button class="btn primary">Say it</button>
       </form>
       <p class="dim" id="conv-mic-status" style="font-size:12px;margin:6px 0 0"></p>
@@ -90,5 +91,18 @@ $locale = \AIWorkforce\LangLearn\Translator::LOCALES[$langCode] ?? 'en-GB';
 
   if (stopBtn) stopBtn.addEventListener('click', function(){ if(provider) provider.stop(); });
   if (rateSel) rateSel.addEventListener('input', function(){ if(rateVal) rateVal.textContent = (parseFloat(rateSel.value)||1).toFixed(1)+'×'; });
+
+  var convMic = document.getElementById('conv-mic');
+  var convText = document.getElementById('conv-text');
+  var convMicStop = document.getElementById('conv-mic-stop');
+  var convMicStatus = document.getElementById('conv-mic-status');
+  if (provider && convMic && convText) {
+    provider.bindMic(convMic, convText, {
+      locale: LOCALE,
+      stopButton: convMicStop,
+      minListenMs: 30000,
+      onStatus: function (msg) { if (convMicStatus) convMicStatus.textContent = msg || ''; }
+    });
+  }
 })();
 </script>

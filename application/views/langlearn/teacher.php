@@ -260,6 +260,7 @@ $flagMap = [
               <div class="notice warnbox" id="stt-note" style="display:none"></div>
               <div class="inline" style="flex-wrap:wrap;align-items:center">
                 <button class="btn primary" type="button" id="tt-mic" disabled>🎤 Speak now</button>
+                <button class="btn" type="button" id="tt-mic-stop" disabled>⏹ Stop</button>
                 <input id="tt-transcript" class="sel" type="text" readonly placeholder="Transcript from your speech engine…" style="min-width:200px;flex:1">
                 <button class="btn" type="button" id="tt-check" disabled>Check</button>
                 <button class="btn" type="button" id="tt-retry" hidden>Try again</button>
@@ -277,6 +278,7 @@ $flagMap = [
           <div class="tt-input-row">
             <span class="tt-count" id="tt-target-count">0 / 500</span>
             <button class="btn" type="button" id="tt-target-mic">🎤 Tap to Speak</button>
+            <button class="btn" type="button" id="tt-target-mic-stop" disabled>⏹ Stop</button>
             <button class="btn" type="button" id="tt-target-submit">Translate to my language</button>
           </div>
         </div>
@@ -299,6 +301,8 @@ $flagMap = [
           <textarea id="tt-input" class="tt-input" maxlength="500" autocomplete="off" spellcheck="false" placeholder="e.g. Good morning, how are you?"></textarea>
           <div class="tt-input-row">
             <span class="tt-count" id="tt-count">0 / 500</span>
+            <button class="btn" type="button" id="tt-source-mic">🎤 Tap to Speak</button>
+            <button class="btn" type="button" id="tt-source-mic-stop" disabled>⏹ Stop</button>
             <button class="btn primary" type="button" id="tt-submit">Translate &amp; Learn</button>
           </div>
         </div>
@@ -740,25 +744,56 @@ $flagMap = [
     sttNote.textContent = 'Your browser does not expose speech recognition, so the microphone cannot capture your voice here. You can still Listen to the correct pronunciation and type the translation to self-check.';
   }
 
+  var micStopBtn = document.getElementById('tt-mic-stop');
   micBtn.addEventListener('click', function () {
     if (!provider || !currentLearn || !currentLearn.translation) return;
+    if (provider.isRecording()) {
+      provider.stopListening();
+      micBtn.textContent = '🎤 Speak now';
+      if (micStopBtn) micStopBtn.disabled = true;
+      micStatus.textContent = transcriptInput.value.trim() ? 'Stopped. Review and Check.' : 'Stopped.';
+      syncMicState();
+      return;
+    }
     transcriptInput.value = '';
-    micStatus.textContent = 'Listening… say the translation aloud.';
+    micBtn.textContent = '🎤 Listening…';
+    if (micStopBtn) micStopBtn.disabled = false;
+    micStatus.textContent = 'Listening… take your time. Silence does not end this. Tap Stop when you have finished talking.';
     provider.speechToText({
       locale: currentLearn.targetLocale || localeFor(targetSel.value),
+      holdUntilStop: true,
+      minListenMs: 30000,
+      onStatus: function(msg){ micStatus.textContent = msg; },
       onResult: function(transcript){
         transcriptInput.value = transcript;
-        micStatus.textContent = 'Transcript captured — review and Check.';
+        micStatus.textContent = 'Heard you — still listening for more. Tap Stop when you are finished.';
         syncMicState();
       },
       onError: function(ev){
-        var msg = ev.error || ev.message || 'unknown';
-        micStatus.textContent = 'Speech engine error: ' + msg + ' — nothing was recorded.';
+        var code = ev.error || ev.message || '';
+        if (code === 'no-speech' || code === 'aborted') {
+          micStatus.textContent = 'Still listening — speak when you are ready, or tap Stop when you are finished.';
+          return;
+        }
+        micBtn.textContent = '🎤 Speak now';
+        if (micStopBtn) micStopBtn.disabled = true;
+        micStatus.textContent = 'Speech engine error: ' + code;
       },
-      onEnd: function(){
-        if (micStatus.textContent === 'Listening… say the translation aloud.') micStatus.textContent = 'Nothing captured — try again.';
+      onEnd: function(info){
+        micBtn.textContent = '🎤 Speak now';
+        if (micStopBtn) micStopBtn.disabled = true;
+        var got = String((info && info.transcript) || transcriptInput.value || '').trim();
+        micStatus.textContent = got ? 'Stopped. Review and Check.' : 'Stopped. Nothing captured — tap Speak to try again.';
+        syncMicState();
       }
     });
+  });
+  if (micStopBtn) micStopBtn.addEventListener('click', function () {
+    if (provider) provider.stopListening();
+    micBtn.textContent = '🎤 Speak now';
+    micStopBtn.disabled = true;
+    micStatus.textContent = transcriptInput.value.trim() ? 'Stopped. Review and Check.' : 'Stopped.';
+    syncMicState();
   });
 
   checkBtn.addEventListener('click', function () { grade(transcriptInput.value); });
@@ -959,6 +994,8 @@ $flagMap = [
   if (provider) {
     provider.bindMic(document.getElementById('tt-source-mic'), input, {
       localeFor: function () { return localeFor(sourceSel.value); },
+      stopButton: document.getElementById('tt-source-mic-stop'),
+      minListenMs: 30000,
       onStatus: function (msg) {
         var n = document.getElementById('stt-note');
         if (!n) return;
@@ -968,6 +1005,8 @@ $flagMap = [
     });
     provider.bindMic(document.getElementById('tt-target-mic'), targetInput, {
       localeFor: function () { return localeFor(targetSel.value); },
+      stopButton: document.getElementById('tt-target-mic-stop'),
+      minListenMs: 30000,
       onStatus: function (msg) {
         var n = document.getElementById('stt-note');
         if (!n) return;
