@@ -483,8 +483,8 @@ class Api_sports extends Api_controller
             'sportmonks' => [
                 'label' => 'SportMonks (sportmonks.com)',
                 'docs' => 'https://docs.sportmonks.com/football/v3',
-                'capabilities' => ['fixtures', 'odds', 'results', 'standings', 'lineups', 'leagues'],
-                'notes' => 'Odds require the optional odds add-on subscription',
+                'capabilities' => ['fixtures', 'odds', 'results', 'standings', 'lineups', 'leagues', 'rounds'],
+                'notes' => 'Odds require the optional odds add-on subscription. round() fetches a full matchday (fixtures + odds + results) in one request.',
                 'envKey' => 'WINDELS_SPORTMONKS_TOKEN',
                 'configured' => $this->platform->sports->providers->provider('sportmonks') !== null,
             ],

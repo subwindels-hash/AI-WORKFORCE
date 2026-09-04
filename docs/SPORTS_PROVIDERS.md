@@ -27,7 +27,7 @@ A provider is registered only when its credential exists. Multiple configured pr
 |---|---:|---:|---:|
 | API-Football | Yes | Yes | Yes, via the odds endpoint |
 | TheSportsDB | Yes | Yes | No bookmaker odds endpoint |
-| SportMonks | Yes | Yes | Requires the SportMonks odds add-on and a separate adapter |
+| SportMonks | Yes (incl. full-round bulk fetch) | Yes | Yes, per fixture and per round (odds add-on) |
 
 All upstream responses are converted to the internal fixture, odds, and result shapes before they reach the normalizers and persistence layer. The provider adapters do not expose credentials to the frontend.
 
@@ -42,6 +42,33 @@ TheSportsDB uses the numeric key as part of the URL path (`/api/v1/json/{key}/..
 ## SportMonks notes
 
 SportMonks uses the token query parameter and the Football API v3 endpoints. Fixtures use participants, scores, and league includes, and are mapped using participant location (`home`/`away`). Ensure the token has access to the leagues and includes used by the deployment.
+
+### Round-based bulk fetch
+
+`SportMonksProvider::round($roundExternalId)` retrieves an entire matchday in **one request** via `GET /rounds/{id}` with nested includes (`fixtures`, `fixtures.odds`, `fixtures.odds.market`, `fixtures.odds.bookmaker`, `fixtures.participants`, `fixtures.scores`, `fixtures.venue`, `fixtures.state`, `league`, `league.country`). It returns:
+
+```php
+[
+    'roundId' => '396698', 'name' => '25', 'leagueId' => '648', 'league' => 'Serie A',
+    'season' => '26763', 'startingAt' => '2026-08-29', 'endingAt' => '2026-08-31',
+    'finished' => true,
+    'fixtures' => [ /* internal fixture shape */ ],
+    'odds'     => [ /* internal odds shape, + impliedProbability/updatedAt/winning when the vendor supplies them */ ],
+    'results'  => [ /* internal result shape, from the embedded scores */ ],
+]
+```
+
+- Round ids are resolved with `SportMonksProvider::seasonRounds($seasonId)` (`GET /rounds/seasons/{id}`).
+- Round-embedded odds carry `original_label` (`1`/`Draw`/`2`) or a display `label` instead of a `selection` object; the mapper handles both shapes.
+- Fixture status is resolved from the v3 `state` include object, then `state_id` (official v3 state table, e.g. `5` = FT), with the legacy v2 numeric `status` codes as a fallback.
+- Consumer pattern through the fallback manager (rounds are a SportMonks-only capability, so guard with `method_exists`):
+
+```php
+$attempt = $providers->withFallback('round', function ($p) use ($roundId) {
+    if (!method_exists($p, 'round')) throw new ProviderException('round endpoint not supported', ProviderException::DATA_ERROR);
+    return $p->round($roundId);
+});
+```
 
 ## Safe operation
 

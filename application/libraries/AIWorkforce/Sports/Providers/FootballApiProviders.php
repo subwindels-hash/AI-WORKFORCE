@@ -681,6 +681,9 @@ class TheSportsDbProvider implements SportsDataProvider
 // ─────────────────────────────────────────────────────────────────────────────
 // 3. SPORTMONKS (sportmonks.com)
 //    Docs: https://docs.sportmonks.com/football/v3
+//    Round-based bulk fetch: round() retrieves a whole matchday (fixtures +
+//    odds + results) in one request via /rounds/{id} with nested includes;
+//    seasonRounds() resolves the season's round ids.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class SportMonksProvider implements SportsDataProvider
@@ -736,6 +739,84 @@ class SportMonksProvider implements SportsDataProvider
         $resp = $this->doRequest('/fixtures?filter[' . $filter . ']&' . $qs);
         $rows = $this->extractList($this->decodeJson($resp));
         return $this->mapFixtures($rows);
+    }
+
+    /**
+     * Fetch an entire matchday (round) in a SINGLE request.
+     *
+     * GET /rounds/{id} with nested includes: fixtures (odds with market and
+     * bookmaker, participants, scores, venue, state) plus league (country).
+     * One HTTP call returns the full round — fixtures, bookmaker odds and
+     * results — instead of fixtures() + N×odds() + N×results().
+     *
+     * Round ids come from seasonRounds(). Odds still require the SportMonks
+     * odds add-on; without it the fixtures simply carry no odds entries.
+     *
+     * @return array{roundId:string, name:?string, leagueId:string, league:?string,
+     *               season:string, startingAt:?string, endingAt:?string, finished:bool,
+     *               fixtures:array<int,array<string,mixed>>,
+     *               odds:array<int,array<string,mixed>>,
+     *               results:array<int,array<string,mixed>>}
+     */
+    public function round(string $roundExternalId): array
+    {
+        $includes = implode(';', [
+            'fixtures',
+            'fixtures.odds', 'fixtures.odds.market', 'fixtures.odds.bookmaker',
+            'fixtures.participants', 'fixtures.scores', 'fixtures.venue', 'fixtures.state',
+            'league', 'league.country',
+        ]);
+        $resp = $this->doRequest('/rounds/' . rawurlencode($roundExternalId) . '?include=' . rawurlencode($includes));
+        $json = $this->decodeJson($resp);
+        $data = $json['data'] ?? $json;
+        if (!is_array($data) || !isset($data['id'])) {
+            throw new ProviderException('round payload is malformed (missing round id)', ProviderException::DATA_ERROR);
+        }
+        $league = is_array($data['league'] ?? null) ? $data['league'] : [];
+        $fixtures = [];
+        foreach (($data['fixtures'] ?? []) as $f) {
+            if (!is_array($f) || !isset($f['id'])) continue;
+            // Round payloads carry the league at the round level; the
+            // per-fixture mappers expect it on each row, so enrich the copy.
+            if (!isset($f['league']) && $league !== []) $f['league'] = $league;
+            if (!isset($f['season']) && isset($data['season_id'])) $f['season'] = ['id' => $data['season_id']];
+            $fixtures[] = $f;
+        }
+        return [
+            'roundId' => (string) $data['id'],
+            'name' => isset($data['name']) && (string) $data['name'] !== '' ? (string) $data['name'] : null,
+            'leagueId' => (string) ($league['id'] ?? $data['league_id'] ?? ''),
+            'league' => isset($league['name']) ? (string) $league['name'] : null,
+            'season' => (string) ($data['season_id'] ?? ''),
+            'startingAt' => $data['starting_at'] ?? null,
+            'endingAt' => $data['ending_at'] ?? null,
+            'finished' => !empty($data['finished']),
+            'fixtures' => $this->mapFixtures($fixtures),
+            'odds' => $this->mapRoundOdds($fixtures),
+            'results' => $this->mapResults($fixtures),
+        ];
+    }
+
+    /** List a season's rounds (id + metadata) so round() can be addressed by round id. */
+    public function seasonRounds(string $seasonId): array
+    {
+        $resp = $this->doRequest('/rounds/seasons/' . rawurlencode($seasonId));
+        $rows = $this->extractList($this->decodeJson($resp));
+        $out = [];
+        foreach ($rows as $r) {
+            if (!is_array($r) || !isset($r['id'])) continue;
+            $out[] = [
+                'roundId' => (string) $r['id'],
+                'name' => isset($r['name']) && (string) $r['name'] !== '' ? (string) $r['name'] : null,
+                'leagueId' => (string) ($r['league_id'] ?? ''),
+                'season' => (string) ($r['season_id'] ?? ''),
+                'finished' => !empty($r['finished']),
+                'isCurrent' => !empty($r['is_current']),
+                'startingAt' => $r['starting_at'] ?? null,
+                'endingAt' => $r['ending_at'] ?? null,
+            ];
+        }
+        return $out;
     }
 
     public function odds(string $fixtureExternalId): array
@@ -849,7 +930,7 @@ class SportMonksProvider implements SportsDataProvider
                 'leagueId' => (string) ($r['league']['id'] ?? ''),
                 'season' => (string) ($r['season']['id'] ?? ''),
                 'kickoff' => $kickoff,
-                'status' => $this->mapSportMonksStatus($r['status'] ?? 0),
+                'status' => $this->fixtureStatus($r),
                 'sport' => 'football',
                 'venue' => $r['venue']['name'] ?? null,
                 'referee' => $r['referee']['name'] ?? null,
@@ -868,13 +949,20 @@ class SportMonksProvider implements SportsDataProvider
     {
         $out = [];
         foreach ($rows as $r) {
+            if (!isset($r['value'])) continue;
             $market = $r['market'] ?? [];
-            $selection = $r['selection'] ?? [];
             $bookmaker = $r['bookmaker'] ?? [];
-            if (!isset($selection['value']) || !isset($r['value'])) continue;
+            // Selection source: the standalone /odds endpoint returns a
+            // `selection` object; round-embedded odds carry `original_label`
+            // (bookmaker-native, e.g. "1"/"Draw"/"2") or a display `label`.
+            $rawSelection = null;
+            if (isset($r['selection']['value'])) $rawSelection = (string) $r['selection']['value'];
+            elseif (isset($r['original_label']) && (string) $r['original_label'] !== '') $rawSelection = (string) $r['original_label'];
+            elseif (isset($r['label']) && (string) $r['label'] !== '') $rawSelection = (string) $r['label'];
+            if ($rawSelection === null) continue;
             $normalizedMarket = self::normalizeMarket((string) ($market['name'] ?? 'UNKNOWN'));
-            $normalizedSelection = self::normalizeSelection($normalizedMarket, (string) ($selection['value'] ?? ''));
-            $out[] = [
+            $normalizedSelection = self::normalizeSelection($normalizedMarket, $rawSelection);
+            $row = [
                 'market' => $normalizedMarket,
                 'selection' => $normalizedSelection,
                 'decimalOdds' => (float) $r['value'],
@@ -882,8 +970,30 @@ class SportMonksProvider implements SportsDataProvider
                 'bookmaker' => (string) ($bookmaker['name'] ?? ''),
                 'fixtureId' => (string) ($r['fixture_id'] ?? ''),
             ];
+            // Optional enrichment present on round-embedded odds.
+            if (isset($r['probability'])) {
+                $prob = (float) rtrim(trim((string) $r['probability']), '%');
+                if (is_finite($prob) && $prob >= 0.0) $row['impliedProbability'] = round($prob / 100, 4);
+            }
+            if (isset($r['latest_bookmaker_update']) && (string) $r['latest_bookmaker_update'] !== '') {
+                $row['updatedAt'] = (string) $r['latest_bookmaker_update'];
+            }
+            if (array_key_exists('winning', $r)) $row['winning'] = (bool) $r['winning'];
+            $out[] = $row;
         }
         return $out;
+    }
+
+    /** Flatten the odds embedded in a round payload's fixtures into mapOdds() rows. */
+    private function mapRoundOdds(array $fixtures): array
+    {
+        $rows = [];
+        foreach ($fixtures as $f) {
+            foreach (($f['odds'] ?? []) as $o) {
+                if (is_array($o)) $rows[] = $o;
+            }
+        }
+        return $this->mapOdds($rows);
     }
 
     private function mapResults(array $rows): array
@@ -893,7 +1003,7 @@ class SportMonksProvider implements SportsDataProvider
             $scores = $r['scores'] ?? [];
             $out[] = [
                 'externalId' => (string) ($r['id'] ?? ''),
-                'status' => $this->mapSportMonksStatus($r['status'] ?? 0),
+                'status' => $this->fixtureStatus($r),
                 'homeScore' => $scores['home']['score'] ?? $scores['home']['current'] ?? null,
                 'awayScore' => $scores['away']['score'] ?? $scores['away']['current'] ?? null,
                 'halfTimeHome' => $scores['home']['halftime']['score'] ?? $scores['home']['halftime']['current'] ?? null,
@@ -934,9 +1044,61 @@ class SportMonksProvider implements SportsDataProvider
         return $r[$side]['image_path'] ?? $r[$side]['logo'] ?? null;
     }
 
+    /**
+     * Resolve a SportMonks fixture's normalized status.
+     *
+     * Preference order (v3 payloads carry state_id or a `state` include
+     * object; legacy v2 payloads carried a numeric `status` code):
+     *   1. `state` include object (id/state/name/developer_name) — most explicit
+     *   2. `state_id` — official v3 fixture state table (see mapStateId)
+     *   3. legacy v2 numeric `status` codes (see mapSportMonksStatus)
+     */
+    private function fixtureStatus(array $r): string
+    {
+        if (isset($r['state']) && is_array($r['state'])) {
+            $code = (string) ($r['state']['developer_name'] ?? $r['state']['state'] ?? '');
+            $mapped = self::mapStateCode($code);
+            if ($mapped !== null) return $mapped;
+        }
+        if (isset($r['state_id'])) return self::mapStateId((int) $r['state_id']);
+        if (isset($r['status'])) return $this->mapSportMonksStatus((int) $r['status']);
+        return 'SCHEDULED';
+    }
+
+    /** Official v3 fixture state table (docs.sportmonks.com → API 3.0 → States). */
+    private static function mapStateId(int $stateId): string
+    {
+        return match ($stateId) {
+            1, 13, 16, 19, 26 => 'SCHEDULED',    // NS, TBA, DELAYED, AU, PENDING
+            2, 3, 4, 6, 9, 21, 22, 25 => 'LIVE', // 1st half, HT, ET break, ET, penalties, ET break, 2nd half, pen break
+            5, 7, 8, 14, 17 => 'FINISHED',       // FT, AET, FT_PEN, WO, AWARDED
+            10 => 'POSTPONED',                    // POSTPONED
+            11, 15, 18 => 'SUSPENDED',            // SUSPENDED, ABANDONED, INTERRUPTED
+            12, 20 => 'CANCELLED',                // CANCELLED, DELETED
+            default => 'SCHEDULED',
+        };
+    }
+
+    /** State codes from the `state` include object (FT, NS, INPLAY_1ST_HALF, …). */
+    private static function mapStateCode(string $code): ?string
+    {
+        $c = strtoupper(trim($code));
+        if ($c === '') return null;
+        return match ($c) {
+            'NS', 'TBA', 'DELAYED', 'AU', 'PENDING' => 'SCHEDULED',
+            'LIVE', 'INPLAY_1ST_HALF', 'INPLAY_2ND_HALF', 'HT', 'BREAK', 'INPLAY_ET', 'EXTRA_TIME_BREAK', 'INPLAY_PENALTIES', 'PEN_BREAK' => 'LIVE',
+            'FT', 'AET', 'FT_PEN', 'WO', 'AWARDED' => 'FINISHED',
+            'POSTPONED' => 'POSTPONED',
+            'SUSPENDED', 'ABANDONED', 'INTERRUPTED' => 'SUSPENDED',
+            'CANCELLED', 'DELETED' => 'CANCELLED',
+            default => null,
+        };
+    }
+
+    /** Legacy v2 numeric `status` codes (v3 payloads use state_id instead). */
     private function mapSportMonksStatus(int $statusCode): string
     {
-        // SportMonks status codes (v3):
+        // Legacy v2 status codes:
         // 6 = not started, 0 = TBD, 7/9/31 = live, 33/100 = finished
         // 40/50/60/70 = extras (extra time, penalties, etc.)
         // 35/45/55/80/100 = various end states

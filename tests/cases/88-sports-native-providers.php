@@ -343,6 +343,248 @@ test('sportmonks handles auth failure gracefully', function () {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// 3b. SPORTMONKS ROUND ENDPOINT (single request → fixtures + odds + results)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Modeled on the real SportMonks v3 GET /rounds/{id} response
+ * (Brazil Serie A, round 25). Note: the participants array is NOT
+ * home-first — meta.location decides the sides.
+ */
+function sportmonksRoundPayload(): array
+{
+    $fulltime = ['id' => 1, 'name' => 'Fulltime Result', 'developer_name' => 'FULLTIME_RESULT', 'has_winning_calculations' => true];
+    $bet365 = ['id' => 2, 'legacy_id' => 2, 'name' => 'bet365'];
+    return [
+        'id' => 396698,
+        'sport_id' => 1,
+        'league_id' => 648,
+        'season_id' => 26763,
+        'stage_id' => 77479548,
+        'name' => '25',
+        'finished' => true,
+        'is_current' => false,
+        'starting_at' => '2026-08-29',
+        'ending_at' => '2026-08-31',
+        'games_in_current_week' => false,
+        'fixtures' => [
+            [
+                'id' => 19621838,
+                'league_id' => 648,
+                'season_id' => 26763,
+                'round_id' => 396698,
+                'state_id' => 5,
+                'venue_id' => 10494,
+                'name' => 'Corinthians vs Santos',
+                'starting_at' => '2026-08-30 19:00:00',
+                'starting_at_timestamp' => 1788116400,
+                'result_info' => 'Santos won after full-time.',
+                'leg' => '1/1',
+                'length' => 90,
+                'has_odds' => true,
+                'has_premium_odds' => true,
+                'state' => ['id' => 5, 'state' => 'FT', 'name' => 'Full Time', 'short_name' => 'FT', 'developer_name' => 'FT'],
+                'venue' => ['id' => 10494, 'name' => 'Neo Química Arena'],
+                'odds' => [
+                    ['id' => 242217199009, 'fixture_id' => 19621838, 'market_id' => 1, 'bookmaker_id' => 2, 'label' => 'Away', 'value' => '4.50', 'original_label' => '2', 'probability' => '22.22%', 'winning' => true, 'latest_bookmaker_update' => '2026-08-30 18:50:47', 'market' => $fulltime, 'bookmaker' => $bet365],
+                    ['id' => 242217199008, 'fixture_id' => 19621838, 'market_id' => 1, 'bookmaker_id' => 2, 'label' => 'Draw', 'value' => '3.30', 'original_label' => 'Draw', 'probability' => '30.3%', 'winning' => false, 'latest_bookmaker_update' => '2026-08-30 18:50:47', 'market' => $fulltime, 'bookmaker' => $bet365],
+                    ['id' => 242217199007, 'fixture_id' => 19621838, 'market_id' => 1, 'bookmaker_id' => 2, 'label' => 'Home', 'value' => '1.90', 'original_label' => '1', 'probability' => '52.63%', 'winning' => false, 'latest_bookmaker_update' => '2026-08-30 18:50:47', 'market' => $fulltime, 'bookmaker' => $bet365],
+                ],
+                'participants' => [
+                    ['id' => 3684, 'name' => 'Santos', 'short_code' => 'STS', 'image_path' => 'https://cdn.sportmonks.com/images/soccer/teams/4/3684.png', 'meta' => ['location' => 'away', 'winner' => true, 'position' => 14]],
+                    ['id' => 303, 'name' => 'Corinthians', 'short_code' => 'CTH', 'image_path' => 'https://cdn.sportmonks.com/images/soccer/teams/15/303.png', 'meta' => ['location' => 'home', 'winner' => false, 'position' => 10]],
+                ],
+                'scores' => ['home' => ['score' => 0, 'halftime' => ['score' => 0]], 'away' => ['score' => 1, 'halftime' => ['score' => 1]]],
+            ],
+            [
+                'id' => 19621837,
+                'league_id' => 648,
+                'season_id' => 26763,
+                'round_id' => 396698,
+                'state_id' => 5,
+                'name' => 'Mirassol vs Palmeiras',
+                'starting_at' => '2026-08-30 21:30:00',
+                'starting_at_timestamp' => 1788125400,
+                'result_info' => 'Game ended in draw.',
+                'state' => ['id' => 5, 'state' => 'FT', 'name' => 'Full Time', 'short_name' => 'FT', 'developer_name' => 'FT'],
+                'venue' => ['id' => 7424, 'name' => 'Maião'],
+                'odds' => [
+                    ['id' => 242217061156, 'fixture_id' => 19621837, 'label' => 'Home', 'value' => '3.50', 'original_label' => '1', 'probability' => '28.57%', 'winning' => false, 'market' => $fulltime, 'bookmaker' => $bet365],
+                    ['id' => 242217061157, 'fixture_id' => 19621837, 'label' => 'Draw', 'value' => '3.40', 'original_label' => 'Draw', 'probability' => '29.41%', 'winning' => true, 'market' => $fulltime, 'bookmaker' => $bet365],
+                    ['id' => 242217061158, 'fixture_id' => 19621837, 'label' => 'Away', 'value' => '2.15', 'original_label' => '2', 'probability' => '46.51%', 'winning' => false, 'market' => $fulltime, 'bookmaker' => $bet365],
+                ],
+                'participants' => [
+                    ['id' => 11126, 'name' => 'Mirassol', 'short_code' => 'MIR', 'image_path' => 'https://cdn.sportmonks.com/images/soccer/teams/22/11126.png', 'meta' => ['location' => 'home', 'winner' => false, 'position' => 18]],
+                    ['id' => 3422, 'name' => 'Palmeiras', 'short_code' => 'PAL', 'image_path' => 'https://cdn.sportmonks.com/images/soccer/teams/30/3422.png', 'meta' => ['location' => 'away', 'winner' => false, 'position' => 1]],
+                ],
+                'scores' => ['home' => ['score' => 1], 'away' => ['score' => 1]],
+            ],
+        ],
+        'league' => ['id' => 648, 'sport_id' => 1, 'country_id' => 5, 'name' => 'Serie A', 'active' => true, 'short_code' => 'BRA CB', 'type' => 'league', 'sub_type' => 'domestic', 'country' => ['id' => 5, 'name' => 'Brazil', 'iso2' => 'BR', 'iso3' => 'BRA']],
+    ];
+}
+
+test('sportmonks round hits /rounds/{id} with nested includes and maps metadata', function () {
+    $captured = null;
+    $transport = function (string $url, array $headers) use (&$captured) {
+        $captured = $url;
+        return ['status' => 200, 'body' => json_encode(['data' => sportmonksRoundPayload()])];
+    };
+    $p = new SportMonksProvider('token', 'https://api.sportmonks.com/v3/football', 10, $transport);
+    $round = $p->round('396698');
+
+    assert_true(is_string($captured), 'transport was not called');
+    assert_true(str_contains($captured, '/rounds/396698?include='), 'expected /rounds/{id}?include= in ' . $captured);
+    assert_true(str_contains($captured, rawurlencode('fixtures.odds.market')), 'expected nested odds include');
+    assert_true(str_contains($captured, rawurlencode('fixtures.participants')), 'expected participants include');
+    assert_true(str_contains($captured, 'api_token='), 'expected api_token query param');
+
+    assert_equals('396698', $round['roundId']);
+    assert_equals('25', $round['name']);
+    assert_equals('648', $round['leagueId']);
+    assert_equals('Serie A', $round['league']);
+    assert_equals('26763', $round['season']);
+    assert_equals('2026-08-29', $round['startingAt']);
+    assert_equals('2026-08-31', $round['endingAt']);
+    assert_true($round['finished'], 'round should be finished');
+});
+
+test('sportmonks round maps fixtures using meta.location (participants are not home-first)', function () {
+    $p = new SportMonksProvider('token', 'https://api.test', 10, makeTransport(200, json_encode(['data' => sportmonksRoundPayload()])));
+    $round = $p->round('396698');
+    assert_equals(2, count($round['fixtures']));
+
+    // Fixture 1: away team (Santos) is listed FIRST in participants.
+    $f = $round['fixtures'][0];
+    assert_equals('19621838', $f['externalId']);
+    assert_equals('Corinthians', $f['homeTeam']);
+    assert_equals('Santos', $f['awayTeam']);
+    assert_equals('303', $f['homeTeamId']);
+    assert_equals('3684', $f['awayTeamId']);
+    assert_equals('https://cdn.sportmonks.com/images/soccer/teams/15/303.png', $f['homeTeamLogo']);
+    assert_equals('FINISHED', $f['status']);
+    assert_equals('football', $f['sport']);
+    assert_equals('Neo Química Arena', $f['venue']);
+    assert_equals('Serie A', $f['competition']);
+    assert_equals('26763', $f['season']);
+
+    $f2 = $round['fixtures'][1];
+    assert_equals('19621837', $f2['externalId']);
+    assert_equals('Mirassol', $f2['homeTeam']);
+    assert_equals('Palmeiras', $f2['awayTeam']);
+    assert_equals('FINISHED', $f2['status']);
+});
+
+test('sportmonks round maps embedded odds with labels, probability and winning flag', function () {
+    $p = new SportMonksProvider('token', 'https://api.test', 10, makeTransport(200, json_encode(['data' => sportmonksRoundPayload()])));
+    $round = $p->round('396698');
+    assert_equals(6, count($round['odds']));
+
+    // First fixture's odds (original_label 2 / Draw / 1).
+    $o = $round['odds'][0];
+    assert_equals('MATCH_RESULT', $o['market']);
+    assert_equals('AWAY', $o['selection']);
+    assert_equals(4.5, $o['decimalOdds']);
+    assert_equals('bet365', $o['bookmaker']);
+    assert_equals('19621838', $o['fixtureId']);
+    assert_close(0.2222, (float) $o['impliedProbability'], 0.0001, 'implied probability');
+    assert_true($o['winning'], 'away selection should be the winner');
+    assert_equals('2026-08-30 18:50:47', $o['updatedAt']);
+
+    $home = $round['odds'][2];
+    assert_equals('HOME', $home['selection']);
+    assert_equals(1.9, $home['decimalOdds']);
+    assert_false($home['winning']);
+
+    // Second fixture: draw won.
+    $draw = $round['odds'][4];
+    assert_equals('19621837', $draw['fixtureId']);
+    assert_equals('DRAW', $draw['selection']);
+    assert_equals(3.4, $draw['decimalOdds']);
+    assert_true($draw['winning']);
+});
+
+test('sportmonks round maps results from embedded scores', function () {
+    $p = new SportMonksProvider('token', 'https://api.test', 10, makeTransport(200, json_encode(['data' => sportmonksRoundPayload()])));
+    $round = $p->round('396698');
+    assert_equals(2, count($round['results']));
+    assert_equals('19621838', $round['results'][0]['externalId']);
+    assert_equals('FINISHED', $round['results'][0]['status']);
+    assert_equals(0, $round['results'][0]['homeScore']);
+    assert_equals(1, $round['results'][0]['awayScore']);
+    assert_equals(0, $round['results'][0]['halfTimeHome']);
+    assert_equals(1, $round['results'][0]['halfTimeAway']);
+});
+
+test('sportmonks round falls back to state_id when the state include is absent', function () {
+    $body = json_encode(['data' => [
+        'id' => 9, 'league_id' => 1, 'season_id' => 1, 'name' => '1', 'finished' => false,
+        'fixtures' => [
+            ['id' => 1, 'name' => 'A vs B', 'starting_at' => '2026-09-01 15:00:00', 'state_id' => 1,
+             'participants' => [['name' => 'A', 'meta' => ['location' => 'home']], ['name' => 'B', 'meta' => ['location' => 'away']]]],
+            ['id' => 2, 'name' => 'C vs D', 'starting_at' => '2026-09-01 15:00:00', 'state_id' => 2,
+             'participants' => [['name' => 'C', 'meta' => ['location' => 'home']], ['name' => 'D', 'meta' => ['location' => 'away']]]],
+            ['id' => 3, 'name' => 'E vs F', 'starting_at' => '2026-09-01 15:00:00', 'state_id' => 12,
+             'participants' => [['name' => 'E', 'meta' => ['location' => 'home']], ['name' => 'F', 'meta' => ['location' => 'away']]]],
+            ['id' => 4, 'name' => 'G vs H', 'starting_at' => '2026-09-01 15:00:00', 'state_id' => 10,
+             'participants' => [['name' => 'G', 'meta' => ['location' => 'home']], ['name' => 'H', 'meta' => ['location' => 'away']]]],
+        ],
+    ]]);
+    $p = new SportMonksProvider('t', 'https://api.test', 10, makeTransport(200, $body));
+    $round = $p->round('9');
+    assert_equals(['SCHEDULED', 'LIVE', 'CANCELLED', 'POSTPONED'], array_map(fn($f) => $f['status'], $round['fixtures']));
+});
+
+test('sportmonks round propagates provider errors', function () {
+    $p = new SportMonksProvider('bad', 'https://api.test', 10, makeTransport(401));
+    try { $p->round('1'); assert_true(false, 'expected ProviderException'); }
+    catch (ProviderException $e) { assert_equals(ProviderException::AUTHENTICATION_ERROR, $e->status); }
+
+    $r = new SportMonksProvider('t', 'https://api.test', 10, makeTransport(429));
+    try { $r->round('1'); assert_true(false, 'expected ProviderException'); }
+    catch (ProviderException $e) { assert_equals(ProviderException::RATE_LIMITED, $e->status); }
+});
+
+test('sportmonks round rejects malformed payloads', function () {
+    $p = new SportMonksProvider('t', 'https://api.test', 10, makeTransport(200, json_encode(['data' => []])));
+    try { $p->round('1'); assert_true(false, 'expected ProviderException'); }
+    catch (ProviderException $e) { assert_equals(ProviderException::DATA_ERROR, $e->status); }
+});
+
+test('sportmonks seasonRounds maps the season schedule', function () {
+    $body = json_encode(['data' => [
+        ['id' => 396698, 'league_id' => 648, 'season_id' => 26763, 'name' => '25', 'finished' => true, 'is_current' => false, 'starting_at' => '2026-08-29', 'ending_at' => '2026-08-31'],
+        ['id' => 396701, 'league_id' => 648, 'season_id' => 26763, 'name' => '26', 'finished' => false, 'is_current' => true, 'starting_at' => '2026-09-05', 'ending_at' => '2026-09-07'],
+    ]]);
+    $p = new SportMonksProvider('t', 'https://api.test', 10, makeTransport(200, $body));
+    $rounds = $p->seasonRounds('26763');
+    assert_equals(2, count($rounds));
+    assert_equals('396698', $rounds[0]['roundId']);
+    assert_equals('25', $rounds[0]['name']);
+    assert_true($rounds[0]['finished']);
+    assert_false($rounds[1]['finished']);
+    assert_true($rounds[1]['isCurrent']);
+    assert_equals('648', $rounds[0]['leagueId']);
+});
+
+test('provider manager falls back to the first provider supporting round()', function () {
+    $manager = new SportsProviderManager();
+    // api-football has no round() — the guard must skip it and fall back.
+    $manager->register(new ApiFootballProvider('k', 'https://api.test', 10, makeTransport(200, '{}')));
+    $manager->register(new SportMonksProvider('t', 'https://api.test', 10, makeTransport(200, json_encode(['data' => sportmonksRoundPayload()]))));
+
+    $attempt = $manager->withFallback('round', function (SportsDataProvider $provider) {
+        if (!method_exists($provider, 'round')) throw new ProviderException('round endpoint not supported', ProviderException::DATA_ERROR);
+        return $provider->round('396698');
+    });
+    assert_true($attempt['ok'], 'round attempt should succeed');
+    assert_equals('sportmonks', $attempt['provider']);
+    assert_equals('396698', $attempt['result']['roundId']);
+    assert_equals(2, count($attempt['result']['fixtures']));
+    assert_equals(6, count($attempt['result']['odds']));
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // 4. LEGACY FootballApiProvider WRAPPER
 // ═══════════════════════════════════════════════════════════════════════════
 
