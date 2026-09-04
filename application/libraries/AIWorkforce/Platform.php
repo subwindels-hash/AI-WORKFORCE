@@ -79,7 +79,13 @@ class Platform
             ['trading', ['broker.getAccount', 'broker.getPositions']],
             ['video', ['video.create']],
         ] as [$role, $tools]) {
-            $this->agents->register(new \AIWorkforce\Agents\CloudflareSpecialistAgent($role, $tools));
+            // Use EnhancedCloudflareAgent for multi-model Cloudflare support,
+            // falling back to CloudflareSpecialistAgent if the enhanced class is unavailable.
+            if (class_exists(\\AIWorkforce\\Agents\\EnhancedCloudflareAgent::class)) {
+                $this->agents->register(new \AIWorkforce\Agents\EnhancedCloudflareAgent($role, $tools));
+            } else {
+                $this->agents->register(new \AIWorkforce\Agents\CloudflareSpecialistAgent($role, $tools));
+            }
         }
 
         $this->providers = new ProviderManager();
