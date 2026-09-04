@@ -156,9 +156,9 @@ $acc = $accuracy ?? [];
         $sportsActive = !empty($intg['sports']['available']);
         $regActive = !empty($intg['registered']);
       ?>
-      <span class="mi-int-pill <?= $cfActive ? 'active' : 'inactive' ?>" title="Windels AI Agents integration">
+      <span class="mi-int-pill <?= $aiAgentsActive ? 'active' : 'inactive' ?>" title="Windels AI Agents integration">
         <span class="dot"></span>
-        AI Agents <?= $cfActive ? 'Connected' : 'Standby' ?>
+        AI Agents <?= $aiAgentsActive ? 'Connected' : 'Standby' ?>
       </span>
       <span class="mi-int-pill <?= $llmActive ? 'active' : 'inactive' ?>" title="LLM model enhancement">
         <span class="dot"></span>
