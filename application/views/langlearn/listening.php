@@ -138,7 +138,16 @@
   document.addEventListener('click', function(ev){
     var btn = ev.target.closest('[data-listen]');
     if (!btn || !provider) return;
-    provider.textToSpeech(btn.getAttribute('data-listen'), { locale: LOCALE, rate: 1 });
+    var text = btn.getAttribute('data-listen');
+    var spoken = provider.speakableText ? provider.speakableText(text) : text;
+    var panel = btn.closest('[data-exercise]');
+    var voiceSel = panel ? panel.querySelector('.tts-voice') : null;
+    var voice = null;
+    if (voiceSel && voiceSel._voices) {
+      var idx = parseInt(voiceSel.value,10);
+      voice = voiceSel._voices[idx] || null;
+    }
+    provider.textToSpeech(spoken, { locale: LOCALE, voice: voice, rate: 1 });
   });
 
   document.addEventListener('click', function(ev){

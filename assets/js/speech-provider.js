@@ -96,6 +96,7 @@ class SpeechProvider {
 
   /**
    * Spoken form of the brand: Win-dels (WIN + dels). On-screen spelling stays WINDELS.
+   * Applied to every TTS utterance in this project so the brand always sounds right.
    */
   speakableText(text) {
     return String(text == null ? '' : text).replace(/\bWINDELS\b/gi, 'Win-dels');

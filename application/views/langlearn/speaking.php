@@ -138,7 +138,16 @@ $locale = $lcodes[$langCode ?? 'en'] ?? 'en-GB';
   document.addEventListener('click', function(ev){
     var btn = ev.target.closest('[data-listen]');
     if (!btn || !provider) return;
-    provider.textToSpeech(btn.getAttribute('data-listen'), { locale: LOCALE, rate: 1 });
+    var text = btn.getAttribute('data-listen');
+    var spoken = provider.speakableText ? provider.speakableText(text) : text;
+    var panel = btn.closest('[data-prompt]');
+    var voiceSel = panel ? panel.querySelector('.tts-voice') : null;
+    var voice = null;
+    if (voiceSel && voiceSel._voices) {
+      var idx = parseInt(voiceSel.value,10);
+      voice = voiceSel._voices[idx] || null;
+    }
+    provider.textToSpeech(spoken, { locale: LOCALE, voice: voice, rate: 1 });
   });
 
   document.addEventListener('click', function(ev){
@@ -161,21 +170,58 @@ $locale = $lcodes[$langCode ?? 'en'] ?? 'en-GB';
     if (!btn || !provider) return;
     var input = document.getElementById(btn.getAttribute('data-target'));
     var status = btn.closest('.stt-form').querySelector('.stt-status');
+    var stopBtn = btn.closest('.stt-form').querySelector('.stt-stop');
     if (!input || !status) return;
-    status.textContent = 'Listening… say the prompt in ' + LOCALE;
+    if (provider.isRecording()) {
+      provider.stopListening();
+      btn.textContent = btn.textContent.replace('Listening…','Speak now');
+      if (stopBtn) stopBtn.disabled = true;
+      status.textContent = input.value.trim() ? 'Stopped. Review and submit.' : 'Stopped. Nothing captured — tap Speak to try again.';
+      return;
+    }
+    input.value = '';
+    btn.textContent = '🎤 Listening…';
+    if (stopBtn) stopBtn.disabled = false;
+    status.textContent = 'Listening… take your time. Silence does not end this. Tap Stop when you have finished talking.';
     provider.speechToText({
       locale: LOCALE,
+      holdUntilStop: true,
+      minListenMs: 30000,
+      onStatus: function(msg){ status.textContent = msg; },
       onResult: function(transcript){
         input.value = transcript;
-        status.textContent = 'Transcript captured — review and submit';
+        status.textContent = 'Heard you — still listening for more. Tap Stop when you are finished.';
       },
       onError: function(e){
-        status.textContent = 'Speech error: ' + (e.error || e.message || 'unknown');
+        var code = e.error || e.message || '';
+        if (code === 'no-speech' || code === 'aborted') {
+          status.textContent = 'Still listening — speak when you are ready, or tap Stop when you are finished.';
+          return;
+        }
+        btn.textContent = '🎤 Speak now';
+        if (stopBtn) stopBtn.disabled = true;
+        status.textContent = 'Speech error: ' + code;
       },
-      onEnd: function(){
-        if (status.textContent === 'Listening… say the prompt in ' + LOCALE) status.textContent = 'Nothing captured — try again';
+      onEnd: function(info){
+        btn.textContent = '🎤 Speak now';
+        if (stopBtn) stopBtn.disabled = true;
+        var got = String((info && info.transcript) || input.value || '').trim();
+        status.textContent = got ? 'Stopped. Review and submit.' : 'Stopped. Nothing captured — tap Speak to try again.';
       }
     });
+  });
+
+  document.addEventListener('click', function(ev){
+    var stopBtn = ev.target.closest('.stt-stop');
+    if (!stopBtn || !provider) return;
+    var form = stopBtn.closest('.stt-form');
+    var micBtn = form.querySelector('.stt-btn');
+    var input = form.querySelector('.stt-transcript');
+    var status = form.querySelector('.stt-status');
+    provider.stopListening();
+    micBtn.textContent = '🎤 Speak now';
+    stopBtn.disabled = true;
+    status.textContent = input.value.trim() ? 'Stopped. Review and submit.' : 'Stopped.';
   });
 })();
 </script>

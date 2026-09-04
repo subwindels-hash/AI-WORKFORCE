@@ -106,13 +106,14 @@
     var btn = ev.target.closest('[data-vocab-listen]');
     if (!btn || !provider) return;
     var text = btn.getAttribute('data-vocab-listen');
+    var spoken = provider.speakableText ? provider.speakableText(text) : text;
     var voice = null;
     if (voiceSel && voiceSel._voices) {
       var idx = parseInt(voiceSel.value,10);
       voice = voiceSel._voices[idx] || null;
     }
     var rate = rateSel ? parseFloat(rateSel.value) || 1 : 1;
-    provider.textToSpeech(text, { locale: LOCALE, voice: voice, rate: rate });
+    provider.textToSpeech(spoken, { locale: LOCALE, voice: voice, rate: rate });
   });
 
   if (stopBtn) stopBtn.addEventListener('click', function(){ if(provider) provider.stop(); });
