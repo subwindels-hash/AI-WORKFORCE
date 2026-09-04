@@ -32,7 +32,13 @@ class Multiplier extends App_Controller
 
     private function engine(): MultiplierIntelligenceEngine
     {
-        $provider = CrashProviderFactory::fromPlatform($this->platform);
+        // Member-facing intelligence must always use the real provider. Never
+        // inherit an administrator's simulation/demo selection and never fall
+        // back to fabricated rounds; LiveCrashProvider reports NO_DATA when
+        // the configured feed is unavailable.
+        $provider = CrashProviderFactory::fromPlatform($this->platform, [
+            'code' => \AIWorkforce\MultiplierIntelligence\LiveCrashProvider::CODE,
+        ]);
         
         // Get database from platform model
         $db = null;
@@ -195,7 +201,9 @@ class Multiplier extends App_Controller
         
         try {
             // 1. Initialize Aviator Provider
-            $aviatorProvider = CrashProviderFactory::fromPlatform($this->platform);
+            $aviatorProvider = CrashProviderFactory::fromPlatform($this->platform, [
+                'code' => \AIWorkforce\MultiplierIntelligence\LiveCrashProvider::CODE,
+            ]);
             $aviatorHealth = $aviatorProvider->health();
             $aviatorStats = method_exists($aviatorProvider, 'stats') ? $aviatorProvider->stats() : [];
             
