@@ -166,6 +166,13 @@ $route['multiplier/live'] = 'multiplier/live';
 $route['multiplier/dashboard'] = 'multiplier/dashboard_data';
 $route['multiplier/accuracy'] = 'multiplier/accuracy';
 $route['multiplier/validate'] = 'multiplier/validate';
+$route['multiplier/admin'] = 'multiplier_admin/index';
+$route['multiplier/stream/live'] = 'multiplier_stream/live';
+$route['multiplier/stream/signals'] = 'multiplier_stream/signals';
+
+// AI Command Center
+$route['command-center'] = 'command_center/index';
+$route['ai-command-center'] = 'command_center/index';
 
 // ---- JSON API (spec §17 subset for Phases 1–3) ---------------------------
 $route['api/system/status'] = 'api_system/status';

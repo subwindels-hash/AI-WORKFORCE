@@ -47,6 +47,7 @@ $isActive = function(array $keys) use ($active): bool {
   <p class="sidebar-label">Workspace</p>
   <!-- Required: Dashboard -->
   <a href="/dashboard" class="<?= $active === 'home' ? 'active' : '' ?>" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg><span>Dashboard</span></a>
+  <a href="/command-center" class="<?= $active === 'command_center' ? 'active' : '' ?>" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg><span>AI Command Center</span></a>
   <!-- Required: AI Workforce -->
   <a href="/analysis" class="<?= $active === 'dashboard' ? 'active' : '' ?>" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="6" width="16" height="13" rx="2"/><path d="M12 2v4M8.5 12h.01M15.5 12h.01M9 16h6"/></svg><span>AI Workforce</span></a>
   <a href="/app/workforce" class="<?= $active === 'workforce' ? 'active' : '' ?> sidebar-sub" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3h-8l-2 4h12zM8 14h.01M12 14h.01M16 14h.01"/></svg><span>⚡ Cloudflare Agents</span></a>
