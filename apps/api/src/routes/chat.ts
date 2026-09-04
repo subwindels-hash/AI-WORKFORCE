@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
 const ChatInputSchema = z.object({ message: z.string().trim().min(1).max(1000), history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(2000) })).max(12).default([]) });
-const SYSTEM_PROMPT = "You are Scout Guide, the helpful website assistant for Scout Lead Intelligence. Explain only product navigation, lead discovery, collections, pipeline, coverage, duplicates, exports, account access, and administrator controls. Never claim access to private records, never invent businesses or metrics, and say when a real provider or administrator is required. Keep replies concise and practical.";
+const SYSTEM_PROMPT = "You are WINDELS Assistant for AI-WORKFORCE. Explain the full product: Dashboard (/dashboard), Command Center (/command-center), Windels AI Agents (/app/workforce), AI Language Teacher (/app/languages/teacher), Languages (/app/languages), Lead Discovery (/leads), Pipeline (/lead-pipeline), Sports (/sports), EuroMillions (/lottery), Multiplier AI (/multiplier), Trading (/app/trading), Paper (/paper), Strategy (/strategy), Execution (/execution), Brokers (/brokers), Risk (/risk), and Account (/account). Give exact paths and practical steps. Never invent private records, businesses, fixtures, lottery draws, prices, or crash rounds. Say when a real provider or administrator must configure something. Trading is analysis-only by default; multiplier uses live data or NO_DATA. Do not repeat a generic list when the user asks a specific question.";
 
 const localGuide = (message: string): string => {
   const value = message.toLowerCase();
@@ -12,7 +12,14 @@ const localGuide = (message: string): string => {
   if (value.includes("search")) return "Use Discover to search a city, category, or business type. A configured provider is required; Scout never fills an empty result with synthetic businesses.";
   if (value.includes("pipeline") || value.includes("status")) return "Open Pipeline to use Kanban or table view, change a lead status, assign an organization member, add a note, and review activity.";
   if (value.includes("collection")) return "Create collections from Collections, then select leads in Discover and add them to one or more campaign groups.";
-  return "I can guide you through Discover, Pipeline, Collections, Intelligence, exports, and access control. Ask about any of those areas.";
+  if (value.includes("language") || value.includes("teacher")) return "AI Language Teacher: /app/languages/teacher. Languages and profiles: /app/languages. Lessons, translation, listening, speaking practice and SRS vocabulary use real authored content.";
+  if (value.includes("sport")) return "Sports Intel: /sports. Fixtures and odds are shown only when a real sports provider is connected.";
+  if (value.includes("lottery") || value.includes("euromillion")) return "EuroMillions: /lottery. Statistics, systems and backtests are historical or labelled data; official draws require a configured feed.";
+  if (value.includes("trading") || value.includes("paper")) return "Trading is analysis-only by default. Use /paper for simulation, /strategy for research, /execution for governed routing, and /risk for limits.";
+  if (value.includes("multiplier") || value.includes("crash")) return "Multiplier AI: /multiplier. It uses live crash history and shows NO_DATA when the real feed is unavailable; it never substitutes demo rounds.";
+  if (value.includes("agent") || value.includes("workforce")) return "Windels AI Agents: /app/workforce. Platform health: /app/agent-platform. Tools require approval and actions are audited.";
+  if (value.includes("dashboard")) return "Dashboard: /dashboard. It shows real provider-backed widgets and leaves unavailable modules empty rather than inventing data.";
+  return "I am WINDELS Assistant for AI-WORKFORCE. Ask about Dashboard, Windels AI Agents, AI Language Teacher, Languages, Lead Discovery, Pipeline, Sports, EuroMillions, Trading, Multiplier AI, Risk, Brokers, or Account and I will give the exact path.";
 };
 
 export async function chatRoutes(app: FastifyInstance): Promise<void> {
