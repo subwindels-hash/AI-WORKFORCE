@@ -113,14 +113,30 @@ class Api_lottery extends Api_controller
      * Statistical intelligence (spec §8–§14). All outputs are historical
      * observations carrying the engine DISCLAIMER — never forecasts of
      * future draws.
-     * Kinds: numbers | stars | hot-cold | distribution | pairs | triplets | star-pairs
+     * Kinds: numbers | frequency | gap | stars | hot-cold | distribution | pairs | triplets | star-pairs
+     * Window: draw count, or calendar aliases 1y / 2y / 6m (EuroMillions ~104 draws/year).
      */
-    public function statistics(string $kind)
+    public function statistics(?string $kind = null)
     {
         if (!$this->requirePermission('lottery.view', false)) return;
-        $window = (int) ($this->input->get('window') ?: 0);
+        $kind = \AIWorkforce\Lottery\LotteryIntelligence::normalizeStatsKind(
+            (string) ($kind !== null && $kind !== '' ? $kind : ($this->input->get('kind') ?: 'frequency'))
+        );
+        $windowRaw = (string) ($this->input->get('window') ?? '0');
+        $window = \AIWorkforce\Lottery\LotteryIntelligence::parseWindow($windowRaw);
         try {
-            $this->json(['kind' => $kind, 'window' => $window, 'data' => $this->platform->lottery->statistics($kind, $window)]);
+            $payload = ['kind' => $kind, 'window' => $window, 'windowRequested' => $windowRaw, 'data' => $this->platform->lottery->statistics($kind, $window)];
+            if ($this->lotteryWantsHtml()) {
+                $this->lotteryHtml('lottery/statistics', [
+                    'title' => 'EuroMillions · ' . ucfirst(str_replace('-', ' ', $kind)),
+                    'kind' => $kind,
+                    'window' => $window,
+                    'windowRequested' => $windowRaw,
+                    'data' => $payload['data'],
+                ]);
+                return;
+            }
+            $this->json($payload);
         } catch (\InvalidArgumentException $e) {
             $this->jsonError($e->getMessage(), 400);
         }
@@ -397,7 +413,47 @@ class Api_lottery extends Api_controller
     {
         if (!$this->requirePermission('lottery.view', false)) return;
         $g = $this->input->get(NULL, true) ?: [];
-        $this->json(['backtests' => $this->platform->lottery->listBacktests((int) ($g['limit'] ?: 50))]);
+        $rows = $this->platform->lottery->listBacktests((int) ($g['limit'] ?: 50));
+        if ($this->lotteryWantsHtml()) {
+            $this->lotteryHtml('lottery/backtests', [
+                'title' => 'EuroMillions · Backtests',
+                'backtests' => $rows,
+            ]);
+            return;
+        }
+        $this->json(['backtests' => $rows]);
+    }
+
+    private function lotteryWantsHtml(): bool
+    {
+        if ($this->input->get('format') === 'json') return false;
+        $accept = strtolower((string) ($_SERVER['HTTP_ACCEPT'] ?? ''));
+        if (str_contains($accept, 'application/json') && !str_contains($accept, 'text/html')) return false;
+        return str_contains($accept, 'text/html') || $accept === '' || $accept === '*/*';
+    }
+
+    /** @param mixed $raw */
+    private function lotteryIntList($raw): array
+    {
+        if (is_array($raw)) return array_values(array_unique(array_map('intval', $raw)));
+        $s = trim((string) $raw);
+        if ($s === '') return [];
+        return array_values(array_unique(array_map('intval', array_filter(explode(',', $s), fn($x) => $x !== ''))));
+    }
+
+    private function lotteryHtml(string $view, array $data): void
+    {
+        $state = $this->platform->state();
+        $data += [
+            'active' => 'lottery',
+            'status' => ['tradingMode' => $state['tradingMode'], 'killSwitch' => $state['killSwitch'],
+                         'providers' => $this->platform->providers->getAllHealth()],
+            'notice' => $this->session->flashdata('notice'),
+            'error' => $this->session->flashdata('error'),
+        ];
+        $this->load->view('layout/header', $data);
+        $this->load->view($view, $data);
+        $this->load->view('layout/footer');
     }
 
     public function show_backtest(string $id)

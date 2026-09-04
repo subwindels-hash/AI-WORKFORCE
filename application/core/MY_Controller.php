@@ -233,6 +233,16 @@ class Api_controller extends MY_Controller
         parent::__construct();
         $key = strtolower($this->router->class . '/' . $this->router->method);
         if (!isset(self::PUBLIC_ACTIONS[$key]) && $this->currentUser() === null) {
+            $accept = strtolower((string) ($_SERVER['HTTP_ACCEPT'] ?? ''));
+            $wantsHtml = str_contains($accept, 'text/html') && !str_contains($accept, 'application/json');
+            if ($wantsHtml && in_array($this->input->method(true), ['GET', 'HEAD'], true)) {
+                $next = '/' . ltrim((string) uri_string(), '/');
+                $qs = (string) ($_SERVER['QUERY_STRING'] ?? '');
+                if ($qs !== '') $next .= '?' . $qs;
+                $this->session->set_userdata('return_to', $next);
+                redirect('/login');
+                exit;
+            }
             $this->jsonError('unauthenticated', 401);
             $this->output->_display();
             exit;

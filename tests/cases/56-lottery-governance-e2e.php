@@ -12,6 +12,7 @@ test('lottery api: routes, RBAC matrix and honest feature matrix', function () {
     $routes = file_get_contents(FCPATH . 'application/config/routes.php');
     assert_contains("\$route['api/lottery/status'] = 'api_lottery/status';", $routes);
     assert_contains("\$route['api/lottery/draws/(:num)'] = 'api_lottery/show_draw/\$1';", $routes);
+    assert_contains("\$route['api/lottery/statistics'] = 'api_lottery/statistics';", $routes);
     assert_contains("\$route['api/lottery/statistics/(:any)'] = 'api_lottery/statistics/\$1';", $routes);
     assert_contains("\$route['api/lottery/sync'] = 'api_lottery/sync';", $routes);
 

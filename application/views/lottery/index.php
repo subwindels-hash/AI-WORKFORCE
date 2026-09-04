@@ -94,11 +94,11 @@ window.__AI_LOTTERY_STATE__ = <?= $stateJson ?>;
       <div class="lottery-card">
         <h3>Quick links</h3>
         <ul style="margin:0;padding-left:18px;line-height:1.8">
-          <li><a href="/api/lottery/statistics?kind=frequency&window=1y" target="_blank">Frequency / hot-cold (1y)</a></li>
-          <li><a href="/api/lottery/statistics?kind=gap&window=1y" target="_blank">Gap statistics</a></li>
-          <li><a href="/api/lottery/statistics?kind=distribution&window=2y" target="_blank">Number distribution</a></li>
-          <li><a href="/api/lottery/system" target="_blank">System (wheel) builder</a></li>
-          <li><a href="/api/lottery/backtests" target="_blank">Backtests — random baseline required</a></li>
+          <li><a href="/api/lottery/statistics?kind=frequency&window=1y">Frequency / hot-cold (1y)</a></li>
+          <li><a href="/api/lottery/statistics?kind=gap&window=1y">Gap statistics</a></li>
+          <li><a href="/api/lottery/statistics?kind=distribution&window=2y">Number distribution</a></li>
+          <li><a href="/api/lottery/system">System (wheel) builder</a></li>
+          <li><a href="/api/lottery/backtests">Backtests — random baseline required</a></li>
         </ul>
       </div>
     </div>

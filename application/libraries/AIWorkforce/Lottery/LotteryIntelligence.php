@@ -234,14 +234,54 @@ class LotteryIntelligence
 
     /**
      * Statistical endpoints (spec §8–§14). All outputs carry the DISCLAIMER.
-     * @param string $kind numbers|stars|hot-cold|distribution|pairs|star-pairs
+     * EuroMillions draws twice a week — used to interpret calendar windows
+     * such as `1y` / `2y` from the live dashboard links.
+     */
+    public const DRAWS_PER_YEAR = 104;
+
+    /**
+     * @param string|int $raw 0|all|50|1y|2y|6m
+     */
+    public static function parseWindow(string|int $raw): int
+    {
+        $s = strtolower(trim((string) $raw));
+        if ($s === '' || $s === '0' || $s === 'all') return 0;
+        if (preg_match('/^(\d+)\s*y/', $s, $m)) return max(1, (int) $m[1]) * self::DRAWS_PER_YEAR;
+        if (preg_match('/^(\d+)\s*m/', $s, $m)) return max(1, (int) round((int) $m[1] * self::DRAWS_PER_YEAR / 12));
+        if (ctype_digit($s)) return (int) $s;
+        return 0;
+    }
+
+    public static function normalizeStatsKind(string $kind): string
+    {
+        $k = strtolower(trim($kind));
+        return match ($k) {
+            '', 'frequency', 'freq', 'numbers', 'hot-cold-frequency' => 'frequency',
+            'gap', 'gaps' => 'gap',
+            'hot-cold', 'hotcold', 'hot_cold' => 'hot-cold',
+            'distribution', 'dist' => 'distribution',
+            'stars' => 'stars',
+            'pairs' => 'pairs',
+            'triplets' => 'triplets',
+            'star-pairs', 'starpairs' => 'star-pairs',
+            default => $k,
+        };
+    }
+
+    /**
+     * @param string $kind numbers|stars|hot-cold|distribution|pairs|star-pairs|frequency|gap
      */
     public function statistics(string $kind = 'numbers', int $window = 0): array
     {
         $draws = $this->repo->drawsForStats(self::LOTTERY, 10000);
         $r = $this->rules;
+        $kind = self::normalizeStatsKind($kind);
         return match ($kind) {
-            'numbers' => $this->statistics->numberStats($draws, $r->mainMin(), $r->mainMax(), $window),
+            'numbers', 'frequency' => array_merge(
+                $this->statistics->numberStats($draws, $r->mainMin(), $r->mainMax(), $window),
+                ['hotCold' => $this->statistics->hotCold($draws, 'main', $r->mainMin(), $r->mainMax(), $window > 0 ? $window : 50)]
+            ),
+            'gap' => $this->statistics->numberStats($draws, $r->mainMin(), $r->mainMax(), $window),
             'stars' => $this->statistics->starStats($draws, $r->starMin(), $r->starMax(), $window),
             'hot-cold' => $this->statistics->hotCold($draws, 'main', $r->mainMin(), $r->mainMax(), $window > 0 ? $window : 50),
             'distribution' => $this->statistics->distribution($draws, $r->mainMin(), $r->mainMax(), $r->mainCount()),
