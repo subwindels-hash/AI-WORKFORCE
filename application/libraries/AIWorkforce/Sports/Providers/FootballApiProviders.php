@@ -760,13 +760,27 @@ class SportMonksProvider implements SportsDataProvider
      */
     public function round(string $roundExternalId): array
     {
-        $includes = implode(';', [
+        $fullIncludes = [
             'fixtures',
             'fixtures.odds', 'fixtures.odds.market', 'fixtures.odds.bookmaker',
             'fixtures.participants', 'fixtures.scores', 'fixtures.venue', 'fixtures.state',
             'league', 'league.country',
-        ]);
-        $resp = $this->doRequest('/rounds/' . rawurlencode($roundExternalId) . '?include=' . rawurlencode($includes));
+        ];
+        $plainIncludes = [
+            'fixtures',
+            'fixtures.participants', 'fixtures.scores', 'fixtures.venue', 'fixtures.state',
+            'league', 'league.country',
+        ];
+        try {
+            $resp = $this->doRequest($this->roundPath($roundExternalId, $fullIncludes));
+        } catch (ProviderException $e) {
+            if ($e->status !== ProviderException::DATA_ERROR) throw $e;
+            // The odds include may not be on this subscription (include
+            // exception 5013) — retry once without odds so the round is
+            // still usable for fixtures + results. Mirrors the odds()
+            // add-on fallback.
+            $resp = $this->doRequest($this->roundPath($roundExternalId, $plainIncludes));
+        }
         $json = $this->decodeJson($resp);
         $data = $json['data'] ?? $json;
         if (!is_array($data) || !isset($data['id'])) {
@@ -817,6 +831,11 @@ class SportMonksProvider implements SportsDataProvider
             ];
         }
         return $out;
+    }
+
+    private function roundPath(string $roundExternalId, array $includes): string
+    {
+        return '/rounds/' . rawurlencode($roundExternalId) . '?include=' . rawurlencode(implode(';', $includes));
     }
 
     public function odds(string $fixtureExternalId): array
@@ -939,6 +958,7 @@ class SportMonksProvider implements SportsDataProvider
                 'homeTeamLogo' => $this->participantLogo($r, 'home'),
                 'awayTeamLogo' => $this->participantLogo($r, 'away'),
                 'round' => $r['round']['name'] ?? null,
+                'roundId' => isset($r['round_id']) && $r['round_id'] !== null ? (string) $r['round_id'] : '',
                 'sourceTimestamp' => gmdate('c'),
             ];
         }

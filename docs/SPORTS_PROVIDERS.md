@@ -70,6 +70,13 @@ $attempt = $providers->withFallback('round', function ($p) use ($roundId) {
 });
 ```
 
+The daily ticket engine uses this path: when the serving provider exposes
+`round()` and the fetched fixtures carry a `roundId`, `DailyTicketService`
+bulk-fetches each matchday's odds with one `round()` call per round
+(`fetchRoundOdds`) and only falls back to the per-fixture `odds()` call for
+fixtures the round fetch did not cover (no `roundId`, or a failed round
+request). Odds already persisted for a match are never re-fetched.
+
 ## Safe operation
 
 Provider data is untrusted input. The existing normalizers, data-quality gates, confidence checks, and ticket governance remain in the pipeline. Missing odds from providers without an odds feed must not be treated as fabricated odds; those predictions should be rejected or supplied by a separately licensed odds source.

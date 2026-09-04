@@ -551,6 +551,30 @@ test('sportmonks round rejects malformed payloads', function () {
     catch (ProviderException $e) { assert_equals(ProviderException::DATA_ERROR, $e->status); }
 });
 
+test('sportmonks round retries without odds include when the odds add-on is unavailable', function () {
+    // Degraded (no odds) variant of the round payload.
+    $plain = sportmonksRoundPayload();
+    foreach ($plain['fixtures'] as &$f) { unset($f['odds']); }
+    unset($f);
+    $urls = [];
+    $transport = function (string $url, array $headers) use (&$urls, $plain) {
+        $urls[] = $url;
+        if (str_contains($url, 'fixtures.odds')) {
+            // Include exception 5013: odds add-on not subscribed.
+            return ['status' => 400, 'body' => json_encode(['error' => ['status' => 5013, 'name' => 'Include not available']])];
+        }
+        return ['status' => 200, 'body' => json_encode(['data' => $plain])];
+    };
+    $p = new SportMonksProvider('token', 'https://api.test', 10, $transport);
+    $round = $p->round('396698');
+    assert_equals(2, count($urls), 'one retry without odds');
+    assert_true(str_contains($urls[0], 'fixtures.odds'), 'first request asks for odds');
+    assert_false(str_contains($urls[1], 'fixtures.odds'), 'retry drops the odds include');
+    assert_equals('396698', $round['roundId']);
+    assert_equals(2, count($round['fixtures']), 'fixtures still mapped from the degraded response');
+    assert_equals(0, count($round['odds']), 'degraded round has no odds — none fabricated');
+});
+
 test('sportmonks seasonRounds maps the season schedule', function () {
     $body = json_encode(['data' => [
         ['id' => 396698, 'league_id' => 648, 'season_id' => 26763, 'name' => '25', 'finished' => true, 'is_current' => false, 'starting_at' => '2026-08-29', 'ending_at' => '2026-08-31'],
