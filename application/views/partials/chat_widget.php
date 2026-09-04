@@ -20,10 +20,11 @@
       </span>
       <button type="button" class="ai_workforce-chat-close" aria-label="Close assistant" title="Close">×</button>
     </header>
-    <div class="ai_workforce-chat-messages" aria-live="polite"><div class="ai_workforce-chat-message agent">Hi, I'm the WINDELS Assistant. Ask me how to use the platform. <button type="button" class="ai_workforce-chat-listen" data-listen="Hi, I'm the WINDELS Assistant. Ask me how to use the platform.">🔊 Listen</button></div></div>
+    <div class="ai_workforce-chat-messages" aria-live="polite"><div class="ai_workforce-chat-message agent">Hi — WINDELS Assistant for AI WORKFORCE. Ask about a real module (agents, languages, leads, trading, sports, EuroMillions, multiplier) and I will give the path and how it actually works. <button type="button" class="ai_workforce-chat-listen" data-listen="Hi — WINDELS Assistant for AI WORKFORCE. Ask about a real module and I will give the path and how it actually works.">🔊 Listen</button></div></div>
     <p class="ai_workforce-chat-voice-status" id="ai_workforce-chat-voice-status" hidden></p>
     <form class="ai_workforce-chat-form">
       <button type="button" class="ai_workforce-chat-mic" id="ai_workforce-chat-mic" aria-label="Tap to speak">🎤 Speak</button>
+      <button type="button" class="ai_workforce-chat-mic-stop" id="ai_workforce-chat-mic-stop" aria-label="Stop listening" disabled>⏹ Stop</button>
       <input name="message" maxlength="1000" required placeholder="Ask about a page or feature…" autocomplete="off" aria-label="Message">
       <button type="submit" aria-label="Send message">Send</button>
     </form>
@@ -38,4 +39,5 @@
     <span class="ai_workforce-chat-launch-label" aria-hidden="true">Ask WINDELS</span>
   </button>
 </div>
+<script src="/assets/js/speech-provider.js" defer></script>
 <script src="/assets/js/ai_workforce-chat.js" defer></script>

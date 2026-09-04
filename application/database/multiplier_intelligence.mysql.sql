@@ -154,5 +154,6 @@ INSERT IGNORE INTO crash_game_models (code, name, version, description) VALUES
 
 -- Insert default providers (simulation only until configured)
 INSERT IGNORE INTO crash_game_providers (code, name, enabled) VALUES
-('simulation', 'Simulation (Demo Data)', 1),
+('bustabit', 'Bustabit (Live)', 1),
+('simulation', 'Simulation (Demo Data)', 0),
 ('aviator_demo', 'Aviator Demo Adapter', 0);

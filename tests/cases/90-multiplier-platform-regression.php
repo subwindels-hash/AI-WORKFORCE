@@ -13,6 +13,8 @@
  */
 use AIWorkforce\MultiplierIntelligence\AviatorProvider;
 use AIWorkforce\MultiplierIntelligence\CrashGameProviderInterface;
+use AIWorkforce\MultiplierIntelligence\CrashProviderFactory;
+use AIWorkforce\MultiplierIntelligence\LiveCrashProvider;
 use AIWorkforce\MultiplierIntelligence\SimulationProvider;
 use AIWorkforce\SchemaInstaller;
 
@@ -73,4 +75,66 @@ test('multiplier engine reports accuracy without validated predictions', functio
     assert_true(is_array($stats), 'accuracyStats returns an array');
     // Empty database → unavailable, never a fatal result_array() on false.
     assert_equals(false, $stats['available'] ?? null);
+});
+
+test('live crash provider parses real Bustabit-shaped JSON and never invents rounds', function () {
+    $payload = [
+        'data' => [
+            'games' => [
+                ['id' => 101, 'bust' => 1.42, 'hash' => 'abc', 'createdAt' => '2026-01-01T00:00:00Z'],
+                ['id' => 102, 'bust' => 3.10, 'hash' => 'def', 'createdAt' => '2026-01-01T00:00:10Z'],
+                ['id' => 103, 'bust' => null, 'inProgress' => true, 'currentMultiplier' => 1.87],
+            ],
+        ],
+    ];
+    $parsed = LiveCrashProvider::parsePayload($payload);
+    assert_equals(2, count($parsed['rounds']));
+    assert_equals(1.42, $parsed['rounds'][0]['multiplier']);
+    assert_equals('101', $parsed['rounds'][0]['roundId']);
+    assert_true($parsed['live']['inRound'] ?? false);
+    assert_equals(1.87, $parsed['live']['currentMultiplier']);
+
+    $empty = LiveCrashProvider::parsePayload(['data' => ['games' => []]]);
+    assert_equals(0, count($empty['rounds']));
+    assert_true($empty['live'] === null);
+});
+
+test('crash factory defaults to live provider, not simulation', function () {
+    $p = CrashProviderFactory::make();
+    assert_true($p instanceof LiveCrashProvider, 'default is LiveCrashProvider');
+    $sim = CrashProviderFactory::make(['code' => 'simulation']);
+    assert_true($sim instanceof SimulationProvider, 'simulation only when requested');
+});
+
+test('engine returns NO_DATA instead of fabricating demo multipliers', function () {
+    $transport = static function () {
+        return json_encode(['data' => ['games' => []]]);
+    };
+    $provider = new LiveCrashProvider(['disable_cache' => true], $transport);
+    $engine = new AIWorkforce\MultiplierIntelligence\MultiplierIntelligenceEngine($provider);
+    $signal = $engine->generateSignal();
+    assert_equals('NO_DATA', $signal['status'] ?? null);
+    assert_true($signal['predictedMultiplier'] === null, 'no invented prediction');
+});
+
+test('live provider reuses persisted real rounds when the feed is down', function () {
+    $cache = sys_get_temp_dir() . '/windels_crash_cache_' . bin2hex(random_bytes(4)) . '.json';
+    $ok = static function () {
+        return json_encode(['games' => [
+            ['id' => 1, 'bust' => 2.2, 'createdAt' => '2026-01-01T00:00:00Z'],
+            ['id' => 2, 'bust' => 1.5, 'createdAt' => '2026-01-01T00:00:10Z'],
+            ['id' => 3, 'bust' => 4.8, 'createdAt' => '2026-01-01T00:00:20Z'],
+            ['id' => 4, 'bust' => 1.11, 'createdAt' => '2026-01-01T00:00:30Z'],
+            ['id' => 5, 'bust' => 3.3, 'createdAt' => '2026-01-01T00:00:40Z'],
+        ]]);
+    };
+    $first = new LiveCrashProvider(['cachePath' => $cache], $ok);
+    assert_equals(5, count($first->history(20)));
+
+    $down = static function () { return null; };
+    $second = new LiveCrashProvider(['cachePath' => $cache], $down);
+    $hist = $second->history(20);
+    assert_equals(5, count($hist), 'stale live cache still has real rounds');
+    assert_equals(2.2, $hist[0]['multiplier']);
+    @unlink($cache);
 });

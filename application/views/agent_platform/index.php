@@ -47,7 +47,9 @@ $activity = $dashboard['recentActivity'] ?? [];
   </div>
   <div style="display:flex;gap:8px">
     <a class="btn" href="/app/workforce">Agent Console</a>
+    <?php if (!empty($admin)): ?>
     <a class="btn" href="/admin/api">AI Providers</a>
+    <?php endif; ?>
   </div>
 </div>
 
@@ -55,7 +57,7 @@ $activity = $dashboard['recentActivity'] ?? [];
 <div class="obs-hero">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;position:relative;z-index:1">
     <div>
-      <h2>Cloudflare AI Agent Platform</h2>
+      <h2>Windels AI Agents</h2>
       <p>Edge AI inference · Multi-provider routing · Durable sessions · Tool orchestration · Workflow engine</p>
     </div>
     <span class="health-pill <?= ($health['overall'] ?? 'HEALTHY') === 'HEALTHY' ? 'healthy' : (($health['overall'] ?? '') === 'DEGRADED' ? 'degraded' : 'down') ?>">

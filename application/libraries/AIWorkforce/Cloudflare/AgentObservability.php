@@ -245,11 +245,19 @@ class AgentObservability
      */
     public function recentActivity(int $limit = 20): array
     {
-        return $this->db
-            ->order_by('created_at', 'DESC')
-            ->limit($limit)
-            ->get('audit_log')
-            ->result_array();
+        try {
+            $rows = $this->db
+                ->order_by('created_at', 'DESC')
+                ->limit(max(20, $limit * 4))
+                ->get('audit_log')
+                ->result_array();
+            if (!is_array($rows)) {
+                $rows = [];
+            }
+        } catch (\Throwable $e) {
+            $rows = [];
+        }
+        return array_slice(\AIWorkforce\MemberAudit::forMembers($rows), 0, $limit);
     }
 
     /**

@@ -64,6 +64,14 @@ class LotteryIntelligence
         $health = $this->provider->health();
         $enabled = $health['state'] === 'ONLINE';
         $last = $this->repo->listDraws(['lotteryCode' => self::LOTTERY], 1);
+        $lastDraw = $last !== [] ? $this->presentDraw($last[0]) : null;
+        $jackpot = $lastDraw['jackpot'] ?? null;
+        $jpInfo = $this->provider->jackpotInfo();
+        if (is_array($jpInfo) && ($jpInfo['value'] ?? null) !== null && ($jpInfo['value'] ?? '') !== '') {
+            $jackpot = $jpInfo['value'];
+        }
+        $imported = $this->drawCount();
+        $uiStatus = $enabled ? 'ONLINE' : (($health['state'] ?? '') === 'UNCONFIGURED' ? 'NO_DATA' : (string) ($health['state'] ?? 'NO_DATA'));
         return [
             'module' => 'lottery-intelligence',
             'activeLottery' => self::LOTTERY,
@@ -74,14 +82,48 @@ class LotteryIntelligence
                 'main' => ['count' => $this->rules->mainCount(), 'min' => $this->rules->mainMin(), 'max' => $this->rules->mainMax()],
                 'stars' => ['count' => $this->rules->starCount(), 'min' => $this->rules->starMin(), 'max' => $this->rules->starMax()],
                 'schedule' => $this->rules->drawSchedule(),
+                'mains' => $this->rules->mainCount(),
+                'mainMax' => $this->rules->mainMax(),
+                'starMax' => $this->rules->starMax(),
             ],
             'provider' => $health,
+            'providerLabel' => (string) ($health['message'] ?? $this->provider->id()),
             'engine' => $enabled ? self::ENGINE_ACTIVE : self::ENGINE_DISABLED,
             'modelVersion' => self::MODEL_VERSION,
-            'drawsTracked' => $this->drawCount(),
-            'lastDraw' => $last !== [] ? $last[0] : null,
+            'drawsTracked' => $imported,
+            'lastDraw' => $lastDraw,
             'disclaimer' => LotteryStatisticsEngine::DISCLAIMER,
+            // Dashboard / widget aliases (views/lottery/index.php)
+            'status' => $uiStatus,
+            'jackpot' => $jackpot,
+            'imported' => $imported,
+            'nextEstimated' => $this->nextDrawHint(),
         ];
+    }
+
+    /** Next EuroMillions draw day (Tue/Fri) as a hint — not a guaranteed official date. */
+    private function nextDrawHint(): ?string
+    {
+        $days = $this->rules->drawSchedule()['days'] ?? [2, 5];
+        $ts = time();
+        for ($i = 0; $i < 8; $i++) {
+            $t = $ts + $i * 86400;
+            if (in_array((int) gmdate('w', $t), $days, true)) return gmdate('Y-m-d', $t);
+        }
+        return null;
+    }
+
+    /** @param array<string,mixed> $row */
+    public function presentDraw(array $row): array
+    {
+        $payload = is_array($row['payload'] ?? null) ? $row['payload'] : [];
+        $mains = array_map('intval', (array) ($payload['main'] ?? []));
+        $stars = array_map('intval', (array) ($payload['stars'] ?? []));
+        $row['numbers'] = ['main' => $mains, 'stars' => $stars];
+        $row['main_numbers'] = $mains;
+        $row['lucky_stars'] = $stars;
+        $row['draw_no'] = $row['external_id'] ?? ($row['id'] ?? '');
+        return $row;
     }
 
     public function drawCount(): int
@@ -234,14 +276,54 @@ class LotteryIntelligence
 
     /**
      * Statistical endpoints (spec §8–§14). All outputs carry the DISCLAIMER.
-     * @param string $kind numbers|stars|hot-cold|distribution|pairs|star-pairs
+     * EuroMillions draws twice a week — used to interpret calendar windows
+     * such as `1y` / `2y` from the live dashboard links.
+     */
+    public const DRAWS_PER_YEAR = 104;
+
+    /**
+     * @param string|int $raw 0|all|50|1y|2y|6m
+     */
+    public static function parseWindow(string|int $raw): int
+    {
+        $s = strtolower(trim((string) $raw));
+        if ($s === '' || $s === '0' || $s === 'all') return 0;
+        if (preg_match('/^(\d+)\s*y/', $s, $m)) return max(1, (int) $m[1]) * self::DRAWS_PER_YEAR;
+        if (preg_match('/^(\d+)\s*m/', $s, $m)) return max(1, (int) round((int) $m[1] * self::DRAWS_PER_YEAR / 12));
+        if (ctype_digit($s)) return (int) $s;
+        return 0;
+    }
+
+    public static function normalizeStatsKind(string $kind): string
+    {
+        $k = strtolower(trim($kind));
+        return match ($k) {
+            '', 'frequency', 'freq', 'numbers', 'hot-cold-frequency' => 'frequency',
+            'gap', 'gaps' => 'gap',
+            'hot-cold', 'hotcold', 'hot_cold' => 'hot-cold',
+            'distribution', 'dist' => 'distribution',
+            'stars' => 'stars',
+            'pairs' => 'pairs',
+            'triplets' => 'triplets',
+            'star-pairs', 'starpairs' => 'star-pairs',
+            default => $k,
+        };
+    }
+
+    /**
+     * @param string $kind numbers|stars|hot-cold|distribution|pairs|star-pairs|frequency|gap
      */
     public function statistics(string $kind = 'numbers', int $window = 0): array
     {
         $draws = $this->repo->drawsForStats(self::LOTTERY, 10000);
         $r = $this->rules;
+        $kind = self::normalizeStatsKind($kind);
         return match ($kind) {
-            'numbers' => $this->statistics->numberStats($draws, $r->mainMin(), $r->mainMax(), $window),
+            'numbers', 'frequency' => array_merge(
+                $this->statistics->numberStats($draws, $r->mainMin(), $r->mainMax(), $window),
+                ['hotCold' => $this->statistics->hotCold($draws, 'main', $r->mainMin(), $r->mainMax(), $window > 0 ? $window : 50)]
+            ),
+            'gap' => $this->statistics->numberStats($draws, $r->mainMin(), $r->mainMax(), $window),
             'stars' => $this->statistics->starStats($draws, $r->starMin(), $r->starMax(), $window),
             'hot-cold' => $this->statistics->hotCold($draws, 'main', $r->mainMin(), $r->mainMax(), $window > 0 ? $window : 50),
             'distribution' => $this->statistics->distribution($draws, $r->mainMin(), $r->mainMax(), $r->mainCount()),

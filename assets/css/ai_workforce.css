@@ -890,7 +890,8 @@ pre.raw {
 .save-toast--ok { background: #12301f; border-color: #22c55e66; color: #9fe9b6; }
 .save-toast--err { background: #3b121d; border-color: #fb5d6b66; color: #ffb3b9; }
 
-.lang-picker { position: relative; width: 100%; }
+.lang-picker-extra { margin-top: 6px; }
+.lang-picker { position: relative; width: 100%; z-index: 24; }
 .lang-picker-display {
   width: 100%;
   text-align: left;

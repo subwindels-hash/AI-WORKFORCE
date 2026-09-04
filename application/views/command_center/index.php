@@ -58,7 +58,9 @@
       <h1><span class="logo">🎛️</span> AI Command Center</h1>
       <div style="display:flex;gap:10px">
         <a href="/" class="cc-module-link" style="padding:8px 16px">Dashboard</a>
-        <a href="/admin" class="cc-module-link" style="padding:8px 16px">Admin</a>
+        <?php if (!empty($admin)): ?>
+          <a href="/admin" class="cc-module-link" style="padding:8px 16px">Admin</a>
+        <?php endif; ?>
       </div>
     </div>
     
@@ -165,6 +167,7 @@
           <span class="cc-action-icon">⚽</span>
           <span class="cc-action-text">Sports Intel</span>
         </a>
+        <?php if (!empty($admin)): ?>
         <a href="/admin/api" class="cc-action">
           <span class="cc-action-icon">🔧</span>
           <span class="cc-action-text">AI Providers</span>
@@ -173,6 +176,7 @@
           <span class="cc-action-icon">🎛️</span>
           <span class="cc-action-text">Module Admin</span>
         </a>
+        <?php endif; ?>
       </div>
     </div>
     

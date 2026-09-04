@@ -48,7 +48,7 @@ class Workforce extends App_Controller
             ];
         }
 
-        // Check Cloudflare configuration
+        // Check LLM provider configuration
         $llmStatus = \AIWorkforce\ApiProviders::publicStatus('llm');
         $cloudflareConfigured = !empty($llmStatus['configured']);
 

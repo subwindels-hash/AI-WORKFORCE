@@ -227,6 +227,7 @@ $route['api/lottery/lotteries'] = 'api_lottery/lotteries';
 $route['api/lottery/rules'] = 'api_lottery/rules';
 $route['api/lottery/draws'] = 'api_lottery/draws';
 $route['api/lottery/draws/(:num)'] = 'api_lottery/show_draw/$1';
+$route['api/lottery/statistics'] = 'api_lottery/statistics';
 $route['api/lottery/statistics/(:any)'] = 'api_lottery/statistics/$1';
 $route['api/lottery/analyze'] = 'api_lottery/analyze';
 $route['api/lottery/generate'] = 'api_lottery/generate';

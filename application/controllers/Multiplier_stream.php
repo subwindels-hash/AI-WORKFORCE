@@ -2,7 +2,7 @@
 defined('BASEPATH') or exit('No direct script access allowed');
 require_once APPPATH . 'core/App_Controller.php';
 
-use AIWorkforce\MultiplierIntelligence\SimulationProvider;
+use AIWorkforce\MultiplierIntelligence\CrashProviderFactory;
 use AIWorkforce\MultiplierIntelligence\MultiplierIntelligenceEngine;
 
 /**
@@ -33,15 +33,7 @@ class Multiplier_stream extends App_Controller
         header('Connection: keep-alive');
         header('X-Accel-Buffering: no'); // Nginx
         
-        $provider = new SimulationProvider();
-        
-        // Generate initial history
-        if (empty($provider->allRounds())) {
-            for ($i = 0; $i < 50; $i++) {
-                $provider->startRound();
-                $provider->endRound();
-            }
-        }
+        $provider = CrashProviderFactory::fromPlatform($this->platform);
         
         $lastSignalTime = 0;
         $iterationCount = 0;
@@ -56,7 +48,14 @@ class Multiplier_stream extends App_Controller
             }
             
             // Update round state
-            $roundData = $provider->updateMultiplier();
+            $roundData = method_exists($provider, 'updateMultiplier')
+                ? $provider->updateMultiplier()
+                : [
+                    'currentMultiplier' => $provider->currentMultiplier() ?? 1.0,
+                    'roundId' => ($provider->latestRound()['roundId'] ?? null),
+                    'inRound' => $provider->isInRound(),
+                    'elapsedMs' => 0,
+                ];
             
             // Send current multiplier
             $this->sendSSE('multiplier', [
@@ -122,13 +121,7 @@ class Multiplier_stream extends App_Controller
         header('Cache-Control: no-cache');
         header('Connection: keep-alive');
         
-        $provider = new SimulationProvider();
-        
-        // Generate initial history
-        for ($i = 0; $i < 100; $i++) {
-            $provider->startRound();
-            $provider->endRound();
-        }
+        $provider = CrashProviderFactory::fromPlatform($this->platform);
         
         $iteration = 0;
         $maxIterations = 180; // ~1 hour

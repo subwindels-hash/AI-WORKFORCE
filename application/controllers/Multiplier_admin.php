@@ -71,7 +71,7 @@ class Multiplier_admin extends App_Controller
         
         $config = [
             'enabled' => (bool) $this->input->post('enabled'),
-            'active_provider' => $this->input->post('active_provider') ?: 'simulation',
+            'active_provider' => $this->input->post('active_provider') ?: 'bustabit',
             'signal_interval' => (int) ($this->input->post('signal_interval') ?: 30),
             'history_size' => (int) ($this->input->post('history_size') ?: 200),
             'require_disclaimer' => (bool) $this->input->post('require_disclaimer'),
@@ -99,7 +99,7 @@ class Multiplier_admin extends App_Controller
         }
         
         try {
-            $provider = new \AIWorkforce\MultiplierIntelligence\SimulationProvider();
+            $provider = \AIWorkforce\MultiplierIntelligence\CrashProviderFactory::fromPlatform($this->platform);
             $engine = new \AIWorkforce\MultiplierIntelligence\MultiplierIntelligenceEngine(
                 $provider,
                 $this->platform->model->db ?? null
@@ -140,7 +140,7 @@ class Multiplier_admin extends App_Controller
     public function accuracy_report()
     {
         try {
-            $provider = new \AIWorkforce\MultiplierIntelligence\SimulationProvider();
+            $provider = \AIWorkforce\MultiplierIntelligence\CrashProviderFactory::fromPlatform($this->platform);
             $engine = new \AIWorkforce\MultiplierIntelligence\MultiplierIntelligenceEngine(
                 $provider,
                 $this->platform->model->db ?? null
@@ -202,7 +202,7 @@ class Multiplier_admin extends App_Controller
         $state = $this->platform->state();
         return $state['multiplier_config'] ?? [
             'enabled' => true,
-            'active_provider' => 'simulation',
+            'active_provider' => 'bustabit',
             'signal_interval' => 30,
             'history_size' => 200,
             'require_disclaimer' => true,
@@ -263,16 +263,16 @@ class Multiplier_admin extends App_Controller
     {
         return [
             [
-                'code' => 'simulation',
-                'name' => 'Simulation (Demo)',
+                'code' => 'bustabit',
+                'name' => 'Bustabit (Live)',
                 'enabled' => true,
-                'description' => 'Generates realistic demo data using geometric distribution',
+                'description' => 'Public Bustabit crash history — real completed rounds, no demo data',
             ],
             [
-                'code' => 'aviator_demo',
-                'name' => 'Aviator Demo Adapter',
+                'code' => 'simulation',
+                'name' => 'Simulation (tests only)',
                 'enabled' => false,
-                'description' => 'Demo adapter for Aviator game (requires configuration)',
+                'description' => 'Geometric demo generator — not used by the member dashboard',
             ],
         ];
     }

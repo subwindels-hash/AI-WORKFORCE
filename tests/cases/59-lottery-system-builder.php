@@ -187,7 +187,8 @@ test('lottery system builder: small systems build inline through the real DB', f
     assert_contains("\$route['api/lottery/system'] = 'api_lottery/system';", $routes);
     assert_contains("\$route['api/lottery/system-build'] = 'api_lottery/system_build';", $routes);
     $c = file_get_contents(FCPATH . 'application/controllers/Api_lottery.php');
-    assert_true(substr_count($c, "requirePermission('lottery.view')") >= 3, 'generate/diversity/system use CSRF-protected lottery.view');
+    assert_true(substr_count($c, "requirePermission('lottery.view'") >= 3, 'generate/diversity/system use lottery.view');
+    assert_contains("lotteryWantsHtml", $c, 'GET /api/lottery/system serves a live HTML wheel page');
     assert_contains("requirePermission('lottery.manage')", $c, 'system-build requires lottery.manage');
 
     require_once FCPATH . 'application/controllers/Api_system.php';

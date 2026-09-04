@@ -6,6 +6,7 @@
  * are reported as observations, never as predictions.
  */
 use AIWorkforce\Lottery\LotteryStatisticsEngine;
+use AIWorkforce\Lottery\LotteryIntelligence;
 
 function fx_lotto_draws(): array
 {
@@ -20,6 +21,17 @@ function fx_lotto_draws(): array
         ['drawDate' => '2026-07-28', 'main' => [7, 14, 21, 24, 49], 'stars' => [2, 5]],
     ];
 }
+
+test('lottery stats: calendar windows and dashboard kinds (frequency / gap)', function () {
+    assert_equals(104, \AIWorkforce\Lottery\LotteryIntelligence::parseWindow('1y'));
+    assert_equals(208, \AIWorkforce\Lottery\LotteryIntelligence::parseWindow('2y'));
+    assert_equals(52, \AIWorkforce\Lottery\LotteryIntelligence::parseWindow('6m'));
+    assert_equals(50, \AIWorkforce\Lottery\LotteryIntelligence::parseWindow('50'));
+    assert_equals(0, \AIWorkforce\Lottery\LotteryIntelligence::parseWindow('all'));
+    assert_equals('frequency', \AIWorkforce\Lottery\LotteryIntelligence::normalizeStatsKind('frequency'));
+    assert_equals('gap', \AIWorkforce\Lottery\LotteryIntelligence::normalizeStatsKind('gaps'));
+    assert_equals('distribution', \AIWorkforce\Lottery\LotteryIntelligence::normalizeStatsKind('dist'));
+});
 
 test('lottery stats: number frequency, gaps and windowed recent stats', function () {
     $e = new LotteryStatisticsEngine();

@@ -215,6 +215,13 @@
   padding: 0 10px !important;
 }
 .ai_workforce-chat-mic.is-recording { border-color: #fb5d6b !important; color: #ffb3b9 !important; }
+.ai_workforce-chat-mic-stop {
+  border: 1px solid #2a3548 !important;
+  background: #131c2c !important;
+  color: #e7ecf4 !important;
+  padding: 0 10px !important;
+}
+.ai_workforce-chat-mic-stop:disabled { opacity: .45; cursor: not-allowed; }
 .ai_workforce-chat-form button {
   border: 0;
   border-radius: 10px;

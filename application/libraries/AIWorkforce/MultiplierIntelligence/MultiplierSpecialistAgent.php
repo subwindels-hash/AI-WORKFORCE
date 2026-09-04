@@ -37,7 +37,7 @@ final class MultiplierSpecialistAgent implements SpecialistAgent
         $modelRouter = null
     ) {
         $this->role = $role;
-        $this->provider = $provider ?? new SimulationProvider();
+        $this->provider = $provider ?? CrashProviderFactory::make();
         $this->sportsEnrichment = $sportsEnrichment;
         $this->modelRouter = $modelRouter;
         $this->useLLM = ($modelRouter !== null);

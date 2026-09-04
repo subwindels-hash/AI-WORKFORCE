@@ -964,7 +964,11 @@ class Admin extends App_Controller
         $this->portal->log($actor, 'API_PROVIDER_TESTED', !empty($result['ok']) ? 'ok' : 'error', [
             'type' => 'api_provider', 'id' => (string) $id, 'label' => $row['label'],
         ], ['ok' => !empty($result['ok']), 'ms' => $result['ms'] ?? null], $this->ip());
-        $this->flash(!empty($result['ok']) ? 'notice' : 'error', !empty($result['ok']) ? '✓ Connected' : '✕ Connection failed');
+        $detail = trim((string) ($result['message'] ?? ''));
+        $flash = !empty($result['ok'])
+            ? ('✓ ' . ($detail !== '' ? $detail : 'Connected'))
+            : ('✕ ' . ($detail !== '' ? $detail : 'Connection failed'));
+        $this->flash(!empty($result['ok']) ? 'notice' : 'error', $flash);
         redirect('/admin/api/' . (int) $id);
     }
 

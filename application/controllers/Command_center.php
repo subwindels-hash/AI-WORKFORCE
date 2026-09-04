@@ -6,7 +6,7 @@ require_once APPPATH . 'core/App_Controller.php';
  * Unified AI Command Center
  * 
  * Single dashboard showing status of all AI modules:
- * - Cloudflare AI Agent Platform
+ * - Windels AI Agents
  * - Trading Intelligence
  * - Lottery Intelligence
  * - Multiplier Intelligence
@@ -38,6 +38,7 @@ class Command_center extends App_Controller
         $data['overview'] = $this->getOverview();
         $data['systemHealth'] = $this->getSystemHealth();
         $data['recentActivity'] = $this->getRecentActivity();
+        $data['admin'] = $this->isAdmin($user);
         
         $this->load->view('layout/header', $data);
         $this->load->view('command_center/index', $data);
@@ -51,11 +52,11 @@ class Command_center extends App_Controller
     {
         $modules = [];
         
-        // 1. Cloudflare AI Agent Platform
+        // 1. Windels AI Agents
         try {
             $cfStatus = $this->platform->cloudflare->status();
             $modules['cloudflare'] = [
-                'name' => 'Cloudflare AI Agent Platform',
+                'name' => 'Windels AI Agents',
                 'icon' => '⚡',
                 'status' => !empty($cfStatus['modelRouter']['configured']) ? 'healthy' : 'degraded',
                 'stats' => [
@@ -67,7 +68,7 @@ class Command_center extends App_Controller
             ];
         } catch (\Throwable $e) {
             $modules['cloudflare'] = [
-                'name' => 'Cloudflare AI Agent Platform',
+                'name' => 'Windels AI Agents',
                 'icon' => '⚡',
                 'status' => 'error',
                 'error' => $e->getMessage(),
@@ -77,7 +78,7 @@ class Command_center extends App_Controller
         
         // 2. Multiplier Intelligence
         try {
-            $provider = new \AIWorkforce\MultiplierIntelligence\SimulationProvider();
+            $provider = \AIWorkforce\MultiplierIntelligence\CrashProviderFactory::fromPlatform($this->platform);
             $engine = new \AIWorkforce\MultiplierIntelligence\MultiplierIntelligenceEngine($provider);
             $dashboard = $engine->dashboard();
             
@@ -259,10 +260,10 @@ class Command_center extends App_Controller
         
         // Try to get recent activities from audit log
         try {
-            $recent = $this->platform->model->audit->recent(20);
-            foreach ($recent as $r) {
+            $recent = \AIWorkforce\MemberAudit::forMembers($this->platform->model->audit->recent(80));
+            foreach (array_slice($recent, 0, 20) as $r) {
                 $activities[] = [
-                    'time' => $r['created_at'] ?? '',
+                    'time' => $r['created_at'] ?? $r['at'] ?? '',
                     'type' => $r['type'] ?? 'UNKNOWN',
                     'summary' => $r['summary'] ?? '',
                     'module' => $this->inferModule($r['type'] ?? ''),
@@ -285,7 +286,7 @@ class Command_center extends App_Controller
         if (strpos($type, 'TRADING') !== false || strpos($type, 'BROKER') !== false) return 'Trading';
         if (strpos($type, 'SPORTS') !== false) return 'Sports';
         if (strpos($type, 'LANGUAGE') !== false) return 'Language';
-        if (strpos($type, 'AGENT') !== false || strpos($type, 'MODEL') !== false) return 'Cloudflare';
+        if (strpos($type, 'AGENT') !== false || strpos($type, 'MODEL') !== false) return 'AI Agents';
         if (strpos($type, 'LEAD') !== false) return 'Leads';
         return 'System';
     }

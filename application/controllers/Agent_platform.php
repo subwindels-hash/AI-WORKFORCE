@@ -37,6 +37,7 @@ class Agent_platform extends App_Controller
         $data['platformStatus'] = $platformStatus;
         $data['agents'] = array_keys($this->platform->agents->agents());
         $data['tools'] = $this->platform->cloudflare->toolRegistry()->categories();
+        $data['admin'] = $this->isAdmin($user);
 
         $this->load->view('layout/header', $data);
         $this->load->view('agent_platform/index', $data);

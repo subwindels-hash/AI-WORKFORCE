@@ -42,8 +42,8 @@
   <div class="demo-container">
     <!-- Header -->
     <div class="demo-header">
-      <h1>🚀 Live Demo Mode</h1>
-      <p>Full Integration Showcase: Multiplier Intelligence + Cloudflare AI + Sports Intelligence + Aviator Provider</p>
+      <h1>🚀 Live Crash Analysis</h1>
+      <p>Live crash history + Windels AI Agents + Sports Intelligence — no simulated rounds</p>
     </div>
 
     <?php if (!empty($demo['error'])): ?>
@@ -58,7 +58,7 @@
       <div class="demo-panel">
         <h3>
           <span style="width:8px;height:8px;border-radius:50%;background:#ef4444;box-shadow:0 0 8px #ef4444"></span>
-          Live Aviator Round
+          Live Crash Round
         </h3>
         <?php $live = $demo['aviator']['live_round'] ?? []; ?>
         <div class="demo-live">
@@ -123,7 +123,7 @@
       <div style="display:flex;gap:12px;flex-wrap:wrap">
         <?php $cf = $demo['cloudflare'] ?? []; ?>
         <span class="demo-badge <?= !empty($cf['available']) ? 'demo-badge-success' : 'demo-badge-warning' ?>">
-          <?= !empty($cf['available']) ? '✓' : '○' ?> Cloudflare <?= !empty($cf['available']) ? 'Connected' : 'Standby' ?>
+          <?= !empty($cf['available']) ? '✓' : '○' ?> AI Agents <?= !empty($cf['available']) ? 'Connected' : 'Standby' ?>
         </span>
         <span class="demo-badge <?= !empty($cf['llm_enhanced']) ? 'demo-badge-success' : 'demo-badge-warning' ?>">
           <?= !empty($cf['llm_enhanced']) ? '✓' : '○' ?> LLM <?= !empty($cf['llm_enhanced']) ? 'Enhanced' : 'Standby' ?>
@@ -138,7 +138,7 @@
           ✓ MCP Tools 6 Active
         </span>
         <span class="demo-badge demo-badge-info">
-          🎮 Aviator Provider: <?= e(strtoupper($demo['aviator']['health']['mode'] ?? 'demo')) ?>
+          🎮 Crash feed: <?= e(strtoupper($demo['aviator']['health']['mode'] ?? 'live')) ?>
         </span>
       </div>
     </div>
@@ -147,7 +147,7 @@
     <div class="demo-grid" style="grid-template-columns:1fr 1fr">
       <!-- Aviator Statistics -->
       <div class="demo-panel">
-        <h3>📊 Aviator Statistics</h3>
+        <h3>📊 Live Crash Statistics</h3>
         <?php $stats = $demo['aviator']['stats'] ?? []; ?>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           <div class="demo-stat">
@@ -211,7 +211,7 @@
           <div style="text-align:center;padding:20px;color:#64748b">
             <div style="font-size:40px;margin-bottom:8px">⚽</div>
             <div>Sports Intelligence</div>
-            <div style="font-size:11px;margin-top:4px">Configure api-football, thesportsdb, or sportmonks to activate</div>
+            <div style="font-size:11px;margin-top:4px">Connect sports data to activate</div>
           </div>
         <?php endif; ?>
       </div>
@@ -241,8 +241,8 @@
         <div class="demo-flow-step">
           <div class="demo-flow-icon">🎮</div>
           <div class="demo-flow-text">
-            <div class="demo-flow-title">1. Aviator Provider</div>
-            <div class="demo-flow-desc">Fetches live multiplier data and round history (<?= e(count($demo['aviator']['history'] ?? [])) ?> rounds)</div>
+            <div class="demo-flow-title">1. Live crash provider</div>
+            <div class="demo-flow-desc">Fetches real multiplier history (<?= e(count($demo['aviator']['history'] ?? [])) ?> rounds)</div>
           </div>
         </div>
         <div class="demo-flow-step">
@@ -257,7 +257,7 @@
           <div class="demo-flow-icon">⚽</div>
           <div class="demo-flow-text">
             <div class="demo-flow-title">3. Sports Intelligence Enrichment</div>
-            <div class="demo-flow-desc">Extracts market sentiment from api-football/thesportsdb/sportmonks (±15% adjustment)</div>
+            <div class="demo-flow-desc">Extracts market sentiment from connected sports data (±15% adjustment)</div>
           </div>
         </div>
         <?php endif; ?>
@@ -265,8 +265,8 @@
         <div class="demo-flow-step">
           <div class="demo-flow-icon">⚡</div>
           <div class="demo-flow-text">
-            <div class="demo-flow-title">4. Cloudflare LLM Enhancement</div>
-            <div class="demo-flow-desc">AI reasoning via Cloudflare Workers AI (70% statistical / 30% LLM blend)</div>
+            <div class="demo-flow-title">4. LLM Enhancement</div>
+            <div class="demo-flow-desc">AI reasoning via the LLM router (70% statistical / 30% LLM blend)</div>
           </div>
         </div>
         <?php endif; ?>
@@ -284,9 +284,7 @@
 
     <!-- Disclaimer -->
     <div style="margin-top:24px;padding:16px;background:rgba(245,158,11,.1);border:1px solid #f59e0b44;border-radius:12px;color:#f59e0b;font-size:11px">
-      <strong>⚠️ DEMONSTRATION PURPOSE ONLY</strong> — This demo showcases the integration architecture. 
-      In production, connect to real Aviator game servers and configure Cloudflare/Sports providers for live data.
-      Crash games use provably fair RNG. No prediction system can guarantee outcomes.
+      <strong>⚠️ EDUCATIONAL ANALYSIS</strong> — Rounds come from a live crash feed. Crash games use provably fair RNG. No prediction system can guarantee outcomes.
     </div>
   </div>
 </div>

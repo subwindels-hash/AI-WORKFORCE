@@ -13,7 +13,7 @@ class Risk_center extends App_Controller
         $data = $this->base('Risk Center');
         $data['limits'] = $this->platform->risk->getLimits();
         $data['lastReport'] = $this->platform->monitor->lastReport();
-        $data['events'] = array_slice($this->platform->model->audit->recent(60), 0, 25);
+        $data['events'] = array_slice(\AIWorkforce\MemberAudit::forMembers($this->platform->model->audit->recent(80)), 0, 25);
         $this->load->view('layout/header', $data);
         $this->load->view('risk/index', $data);
         $this->load->view('layout/footer');

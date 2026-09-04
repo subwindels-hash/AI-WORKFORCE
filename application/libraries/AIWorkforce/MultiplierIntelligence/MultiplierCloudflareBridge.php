@@ -311,7 +311,7 @@ Remember: Crash games use provably fair random number generation. Your analysis 
                 'name' => 'multiplier.getCurrentMultiplier',
                 'description' => 'Get the current live multiplier value from a crash game',
                 'parameters' => [
-                    'provider' => ['type' => 'string', 'default' => 'simulation', 'description' => 'Game provider (simulation, aviator)'],
+                    'provider' => ['type' => 'string', 'default' => 'bustabit', 'description' => 'Game provider (bustabit live, or simulation)'],
                 ],
                 'category' => 'multiplier',
                 'requiresApproval' => false,
@@ -321,7 +321,7 @@ Remember: Crash games use provably fair random number generation. Your analysis 
                 'name' => 'multiplier.getHistory',
                 'description' => 'Get historical multiplier data from a crash game provider',
                 'parameters' => [
-                    'provider' => ['type' => 'string', 'default' => 'simulation'],
+                    'provider' => ['type' => 'string', 'default' => 'bustabit'],
                     'limit' => ['type' => 'integer', 'default' => 50, 'description' => 'Number of rounds to return'],
                 ],
                 'category' => 'multiplier',
@@ -332,7 +332,7 @@ Remember: Crash games use provably fair random number generation. Your analysis 
                 'name' => 'multiplier.generateSignal',
                 'description' => 'Generate an AI-powered multiplier prediction signal using 9 specialist agents',
                 'parameters' => [
-                    'provider' => ['type' => 'string', 'default' => 'simulation'],
+                    'provider' => ['type' => 'string', 'default' => 'bustabit'],
                     'model' => ['type' => 'string', 'default' => 'MIXED-ENSEMBLE-v1'],
                 ],
                 'category' => 'multiplier',
@@ -362,7 +362,7 @@ Remember: Crash games use provably fair random number generation. Your analysis 
                 'description' => 'Run a specific multiplier agent analysis on historical data',
                 'parameters' => [
                     'agent' => ['type' => 'string', 'required' => true, 'description' => 'Agent name (historical, pattern, probability, sequence, anomaly, risk)'],
-                    'provider' => ['type' => 'string', 'default' => 'simulation'],
+                    'provider' => ['type' => 'string', 'default' => 'bustabit'],
                 ],
                 'category' => 'multiplier',
                 'requiresApproval' => false,
@@ -375,8 +375,10 @@ Remember: Crash games use provably fair random number generation. Your analysis 
     
     private function toolGetCurrentMultiplier(array $args): array
     {
-        $provider = $this->getProvider(['provider' => $args['provider'] ?? 'simulation']);
-        $roundData = $provider->updateMultiplier();
+        $provider = $this->getProvider(['provider' => $args['provider'] ?? 'bustabit']);
+        $roundData = method_exists($provider, 'updateMultiplier')
+            ? $provider->updateMultiplier()
+            : ['currentMultiplier' => $provider->currentMultiplier() ?? 1.0, 'roundId' => null, 'inRound' => $provider->isInRound()];
         return [
             'currentMultiplier' => $roundData['currentMultiplier'] ?? 1.0,
             'roundId' => $roundData['roundId'] ?? null,
@@ -387,7 +389,7 @@ Remember: Crash games use provably fair random number generation. Your analysis 
     
     private function toolGetHistory(array $args): array
     {
-        $provider = $this->getProvider(['provider' => $args['provider'] ?? 'simulation']);
+        $provider = $this->getProvider(['provider' => $args['provider'] ?? 'bustabit']);
         $limit = (int)($args['limit'] ?? 50);
         $history = $provider->history($limit);
         return [
@@ -399,12 +401,12 @@ Remember: Crash games use provably fair random number generation. Your analysis 
     
     private function toolGenerateSignal(array $args): array
     {
-        $provider = $this->getProvider(['provider' => $args['provider'] ?? 'simulation']);
+        $provider = $this->getProvider(['provider' => $args['provider'] ?? 'bustabit']);
         $engine = new MultiplierIntelligenceEngine($provider);
         
         // Use Cloudflare-enhanced signal if LLM is available
         if ($this->llmEnhancementEnabled && $this->modelRouter->configured()) {
-            return $this->generateCloudflareSignal(['provider' => $args['provider'] ?? 'simulation']);
+            return $this->generateCloudflareSignal(['provider' => $args['provider'] ?? 'bustabit']);
         }
         
         return $engine->generateSignal($args['model'] ?? null);
@@ -412,7 +414,7 @@ Remember: Crash games use provably fair random number generation. Your analysis 
     
     private function toolGetAccuracy(array $args): array
     {
-        $provider = $this->getProvider(['provider' => 'simulation']);
+        $provider = $this->getProvider(['provider' => 'bustabit']);
         $engine = new MultiplierIntelligenceEngine($provider);
         $window = (int)($args['window'] ?? 100);
         return $engine->accuracyStats($window);
@@ -430,22 +432,15 @@ Remember: Crash games use provably fair random number generation. Your analysis 
     private function toolAnalyzeRound(array $args): array
     {
         $agentKey = 'multiplier.' . ($args['agent'] ?? 'historical');
-        return $this->dispatch($agentKey, ['instruction' => 'Analyze current data'], ['provider' => $args['provider'] ?? 'simulation']);
+        return $this->dispatch($agentKey, ['instruction' => 'Analyze current data'], ['provider' => $args['provider'] ?? 'bustabit']);
     }
     
     // ── Helpers ────────────────────────────────────────────────────
     
     private function getProvider(array $context): CrashGameProviderInterface
     {
-        $code = $context['provider'] ?? 'simulation';
-        switch ($code) {
-            case 'aviator':
-            case 'aviator_demo':
-                // Future: return new AviatorProvider();
-                return new SimulationProvider();
-            default:
-                return new SimulationProvider();
-        }
+        $code = $context['provider'] ?? 'bustabit';
+        return CrashProviderFactory::make(['code' => $code]);
     }
     
     private function extractFeatures(array $multipliers): array

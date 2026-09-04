@@ -17,6 +17,18 @@ $langOptions = [];
 foreach ($languages as $l) {
     $langOptions[$l['code']] = $l['name'] . ($l['native_name'] ? ' — ' . $l['native_name'] : '');
 }
+$learnDefault = (string) ($learningLanguage ?? 'nl');
+if ($learnDefault === '' || !isset($langOptions[$learnDefault])) {
+    $learnDefault = isset($langOptions['nl']) ? 'nl' : (array_key_first($langOptions) ?: 'en');
+}
+$mineDefault = (string) ($nativeLanguage ?? 'en');
+if ($mineDefault === '' || !isset($langOptions[$mineDefault])) {
+    $mineDefault = isset($langOptions['en']) ? 'en' : (array_key_first($langOptions) ?: 'en');
+}
+if ($mineDefault === $learnDefault) {
+    $mineDefault = $learnDefault === 'en' ? (isset($langOptions['nl']) ? 'nl' : $mineDefault) : 'en';
+    if (!isset($langOptions[$mineDefault])) $mineDefault = $learnDefault;
+}
 $localeMap = $locales ?? [];
 $flagMap = [
     'nl' => '🇳🇱', 'es' => '🇪🇸', 'it' => '🇮🇹', 'fr' => '🇫🇷', 'de' => '🇩🇪', 'en' => '🇬🇧',
@@ -169,12 +181,12 @@ $flagMap = [
     <div class="tt-swapbar">
       <label class="tt-side tt-side-learn">
         <span>Language I'm Learning</span>
-        <select id="tt-target" class="sel" aria-label="Language I'm Learning" hidden>
+        <select id="tt-target" class="sel" aria-label="Language I'm Learning">
           <?php foreach ($langOptions as $code => $label): ?>
-            <option value="<?= e($code) ?>" <?= $code === 'nl' ? 'selected' : '' ?>><?= e($flagMap[$code] ?? '') ?> <?= e($label) ?></option>
+            <option value="<?= e($code) ?>" <?= $code === $learnDefault ? 'selected' : '' ?>><?= e($flagMap[$code] ?? '') ?> <?= e($label) ?></option>
           <?php endforeach; ?>
         </select>
-        <div id="tt-target-picker"></div>
+        <div id="tt-target-picker" class="lang-picker-extra"></div>
       </label>
       <div class="tt-swap-wrap">
         <button type="button" class="tt-swap" id="tt-swap" title="Swap languages" aria-label="Swap learning language with my language">
@@ -184,12 +196,12 @@ $flagMap = [
       </div>
       <label class="tt-side tt-side-mine">
         <span>My Language</span>
-        <select id="tt-source" class="sel" aria-label="My language" hidden>
+        <select id="tt-source" class="sel" aria-label="My language">
           <?php foreach ($langOptions as $code => $label): ?>
-            <option value="<?= e($code) ?>" <?= $code === 'en' ? 'selected' : '' ?>><?= e($flagMap[$code] ?? '') ?> <?= e($label) ?></option>
+            <option value="<?= e($code) ?>" <?= $code === $mineDefault ? 'selected' : '' ?>><?= e($flagMap[$code] ?? '') ?> <?= e($label) ?></option>
           <?php endforeach; ?>
         </select>
-        <div id="tt-source-picker"></div>
+        <div id="tt-source-picker" class="lang-picker-extra"></div>
       </label>
     </div>
 
@@ -248,6 +260,7 @@ $flagMap = [
               <div class="notice warnbox" id="stt-note" style="display:none"></div>
               <div class="inline" style="flex-wrap:wrap;align-items:center">
                 <button class="btn primary" type="button" id="tt-mic" disabled>🎤 Speak now</button>
+                <button class="btn" type="button" id="tt-mic-stop" disabled>⏹ Stop</button>
                 <input id="tt-transcript" class="sel" type="text" readonly placeholder="Transcript from your speech engine…" style="min-width:200px;flex:1">
                 <button class="btn" type="button" id="tt-check" disabled>Check</button>
                 <button class="btn" type="button" id="tt-retry" hidden>Try again</button>
@@ -265,6 +278,7 @@ $flagMap = [
           <div class="tt-input-row">
             <span class="tt-count" id="tt-target-count">0 / 500</span>
             <button class="btn" type="button" id="tt-target-mic">🎤 Tap to Speak</button>
+            <button class="btn" type="button" id="tt-target-mic-stop" disabled>⏹ Stop</button>
             <button class="btn" type="button" id="tt-target-submit">Translate to my language</button>
           </div>
         </div>
@@ -287,6 +301,8 @@ $flagMap = [
           <textarea id="tt-input" class="tt-input" maxlength="500" autocomplete="off" spellcheck="false" placeholder="e.g. Good morning, how are you?"></textarea>
           <div class="tt-input-row">
             <span class="tt-count" id="tt-count">0 / 500</span>
+            <button class="btn" type="button" id="tt-source-mic">🎤 Tap to Speak</button>
+            <button class="btn" type="button" id="tt-source-mic-stop" disabled>⏹ Stop</button>
             <button class="btn primary" type="button" id="tt-submit">Translate &amp; Learn</button>
           </div>
         </div>
@@ -418,6 +434,7 @@ $flagMap = [
   var currentLearn = null; // translation into the learning language
   var currentMy = null;    // translation into my language
   var lastDetected = '';
+  var lastOriginal = '';
 
   function flagFor(code) { return FLAGS[code] || '🌐'; }
   function langName(code) { return LANG_NAMES[code] || (code === 'auto' ? 'Auto-detect' : String(code).toUpperCase()); }
@@ -578,11 +595,13 @@ $flagMap = [
   function populateVoices(locale) {
     if (!provider) return false;
     var matches = provider.getVoicesForLocale(locale);
+    if (!matches.length) matches = provider.getSupportedVoices();
     voiceSel.innerHTML = '';
     if (!matches.length) {
       voiceSel.disabled = true;
-      voiceSel.innerHTML = '<option>No voice for this language</option>';
-      return false;
+      voiceSel.innerHTML = '<option>Browser default voice</option>';
+      voiceSel._matches = [];
+      return !!provider.healthCheck().tts;
     }
     voiceSel.disabled = false;
     matches.forEach(function (v, i) {
@@ -595,19 +614,46 @@ $flagMap = [
     return true;
   }
 
+  function speakableNow() {
+    if (currentLearn && currentLearn.translation) return { text: currentLearn.translation, locale: currentLearn.targetLocale || localeFor(targetSel.value) };
+    if (currentMy && currentMy.translation) return { text: currentMy.translation, locale: currentMy.targetLocale || localeFor(sourceSel.value) };
+    var lesson = lessonAi && lessonAi.textContent ? lessonAi.textContent.trim() : '';
+    if (lesson) return { text: lesson, locale: localeFor(targetSel.value) };
+    var typed = (targetInput && targetInput.value.trim()) || (input && input.value.trim()) || '';
+    if (typed) return { text: typed, locale: localeFor(targetSel.value) };
+    return null;
+  }
+
   function speak(text, locale) {
-    if (!provider || !text) return;
+    if (!text) return;
     var rate = parseFloat(rateSel.value) || 1;
     var voiceIdx = parseInt(voiceSel.value, 10);
     var voice = voiceSel._matches && voiceSel._matches[voiceIdx] ? voiceSel._matches[voiceIdx] : null;
-    provider.textToSpeech(text, {
+    var engine = provider || (window.speechSynthesis ? {
+      textToSpeech: function (t, o) {
+        var spoken = (window.windelsSpeech && window.windelsSpeech.speakableText) ? window.windelsSpeech.speakableText(t) : String(t).replace(/\bWINDELS\b/gi, 'Win-dels');
+        var u = new SpeechSynthesisUtterance(spoken);
+        u.lang = (o && o.locale) || 'en-US';
+        u.rate = (o && o.rate) || 1;
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(u);
+        u.onend = o && o.onEnd;
+        u.onerror = o && o.onError;
+      },
+      stop: function () { window.speechSynthesis.cancel(); },
+      pause: function () { try { window.speechSynthesis.pause(); } catch (e) {} },
+      resume: function () { try { window.speechSynthesis.resume(); } catch (e) {} },
+      isPaused: function () { return !!window.speechSynthesis.paused; }
+    } : null);
+    if (!engine) return;
+    engine.textToSpeech(text, {
       locale: locale,
       voice: voice,
       rate: rate,
       onEnd: function() { playBtn.disabled = false; stopBtn.disabled = true; myStopBtn.disabled = true; if (pauseBtn) pauseBtn.disabled = true; if (myPauseBtn) myPauseBtn.disabled = true; },
       onError: function() { playBtn.disabled = false; stopBtn.disabled = true; myStopBtn.disabled = true; if (pauseBtn) pauseBtn.disabled = true; if (myPauseBtn) myPauseBtn.disabled = true; }
     });
-    playBtn.disabled = true;
+    playBtn.disabled = false;
     stopBtn.disabled = false;
     myStopBtn.disabled = false;
     if (pauseBtn) pauseBtn.disabled = false;
@@ -633,16 +679,16 @@ $flagMap = [
         myStopBtn.disabled = !on;
       }
       playBtn.addEventListener('click', function () {
-        if (currentLearn && currentLearn.translation) {
-          speak(currentLearn.translation, currentLearn.targetLocale || localeFor(targetSel.value));
-          markSpeaking(true);
-        }
+        var item = speakableNow();
+        if (!item) { showError('Type a sentence or tap Translate first, then Listen.'); return; }
+        speak(item.text, item.locale);
+        markSpeaking(true);
       });
       replayBtn.addEventListener('click', function () {
-        if (currentLearn && currentLearn.translation) {
-          speak(currentLearn.translation, currentLearn.targetLocale || localeFor(targetSel.value));
-          markSpeaking(true);
-        }
+        var item = speakableNow();
+        if (!item) return;
+        speak(item.text, item.locale);
+        markSpeaking(true);
       });
       myPlayBtn.addEventListener('click', function () {
         if (currentMy && currentMy.translation) {
@@ -699,25 +745,56 @@ $flagMap = [
     sttNote.textContent = 'Your browser does not expose speech recognition, so the microphone cannot capture your voice here. You can still Listen to the correct pronunciation and type the translation to self-check.';
   }
 
+  var micStopBtn = document.getElementById('tt-mic-stop');
   micBtn.addEventListener('click', function () {
     if (!provider || !currentLearn || !currentLearn.translation) return;
+    if (provider.isRecording()) {
+      provider.stopListening();
+      micBtn.textContent = '🎤 Speak now';
+      if (micStopBtn) micStopBtn.disabled = true;
+      micStatus.textContent = transcriptInput.value.trim() ? 'Stopped. Review and Check.' : 'Stopped.';
+      syncMicState();
+      return;
+    }
     transcriptInput.value = '';
-    micStatus.textContent = 'Listening… say the translation aloud.';
+    micBtn.textContent = '🎤 Listening…';
+    if (micStopBtn) micStopBtn.disabled = false;
+    micStatus.textContent = 'Listening… take your time. Silence does not end this. Tap Stop when you have finished talking.';
     provider.speechToText({
       locale: currentLearn.targetLocale || localeFor(targetSel.value),
+      holdUntilStop: true,
+      minListenMs: 30000,
+      onStatus: function(msg){ micStatus.textContent = msg; },
       onResult: function(transcript){
         transcriptInput.value = transcript;
-        micStatus.textContent = 'Transcript captured — review and Check.';
+        micStatus.textContent = 'Heard you — still listening for more. Tap Stop when you are finished.';
         syncMicState();
       },
       onError: function(ev){
-        var msg = ev.error || ev.message || 'unknown';
-        micStatus.textContent = 'Speech engine error: ' + msg + ' — nothing was recorded.';
+        var code = ev.error || ev.message || '';
+        if (code === 'no-speech' || code === 'aborted') {
+          micStatus.textContent = 'Still listening — speak when you are ready, or tap Stop when you are finished.';
+          return;
+        }
+        micBtn.textContent = '🎤 Speak now';
+        if (micStopBtn) micStopBtn.disabled = true;
+        micStatus.textContent = 'Speech engine error: ' + code;
       },
-      onEnd: function(){
-        if (micStatus.textContent === 'Listening… say the translation aloud.') micStatus.textContent = 'Nothing captured — try again.';
+      onEnd: function(info){
+        micBtn.textContent = '🎤 Speak now';
+        if (micStopBtn) micStopBtn.disabled = true;
+        var got = String((info && info.transcript) || transcriptInput.value || '').trim();
+        micStatus.textContent = got ? 'Stopped. Review and Check.' : 'Stopped. Nothing captured — tap Speak to try again.';
+        syncMicState();
       }
     });
+  });
+  if (micStopBtn) micStopBtn.addEventListener('click', function () {
+    if (provider) provider.stopListening();
+    micBtn.textContent = '🎤 Speak now';
+    micStopBtn.disabled = true;
+    micStatus.textContent = transcriptInput.value.trim() ? 'Stopped. Review and Check.' : 'Stopped.';
+    syncMicState();
   });
 
   checkBtn.addEventListener('click', function () { grade(transcriptInput.value); });
@@ -905,19 +982,21 @@ $flagMap = [
       mount: '#tt-target-picker', target: targetSel,
       value: targetSel.value,
       initial: { code: targetSel.value, name: langName(targetSel.value), native_name: '' },
-      placeholder: 'Search language…'
+      placeholder: 'Search more languages…'
     });
     window.WindelsLanguagePicker({
       mount: '#tt-source-picker', target: sourceSel,
       value: sourceSel.value,
       initial: { code: sourceSel.value, name: langName(sourceSel.value), native_name: '' },
-      placeholder: 'Search language…'
+      placeholder: 'Search more languages…'
     });
   }
 
   if (provider) {
     provider.bindMic(document.getElementById('tt-source-mic'), input, {
       localeFor: function () { return localeFor(sourceSel.value); },
+      stopButton: document.getElementById('tt-source-mic-stop'),
+      minListenMs: 30000,
       onStatus: function (msg) {
         var n = document.getElementById('stt-note');
         if (!n) return;
@@ -927,6 +1006,8 @@ $flagMap = [
     });
     provider.bindMic(document.getElementById('tt-target-mic'), targetInput, {
       localeFor: function () { return localeFor(targetSel.value); },
+      stopButton: document.getElementById('tt-target-mic-stop'),
+      minListenMs: 30000,
       onStatus: function (msg) {
         var n = document.getElementById('stt-note');
         if (!n) return;

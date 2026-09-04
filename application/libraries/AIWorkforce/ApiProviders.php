@@ -847,21 +847,53 @@ final class ApiProviders
         return ['ok' => $status >= 200 && $status < 400, 'message' => ($status >= 200 && $status < 400) ? 'Connected' : 'Connection failed'];
     }
 
+    /**
+     * Map marketing / RapidAPI hostnames onto a real API-Football v3 root.
+     */
+    public static function normalizeApiFootballBaseUrl(string $baseUrl): string
+    {
+        $base = rtrim(trim($baseUrl), '/');
+        if ($base === '') return 'https://v3.football.api-sports.io';
+        $host = strtolower((string) (parse_url($base, PHP_URL_HOST) ?? ''));
+        if ($host === 'api-football.com' || $host === 'www.api-football.com' || $host === 'dashboard.api-football.com' || $host === 'football.com' || $host === 'www.football.com') {
+            return 'https://v3.football.api-sports.io';
+        }
+        if (str_contains($host, 'rapidapi.com')) {
+            if (!str_ends_with($base, '/v3')) $base = rtrim($base, '/') . '/v3';
+            return $base;
+        }
+        return $base;
+    }
+
     private static function testApiFootball(string $baseUrl, string $key): array
     {
         if ($key === '') return ['ok' => false, 'message' => 'An API key is required. Register at https://dashboard.api-football.com/'];
-        $url = rtrim($baseUrl !== '' ? $baseUrl : 'https://v3.football.api-sports.io', '/') . '/status';
-        $resp = self::http($url, ['Accept: application/json', 'x-apisports-key: ' . $key]);
+        $base = self::normalizeApiFootballBaseUrl($baseUrl);
+        $url = rtrim($base, '/') . '/status';
+        $host = strtolower((string) (parse_url($base, PHP_URL_HOST) ?? ''));
+        $headers = ['Accept: application/json', 'x-apisports-key: ' . $key];
+        if (str_contains($host, 'rapidapi.com')) {
+            $headers[] = 'x-rapidapi-key: ' . $key;
+            $headers[] = 'x-rapidapi-host: ' . $host;
+        }
+        $resp = self::http($url, $headers);
         $status = (int) ($resp['status'] ?? 0);
-        if ($status >= 200 && $status < 400) {
-            $decoded = json_decode($resp['body'] ?? '', true);
-            $remaining = $decoded['response']['requests']['limit_day'] ?? null;
-            $used = $decoded['response']['requests'] ?? null;
+        $decoded = json_decode((string) ($resp['body'] ?? ''), true);
+        $errors = is_array($decoded) ? ($decoded['errors'] ?? null) : null;
+        $hasErrors = is_array($errors) && $errors !== [];
+        if ($status >= 200 && $status < 400 && !$hasErrors) {
+            $requests = is_array($decoded['response']['requests'] ?? null) ? $decoded['response']['requests'] : [];
+            $limit = isset($requests['limit_day']) ? (int) $requests['limit_day'] : null;
+            $used = isset($requests['current']) ? (int) $requests['current'] : (isset($requests['used']) ? (int) $requests['used'] : null);
             $msg = 'Connected to API-Football';
-            if ($remaining !== null) $msg .= ' (' . ($remaining - ($used ?? 0)) . ' requests remaining today)';
+            if ($limit !== null && $used !== null) {
+                $msg .= ' (' . max(0, $limit - $used) . ' of ' . $limit . ' requests remaining today)';
+            } elseif ($limit !== null) {
+                $msg .= ' (daily limit ' . $limit . ')';
+            }
             return ['ok' => true, 'message' => $msg];
         }
-        if ($status === 401 || $status === 403) return ['ok' => false, 'message' => 'Invalid API key'];
+        if ($status === 401 || $status === 403 || $hasErrors) return ['ok' => false, 'message' => 'Invalid API key'];
         if ($status === 429) return ['ok' => false, 'message' => 'Rate limited — try again later'];
         return ['ok' => false, 'message' => 'Connection failed'];
     }
