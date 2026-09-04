@@ -24,6 +24,9 @@ final class AgentOrchestrator
         'sports.getMatchStats'=>'sports', 'lottery.getResults'=>'lottery', 'lottery.generateCombinations'=>'lottery',
         'lottery.purchaseTicket'=>'lottery_purchase', 'broker.getAccount'=>'trading', 'broker.getPositions'=>'trading',
         'broker.submitTrade'=>'trading_execution', 'language.analyzePronunciation'=>'language', 'video.create'=>'video',
+        'multiplier.getCurrentMultiplier'=>'multiplier', 'multiplier.getHistory'=>'multiplier',
+        'multiplier.generateSignal'=>'multiplier', 'multiplier.getAccuracy'=>'multiplier',
+        'multiplier.listAgents'=>'multiplier', 'multiplier.analyzeRound'=>'multiplier',
     ];
     public function __construct(?callable $audit=null, ?callable $approval=null) { $this->audit=$audit; $this->approval=$approval; }
     public function register(SpecialistAgent $agent): void { $this->agents[$agent->name()]=$agent; }

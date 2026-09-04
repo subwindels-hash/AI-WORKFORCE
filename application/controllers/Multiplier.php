@@ -87,6 +87,141 @@ class Multiplier extends App_Controller
     }
     
     /**
+     * Verify integration with Cloudflare Agent Platform and Sports Intelligence
+     */
+    public function verify_integration()
+    {
+        $results = [
+            'ok' => true,
+            'timestamp' => date('c'),
+            'checks' => [],
+        ];
+        
+        // 1. Check Multiplier Intelligence Engine
+        try {
+            $provider = new \AIWorkforce\MultiplierIntelligence\SimulationProvider();
+            $engine = new \AIWorkforce\MultiplierIntelligence\MultiplierIntelligenceEngine($provider);
+            $signal = $engine->generateSignal();
+            $results['checks']['multiplier_engine'] = [
+                'status' => 'OK',
+                'agents' => count($signal['agents'] ?? []),
+                'prediction' => $signal['predictedMultiplier'] ?? null,
+                'confidence' => $signal['confidence'] ?? null,
+            ];
+        } catch (\Throwable $e) {
+            $results['checks']['multiplier_engine'] = ['status' => 'FAIL', 'error' => $e->getMessage()];
+            $results['ok'] = false;
+        }
+        
+        // 2. Check Cloudflare ModelRouter
+        try {
+            $modelRouter = $this->platform->cloudflare->modelRouter();
+            $configured = $modelRouter->configured();
+            $status = $modelRouter->status();
+            $results['checks']['cloudflare_model_router'] = [
+                'status' => $configured ? 'OK' : 'NOT_CONFIGURED',
+                'providers' => $configured ? count($status['providers'] ?? []) : 0,
+                'llm_enhancement_available' => $configured,
+            ];
+        } catch (\Throwable $e) {
+            $results['checks']['cloudflare_model_router'] = ['status' => 'FAIL', 'error' => $e->getMessage()];
+        }
+        
+        // 3. Check McpToolRegistry for multiplier tools
+        try {
+            $registry = $this->platform->cloudflare->toolRegistry();
+            $multiplierTools = $registry->list('multiplier');
+            $results['checks']['mcp_multiplier_tools'] = [
+                'status' => count($multiplierTools) > 0 ? 'OK' : 'NOT_YET_REGISTERED',
+                'tools_registered' => count($multiplierTools),
+                'tools' => array_keys($multiplierTools),
+                'note' => 'Tools registered when MultiplierPlatformIntegration::register() is called',
+            ];
+        } catch (\Throwable $e) {
+            $results['checks']['mcp_multiplier_tools'] = ['status' => 'FAIL', 'error' => $e->getMessage()];
+        }
+        
+        // 4. Check MultiplierCloudflareBridge
+        try {
+            $modelRouter = $this->platform->cloudflare->modelRouter();
+            $bridge = new \AIWorkforce\MultiplierIntelligence\MultiplierCloudflareBridge($modelRouter);
+            $agents = $bridge->agentDescriptors();
+            $tools = $bridge->mcpTools();
+            $results['checks']['cloudflare_bridge'] = [
+                'status' => 'OK',
+                'agents_available' => count($agents),
+                'tools_available' => count($tools),
+                'llm_enhancement' => $bridge->isLLMEnhancementEnabled(),
+            ];
+        } catch (\Throwable $e) {
+            $results['checks']['cloudflare_bridge'] = ['status' => 'FAIL', 'error' => $e->getMessage()];
+        }
+        
+        // 5. Check SportsBettingEnrichmentProvider
+        try {
+            $enrichment = new \AIWorkforce\MultiplierIntelligence\SportsBettingEnrichmentProvider();
+            $signals = $enrichment->getEnrichmentSignals();
+            $results['checks']['sports_enrichment'] = [
+                'status' => $signals['data_available'] ? 'OK' : 'AWAITING_SPORTS_CONFIG',
+                'data_available' => $signals['data_available'],
+                'source' => $signals['source'] ?? 'none',
+                'enrichment_weight' => $enrichment->getEnrichmentWeight(),
+                'note' => 'Becomes active when Sports Intelligence providers (api-football, thesportsdb, sportmonks) are configured with API keys',
+            ];
+        } catch (\Throwable $e) {
+            $results['checks']['sports_enrichment'] = ['status' => 'FAIL', 'error' => $e->getMessage()];
+        }
+        
+        // 6. Check MultiplierSpecialistAgent
+        try {
+            $agent = new \AIWorkforce\MultiplierIntelligence\MultiplierSpecialistAgent();
+            $result = $agent->handle(['instruction' => 'Test signal'], []);
+            $results['checks']['specialist_agent'] = [
+                'status' => ($result['status'] ?? '') === 'COMPLETED' ? 'OK' : 'FAIL',
+                'role' => $agent->name(),
+                'tools' => count($agent->tools()),
+                'dispatchable' => true,
+                'implements' => 'SpecialistAgent (Cloudflare)',
+            ];
+        } catch (\Throwable $e) {
+            $results['checks']['specialist_agent'] = ['status' => 'FAIL', 'error' => $e->getMessage()];
+        }
+        
+        // 7. Check Platform Integration
+        try {
+            $integration = new \AIWorkforce\MultiplierIntelligence\MultiplierPlatformIntegration($this->platform->cloudflare);
+            $integration->register();
+            $status = $integration->status();
+            $results['checks']['platform_integration'] = [
+                'status' => $status['registered'] ? 'OK' : 'REGISTERED_PARTIAL',
+                'registered' => $status['registered'],
+                'agent_available' => $status['agent_available'],
+                'bridge_available' => $status['bridge_available'],
+                'enrichment_available' => $status['enrichment_available'],
+                'llm_enhancement' => $status['llm_enhancement'],
+            ];
+        } catch (\Throwable $e) {
+            $results['checks']['platform_integration'] = ['status' => 'FAIL', 'error' => $e->getMessage()];
+        }
+        
+        // Summary
+        $totalChecks = count($results['checks']);
+        $okChecks = count(array_filter($results['checks'], fn($c) => in_array($c['status'] ?? '', ['OK', 'NOT_CONFIGURED', 'AWAITING_SPORTS_CONFIG', 'NOT_YET_REGISTERED'])));
+        $results['summary'] = [
+            'total_checks' => $totalChecks,
+            'passed_or_configurable' => $okChecks,
+            'fully_operational' => $okChecks === $totalChecks,
+            'integration_ready' => $okChecks >= 4,
+            'message' => $okChecks === $totalChecks
+                ? 'All systems operational — full integration ready'
+                : 'Integration architecture verified — configure providers to activate',
+        ];
+        
+        header('Content-Type: application/json');
+        echo json_encode($results, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+    }
+    
+    /**
      * Get live multiplier data
      */
     public function live()

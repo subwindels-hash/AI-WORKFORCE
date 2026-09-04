@@ -41,6 +41,7 @@ class McpToolRegistry
         'forex' => 'Forex Market Data',
         'sports' => 'Sports Intelligence',
         'lottery' => 'Lottery Intelligence',
+        'multiplier' => 'Multiplier Intelligence (Crash Game Analytics)',
         'broker' => 'Trading Broker Operations',
         'language' => 'Language Learning',
         'video' => 'Video Generation',
@@ -269,6 +270,64 @@ class McpToolRegistry
             ['leadId' => ['type' => 'string', 'required' => true]],
             requiresApproval: false,
             category: 'lead',
+        ));
+
+        // ── Multiplier Intelligence Tools ──────────────────────────
+        $this->register(new McpTool(
+            'multiplier.getCurrentMultiplier',
+            'Get the current live multiplier value from a crash game',
+            ['provider' => ['type' => 'string', 'default' => 'simulation', 'description' => 'Game provider (simulation, aviator)']],
+            requiresApproval: false,
+            category: 'multiplier',
+        ));
+
+        $this->register(new McpTool(
+            'multiplier.getHistory',
+            'Get historical multiplier data from a crash game provider',
+            [
+                'provider' => ['type' => 'string', 'default' => 'simulation'],
+                'limit' => ['type' => 'integer', 'default' => 50, 'description' => 'Number of rounds to return'],
+            ],
+            requiresApproval: false,
+            category: 'multiplier',
+        ));
+
+        $this->register(new McpTool(
+            'multiplier.generateSignal',
+            'Generate an AI-powered multiplier prediction signal using 9 specialist agents (with optional LLM enhancement via Cloudflare)',
+            [
+                'provider' => ['type' => 'string', 'default' => 'simulation'],
+                'model' => ['type' => 'string', 'default' => 'MIXED-ENSEMBLE-v1'],
+            ],
+            requiresApproval: false,
+            category: 'multiplier',
+        ));
+
+        $this->register(new McpTool(
+            'multiplier.getAccuracy',
+            'Get accuracy statistics for multiplier predictions',
+            ['window' => ['type' => 'integer', 'default' => 100, 'description' => 'Number of predictions to evaluate']],
+            requiresApproval: false,
+            category: 'multiplier',
+        ));
+
+        $this->register(new McpTool(
+            'multiplier.listAgents',
+            'List all 9 specialist AI agents in the Multiplier Intelligence system',
+            [],
+            requiresApproval: false,
+            category: 'multiplier',
+        ));
+
+        $this->register(new McpTool(
+            'multiplier.analyzeRound',
+            'Run a specific multiplier agent analysis on historical data',
+            [
+                'agent' => ['type' => 'string', 'required' => true, 'description' => 'Agent name (historical, pattern, probability, sequence, anomaly, risk)'],
+                'provider' => ['type' => 'string', 'default' => 'simulation'],
+            ],
+            requiresApproval: false,
+            category: 'multiplier',
         ));
     }
 

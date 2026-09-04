@@ -166,6 +166,7 @@ $route['multiplier/live'] = 'multiplier/live';
 $route['multiplier/dashboard'] = 'multiplier/dashboard_data';
 $route['multiplier/accuracy'] = 'multiplier/accuracy';
 $route['multiplier/validate'] = 'multiplier/validate';
+$route['multiplier/verify'] = 'multiplier/verify_integration';
 $route['multiplier/admin'] = 'multiplier_admin/index';
 $route['multiplier/stream/live'] = 'multiplier_stream/live';
 $route['multiplier/stream/signals'] = 'multiplier_stream/signals';
