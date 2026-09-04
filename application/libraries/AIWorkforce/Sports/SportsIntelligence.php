@@ -215,7 +215,13 @@ class SportsIntelligence
         $providers = [];
         foreach ($this->repository->listProviders() as $p) {
             $health = $this->providerHealth->assess($p, $this->repository->listHealth((int) $p['id'], 20), $this->repository->listJobRuns(null, 50));
-            $providers[] = array_merge($p, ['derivedStatus' => $health['status'], 'reliability' => $health['reliability'], 'detail' => $health['detail']]);
+            // Strip provider identity — users see Feed N, not provider names/codes/URLs.
+            $providers[] = [
+                'id' => (int) ($p['id'] ?? 0),
+                'derivedStatus' => $health['status'],
+                'reliability' => $health['reliability'],
+                'detail' => $health['detail'],
+            ];
         }
         return [
             'module' => 'WINDELS Sports Intelligence',
