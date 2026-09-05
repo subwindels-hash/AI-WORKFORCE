@@ -65,9 +65,14 @@ class LotteryCronService
         if ($run === null) {
             return ['status' => 'ALREADY_RUN', 'note' => 'sync already completed for ' . $date . ' (idempotent)'];
         }
-        $result = $this->lottery->sync(100);
+        // Backfill deeply on the first run (empty database), then keep the
+        // daily delta cheap once the history is present.
+        $limit = $this->lottery->verifiedDrawCount() === 0 ? 520 : 100;
+        $result = $this->lottery->sync($limit);
         $status = match ($result['status']) {
             'NO_PROVIDER' => 'SKIPPED_NO_PROVIDER',
+            LotteryIntelligence::STATUS_DATA_UNAVAILABLE => 'DATA_UNAVAILABLE',
+            'NO_DATA' => 'NO_DATA',
             default => 'OK',
         };
         $this->repo->finishJobRun((string) $run['id'], [

@@ -18,13 +18,26 @@
     t.disabled = true;
     var orig = t.textContent;
     t.textContent = 'Generating…';
+    /* HISTORICAL mode is driven by the verified historical dataset stored in
+       the database. If that dataset is empty the API answers 400 with a
+       DATA UNAVAILABLE message — we surface it instead of silently falling
+       back to random numbers. `count` is the API's field name for the number
+       of lines. */
     fetch('/api/lottery/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify({ mode: 'balanced', lines: 5 })
-    }).then(function (r) { return r.json(); })
-      .then(function () { window.location.reload(); })
+      body: JSON.stringify({ mode: 'HISTORICAL', count: 5 })
+    }).then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+      .then(function (res) {
+        if (!res.ok || res.body.error) {
+          t.disabled = false;
+          t.textContent = orig;
+          window.alert(res.body.error || 'DATA UNAVAILABLE — the verified historical dataset could not be read.');
+          return;
+        }
+        window.location.reload();
+      })
       .catch(function () { t.disabled = false; t.textContent = orig; });
   });
 })();

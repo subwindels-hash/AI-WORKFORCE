@@ -227,7 +227,12 @@ test('loteriasapi: falls back to /latest when the range endpoint returns nothing
     assert_equals(1, count($draws));
     assert_equals('2026029', $draws[0]['externalId']);
     assert_equals('2026-04-10T22:00:00.000Z', $draws[0]['sourceTimestamp'], 'the envelope timestamp attributes the draw');
-    assert_equals(2, count($calls), 'range attempt then latest fallback');
+    // History has three sources, tried in order of richness:
+    // /range → the paged listing route → /latest (single draw, last resort).
+    assert_equals(3, count($calls), 'range, then the history listing, then the latest fallback');
+    assert_contains('/range', $calls[0]['url']);
+    assert_contains('page=1', $calls[1]['url']);
+    assert_contains('/latest', $calls[2]['url']);
 });
 
 test('loteriasapi: single draws are fetched by date or resolved by vendor draw id', function () {
@@ -505,4 +510,233 @@ test('loteriasapi adapter obeys the module honesty rules and leaks no credential
     // A managed row belonging to a different driver must not be adopted.
     assert_contains("!== 'loteriasapi'", file_get_contents(FCPATH . 'application/libraries/AIWorkforce/Lottery/LoteriasApiProvider.php'));
     assert_contains("!== 'official_lottery'", file_get_contents(FCPATH . 'application/libraries/AIWorkforce/Lottery/OfficialLotteryProvider.php'));
+});
+
+// ---------------------------------------------------------------------------
+// Historical draw synchronization: API → validation → database → statistics →
+// AI generation, plus the honest DATA UNAVAILABLE state (issue #66).
+// ---------------------------------------------------------------------------
+
+/** A provider serving `$count` distinct EuroMillions draws through /range. */
+function fx_loterias_history_provider(int $count = 12, array $overrides = []): array
+{
+    $rows = [];
+    for ($i = 0; $i < $count; $i++) {
+        $date = gmdate('Y-m-d', strtotime('2026-04-10 -' . ($i * 4) . ' days'));
+        $draw = fx_loterias_live_payload($date, '2026' . str_pad((string) (100 - $i), 3, '0', STR_PAD_LEFT));
+        // Distinct, valid combinations so the statistics have real variation.
+        $draw['combination'] = [
+            1 + ($i % 10), 11 + ($i % 9), 21 + ($i % 8), 31 + ($i % 7), 41 + ($i % 6),
+        ];
+        $draw['resultData'] = ['estrellas' => [1 + ($i % 6), 7 + ($i % 5)]];
+        $rows[] = $draw;
+    }
+    return fx_loterias_provider(function (string $url) use ($rows) {
+        if (str_contains($url, '/latest')) return fx_loterias_json(fx_loterias_live_envelope($rows[0]));
+        return fx_loterias_json(['success' => true, 'data' => $rows, 'meta' => ['hasNext' => false]]);
+    }, $overrides);
+}
+
+test('loteriasapi history sync: fetch → validate → store, with no duplicates', function () {
+    $repo = new LotteryRepositoryStub();
+    $audit = fx_loterias_audit();
+    [$provider] = fx_loterias_history_provider(12);
+    $intel = new LotteryIntelligence($repo, $audit, $provider);
+
+    $sync = $intel->sync(50);
+    assert_equals('OK', $sync['status']);
+    assert_equals(12, $sync['imported'], 'every available historical draw is imported');
+    assert_equals(0, $sync['failed']);
+    assert_equals(12, $intel->drawCount());
+    assert_equals(12, $intel->verifiedDrawCount(), 'stored draws are VERIFIED');
+    assert_equals(12, $sync['verifiedDraws']);
+
+    // Duplicate protection: a second sync stores nothing new.
+    $again = $intel->sync(50);
+    assert_equals(0, $again['imported']);
+    assert_equals(12, $again['unchanged']);
+    assert_equals(12, $intel->verifiedDrawCount(), 'no duplicate rows');
+
+    // Every row carries date, 5 mains, 2 stars, jackpot, prizes and winners.
+    $row = $repo->listDraws(['lotteryCode' => 'EUROMILLIONS'], 1)[0];
+    assert_equals(5, count($row['payload']['main']));
+    assert_equals(2, count($row['payload']['stars']));
+    assert_equals('130000000.00', $row['jackpot'], 'jackpot stored from the feed');
+    assert_not_null($row['payload']['prizes'], 'prize breakdown recorded');
+    assert_equals(2, count($row['payload']['prizes']));
+    assert_equals(3, $row['payload']['prizes'][1]['winners'], 'winner counts recorded per tier');
+    assert_equals('0', $row['payload']['winners'], 'jackpot winner count recorded');
+    assert_equals('VERIFIED', $row['verification_status']);
+});
+
+test('lottery dashboard: verified draw count, last successful sync and sync status', function () {
+    $repo = new LotteryRepositoryStub();
+    [$provider] = fx_loterias_history_provider(8);
+    $intel = new LotteryIntelligence($repo, fx_loterias_audit(), $provider);
+
+    $before = $intel->status();
+    assert_equals(0, $before['verifiedDraws']);
+    assert_equals('NEVER_SYNCED', $before['syncStatus']);
+    assert_null($before['lastSuccessfulSync']);
+    assert_false($before['dataAvailable']);
+
+    $intel->sync(50);
+    $after = $intel->status();
+    assert_equals(8, $after['verifiedDraws']);
+    assert_true($after['dataAvailable']);
+    assert_equals('OK', $after['syncStatus']);
+    assert_not_null($after['lastSuccessfulSync'], 'the dashboard reports the last successful sync');
+    assert_not_null($after['lastSyncAttempt']);
+    assert_equals(8, $after['historicalDataset']['draws']);
+    assert_true($after['historicalDataset']['available']);
+});
+
+test('lottery jackpot is read from the LoteriasAPI response, never hardcoded', function () {
+    $repo = new LotteryRepositoryStub();
+    // A jackpot the code could not possibly contain as a literal.
+    $payload = fx_loterias_live_payload();
+    $payload['jackpotFormatted'] = '89.000.000,00 €';
+    $payload['jackpot'] = '8900000000';
+    $payload['prizes'] = [['category' => 1, 'categoryName' => '5 + 2 estrellas', 'winners' => 0,
+        'prizeAmount' => '8900000000', 'formattedPrize' => '89.000.000,00 €']];
+    [$provider] = fx_loterias_provider(fn() => fx_loterias_json(fx_loterias_live_envelope($payload)));
+    $status = (new LotteryIntelligence($repo, fx_loterias_audit(), $provider))->status();
+    assert_equals('89000000.00', $status['jackpot'], 'the displayed jackpot mirrors the feed');
+    assert_equals('PROVIDER_FEED', $status['jackpotSource']['origin']);
+    assert_equals('loteriasapi', $status['jackpotSource']['provider']);
+    assert_false($status['jackpotSource']['hardcoded']);
+
+    // Change the feed → the displayed jackpot changes with it.
+    $payload['jackpotFormatted'] = '17.000.000,00 €';
+    $payload['jackpot'] = '1700000000';
+    $payload['prizes'][0]['formattedPrize'] = '17.000.000,00 €';
+    [$moved] = fx_loterias_provider(fn() => fx_loterias_json(fx_loterias_live_envelope($payload)));
+    $movedStatus = (new LotteryIntelligence(new LotteryRepositoryStub(), fx_loterias_audit(), $moved))->status();
+    assert_equals('17000000.00', $movedStatus['jackpot'], 'the amount tracks the feed, so it is not a constant');
+
+    // And no jackpot literal is committed in the module sources.
+    foreach (['LoteriasApiProvider.php', 'LotteryIntelligence.php'] as $file) {
+        $src = file_get_contents(FCPATH . 'application/libraries/AIWorkforce/Lottery/' . $file);
+        assert_false((bool) preg_match('/89[.,]?000[.,]?000/', $src), 'no hardcoded jackpot in ' . $file);
+    }
+    assert_false((bool) preg_match('/89[.,]?000[.,]?000/', file_get_contents(FCPATH . 'application/views/lottery/index.php')));
+});
+
+test('Strategy Lab and Generate 5 AI Lines run on the stored historical dataset', function () {
+    $repo = new LotteryRepositoryStub();
+    [$provider] = fx_loterias_history_provider(30);
+    $intel = new LotteryIntelligence($repo, fx_loterias_audit(), $provider);
+    $intel->sync(50);
+
+    $dataset = $intel->historicalDataset();
+    assert_equals(30, count($dataset), 'the shared dataset accessor reads the stored draws');
+    assert_true($dataset[0]['drawDate'] < $dataset[29]['drawDate'], 'oldest first for look-ahead safety');
+
+    // Statistics (Strategy Lab input) name the dataset they used.
+    $stats = $intel->statistics('frequency', 0);
+    assert_equals('VERIFIED_HISTORICAL_DATABASE', $stats['dataset']['source']);
+    assert_equals(30, $stats['dataset']['draws']);
+
+    // Backtesting (Strategy Lab) replays the same stored dataset.
+    $bt = $intel->backtest('HISTORICAL_FREQ', 1, 10);
+    assert_equals(30, $bt['dataset']['draws']);
+    assert_equals('VERIFIED_HISTORICAL_DATABASE', $bt['dataset']['source']);
+
+    // Generate 5 AI lines from the historical dataset — not a random fallback.
+    $report = $intel->generate(['mode' => 'HISTORICAL', 'count' => 5, 'seed' => 7]);
+    assert_equals(5, count($report['lines']));
+    assert_equals(30, $report['inputs']['drawsUsed'], 'generation consumed all 30 stored draws');
+    assert_true($report['dataset']['usedForGeneration']);
+    assert_false($report['dataset']['randomBaseline']);
+    assert_equals('n=30;last=' . $dataset[29]['drawDate'], $report['inputs']['datasetVersion']);
+    assert_true(count($report['factors']['topMainNumbers']) > 0, 'historical frequencies drove the sampling');
+});
+
+test('empty dataset: AI generation refuses to fake history instead of falling back to random', function () {
+    $repo = new LotteryRepositoryStub();
+    [$provider] = fx_loterias_history_provider(4);
+    $intel = new LotteryIntelligence($repo, fx_loterias_audit(), $provider);
+
+    assert_throws(InvalidArgumentException::class, fn() => $intel->generate(['mode' => 'HISTORICAL', 'count' => 5]));
+    try {
+        $intel->generate(['mode' => 'BALANCED', 'count' => 5]);
+        assert_true(false, 'BALANCED must refuse an empty dataset');
+    } catch (InvalidArgumentException $e) {
+        assert_contains('DATA UNAVAILABLE', $e->getMessage());
+    }
+    // An explicit random baseline stays available and is labeled as such.
+    $random = $intel->generate(['mode' => 'RANDOM', 'count' => 5, 'seed' => 1]);
+    assert_equals(5, count($random['lines']));
+    assert_true($random['dataset']['randomBaseline']);
+    assert_false($random['dataset']['usedForGeneration']);
+});
+
+test('a down feed with stored history reads STORED DATA, never NO_DATA', function () {
+    $repo = new LotteryRepositoryStub();
+    [$live] = fx_loterias_history_provider(6);
+    $intel = new LotteryIntelligence($repo, fx_loterias_audit(), $live);
+    $intel->sync(50);
+    assert_equals(6, $intel->verifiedDrawCount());
+
+    // Same database, but the feed is now unreachable.
+    [$down] = fx_loterias_provider(fn() => ['status' => 503, 'body' => 'gateway down']);
+    $status = (new LotteryIntelligence($repo, fx_loterias_audit(), $down))->status();
+    assert_equals('STORED DATA', $status['status'], 'stored verified draws are never reported as NO_DATA');
+    assert_true($status['dataAvailable']);
+    assert_equals(6, $status['verifiedDraws']);
+    assert_equals(6, $status['historicalDataset']['draws'], 'statistics still have their dataset');
+});
+
+test('sync state falls back to the stored draws when the active provider has no health row', function () {
+    $repo = new LotteryRepositoryStub();
+    [$live] = fx_loterias_history_provider(5);
+    (new LotteryIntelligence($repo, fx_loterias_audit(), $live))->sync(50);
+
+    // A different provider instance (reconfigured feed) has no health history.
+    [$other] = fx_loterias_provider(fn() => fx_loterias_json(fx_loterias_live_envelope(fx_loterias_live_payload())));
+    $fresh = new LotteryIntelligence(new LotteryRepositoryStub(), fx_loterias_audit(), $other);
+    assert_equals('NEVER_SYNCED', $fresh->status()['syncStatus'], 'an empty database really has never synced');
+
+    $repo->health = [];   // drop the health history, keep the draws
+    $stale = (new LotteryIntelligence($repo, fx_loterias_audit(), $other))->status();
+    assert_equals('STALE', $stale['syncStatus']);
+    assert_not_null($stale['lastSuccessfulSync'], 'the stored draws date the last successful ingestion');
+    assert_contains('stored verified draws', $stale['syncMessage']);
+});
+
+test('lottery reports DATA UNAVAILABLE when LoteriasAPI cannot be reached', function () {
+    $repo = new LotteryRepositoryStub();
+    $audit = fx_loterias_audit();
+    [$provider] = fx_loterias_provider(fn() => ['status' => 503, 'body' => 'gateway down']);
+    $intel = new LotteryIntelligence($repo, $audit, $provider);
+
+    $status = $intel->status();
+    assert_equals('OFFLINE', $status['provider']['state']);
+    assert_equals('DATA UNAVAILABLE', $status['status'], 'an unreachable feed is never reported as "no data exists"');
+    assert_false($status['dataAvailable']);
+
+    $sync = $intel->sync(10);
+    assert_equals('DATA UNAVAILABLE', $sync['status']);
+    assert_equals(0, $sync['imported']);
+    assert_contains('DATA UNAVAILABLE', $sync['message']);
+    assert_true(in_array('LOTTERY_SYNC_FAILED', array_column($audit->events, 'type'), true), 'the failure is audited');
+
+    $after = $intel->status();
+    assert_equals('FAILED', $after['syncStatus']);
+    assert_contains('DATA UNAVAILABLE', $after['syncMessage']);
+    assert_equals(0, $after['verifiedDraws']);
+});
+
+test('lottery dashboard view renders sync status, verified draws and the feed jackpot', function () {
+    $view = file_get_contents(FCPATH . 'application/views/lottery/index.php');
+    assert_contains('lastSuccessfulSync', $view, 'last successful sync is on the dashboard');
+    assert_contains('syncStatus', $view, 'sync status is on the dashboard');
+    assert_contains('verifiedDraws', $view, 'verified draw count is on the dashboard');
+    assert_contains('DATA UNAVAILABLE', $view, 'the honest unavailable state is rendered');
+    assert_contains('jackpot source', $view, 'the jackpot origin is disclosed');
+
+    // The dashboard button must ask for a history-backed generation.
+    $js = file_get_contents(FCPATH . 'assets/js/lottery.js');
+    assert_contains("mode: 'HISTORICAL'", $js, 'Generate 5 AI lines uses the historical dataset');
+    assert_contains('count: 5', $js, 'five lines, using the API field name');
 });
