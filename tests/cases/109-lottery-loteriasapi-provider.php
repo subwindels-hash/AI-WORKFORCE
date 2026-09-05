@@ -38,6 +38,21 @@ function fx_loterias_live_payload(string $date = '2026-04-10', string $drawId = 
     ];
 }
 
+/**
+ * The live-feed variant that keys rows by its own numeric id and publishes the
+ * whole winning line (numbers followed by the stars) in ONE `combination`
+ * array — the shape that used to be rejected as
+ * "line must contain 5 main numbers (got 7)".
+ */
+function fx_loterias_flat_payload(string $date = '2026-09-04', array $combination = [7, 12, 29, 33, 45, 3, 9]): array
+{
+    $row = fx_loterias_live_payload($date);
+    $row['id'] = (int) str_replace('-', '', $date);
+    unset($row['drawId'], $row['resultData']);
+    $row['combination'] = $combination;
+    return $row;
+}
+
 /** Envelope the live API wraps a single draw in. */
 function fx_loterias_live_envelope(array $draw, string $timestamp = '2026-04-10T22:00:00.000Z'): array
 {
@@ -568,6 +583,87 @@ test('loteriasapi: malformed vendor numbers are rejected, not stored as official
     assert_contains('line must contain 5 main numbers', $notice, 'the validator reason rides along');
 });
 
+test('loteriasapi: a whole winning line in one flat combination is re-grouped, not rejected', function () {
+    [$provider] = fx_loterias_provider(fn() => fx_loterias_json(fx_loterias_live_envelope(fx_loterias_flat_payload())));
+
+    // The vendor's own star field confirms the split.
+    $withStars = fx_loterias_flat_payload();
+    $withStars['resultData'] = ['estrellas' => [3, 9]];
+    $draw = $provider->normalizeDraw($withStars);
+    assert_equals([7, 12, 29, 33, 45], $draw['main'], 'the flat line is split into the 5 numbers');
+    assert_equals([3, 9], $draw['stars'], 'the trailing values are the stars');
+    assert_equals('flat-combination-split', $draw['extra']['numberLayout'], 'the interpretation is recorded');
+    assert_equals([7, 12, 29, 33, 45, 3, 9], $draw['extra']['rawCombination'], 'the vendor line stays auditable');
+
+    // Without any star field the split still applies — every value fits the game.
+    $noStars = fx_loterias_flat_payload();
+    $draw2 = $provider->normalizeDraw($noStars);
+    assert_equals('20260904', $draw2['externalId'], 'the numeric vendor id is the draw key');
+    assert_equals([7, 12, 29, 33, 45], $draw2['main']);
+    assert_equals([3, 9], $draw2['stars']);
+    assert_equals('flat-combination-split', $draw2['extra']['numberLayout']);
+
+    // The same line published stars first — confirmed by the star field too.
+    $starsFirst = fx_loterias_flat_payload('2026-09-04', [3, 9, 7, 12, 29, 33, 45]);
+    $starsFirst['resultData'] = ['estrellas' => [3, 9]];
+    $draw4 = $provider->normalizeDraw($starsFirst);
+    assert_equals([7, 12, 29, 33, 45], $draw4['main']);
+    assert_equals([3, 9], $draw4['stars']);
+    assert_equals('flat-combination-split-stars-first', $draw4['extra']['numberLayout']);
+
+    // A line that cannot be a 5+2 line is never reshaped into one: it stays
+    // exactly as the feed sent it and is rejected by the validator instead.
+    $implausible = fx_loterias_flat_payload('2026-09-04', [7, 12, 29, 33, 45, 44, 43]);
+    $draw3 = $provider->normalizeDraw($implausible);
+    assert_equals([7, 12, 29, 33, 45, 44, 43], $draw3['main'], 'an implausible split is refused');
+    assert_null($draw3['extra']['numberLayout']);
+
+    // Neither for a game whose number layout the adapter does not know.
+    [$other] = fx_loterias_provider(fn() => fx_loterias_json([]), ['game' => 'primitiva']);
+    assert_equals([7, 12, 29, 33, 45, 3, 9], $other->normalizeDraw(fx_loterias_flat_payload())['main'],
+        'an unknown game layout is never guessed');
+});
+
+test('loteriasapi: a flat-combination feed syncs end to end instead of being rejected', function () {
+    $repo = new LotteryRepositoryStub();
+    $audit = fx_loterias_audit();
+    [$provider] = fx_loterias_provider(function (string $url) {
+        $payloads = [
+            fx_loterias_flat_payload('2026-09-04', [7, 12, 29, 33, 45, 3, 9]),
+            fx_loterias_flat_payload('2026-09-01', [4, 18, 27, 36, 50, 2, 11]),
+        ];
+        if (str_contains($url, '/latest')) return fx_loterias_json(fx_loterias_live_envelope($payloads[0]));
+        return fx_loterias_json(['success' => true, 'data' => $payloads, 'meta' => ['hasNext' => false]]);
+    });
+    $intel = new LotteryIntelligence($repo, $audit, $provider);
+
+    $sync = $intel->sync(10);
+    assert_equals(0, $sync['failed'], 'a flat winning line is no longer a validation failure: ' . json_encode($sync['errors']));
+    assert_equals(2, $sync['imported']);
+    assert_equals(2, $intel->verifiedDrawCount());
+    assert_equals(0, count(array_filter($audit->events, fn($e) => $e['type'] === 'LOTTERY_DRAW_VALIDATION_FAILED')));
+
+    $stored = $intel->presentDraw($repo->listDraws(['lotteryCode' => 'EUROMILLIONS'], 1)[0]);
+    assert_equals([7, 12, 29, 33, 45], $stored['main_numbers']);
+    assert_equals([3, 9], $stored['lucky_stars']);
+});
+
+test('loteriasapi: the raw vendor payload is available for smoke diagnostics', function () {
+    [$provider, $calls] = fx_loterias_provider(fn() => fx_loterias_json(fx_loterias_live_envelope(fx_loterias_flat_payload())));
+    $raw = $provider->rawLatest();
+    assert_equals([7, 12, 29, 33, 45, 3, 9], $raw['combination'], 'the vendor row is exposed unmapped for --raw');
+    assert_equals(1, count($calls), 'diagnostics reuse the memoised /latest answer');
+
+    // An unconfigured adapter exposes nothing rather than a synthetic row.
+    $off = new LoteriasApiProvider(null, '', null, true, fn() => fx_loterias_json([]));
+    assert_equals([], $off->rawLatest());
+
+    // The CLI smoke test can print it next to the mapped draw.
+    $tools = file_get_contents(FCPATH . 'application/controllers/Tools.php');
+    assert_contains("'--raw'", $tools, 'lottery-smoke --raw prints what the feed actually sends');
+    assert_contains('rawLatest()', $tools);
+});
+
 test('loteriasapi is registered in API Management with a working connectivity test', function () {
     $services = \AIWorkforce\ApiProviders::services();
     assert_true(in_array('loteriasapi', $services['lottery']['drivers'], true), 'driver offered for the lottery service');
@@ -660,6 +756,40 @@ test('lottery status and dashboard surface the live feed identity honestly', fun
     $offStatus = (new LotteryIntelligence(new LotteryRepositoryStub(), fx_loterias_audit(), $offline))->status();
     assert_equals('DISABLED_NO_PROVIDER', $offStatus['engine']);
     assert_equals('NO_DATA', $offStatus['status']);
+});
+
+test('lottery dashboard names the product feed, never the upstream vendor', function () {
+    $repo = new LotteryRepositoryStub();
+    [$provider] = fx_loterias_provider(fn() => fx_loterias_json(fx_loterias_live_envelope(fx_loterias_live_payload())));
+    $status = (new LotteryIntelligence($repo, fx_loterias_audit(), $provider))->status();
+
+    assert_equals('Windels API — EuroMillions results', $status['provider']['name'], 'the dashboard shows the product display name');
+    assert_contains('Windels API', (string) $status['provider']['message']);
+    assert_not_contains('LoteriasAPI', json_encode($status), 'no vendor brand in the dashboard payload');
+    assert_contains('Windels API', (string) $provider->jackpotInfo()['note']);
+
+    // Every health state carries the same label, not just ONLINE.
+    $off = new LoteriasApiProvider(null, '', null, true, fn() => fx_loterias_json([]));
+    assert_contains('Windels API', (string) $off->health()['message']);
+    $disabled = new LoteriasApiProvider(null, 'k', null, false, fn() => fx_loterias_json([]));
+    assert_contains('Windels API', (string) $disabled->health()['message']);
+
+    // … and so does the dashboard markup itself.
+    $view = file_get_contents(FCPATH . 'application/views/lottery/index.php');
+    assert_not_contains('LoteriasAPI', $view, 'no vendor name left on the user dashboard');
+    assert_contains('Windels API', $view);
+
+    // The rename is a label only — provenance still names the real source.
+    assert_equals('loteriasapi.com (SELAE)', $provider->normalizeDraw(fx_loterias_live_payload())['source'],
+        'renaming the display label never rewrites the source attribution');
+    assert_equals('loteriasapi', $status['provider']['id'], 'the provider id stays the vendor key');
+
+    // A registry row created under the old label follows the current one, so
+    // GET /api/lottery/providers never serves a stale vendor name.
+    $stub = new LotteryRepositoryStub();
+    $stub->ensureProvider('loteriasapi', 'LoteriasAPI (loteriasapi.com) — EuroMillions results');
+    assert_equals('Windels API — EuroMillions results', $stub->ensureProvider('loteriasapi', $provider->name())['display_name'],
+        'the stored display name follows the code label');
 });
 
 test('scheduled lottery sync ingests LoteriasAPI draws and is idempotent per day', function () {

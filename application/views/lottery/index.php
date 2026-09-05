@@ -74,11 +74,11 @@ window.__AI_LOTTERY_STATE__ = <?= $stateJson ?>;
   const ds = s.historicalDataset || {};
   const js = s.jackpotSource || {};
   const jackpotOrigin = js.origin === 'PROVIDER_FEED'
-    ? 'live LoteriasAPI response' + (js.observedAt ? ' (observed ' + e(js.observedAt) + ')' : '')
+    ? 'live Windels API response' + (js.observedAt ? ' (observed ' + e(js.observedAt) + ')' : '')
     : (js.origin === 'STORED_DRAW' ? 'stored verified draw' : 'no feed value — nothing displayed');
 
   const lastDraw = s.lastDraw;
-  let lastDrawHtml = '<p class="dim">No verified draw imported yet. Connect an official EuroMillions source (e.g. LoteriasAPI) in Admin → API.</p>';
+  let lastDrawHtml = '<p class="dim">No verified draw imported yet. Connect an official EuroMillions source (e.g. Windels API) in Admin → API.</p>';
   if (lastDraw && lastDraw.numbers) {
     const mains = (lastDraw.numbers.main || []).map(n => '<span class="ball">'+n+'</span>').join('');
     const stars = (lastDraw.numbers.stars || []).map(n => '<span class="lucky-star">'+n+'</span>').join('');

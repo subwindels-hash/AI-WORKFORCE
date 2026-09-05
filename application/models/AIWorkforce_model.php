@@ -349,7 +349,16 @@ class AIWorkforce_model extends CI_Model
             public function saveRules(array $r): int { $this->db->insert('lottery_rules', $r); return (int) $this->db->insert_id(); }
             public function ensureProvider(string $code, string $name): array {
                 $q = $this->db->get_where('lottery_data_sources', ['provider_code' => $code], 1); $row = ($q && is_object($q)) ? $q->row_array() : null;
-                if ($row) return $row;
+                if ($row) {
+                    // Display names live in code (`LotteryProvider::name()`);
+                    // the registry row follows it, so a renamed provider is
+                    // not served under its old label by /api/lottery/providers.
+                    if (($row['display_name'] ?? null) !== $name) {
+                        $this->db->where('provider_code', $code)->update('lottery_data_sources', ['display_name' => $name, 'updated_at' => gmdate('c')]);
+                        $row['display_name'] = $name;
+                    }
+                    return $row;
+                }
                 $now = gmdate('c');
                 $this->db->insert('lottery_data_sources', ['provider_code' => $code, 'display_name' => $name, 'enabled' => 0, 'synthetic' => str_contains($code, 'sandbox') ? 1 : 0, 'created_at' => $now, 'updated_at' => $now]);
                 $q2 = $this->db->get_where('lottery_data_sources', ['provider_code' => $code], 1); return ($q2 && is_object($q2)) ? $q2->row_array() : ['provider_code' => $code, 'display_name' => $name, 'enabled' => 0, 'synthetic' => str_contains($code, 'sandbox') ? 1 : 0, 'created_at' => $now, 'updated_at' => $now];

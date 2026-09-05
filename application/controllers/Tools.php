@@ -28,7 +28,7 @@ class Tools extends MY_Controller
         $footballJobs = class_exists(\AIWorkforce\Football\FootballCronService::class)
             ? implode('|', \AIWorkforce\Football\FootballCronService::JOBS)
             : 'fixtures|upcoming|live|results|statistics|predict|settle|performance|cleanup';
-        echo "AI Workforce tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n  php index.php tools marketdata        — market-data connectivity report (add --activate to go live, --probe to fetch real bars)\n  php index.php tools cron              — scheduled operations: portfolio risk scan, broker transitions, proposal expiry\n  php index.php tools scheduler [job]   — unified scheduler: runs every enabled + due job ({$groups})\n  php index.php tools sports-cron [job] — sports scheduled jobs (fixtures|odds|results|quality|ticket|settlement|performance|monitoring|cleanup)\n  php index.php tools football-cron [job] — football refresh jobs ({$footballJobs}); --force bypasses cadence\n  php index.php tools lottery-cron [job] — lottery scheduled jobs (sync|health|statistics|systems|tickets|backtests|cleanup)\n  php index.php tools lottery-smoke     — live check of the configured lottery feed (LoteriasAPI / authorized feed)\n";
+        echo "AI Workforce tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n  php index.php tools marketdata        — market-data connectivity report (add --activate to go live, --probe to fetch real bars)\n  php index.php tools cron              — scheduled operations: portfolio risk scan, broker transitions, proposal expiry\n  php index.php tools scheduler [job]   — unified scheduler: runs every enabled + due job ({$groups})\n  php index.php tools sports-cron [job] — sports scheduled jobs (fixtures|odds|results|quality|ticket|settlement|performance|monitoring|cleanup)\n  php index.php tools football-cron [job] — football refresh jobs ({$footballJobs}); --force bypasses cadence\n  php index.php tools lottery-cron [job] — lottery scheduled jobs (sync|health|statistics|systems|tickets|backtests|cleanup)\n  php index.php tools lottery-smoke     — live check of the configured lottery feed (LoteriasAPI / authorized feed); add --raw to print the vendor's own payload\n";
     }
 
     public function install()
@@ -178,11 +178,16 @@ class Tools extends MY_Controller
      * Live connectivity smoke test for the configured lottery feed
      * (LoteriasAPI / authorized official feed).
      *   php index.php tools lottery-smoke
+     *   php index.php tools lottery-smoke --raw   (also print the vendor's own
+     *     unmapped latest row — the way to see which payload shape a feed that
+     *     gets rejected is actually sending)
      * Exit codes: 0 = live data received, 1 = configured but unreachable,
      * 2 = no provider configured. Never prints credentials.
      */
     public function lottery_smoke()
     {
+        $flags = array_values(array_filter(array_slice($_SERVER['argv'] ?? [], 3), fn($a) => is_string($a) && str_starts_with($a, '--')));
+        $raw = in_array('--raw', $flags, true);
         $provider = $this->platform->lottery->provider;
         $health = $provider->health();
         $report = [
@@ -192,6 +197,9 @@ class Tools extends MY_Controller
             'draws' => [],
             'jackpot' => null,
         ];
+        if ($raw && $provider instanceof \AIWorkforce\Lottery\LoteriasApiProvider) {
+            $report['rawLatest'] = $provider->rawLatest();
+        }
         if (($health['state'] ?? '') === 'ONLINE') {
             foreach ($provider->draws(null, null, 3) as $draw) {
                 $report['draws'][] = [

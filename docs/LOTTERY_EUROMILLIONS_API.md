@@ -16,7 +16,7 @@ Lottery Intelligence pipeline.
 | API Management driver `loteriasapi` + connectivity test | `application/libraries/AIWorkforce/ApiProviders.php` |
 | Live CLI smoke test | `php index.php tools lottery-smoke` (`Tools::lottery_smoke`) |
 | Dashboard + admin deep-link | `application/views/lottery/index.php` |
-| Tests (39) | `tests/cases/109-lottery-loteriasapi-provider.php` |
+| Tests (42) | `tests/cases/109-lottery-loteriasapi-provider.php` |
 
 The adapter implements the same `LotteryProvider` interface every other lottery
 source uses, so statistics, combination generation, the system builder,
@@ -64,6 +64,8 @@ drawId       "2026029"                       → externalId
 drawDate     "2026-04-10"                    → drawDate
 combination  [7,12,29,33,45]                 → main
 resultData.estrellas [3,9]                   → stars
+combination  [7,12,29,33,45,3,9]             → main [7,12,29,33,45] + stars [3,9]
+  (whole winning line in one flat array)
 jackpotFormatted "130.000.000,00 €"          → jackpot "130000000.00"
   (fallback: jackpot "13000000000" = integer cents → euros)
 prizes[category 1].winners == 0              → rollover=true, winners="0"
@@ -75,6 +77,40 @@ status, dayOfWeek, prizes count              → extra.status, extra.dayOfWeek, 
 The legacy snake_case payload (`draw_id`, `draw_date`, `numbers`, `stars`,
 `el_millon`, `jackpot_next`, `meta.updated_at`) is still mapped, so both shapes
 ingest correctly.
+
+### The flat winning line (`combination` with 7 numbers)
+
+The live feed also publishes the whole line — the 5 numbers followed by the 2
+Lucky Stars — as a single `combination` array:
+
+```json
+{ "id": 1321502071, "game": { "slug": "euromillones" }, "drawDate": "2026-09-04",
+  "status": "COMPLETED", "combination": [7, 12, 29, 33, 45, 3, 9],
+  "resultData": { "estrellas": [3, 9] } }
+```
+
+Taken literally that is 7 main numbers, and every such draw was rejected as
+`line must contain 5 main numbers (got 7)` — the sync reported
+`0 imported, 2 rejected; 0 verified draws stored`. `LoteriasApiProvider` now
+re-groups the flat list into 5 + 2 when the split is safe, and leaves it alone
+when it is not:
+
+| Situation | Applied? | Why |
+|---|---|---|
+| The row also names the stars (`resultData.estrellas`) and the flat list begins or ends with exactly those values | yes — `extra.numberLayout = flat-combination-split` (`-stars-first` when they lead) | the vendor itself confirms the split |
+| No star field, the flat list is exactly 7 long, the first 5 values are unique and inside 1–50, the last 2 are unique and inside 1–12 | yes — `flat-combination-split` | the only layout a 5+2 game can have |
+| Anything else (unknown game slug, out-of-range values, a repeated value inside a group, a list of another length) | **no** | the draw is left exactly as sent and rejected by `LotteryResultValidator`, so a genuinely broken line is audited, never reshaped into a valid-looking one |
+
+Every re-grouped draw keeps the vendor's own number list in
+`payload.extra.rawCombination` next to the interpretation in
+`payload.extra.numberLayout`, so a stored draw can always be traced back to
+what the feed actually sent.
+
+To see which shape a feed is sending:
+
+```bash
+php index.php tools lottery-smoke --raw   # adds the vendor's unmapped latest row
+```
 
 The published jackpot is surfaced through `status().jackpot` on the lottery
 dashboard and carries the note *"not used to infer future draw outcomes"*.
@@ -97,6 +133,27 @@ dashboard and carries the note *"not used to infer future draw outcomes"*.
    key returns `Connected to LoteriasAPI (euromillones) — latest draw YYYY-MM-DD`.
 
 Keys are stored encrypted and never appear in views, JS, audit logs or errors.
+
+### Display name on the user dashboard
+
+The upstream vendor is `loteriasapi.com`, but users only ever see the product
+name. `LoteriasApiProvider::name()` and every dashboard-facing string
+(health message, jackpot-source note, the lottery view's own labels) read
+**`Windels API — EuroMillions`** / **`Windels API`**:
+
+```
+provider: loteriasapi.com (SELAE) · imported 42 verified draws
+Windels API reachable — latest draw 2026-09-04
+jackpot source: live Windels API response (observed 2026-09-04T22:00:00Z)
+```
+
+Admin → API Management, the CLI (`lottery-smoke`) and this document keep the
+vendor name, because an operator configuring the feed needs to know which
+upstream it is. The rename is a label only — the **source attribution stored
+with every draw stays `loteriasapi.com (SELAE)`**, and the provider id stays
+`loteriasapi`; test
+`lottery dashboard names the product feed, never the upstream vendor` locks
+both in.
 
 ### Option B — environment variables
 
@@ -124,6 +181,7 @@ WINDELS_LOTTERY_LOTERIASAPI_TIMEOUT=8
 ```bash
 # 1. Live feed check (exit 0 = live draws received, 1 = unreachable, 2 = unconfigured)
 php index.php tools lottery-smoke
+php index.php tools lottery-smoke --raw   # also print the vendor's unmapped row
 
 # 2. Pull draws into the historical database (validated + idempotent)
 php index.php tools lottery-cron sync
@@ -133,7 +191,7 @@ php index.php tools lottery-cron sync
 php index.php tools scheduler lottery
 
 # 4. Automated tests
-php index.php tools tests            # includes tests/cases/109-lottery-loteriasapi-provider.php (39 tests)
+php index.php tools tests            # includes tests/cases/109-lottery-loteriasapi-provider.php (42 tests)
 ```
 
 `lottery-smoke` output on a working key:
