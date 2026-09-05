@@ -31,6 +31,20 @@ class Sports extends App_Controller
         $this->render('sports/tickets', $data);
     }
 
+    /**
+     * Sports capabilities of the signed-in identity, read fresh from the
+     * database. The console uses these to show only the controls the identity
+     * can actually use, instead of offering a button that fails on submit.
+     *
+     * @return array{sync: bool, approve: bool, settle: bool}
+     */
+    private function sportsCaps(): array
+    {
+        $user = $this->refreshIdentityPermissions($this->identity);
+        $can = fn(string $permission): bool => $user !== null && $this->platform->identity->can($user, $permission);
+        return ['sync' => $can('sports.manage'), 'approve' => $can('sports.approve'), 'settle' => $can('sports.settle')];
+    }
+
     /** Approve / reject a PENDING_USER_APPROVAL ticket (sports.approve). */
     public function decide(string $id)
     {
@@ -183,9 +197,12 @@ class Sports extends App_Controller
      */
     private function requireSportsPermission(string $permission, string $action): bool
     {
-        $user = $this->session->userdata('identity');
+        // Read permissions from the database: a role granted after sign-in
+        // applies immediately instead of waiting for the next sign-in.
+        $user = $this->refreshIdentityPermissions($this->identity);
         if (!is_array($user) || !$this->platform->identity->can($user, $permission)) {
-            $this->flash('error', "Refused: signed-in identity lacks '{$permission}' — the {$action} action was not performed.");
+            $this->flash('error', "Refused: signed-in identity lacks '{$permission}' — the {$action} action was not performed."
+                . " Ask an administrator to assign a role that carries '{$permission}' (Sports administrator for the sports console), then retry — permissions are re-read from the database on every action, so no sign-out is needed.");
             redirect('/sports');
             return false;
         }
@@ -208,7 +225,7 @@ class Sports extends App_Controller
 
     private function actor(): string
     {
-        $user = $this->session->userdata('identity');
+        $user = $this->refreshIdentityPermissions($this->identity);
         return is_array($user) ? (string) $user['id'] : 'anonymous';
     }
 
@@ -218,6 +235,7 @@ class Sports extends App_Controller
         return [
             'title' => $title, 'active' => $active,
             'csrfToken' => (string) $this->session->userdata('csrf_token'),
+            'caps' => $this->sportsCaps(),
             'status' => ['tradingMode' => $state['tradingMode'], 'killSwitch' => $state['killSwitch'],
                 'providers' => $this->platform->providers->getAllHealth()],
             'notice' => $this->flashGet('notice'), 'error' => $this->flashGet('error'),

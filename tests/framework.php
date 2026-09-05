@@ -68,6 +68,13 @@ function assert_contains(string $needle, string $haystack, string $msg = ''): vo
     }
 }
 
+function assert_not_contains(string $needle, string $haystack, string $msg = ''): void
+{
+    if (str_contains($haystack, $needle)) {
+        throw new RuntimeException('ASSERT: ' . ($msg ?: "did not expect \"{$needle}\" in output"));
+    }
+}
+
 function assert_in_array($needle, array $haystack, string $msg = ''): void
 {
     if (!in_array($needle, $haystack, true)) {

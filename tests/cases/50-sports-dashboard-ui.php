@@ -9,6 +9,18 @@ function fx_ui_audit(): AuditRepository
     return new class implements AuditRepository { public array $events = []; public function emit(string $t, string $s, array $d = [], string $a = 'system'): void { $this->events[] = ['type' => $t, 'actor' => $a, 'detail' => $d]; } public function recent(int $l = 100): array { return []; } };
 }
 
+/** Sports capabilities of a fully privileged identity (sports_admin / super admin). */
+function fx_sports_caps_all(): array
+{
+    return ['sync' => true, 'approve' => true, 'settle' => true];
+}
+
+/** Sports capabilities of a read-only identity (platform_member: sports.view only). */
+function fx_sports_caps_none(): array
+{
+    return ['sync' => false, 'approve' => false, 'settle' => false];
+}
+
 /** Render console views (header + page + footer) and return the HTML. */
 function fx_render_sports(string $page, array $extra): string
 {
@@ -17,6 +29,7 @@ function fx_render_sports(string $page, array $extra): string
         'title' => 'Sports Intelligence', 'active' => 'sports',
         'status' => ['tradingMode' => 'ANALYSIS_ONLY', 'killSwitch' => ['active' => false], 'providers' => []],
         'notice' => null, 'error' => null,
+        'caps' => fx_sports_caps_all(),
     ], $extra);
     ob_start();
     $ci->load->view('layout/header', $data);
@@ -59,6 +72,11 @@ test('sports UI: console routes and controller are wired', function () {
     assert_contains("requireSportsPermission('sports.manage'", $controller);
     assert_contains("requireSportsPermission('sports.approve'", $controller);
     assert_contains("requireSportsPermission('sports.settle'", $controller);
+    // ...against permissions read from the database, not the sign-in snapshot
+    $base = file_get_contents(FCPATH . 'application/core/MY_Controller.php');
+    assert_contains('function refreshIdentityPermissions', $base);
+    assert_contains('$this->refreshIdentityPermissions()', $base, 'API gate re-reads permissions');
+    assert_contains('refreshIdentityPermissions(', $controller);
 });
 
 test('sports UI: console header links the Sports page', function () {
@@ -115,4 +133,33 @@ test('sports UI: tickets console renders tickets, runs and performance', functio
     assert_contains('/sports/' . $ticketId . '/settle', $html);
     assert_contains('DEMO / SANDBOX DATA', $html, 'sandbox statistics are clearly labeled');
     assert_true(!str_contains($html, 'No tickets generated yet'), 'seeded ticket must be listed, not the empty state');
+});
+
+test('sports UI: a read-only identity is told why, instead of being handed a refused button', function () {
+    $repo = new SportsRepositoryStub();
+    $ticketId = fx_ui_today($repo);
+    $intel = new SportsIntelligence($repo, fx_ui_audit());
+    $dash = $intel->dashboard();
+
+    $html = fx_render_sports('index', ['dashboard' => $dash, 'caps' => fx_sports_caps_none()]);
+    // No POST targets an identity would only be refused from.
+    assert_not_contains('/sports/sync', $html, 'sync form is rendered for sports.manage only');
+    assert_not_contains('/sports/' . $ticketId . '/decide', $html, 'decide form needs sports.approve');
+    assert_not_contains('/sports/' . $ticketId . '/settle', $html, 'settle form needs sports.settle');
+    // The missing permission is named, so the operator knows what to ask for.
+    assert_contains('Sync now (needs sports.manage)', $html);
+    assert_contains('needs sports.approve', $html);
+    assert_contains('needs sports.settle', $html);
+    assert_contains('disabled', $html, 'unavailable controls are visibly disabled');
+
+    $tickets = fx_render_sports('tickets', [
+        'tickets' => $repo->listTickets([], 100),
+        'dailyRuns' => $repo->listDailyTickets(30),
+        'performance' => $intel->performanceReport([]),
+        'caps' => fx_sports_caps_none(),
+    ]);
+    assert_not_contains('/sports/' . $ticketId . '/decide', $tickets);
+    assert_not_contains('/sports/' . $ticketId . '/settle', $tickets);
+    assert_contains('needs sports.approve', $tickets);
+    assert_contains('needs sports.settle', $tickets);
 });
