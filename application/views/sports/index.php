@@ -12,15 +12,26 @@ foreach (array_merge($today['upcoming'] ?? [], $today['live'] ?? []) as $m) {
     $selByName[(int) ($m['id'] ?? 0)] = ($m['home_team'] ?? '?') . ' vs ' . ($m['away_team'] ?? '?');
 }
 $disabled = ($sys['ticketEngine'] ?? '') === 'DISABLED_NO_PROVIDER';
+// Capabilities of the signed-in identity (controller reads them fresh from the
+// database). Without them the console shows a disabled control plus the reason,
+// instead of a button that is refused after the click.
+$caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
 ?>
 <div class="page-head">
   <div>
     <h2>Sports Intelligence — daily ticket engine</h2>
     <p>Daily ticket research from stored fixtures, odds and settled results. With no sports data connected the module stays off and fabricates nothing.</p>
-    <form method="post" action="/sports/sync" style="margin-top:10px" onsubmit="return confirm('Pull fresh fixtures, odds and results from the configured providers now?')">
-      <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
-      <button class="btn primary small">Sync now (sports.manage)</button>
-    </form>
+    <?php if (!empty($caps['sync'])): ?>
+      <form method="post" action="/sports/sync" style="margin-top:10px" onsubmit="return confirm('Pull fresh fixtures, odds and results from the configured providers now?')">
+        <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+        <button class="btn primary small">Sync now</button>
+      </form>
+    <?php else: ?>
+      <div style="margin-top:10px">
+        <button class="btn small" disabled title="Requires the sports.manage permission">Sync now (needs sports.manage)</button>
+        <p class="dim" style="font-size:11px;margin-top:6px">Your account is read-only here (sports.view). Ask an administrator to assign the <b>Sports administrator</b> role — the console picks the new permission up on your next page load, no sign-out needed.</p>
+      </div>
+    <?php endif; ?>
   </div>
 </div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
@@ -238,25 +249,39 @@ $disabled = ($sys['ticketEngine'] ?? '') === 'DISABLED_NO_PROVIDER';
             </table>
           <?php endif; ?>
           <?php if ((string) ($ticket['approval_status'] ?? '') === 'PENDING_USER_APPROVAL'): ?>
-            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-              <form method="post" action="/sports/<?= e((string) $ticket['id']) ?>/decide">
-                <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
-                <input type="hidden" name="approve" value="1">
-                <button class="btn primary small">Approve (sports.approve)</button>
-              </form>
-              <form method="post" action="/sports/<?= e((string) $ticket['id']) ?>/decide" onsubmit="return confirm('Reject this ticket?')">
-                <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
-                <input type="hidden" name="approve" value="0">
-                <button class="btn danger small">Reject</button>
-              </form>
-            </div>
-            <p class="dim" style="font-size:10px;margin-top:8px">Approval is recorded with the acting identity. There is no external execution connector — approval never places a bet.</p>
+            <?php if (!empty($caps['approve'])): ?>
+              <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+                <form method="post" action="/sports/<?= e((string) $ticket['id']) ?>/decide">
+                  <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+                  <input type="hidden" name="approve" value="1">
+                  <button class="btn primary small">Approve (sports.approve)</button>
+                </form>
+                <form method="post" action="/sports/<?= e((string) $ticket['id']) ?>/decide" onsubmit="return confirm('Reject this ticket?')">
+                  <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+                  <input type="hidden" name="approve" value="0">
+                  <button class="btn danger small">Reject</button>
+                </form>
+              </div>
+              <p class="dim" style="font-size:10px;margin-top:8px">Approval is recorded with the acting identity. There is no external execution connector — approval never places a bet.</p>
+            <?php else: ?>
+              <div style="margin-top:12px">
+                <button class="btn small" disabled title="Requires the sports.approve permission">Approve / reject (needs sports.approve)</button>
+                <p class="dim" style="font-size:10px;margin-top:6px">Your account cannot approve tickets — ask an administrator for the <b>sports.approve</b> permission (Sports administrator role).</p>
+              </div>
+            <?php endif; ?>
           <?php endif; ?>
           <?php if ((string) ($ticket['settlement_status'] ?? '') === 'PENDING'): ?>
-            <form method="post" action="/sports/<?= e((string) $ticket['id']) ?>/settle" style="margin-top:12px">
-              <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
-              <button class="btn small">Settle from verified results (sports.settle)</button>
-            </form>
+            <?php if (!empty($caps['settle'])): ?>
+              <form method="post" action="/sports/<?= e((string) $ticket['id']) ?>/settle" style="margin-top:12px">
+                <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+                <button class="btn small">Settle from verified results (sports.settle)</button>
+              </form>
+            <?php else: ?>
+              <div style="margin-top:12px">
+                <button class="btn small" disabled title="Requires the sports.settle permission">Settle (needs sports.settle)</button>
+                <p class="dim" style="font-size:10px;margin-top:6px">Settlement stays with identities holding <b>sports.settle</b>.</p>
+              </div>
+            <?php endif; ?>
           <?php endif; ?>
         <?php endif; ?>
       </div>

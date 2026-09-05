@@ -1,6 +1,9 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed');
-/** @var array $tickets @var array $dailyRuns @var array $performance */
+/** @var array $tickets @var array $dailyRuns @var array $performance @var array $caps */
 $perf = $performance ?? [];
+// Capabilities of the signed-in identity (fresh from the database, see
+// Sports::sportsCaps). Missing capabilities render as a reason, not a button.
+$caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
 ?>
 <div class="page-head">
   <div>
@@ -51,17 +54,25 @@ $perf = $performance ?? [];
                 <td class="num mono <?= $pnl !== null && (float) $pnl >= 0 ? 'up' : 'down' ?>"><?= $pnl !== null ? e(number_format((float) $pnl, 2)) : '—' ?></td>
                 <td class="num" style="white-space:nowrap">
                   <?php if ((string) ($t['approval_status'] ?? '') === 'PENDING_USER_APPROVAL'): ?>
-                    <form method="post" action="/sports/<?= e((string) $t['id']) ?>/decide" style="display:inline">
-                      <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><input type="hidden" name="approve" value="1"><button class="btn small primary">approve</button>
-                    </form>
-                    <form method="post" action="/sports/<?= e((string) $t['id']) ?>/decide" style="display:inline" onsubmit="return confirm('Reject this ticket?')">
-                      <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><input type="hidden" name="approve" value="0"><button class="btn small danger">reject</button>
-                    </form>
+                    <?php if (!empty($caps['approve'])): ?>
+                      <form method="post" action="/sports/<?= e((string) $t['id']) ?>/decide" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><input type="hidden" name="approve" value="1"><button class="btn small primary">approve</button>
+                      </form>
+                      <form method="post" action="/sports/<?= e((string) $t['id']) ?>/decide" style="display:inline" onsubmit="return confirm('Reject this ticket?')">
+                        <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><input type="hidden" name="approve" value="0"><button class="btn small danger">reject</button>
+                      </form>
+                    <?php else: ?>
+                      <span class="dim" style="font-size:10px" title="Requires the sports.approve permission">needs sports.approve</span>
+                    <?php endif; ?>
                   <?php endif; ?>
                   <?php if ((string) ($t['settlement_status'] ?? '') === 'PENDING'): ?>
-                    <form method="post" action="/sports/<?= e((string) $t['id']) ?>/settle" style="display:inline">
-                      <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><button class="btn small">settle</button>
-                    </form>
+                    <?php if (!empty($caps['settle'])): ?>
+                      <form method="post" action="/sports/<?= e((string) $t['id']) ?>/settle" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><button class="btn small">settle</button>
+                      </form>
+                    <?php else: ?>
+                      <span class="dim" style="font-size:10px" title="Requires the sports.settle permission">needs sports.settle</span>
+                    <?php endif; ?>
                   <?php endif; ?>
                 </td>
               </tr>

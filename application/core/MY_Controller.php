@@ -11,12 +11,63 @@ class MY_Controller extends CI_Controller
 {
     public \AIWorkforce\Platform $platform;
 
+    /** Per-request guard: permissions are re-read from the database at most once. */
+    private bool $identityPermissionsRefreshed = false;
+
+    /** The identity as refreshed during this request (permissions from the database). */
+    private ?array $refreshedIdentity = null;
+
     public function __construct()
     {
         parent::__construct();
         $this->load->model('AIWorkforce_model');
         $disableReal = getenv('AI_WORKFORCE_DISABLE_REAL_PROVIDERS') === '1';
         $this->platform = new \AIWorkforce\Platform($this->AIWorkforce_model, $disableReal);
+    }
+
+    /**
+     * Re-read the signed-in identity's permissions from the database and refresh
+     * the session snapshot before a permission decision is taken.
+     *
+     * The session identity is a point-in-time copy captured at sign-in, so a
+     * role change made afterwards (admin console, RBAC re-seed, support
+     * escalation) used to be invisible until the next sign-in — leaving
+     * operators staring at "lacks sports.manage" refusals on an account that
+     * does hold the role. Reading fresh here makes grants take effect on the
+     * very next action and makes a revoked permission stop working at once
+     * instead of surviving in the session until logout.
+     *
+     * Fail-soft on a database error: the snapshot the session was issued with
+     * is kept rather than escalating an outage into a permission change.
+     *
+     * @return array|null the identity with current permissions, or null when nobody is signed in
+     */
+    protected function refreshIdentityPermissions(?array $user = null): ?array
+    {
+        if ($user === null) {
+            $session = $this->session->userdata('identity');
+            $user = is_array($session) ? $session : null;
+        }
+        if ($user === null || empty($user['id'])) return null;
+        // Later callers in the same request get the already-refreshed copy, so
+        // a stale array handed in by the caller can never win over the fresh one.
+        if ($this->identityPermissionsRefreshed) return $this->refreshedIdentity ?? $user;
+        $this->identityPermissionsRefreshed = true;
+        try {
+            $permissions = $this->AIWorkforce_model->identity->permissionsForUser((int) $user['id']);
+        } catch (\Throwable $e) {
+            log_message('error', 'refreshIdentityPermissions failed: ' . $e->getMessage());
+            return $this->refreshedIdentity = $user;
+        }
+        if (!is_array($permissions)) return $this->refreshedIdentity = $user;
+        sort($permissions);
+        $current = array_values((array) ($user['permissions'] ?? []));
+        sort($current);
+        if ($permissions !== $current) {
+            $user['permissions'] = $permissions;
+            $this->session->set_userdata('identity', $user);
+        }
+        return $this->refreshedIdentity = $user;
     }
 
     protected function currentUser(): ?array
@@ -146,7 +197,8 @@ class MY_Controller extends CI_Controller
 
     protected function requireAdminPage(): array
     {
-        $user = $this->currentUser();
+        // Portal access follows the stored roles, not the sign-in snapshot.
+        $user = $this->refreshIdentityPermissions($this->currentUser()) ?? $this->currentUser();
         if (!$user) {
             $this->session->set_userdata('return_to', '/admin');
             redirect('/admin/login');
@@ -179,7 +231,8 @@ class MY_Controller extends CI_Controller
     /** Require a signed-in user plus an explicit permission for privileged APIs. */
     protected function requirePermission(string $permission, bool $csrf = true): ?array
     {
-        $user = $this->session->userdata('identity');
+        // Permissions come from the database, not from the sign-in snapshot.
+        $user = $this->refreshIdentityPermissions();
         if (!is_array($user) || !$this->platform->identity->can($user, $permission)) {
             $this->jsonError('forbidden', 403); return null;
         }

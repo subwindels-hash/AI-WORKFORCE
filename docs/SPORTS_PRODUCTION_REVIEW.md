@@ -59,6 +59,41 @@ Both fixes are pinned by case 51 (per-method source assertions so a refactor
 that drops the guard fails the suite) plus a behavioral round trip of the kill
 switch through the live platform state.
 
+### 3. The console handed out controls the signed-in identity could not use (FIXED)
+
+Reported symptom: `Refused: signed-in identity lacks 'sports.manage' — the sync
+action was not performed.` Two defects combined:
+
+1. **The views rendered mutation controls unconditionally.** Any identity with
+   `sports.view` saw a working-looking *Sync now* button (and approve/reject/
+   settle forms) that could only be refused on submit.
+2. **The permission decision was taken against the session snapshot.** The
+   session identity is a copy captured at sign-in, so a role granted afterwards
+   (admin console, RBAC re-seed, support escalation) stayed invisible until the
+   next sign-in — and, symmetrically, a revoked permission kept working until
+   logout.
+
+**Fix** —
+
+- `Sports::sportsCaps()` resolves `sync` / `approve` / `settle` for the signed-in
+  identity and `base()` passes `caps` into both console views. Controls render
+  only when the identity holds the permission; otherwise a disabled control
+  names the missing permission and how to obtain it (no dead-end POST target).
+- `MY_Controller::refreshIdentityPermissions()` re-reads permissions from the
+  database before every permission decision — the console guard, the JSON API's
+  `requirePermission()` and the admin page gate — once per request, and
+  rewrites the session snapshot when it changed. A grant applies on the very
+  next action; a revocation stops working at once. A database error keeps the
+  snapshot the session was issued with, so an outage never silently grants or
+  revokes access.
+- The refusal message now names the role to ask for and states that no
+  sign-out is needed.
+
+Pinned by case 100 (behavioral: granted / revoked / once-per-request /
+database-failure paths against a stub session and identity repository) and case
+50 (rendered output: a read-only identity gets no mutation POST targets, and
+the missing permission is named).
+
 ## Process items for cutover (not code — owner: operator)
 
 1. **Data backfill before first real ticket** — enough historical odds +
@@ -78,7 +113,7 @@ switch through the live platform state.
 
 - [ ] Migrations applied (`tools install`); sports tables verified in target DB
 - [ ] Provider credentials set in environment only; provider payload sample passed through normalizer
-- [ ] RBAC users provisioned (`bootstrap_admin`); `sports.approve` / `sports.settle` granted only to named operators
+- [ ] RBAC users provisioned (`bootstrap_admin`); `sports.approve` / `sports.settle` granted only to named operators — grants apply on the next action, no sign-out needed
 - [ ] Kill switch deliberately released for the trading window (it boots ACTIVE)
 - [ ] Mode set deliberately: `WINDELS_SPORTS_MODE` = `PAPER` (or `PRODUCTION`) — not left on `SANDBOX` in production
 - [ ] Backfill + approved calibration in place (no `MODEL_NOT_CALIBRATED` on a live day)
