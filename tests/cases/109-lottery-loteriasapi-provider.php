@@ -149,7 +149,7 @@ test('loteriasapi: the live vendor payload maps to the provider-neutral draw con
     assert_equals([3, 9], $draw['stars'], 'resultData.estrellas maps to stars');
     assert_equals('130000000.00', $draw['jackpot'], 'the formatted euro amount is authoritative');
     assert_equals('2026-04-10T22:00:00.000Z', $draw['sourceTimestamp'], 'the envelope timestamp is the source timestamp');
-    assert_true(str_contains($draw['source'], 'loteriasapi'), 'source attribution names the feed');
+    assert_true(str_contains($draw['source'], 'windels.ai'), 'source attribution names the product feed');
     assert_true($draw['rollover'], 'zero 5+2 winners is a rollover');
     assert_equals('0', $draw['winners']);
     assert_equals('COMPLETED', $draw['extra']['status']);
@@ -554,7 +554,7 @@ test('loteriasapi: draws flow through validation into the historical database', 
     $stored = $intel->presentDraw($repo->listDraws(['lotteryCode' => 'EUROMILLIONS'], 1)[0]);
     assert_equals([7, 12, 29, 33, 45], $stored['main_numbers']);
     assert_equals([3, 9], $stored['lucky_stars']);
-    assert_true(str_contains((string) $stored['source'], 'loteriasapi'));
+    assert_true(str_contains((string) $stored['source'], 'windels.ai'));
     assert_false(str_contains(json_encode($repo->draws), 'live-key-secret-123'), 'credentials never reach storage');
 });
 
@@ -779,9 +779,10 @@ test('lottery dashboard names the product feed, never the upstream vendor', func
     assert_not_contains('LoteriasAPI', $view, 'no vendor name left on the user dashboard');
     assert_contains('Windels API', $view);
 
-    // The rename is a label only — provenance still names the real source.
-    assert_equals('loteriasapi.com (SELAE)', $provider->normalizeDraw(fx_loterias_live_payload())['source'],
-        'renaming the display label never rewrites the source attribution');
+    // The user dashboard attributes the feed to the product's own domain; the
+    // upstream vendor (SELAE) stays traceable in each draw's payload.
+    assert_equals('windels.ai', $provider->normalizeDraw(fx_loterias_live_payload())['source'],
+        'the displayed source is the product domain, not the upstream vendor');
     assert_equals('loteriasapi', $status['provider']['id'], 'the provider id stays the vendor key');
 
     // A registry row created under the old label follows the current one, so
@@ -1082,7 +1083,7 @@ test('loteriasapi: latest verified draw retrieval returns the newest VERIFIED dr
     assert_equals([1, 11, 21, 31, 41], $latest['main_numbers']);
     assert_equals([1, 7], $latest['lucky_stars']);
     assert_equals('VERIFIED', $latest['verification_status'], 'only verified rows are ever surfaced');
-    assert_true(str_contains((string) $latest['source'], 'loteriasapi'));
+    assert_true(str_contains((string) $latest['source'], 'windels.ai'));
 
     // The dashboard "Last Verified Draw" section reads the same accessor.
     $status = $intel->status();

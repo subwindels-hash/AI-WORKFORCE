@@ -197,7 +197,7 @@ test('intelligence report: drives the real adapter with the actual Sept 4 vendor
     assert_equals('2026233', $latest['draw_no']);
     assert_equals('2026-09-04', $latest['draw_date']);
     assert_equals('89319120.00', $latest['jackpot'], '€89,319,120 parsed from the vendor jackpotFormatted');
-    assert_equals('loteriasapi.com (SELAE)', $latest['source']);
+    assert_equals('windels.ai', $latest['source']);
     assert_equals('2026-09-04', $report['asOfDrawDate']);
     assert_equals(60, $report['historicalDrawsAnalyzed']);
 
@@ -336,7 +336,7 @@ test('lottery intelligence: scheduled job regenerates only after a new verified 
     $intel->importDraws([[
         'externalId' => '2026-09-07', 'drawDate' => '2026-09-07',
         'main' => [2, 14, 26, 33, 47], 'stars' => [3, 9],
-        'source' => 'loteriasapi.com (SELAE)', 'sourceTimestamp' => '2026-09-07T22:00:00+00:00',
+        'source' => 'windels.ai', 'sourceTimestamp' => '2026-09-07T22:00:00+00:00',
     ]]);
     $after = $cron->run('intelligence', '2026-09-07');
     assert_equals('OK', $after['status'], 'a newly verified draw triggers a fresh analysis');

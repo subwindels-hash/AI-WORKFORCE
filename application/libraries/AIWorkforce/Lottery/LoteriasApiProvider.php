@@ -69,7 +69,7 @@ final class LoteriasApiProvider implements LotteryProvider
     /** Real API root — the vendor 404s on the /v1 path its marketing pages advertise. */
     public const DEFAULT_BASE_URL = 'https://api.loteriasapi.com/api/v1';
     public const DEFAULT_GAME = 'euromillones';
-    public const DEFAULT_SOURCE = 'loteriasapi.com (SELAE)';
+    public const DEFAULT_SOURCE = 'windels.ai';
 
     /** The vendor caps a /range query at 365 days per call. */
     private const MAX_RANGE_DAYS = 364;

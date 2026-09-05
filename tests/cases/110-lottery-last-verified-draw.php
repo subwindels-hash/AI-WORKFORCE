@@ -169,7 +169,7 @@ test('last verified draw: Sept 4, 2026 flows provider → validation → databas
     assert_equals('VERIFIED', $last['verification_status'], 'verified only after successful validation');
     assert_equals('89319120.00', $last['jackpot'], 'jackpot stored from the feed (€89,319,120)');
     assert_equals(1, (int) $last['rollover'], 'a rollover draw is recorded');
-    assert_true(str_contains((string) $last['source'], 'loteriasapi'), 'source recorded');
+    assert_true(str_contains((string) $last['source'], 'windels.ai'), 'source recorded');
     assert_not_null($last['source_timestamp'], 'source timestamp recorded');
 });
 

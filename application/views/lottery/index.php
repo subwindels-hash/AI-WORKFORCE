@@ -102,7 +102,7 @@ window.__AI_LOTTERY_STATE__ = <?= $stateJson ?>;
         <h3>Next draw ${statusBadge}</h3>
         <div class="lottery-jackpot">${e(s.jackpot ? '€' + Number(s.jackpot).toLocaleString('en-GB') : '—')}</div>
         <div class="lottery-meta">jackpot source: ${jackpotOrigin}</div>
-        <div class="lottery-meta">provider: ${e((s.provider && (s.provider.source || s.provider.id)) || s.providerLabel || 'none')} · imported ${e(s.imported||s.drawsTracked||0)} verified draws</div>
+        <div class="lottery-meta">provider: ${e((s.provider && (s.provider.source || s.provider.name || s.provider.id)) || s.providerLabel || 'none')} · imported ${e(s.imported||s.drawsTracked||0)} verified draws</div>
         <div class="lottery-meta">${e((s.provider && s.provider.message) || '')}</div>
         <div class="lottery-actions">
           <a class="btn primary" href="/api/lottery/generate" data-lottery-generate>Generate 5 AI lines</a>
