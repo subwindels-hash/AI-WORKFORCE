@@ -1,13 +1,16 @@
 <?php
 defined('BASEPATH') or exit('No direct script access allowed');
 
-/** Public SEO documents generated from the environment-driven SEO settings. */
-class Seo extends CI_Controller
+/** Public SEO documents: config/env defaults with super-admin overrides from System Settings → SEO. */
+class Seo extends MY_Controller
 {
     private function settings(): array
     {
         $this->config->load('seo', true);
-        return $this->config->item('settings', 'seo') ?: [];
+        return \AIWorkforce\SeoSettings::effective(
+            $this->config->item('settings', 'seo') ?: [],
+            $this->AIWorkforce_model->db
+        );
     }
 
     public function robots()

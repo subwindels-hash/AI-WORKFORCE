@@ -31,6 +31,16 @@ class AdminPortal
         'accounts' => [
             'registration_enabled' => '1',
         ],
+        'seo' => [
+            'seo_site_name' => '',
+            'seo_title_suffix' => '',
+            'seo_description' => '',
+            'seo_keywords' => '',
+            'seo_robots' => '',
+            'seo_canonical' => '',
+            'seo_og_image' => '',
+            'seo_theme_color' => '',
+        ],
     ];
 
     public function __construct(private \AIWorkforce_model $model) {}

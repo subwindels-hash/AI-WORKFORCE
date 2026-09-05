@@ -5,7 +5,10 @@ if (!function_exists('e')) {
 }
 $ci = get_instance();
 $ci->config->load('seo', true);
-$seo = $ci->config->item('settings', 'seo') ?: [];
+$seo = \AIWorkforce\SeoSettings::effective(
+    $ci->config->item('settings', 'seo') ?: [],
+    $ci->AIWorkforce_model->db ?? null
+);
 $pageTitle = (string) ($title ?? 'WINDELS AI WORKFORCE');
 $user = $user ?? null;
 $active = $active ?? 'home';
@@ -33,6 +36,16 @@ $nav = [
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="<?= e((string) ($seo['site_name'] ?? 'WINDELS AI WORKFORCE')) ?>">
 <meta property="og:image" content="<?= e((string) ($seo['og_image'] ?? '')) ?>">
+<?php if (!empty($seo['keywords'])): ?>
+<meta name="keywords" content="<?= e((string) $seo['keywords']) ?>">
+<?php endif; ?>
+<?php $seoCanonicalBase = rtrim((string) ($seo['canonical'] ?? ''), '/'); ?>
+<?php if ($seoCanonicalBase !== ''): ?>
+<link rel="canonical" href="<?= e($seoCanonicalBase . '/' . ltrim(uri_string(), '/')) ?>">
+<?php endif; ?>
+<?php if (!empty($seo['theme_color'])): ?>
+<meta name="theme-color" content="<?= e((string) $seo['theme_color']) ?>">
+<?php endif; ?>
 <meta name="twitter:card" content="summary">
 <link rel="icon" type="image/png" href="/assets/images/windels-mark.png">
 <link rel="apple-touch-icon" href="/assets/images/windels-mark.png">

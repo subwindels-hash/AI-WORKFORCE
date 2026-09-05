@@ -4,6 +4,7 @@ $general = $set['general'] ?? [];
 $ai = $set['ai'] ?? [];
 $security = $set['security'] ?? [];
 $accounts = $set['accounts'] ?? [];
+$seo = $set['seo'] ?? [];
 $smtp = $smtp ?? [];
 ?>
 <div class="page-head">
@@ -85,6 +86,31 @@ $smtp = $smtp ?? [];
       <input type="hidden" name="category" value="accounts">
       <label class="choice"><input type="checkbox" name="registration_enabled" value="1" <?= ($accounts['registration_enabled'] ?? '1') === '1' ? 'checked' : '' ?>> Allow public registration</label>
       <button class="btn primary" type="submit">Save account settings</button>
+    </form>
+  </div>
+</section>
+
+<section class="panel" id="seo" style="margin-top:14px">
+  <h3>SEO</h3>
+  <div class="body">
+    <p class="dim">Public-site search settings. Any field left blank falls back to the server default (config/env). These drive the page titles, meta tags, robots.txt and sitemap.xml.</p>
+    <form method="post" action="/admin/settings/save" class="admin-form">
+      <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+      <input type="hidden" name="category" value="seo">
+      <label>Site name<input name="seo_site_name" maxlength="120" placeholder="WINDELS AI WORKFORCE" value="<?= e($seo['seo_site_name'] ?? '') ?>"></label>
+      <label>Title suffix (appended to every page title)<input name="seo_title_suffix" maxlength="120" placeholder=" · WINDELS AI WORKFORCE" value="<?= e($seo['seo_title_suffix'] ?? '') ?>"></label>
+      <label>Meta description<input name="seo_description" maxlength="500" placeholder="Shown on search result pages (about 150 characters)" value="<?= e($seo['seo_description'] ?? '') ?>"></label>
+      <label>Meta keywords (comma separated)<input name="seo_keywords" maxlength="500" placeholder="Leave blank to use the server default" value="<?= e($seo['seo_keywords'] ?? '') ?>"></label>
+      <label>Crawl directive<select name="seo_robots">
+        <option value="">Server default</option>
+        <?php foreach (['index,follow' => 'index,follow — index everything', 'noindex,follow' => 'noindex,follow — hide from search, follow links', 'index,nofollow' => 'index,nofollow — index, ignore links', 'noindex,nofollow' => 'noindex,nofollow — hide completely'] as $v => $label): ?>
+        <option value="<?= e($v) ?>" <?= ($seo['seo_robots'] ?? '') === $v ? 'selected' : '' ?>><?= e($label) ?></option>
+        <?php endforeach; ?>
+      </select></label>
+      <label>Canonical base URL (also used for sitemap.xml)<input name="seo_canonical" maxlength="190" placeholder="https://example.com/" value="<?= e($seo['seo_canonical'] ?? '') ?>"></label>
+      <label>Social share image URL (og:image)<input name="seo_og_image" maxlength="500" placeholder="https://example.com/assets/images/share.png" value="<?= e($seo['seo_og_image'] ?? '') ?>"></label>
+      <label>Browser theme color<input name="seo_theme_color" maxlength="20" placeholder="#07090e" value="<?= e($seo['seo_theme_color'] ?? '') ?>"></label>
+      <button class="btn primary" type="submit">Save SEO</button>
     </form>
   </div>
 </section>
