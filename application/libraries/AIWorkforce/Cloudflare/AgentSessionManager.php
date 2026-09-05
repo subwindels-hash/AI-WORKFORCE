@@ -249,7 +249,11 @@ class AgentSessionManager
 
     private function ensureSchema(): void
     {
-        if (!$this->db->table_exists('agent_sessions')) {
+        if ($this->db->table_exists('agent_sessions')) {
+            return;
+        }
+        $dialect = \AIWorkforce\SchemaInstaller::dialect($this->db);
+        if ($dialect === 'mysql') {
             $this->db->query("CREATE TABLE IF NOT EXISTS agent_sessions (
                 id VARCHAR(64) PRIMARY KEY,
                 user_id INT NOT NULL,
@@ -265,7 +269,25 @@ class AgentSessionManager
                 INDEX idx_user_agent (user_id, agent),
                 INDEX idx_expires (expires_at)
             )");
+            return;
         }
+        // SQLite and PostgreSQL share portable types; MySQL-only inline indexes
+        // are emitted as standalone CREATE INDEX IF NOT EXISTS (valid in both).
+        $this->db->query("CREATE TABLE IF NOT EXISTS agent_sessions (
+            id VARCHAR(64) PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            agent VARCHAR(64) NOT NULL,
+            state TEXT,
+            history TEXT,
+            metadata TEXT,
+            created_at TIMESTAMP NOT NULL,
+            updated_at TIMESTAMP NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            message_count INTEGER DEFAULT 0,
+            token_count INTEGER DEFAULT 0
+        )");
+        $this->db->query("CREATE INDEX IF NOT EXISTS idx_user_agent ON agent_sessions (user_id, agent)");
+        $this->db->query("CREATE INDEX IF NOT EXISTS idx_expires ON agent_sessions (expires_at)");
     }
 
     private function auditLog(string $type, array $detail): void

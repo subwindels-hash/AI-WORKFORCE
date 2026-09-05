@@ -59,6 +59,35 @@ class UserBrokerConnections
 
     public static function ensureSchema(object $db): void
     {
+        $driver = strtolower((string) ($db->dbdriver ?? ''));
+        $sub = strtolower((string) ($db->subdriver ?? ''));
+        $pgsql = str_contains($driver, 'pgsql') || str_contains($driver, 'postgre') || $sub === 'pgsql';
+        if ($pgsql) {
+            try {
+                $db->query("CREATE TABLE IF NOT EXISTS user_broker_connections (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    broker VARCHAR(40) NOT NULL,
+                    label VARCHAR(120) NULL,
+                    base_url VARCHAR(255) NOT NULL,
+                    extra_url VARCHAR(255) NULL,
+                    token_ciphertext TEXT NULL,
+                    token_nonce VARCHAR(64) NULL,
+                    account_hint VARCHAR(120) NULL,
+                    enabled SMALLINT NOT NULL DEFAULT 0,
+                    trading_enabled SMALLINT NOT NULL DEFAULT 0,
+                    live_allowed SMALLINT NOT NULL DEFAULT 0,
+                    last_test_ok SMALLINT NULL,
+                    last_test_message VARCHAR(255) NULL,
+                    last_test_at VARCHAR(32) NULL,
+                    created_at VARCHAR(32) NOT NULL,
+                    updated_at VARCHAR(32) NOT NULL,
+                    CONSTRAINT uq_user_broker UNIQUE (user_id, broker)
+                )");
+                $db->query('CREATE INDEX IF NOT EXISTS idx_user_enabled ON user_broker_connections(user_id, enabled)');
+            } catch (\Throwable $e) { /* already exists */ }
+            return;
+        }
         // MySQL flavor first, then SQLite fallback (mirrors ApiProviders pattern).
         try {
             $db->query("CREATE TABLE IF NOT EXISTS user_broker_connections (

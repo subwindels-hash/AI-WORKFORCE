@@ -225,6 +225,11 @@ LoteriasAPI driver can be chosen directly.
   audited as `LOTTERY_DRAW_VALIDATION_FAILED` and never stored as official.
 - **Imports are idempotent** and a `VERIFIED` draw is never silently
   overwritten — conflicts are audited for manual correction.
+- **Winning numbers are order-insensitive.** EuroMillions is one shared draw,
+  so each group is normalized to ascending integers on storage and every read
+  surface (`Last Verified Draw`, draw lists, statistics, Strategy Lab,
+  backtesting) presents the same canonical line. Re-importing the same numbers
+  in a different order is a no-op (`unchanged`), never a false conflict.
 - **Credentials never leak.** The key is redacted from every health/error
   message, never persisted with draw payloads, and stored encrypted.
 - **HTTPS only.** A plaintext `http://` base URL is refused as unconfigured.

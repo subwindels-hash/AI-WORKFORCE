@@ -250,15 +250,22 @@ final class IdentitySchema
 
     private static function ensureUniqueIndexes(object $db, bool $sqlite): void
     {
-        $stmts = $sqlite
-            ? [
+        if (\AIWorkforce\SchemaInstaller::isPgsql($db)) {
+            $stmts = [
+                'CREATE UNIQUE INDEX IF NOT EXISTS uq_users_username ON users(username)',
+                'CREATE UNIQUE INDEX IF NOT EXISTS uq_users_user_uid ON users(user_uid)',
+            ];
+        } elseif ($sqlite) {
+            $stmts = [
                 'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)',
                 'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_user_uid ON users(user_uid)',
-            ]
-            : [
+            ];
+        } else {
+            $stmts = [
                 'CREATE UNIQUE INDEX uq_users_username ON users(username)',
                 'CREATE UNIQUE INDEX uq_users_user_uid ON users(user_uid)',
             ];
+        }
         foreach ($stmts as $sql) {
             try { $db->query($sql); }
             catch (\Throwable $e) { /* already exists */ }

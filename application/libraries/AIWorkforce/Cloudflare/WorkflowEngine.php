@@ -323,7 +323,11 @@ class WorkflowEngine
 
     private function ensureSchema(): void
     {
-        if (!$this->db->table_exists('agent_workflows')) {
+        if ($this->db->table_exists('agent_workflows')) {
+            return;
+        }
+        $dialect = \AIWorkforce\SchemaInstaller::dialect($this->db);
+        if ($dialect === 'mysql') {
             $this->db->query("CREATE TABLE IF NOT EXISTS agent_workflows (
                 id VARCHAR(64) PRIMARY KEY,
                 type VARCHAR(100) NOT NULL,
@@ -345,7 +349,31 @@ class WorkflowEngine
                 INDEX idx_scheduled (scheduled_at),
                 INDEX idx_user (user_id)
             )");
+            return;
         }
+        // SQLite and PostgreSQL share portable types; MySQL-only inline indexes
+        // are emitted as standalone CREATE INDEX IF NOT EXISTS (valid in both).
+        $this->db->query("CREATE TABLE IF NOT EXISTS agent_workflows (
+            id VARCHAR(64) PRIMARY KEY,
+            type VARCHAR(100) NOT NULL,
+            status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+            params TEXT,
+            result TEXT,
+            error TEXT,
+            progress TEXT,
+            created_at TIMESTAMP NOT NULL,
+            started_at TIMESTAMP,
+            completed_at TIMESTAMP,
+            scheduled_at TIMESTAMP NOT NULL,
+            attempts INTEGER DEFAULT 0,
+            max_retries INTEGER DEFAULT 3,
+            priority INTEGER DEFAULT 5,
+            user_id INTEGER
+        )");
+        $this->db->query("CREATE INDEX IF NOT EXISTS idx_status ON agent_workflows (status)");
+        $this->db->query("CREATE INDEX IF NOT EXISTS idx_type ON agent_workflows (type)");
+        $this->db->query("CREATE INDEX IF NOT EXISTS idx_scheduled ON agent_workflows (scheduled_at)");
+        $this->db->query("CREATE INDEX IF NOT EXISTS idx_user ON agent_workflows (user_id)");
     }
 
     private function auditLog(string $type, array $detail): void

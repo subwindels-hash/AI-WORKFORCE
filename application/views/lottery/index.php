@@ -41,6 +41,12 @@ window.__AI_LOTTERY_STATE__ = <?= $stateJson ?>;
 .ball, .lucky-star { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; font-weight: 700; font-size: 13px; margin: 0 4px 4px 0; }
 .ball { background: #ffd24a; color: #1b1b1b; }
 .lucky-star { background: #7dd3fc; color: #0c2e46; }
+.ball.sm, .lucky-star.sm { width: 24px; height: 24px; font-size: 11px; }
+.lottery-intel { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 14px; margin-bottom: 14px; }
+.lottery-intel > h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0.02em; text-transform: uppercase; color: var(--brand); }
+.lottery-intel .intel-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(320px,1fr)); margin-bottom: 10px; }
+.lottery-why { line-height: 1.6; color: var(--muted); font-size: 12px; }
+.lottery-why li { margin-bottom: 3px; }
 .lottery-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .lottery-line { display: flex; align-items: center; gap: 2px; margin: 4px 0; }
 .lottery-meta { color: var(--muted); font-size: 12px; }
@@ -86,13 +92,17 @@ window.__AI_LOTTERY_STATE__ = <?= $stateJson ?>;
       + '<div class="lottery-meta">'+e(lastDraw.draw_date||'')+' · draw #'+e(lastDraw.draw_no||'')+'</div>';
   }
 
+  const intelHtml = renderIntelligence(state.intelligence || {});
+
   root.innerHTML = `
+    ${intelHtml}
+
     <div class="lottery-grid">
       <div class="lottery-card">
         <h3>Next draw ${statusBadge}</h3>
         <div class="lottery-jackpot">${e(s.jackpot ? '€' + Number(s.jackpot).toLocaleString('en-GB') : '—')}</div>
         <div class="lottery-meta">jackpot source: ${jackpotOrigin}</div>
-        <div class="lottery-meta">provider: ${e((s.provider && (s.provider.source || s.provider.id)) || s.providerLabel || 'none')} · imported ${e(s.imported||s.drawsTracked||0)} verified draws</div>
+        <div class="lottery-meta">provider: ${e((s.provider && (s.provider.source || s.provider.name || s.provider.id)) || s.providerLabel || 'none')} · imported ${e(s.imported||s.drawsTracked||0)} verified draws</div>
         <div class="lottery-meta">${e((s.provider && s.provider.message) || '')}</div>
         <div class="lottery-actions">
           <a class="btn primary" href="/api/lottery/generate" data-lottery-generate>Generate 5 AI lines</a>
@@ -144,6 +154,138 @@ window.__AI_LOTTERY_STATE__ = <?= $stateJson ?>;
       root.querySelectorAll('[data-panel]').forEach(p => p.style.display = (p.dataset.panel === b.dataset.tab) ? '' : 'none');
     });
   });
+
+  const runBtn = root.querySelector('[data-lottery-intelligence-run]');
+  if (runBtn) {
+    runBtn.addEventListener('click', function () {
+      const orig = runBtn.textContent;
+      runBtn.disabled = true;
+      runBtn.textContent = 'Running intelligence… (sync + analysis)';
+      const csrf = document.querySelector('input[name=csrf_token]')?.value || '';
+      fetch('/api/lottery/intelligence/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-Token': csrf },
+        credentials: 'same-origin',
+        body: JSON.stringify({ lines: 5 })
+      }).then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+        .then(function (res) {
+          if (!res.ok || res.body.error) {
+            window.alert(res.body.error || 'The Lottery Intelligence analysis could not be completed.');
+            runBtn.disabled = false;
+            runBtn.textContent = orig;
+            return;
+          }
+          window.location.reload();
+        })
+        .catch(function () { runBtn.disabled = false; runBtn.textContent = orig; });
+    });
+  }
+
+  function balls(nums, sm) {
+    return (nums || []).map(n => '<span class="ball'+(sm?' sm':'')+'">'+e(n)+'</span>').join('');
+  }
+  function stars(nums, sm) {
+    return (nums || []).map(n => '<span class="lucky-star'+(sm?' sm':'')+'">'+e(n)+'</span>').join('');
+  }
+
+  function renderFieldAnalysis(a, label) {
+    if (!a) return '';
+    const nf = (rows, fmt) => (rows && rows.length ? rows.map(fmt).join(', ') : '—');
+    return '<div>'
+      + '<div class="lottery-meta" style="margin-bottom:2px"><strong>'+e(label)+'</strong></div>'
+      + '<div class="lottery-meta">most frequent: '+nf(a.mostFrequent, x => e(x.number)+' ('+e(x.appearances)+'×)')+'</div>'
+      + '<div class="lottery-meta">recent (last '+e((a.recentHot&&a.recentHot[0]&&a.recentHot[0].window)||26)+' draws): '+nf(a.recentHot, x => e(x.number)+' ('+e(x.recentAppearances)+'×)')+'</div>'
+      + '<div class="lottery-meta">longest absence: '+nf(a.longestAbsence, x => e(x.number)+' (absent '+e(x.drawsSinceLast)+' draws, last '+e(x.lastAppearance||'—')+')')+'</div>'
+      + '<div class="lottery-meta dim">'+e(a.note||'')+'</div>'
+      + '</div>';
+  }
+
+  function renderCandidates(report) {
+    const list = report.candidates || [];
+    if (!list.length) return '<p class="dim">No candidate lines were generated — insufficient verified historical data.</p>';
+    const best = report.bestLine || list[0];
+    const breakdown = best.scoreBreakdown || {};
+    const bd = Object.keys(breakdown).length
+      ? '<div class="lottery-meta">score factors: ' + Object.keys(breakdown).map(k => e(k)+' '+e(breakdown[k])).join(' · ') + '</div>'
+      : '';
+    const why = (best.explanation || []).map(x => '<li>'+e(x)+'</li>').join('');
+    const rows = list.map(c => '<tr>'
+      + '<td>'+e(c.rank)+'</td>'
+      + '<td>'+balls(c.mains, true)+stars(c.stars, true)+'</td>'
+      + '<td><strong>'+e(c.score)+'</strong>/100</td>'
+      + '<td style="white-space:normal;font-size:11px">'+e((c.explanation||[]).slice(0,2).join(' '))+'</td>'
+      + '</tr>').join('');
+    return '<div style="margin-bottom:8px"><strong>Best-ranked candidate line (5 mains + 2 Lucky Stars)</strong></div>'
+      + '<div class="lottery-line">'+balls(best.mains)+stars(best.stars)+'</div>'
+      + '<div class="lottery-meta">'+e(best.scoreLabel)+'</div>'
+      + bd
+      + '<div class="lottery-meta" style="margin:4px 0">Why this line was selected:</div>'
+      + '<ul class="lottery-why" style="margin:0 0 10px;padding-left:18px">'+why+'</ul>'
+      + '<div class="lottery-meta" style="margin-bottom:4px">All ranked candidate lines:</div>'
+      + '<table class="tbl mono"><thead><tr><th>#</th><th>Line</th><th>Score</th><th>Why (summary)</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  }
+
+  function renderIntelligence(intel) {
+    const report = intel.report || null;
+    const live = intel.live || {};
+    const canManage = !!(state.me && state.me.canManage);
+    const latest = (live.latestVerifiedDraw || (report && report.latestVerifiedDraw) || null);
+    const ds = report && report.dataSource ? report.dataSource : {};
+
+    let latestHtml = '<p class="dim">No verified draw imported yet.</p>';
+    if (latest && latest.numbers) {
+      latestHtml = '<div class="lottery-line">'+balls(latest.numbers.main)+stars(latest.numbers.stars)+'</div>'
+        + '<div class="lottery-meta">'+e(latest.draw_date||'')+' · draw #'+e(latest.draw_no||'')+' · source: '+e(latest.source||'—')+'</div>';
+    }
+
+    const drawsAnalyzed = report ? report.historicalDrawsAnalyzed : (live.historicalDataset ? live.historicalDataset.draws : 0);
+    const lastSync = live.lastSuccessfulSync || (report && report.lastSync && report.lastSync.lastSuccessAt) || null;
+
+    let head = '<div class="lottery-intel"><h3>EUROMILLIONS · LOTTERY INTELLIGENCE</h3>';
+    let body = '';
+    let tail = '';
+    if (!report) {
+      body = '<div class="intel-grid">'
+        + '<div><div class="lottery-meta" style="margin-bottom:2px"><strong>Latest verified draw</strong></div>'+latestHtml+'</div>'
+        + '<div>'
+        +   '<div class="lottery-meta">Historical draws analyzed: <strong>'+e(drawsAnalyzed)+'</strong></div>'
+        +   '<div class="lottery-meta">Last synchronization: <strong>'+e(lastSync||'never')+'</strong></div>'
+        +   '<div class="lottery-meta">Data source: verified historical database'+(live.syncStatus?' · sync '+e(live.syncStatus):'')+'</div>'
+        +   '<p class="dim">No intelligence analysis has been run yet. '+(canManage?'Click <strong>Run Lottery Intelligence</strong> to synchronize, analyse and generate candidate lines.':'')+'</p>'
+        +   (canManage ? '<button class="btn primary" data-lottery-intelligence-run>Run Lottery Intelligence</button>' : '')
+        + '</div>'
+        + '</div>';
+    } else {
+      body = (report.warning ? '<div class="notice warnbox" style="margin-bottom:10px">'+e(report.warning)+'</div>' : '')
+        + '<div class="intel-grid">'
+        + '<div><div class="lottery-meta" style="margin-bottom:2px"><strong>Latest verified draw</strong></div>'+latestHtml
+        +   '<div class="lottery-meta" style="margin-top:6px">Historical draws analyzed: <strong>'+e(drawsAnalyzed)+'</strong></div>'
+        +   '<div class="lottery-meta">Last synchronization: <strong>'+e(lastSync||'never')+'</strong></div>'
+        +   '<div class="lottery-meta">Data source: '+e(ds.providerName||ds.provider||'verified historical database')+' ('+e(ds.drawSource||'verified draws')+')</div>'
+        +   '<div class="lottery-meta dim">'+e(ds.note||'')+'</div>'
+        +   '<div class="lottery-meta dim">Generated '+e(report.generatedAt||'')+' · model '+e(report.model||'')+' · mode '+e(report.mode||'')+' · seed '+e(report.seed||'')+' (reproducible)</div>'
+        + '</div>'
+        + '<div>'
+        +   renderFieldAnalysis(report.mainNumberAnalysis, 'Main-number analysis (1–50)')
+        +   '<div style="height:8px"></div>'
+        +   renderFieldAnalysis(report.starAnalysis, 'Lucky-Star analysis (1–12)')
+        + '</div>'
+        + '</div>'
+        + '<div class="lottery-card" style="margin-top:10px">'
+        +   renderCandidates(report)
+        + '</div>'
+        + '<div class="lottery-card" style="margin-top:10px">'
+        +   '<div class="lottery-meta"><strong>Score meaning</strong>: '+e(report.scoreMeaning||'')+'</div>'
+        +   '<div class="lottery-meta">Weights: '+e(JSON.stringify(report.scoreWeights||{}))+'</div>'
+        +   '<div class="lottery-meta"><strong>Disclaimer</strong>: '+e(report.disclaimer||'')+'</div>'
+        +   '<div class="lottery-meta dim">'+e(report.honestyNote||'')+'</div>'
+        + '</div>';
+      tail = canManage
+        ? '<div class="lottery-actions" style="margin-top:10px"><button class="btn primary" data-lottery-intelligence-run>Run Lottery Intelligence</button> <span class="lottery-meta">re-synchronizes the provider, re-analyses the verified dataset and regenerates ranked candidates</span></div>'
+        : '';
+    }
+    return head + body + tail + '</div>';
+  }
 
   function renderDraws(draws) {
     if (!draws || !draws.length) return '<p class="dim">No draws loaded yet.</p>';

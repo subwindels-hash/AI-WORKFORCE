@@ -169,13 +169,35 @@ class LotteryIntelligence
     public function presentDraw(array $row): array
     {
         $payload = is_array($row['payload'] ?? null) ? $row['payload'] : [];
-        $mains = array_map('intval', (array) ($payload['main'] ?? []));
-        $stars = array_map('intval', (array) ($payload['stars'] ?? []));
+        // Ascending canonical form, even for rows stored before normalization —
+        // the Last Verified Draw and every list surface the same sorted line.
+        $mains = self::normalizeGroup($payload['main'] ?? []);
+        $stars = self::normalizeGroup($payload['stars'] ?? []);
         $row['numbers'] = ['main' => $mains, 'stars' => $stars];
         $row['main_numbers'] = $mains;
         $row['lucky_stars'] = $stars;
         $row['draw_no'] = $row['external_id'] ?? ($row['id'] ?? '');
         return $row;
+    }
+
+    /**
+     * Canonical form of one number group: integers, ascending. EuroMillions is
+     * a single shared draw — the winning combination is a SET, so matching and
+     * storage never depend on the order the feed happened to send it in.
+     * @param mixed $values
+     * @return list<int>
+     */
+    private static function normalizeGroup($values): array
+    {
+        $out = array_values(array_map('intval', (array) ($values ?? [])));
+        sort($out);
+        return $out;
+    }
+
+    /** Two number groups hold the same values regardless of order. */
+    private static function sameNumbers(array $a, array $b): bool
+    {
+        return self::normalizeGroup($a) === self::normalizeGroup($b);
     }
 
     public function drawCount(): int
@@ -455,11 +477,22 @@ class LotteryIntelligence
                 ], 'system');
                 continue;
             }
-            $numbers = ['main' => array_values($raw['main']), 'stars' => array_values($raw['stars'])];
+            // Normalize each group to ints in ascending order: EuroMillions is
+            // ONE shared draw and the winning combination is order-insensitive —
+            // "46 27 12 19 11" IS "11 12 19 27 46". Storing ascending makes the
+            // database the single canonical form every consumer (Last Verified
+            // Draw, statistics, Strategy Lab, backtesting) reads.
+            $numbers = [
+                'main' => self::normalizeGroup($raw['main'] ?? null),
+                'stars' => self::normalizeGroup($raw['stars'] ?? null),
+            ];
             $existing = $this->repo->findDrawByExternal(self::LOTTERY, $externalId);
             if ($existing) {
                 $existingPayload = is_array($existing['payload'] ?? null) ? $existing['payload'] : [];
-                $same = ($existingPayload['main'] ?? null) === $numbers['main'] && ($existingPayload['stars'] ?? null) === $numbers['stars'];
+                // Idempotency is order-insensitive too: the same five mains in a
+                // different order are the same draw, never a conflict.
+                $same = self::sameNumbers((array) ($existingPayload['main'] ?? []), $numbers['main'])
+                    && self::sameNumbers((array) ($existingPayload['stars'] ?? []), $numbers['stars']);
                 if ($same) {
                     $summary['unchanged']++; // idempotent — verified data never silently touched
                     continue;
@@ -467,7 +500,9 @@ class LotteryIntelligence
                 if (($existing['verification_status'] ?? '') === 'VERIFIED') {
                     $summary['conflicts']++;
                     $this->audit->emit('LOTTERY_RESULT_CONFLICT', 'Verified draw ' . $externalId . ' differs from provider data — NOT overwritten; manual correction required', [
-                        'externalId' => $externalId, 'existing' => $numbers, 'incoming' => $numbers,
+                        'externalId' => $externalId,
+                        'existing' => ['main' => $existingPayload['main'] ?? null, 'stars' => $existingPayload['stars'] ?? null],
+                        'incoming' => $numbers,
                         'existingMain' => $existingPayload['main'] ?? null, 'incomingMain' => $numbers['main'],
                     ], 'system');
                     continue;
@@ -500,6 +535,9 @@ class LotteryIntelligence
             'source' => (string) $raw['source'],
             'source_timestamp' => (string) $raw['sourceTimestamp'],
             'retrieved_at' => gmdate('c'),
+            // `drawRow()` is only ever called after LotteryResultValidator has
+            // passed the draw — so a row is marked VERIFIED strictly after
+            // successful validation, never before and never for a rejected draw.
             'verification_status' => 'VERIFIED',
             'payload' => json_encode([
                 'main' => $numbers['main'], 'stars' => $numbers['stars'],
@@ -529,10 +567,16 @@ class LotteryIntelligence
 
     // ----------------------------------------------------------------- reads
 
-    /** @return array<int,array<string,mixed>> */
+    /**
+     * @return array<int,array<string,mixed>> newest first; every row is
+     * presented in canonical ascending form (`numbers`/`main_numbers`/
+     * `lucky_stars`) so the workspace \"Recent Draw Results\" and the API
+     * draws list render the exact same sorted line as the Last Verified Draw.
+     */
     public function listDraws(int $limit = 50, ?string $from = null, ?string $to = null): array
     {
-        return $this->repo->listDraws(['lotteryCode' => self::LOTTERY, 'from' => $from, 'to' => $to], $limit);
+        $rows = $this->repo->listDraws(['lotteryCode' => self::LOTTERY, 'from' => $from, 'to' => $to], $limit);
+        return array_map(fn(array $row) => $this->presentDraw($row), $rows);
     }
 
     /** @return array<string,mixed>|null */
@@ -709,6 +753,334 @@ class LotteryIntelligence
             'modelVersion' => $model,
         ], $actor);
         return ['combinationId' => $cid, 'decisionId' => (int) $decision['row']['id']];
+    }
+
+    // ----------------------------------------------------- intelligence report
+
+    /** Persisted-analysis mode tag stored on lottery_combinations / lottery_ai_decisions. */
+    public const INTELLIGENCE_MODE = 'INTELLIGENCE';
+    /**
+     * Verified-draw floor below which the analysis is reported as LIMITED and
+     * not treated as reliable. With zero draws nothing is generated at all.
+     */
+    public const MIN_RELIABLE_DRAWS = 50;
+
+    /**
+     * Compose the full EuroMillions Lottery Intelligence report from the
+     * verified historical dataset only (never fabricated numbers): latest
+     * verified draw, main-number and Lucky-Star analysis, recurring
+     * combinations, distribution, and ranked candidate lines with the factors
+     * behind each score. Pure read — no sync, no persistence (see
+     * runIntelligence() for the refresh-and-persist path).
+     *
+     * @param int|null $lines candidate lines to generate (default 5)
+     * @param int|null $seed  reproducible seed (recorded in the report)
+     */
+    public function intelligenceReport(?int $lines = null, ?int $seed = null): array
+    {
+        $draws = $this->historicalDataset();
+        $n = count($draws);
+        $r = $this->rules;
+        $lines = min(CombinationGenerator::MAX_LINES, max(1, (int) ($lines ?? 5)));
+        $seed = $seed !== null ? ((int) $seed) & 0x7FFFFFFF : ((int) (microtime(true) * 1000000)) % 2147483647;
+        if ($seed === 0) $seed = 1;
+
+        $dataState = $n === 0 ? 'INSUFFICIENT_DATA' : ($n < self::MIN_RELIABLE_DRAWS ? 'LIMITED_DATA' : 'RELIABLE');
+        $warning = match ($dataState) {
+            'INSUFFICIENT_DATA' => 'Insufficient verified historical data (' . $n . ' draws). No reliable analysis is possible and NO candidate lines are generated — synchronize the lottery provider first (Admin → API Management → lottery).',
+            'LIMITED_DATA' => 'Limited verified historical data (' . $n . ' draws — fewer than ' . self::MIN_RELIABLE_DRAWS . '). The analysis and candidate lines below are provisional statistical observations and must not be treated as reliable.',
+            default => null,
+        };
+
+        $lastDraw = $this->latestVerifiedDraw();
+        $dataset = $this->datasetInfo();
+
+        // ---- analysis blocks, always computed from the verified dataset ----
+        $mainStats = $this->statistics->numberStats($draws, $r->mainMin(), $r->mainMax());
+        $starStats = $this->statistics->starStats($draws, $r->starMin(), $r->starMax());
+        $recentMain = $this->statistics->numberStats($draws, $r->mainMin(), $r->mainMax(), 26);
+        $recentStar = $this->statistics->starStats($draws, $r->starMin(), $r->starMax(), 26);
+        $dist = $this->statistics->distribution($draws, $r->mainMin(), $r->mainMax(), $r->mainCount());
+        $pairs = $this->statistics->groupStats($draws, 'main', $r->mainMin(), $r->mainMax(), 2);
+        $triplets = $this->statistics->groupStats($draws, 'main', $r->mainMin(), $r->mainMax(), 3);
+        $starPairs = $this->statistics->groupStats($draws, 'stars', $r->starMin(), $r->starMax(), 2);
+
+        // Composition targets a candidate explanation can be measured against.
+        $sums = array_map(fn($d) => array_sum($d['main']), $draws);
+        $sumAvg = $n > 0 ? (float) \AIWorkforce\MathUtils::mean($sums) : null;
+        $sumStd = $n > 0 ? (\AIWorkforce\MathUtils::stdev($sums) ?? 0.0) : 0.0;
+        $oddEvenMode = $this->modeKey($dist['oddEven'] ?? []);
+        $lowHighMode = $this->modeKey($dist['lowHigh'] ?? []);
+        $spreadAvg = $n > 0 ? (float) ($dist['spread']['avg'] ?? 0.0) : null;
+
+        // Number sets used to explain each line (historical observations only).
+        $freqMain = $this->intelligenceTop($mainStats, 'appearances', 10);
+        $absentMain = $this->intelligenceTop($mainStats, 'drawsSinceLast', 10, true);
+
+        // ---- candidate lines (only when there is verified data to analyse) ----
+        $candidates = [];
+        $bestLine = null;
+        $factors = [];
+        if ($n > 0) {
+            $gen = $this->generator->generate($draws, ['mode' => 'BALANCED', 'count' => $lines, 'seed' => $seed]);
+            $factors = $gen['factors'] ?? [];
+            $rawLines = $gen['lines'] ?? [];
+            usort($rawLines, fn($a, $b) => ($b['score'] ?? 0) <=> ($a['score'] ?? 0));
+            foreach ($rawLines as $i => $ln) {
+                $profile = $this->analyzer->analyze($ln['mains'], $ln['stars'], $draws);
+                $candidates[] = [
+                    'rank' => $i + 1,
+                    'mains' => array_map('intval', $ln['mains']),
+                    'stars' => array_map('intval', $ln['stars']),
+                    'score' => (int) $ln['score'],
+                    'scoreLabel' => (string) $ln['scoreLabel'],
+                    'scoreBreakdown' => $profile['scoreBreakdown'],
+                    'composition' => $profile['composition'],
+                    'explanation' => $this->intelligenceExplanation($ln, $profile, $sumAvg, $sumStd, $oddEvenMode, $lowHighMode, $spreadAvg, $freqMain, $absentMain),
+                ];
+            }
+            $bestLine = $candidates[0] ?? null;
+        }
+
+        $scores = array_column($candidates, 'score');
+        return [
+            'kind' => 'LOTTERY_INTELLIGENCE_REPORT',
+            'model' => 'WINDELS Lottery Model v' . self::MODEL_VERSION,
+            'generatedAt' => gmdate('c'),
+            'asOfDrawDate' => $n > 0 ? (string) $draws[$n - 1]['drawDate'] : null,
+            'mode' => 'BALANCED',
+            'seed' => $seed,
+            'reproducible' => true,
+            'reproducibleNote' => 'Re-running with the same seed and the same verified dataset reproduces these candidate lines (seeded PRNG).',
+            'dataState' => $dataState,
+            'warning' => $warning,
+            'dataSource' => [
+                'provider' => $this->provider->id(),            // identity only — the API key is never exposed
+                'providerName' => $this->provider->name(),
+                'drawSource' => $lastDraw !== null ? (string) ($lastDraw['source'] ?? '') : null,
+                'verifiedOnly' => true,
+                'note' => 'Every number in this report is read from the verified historical database. Nothing is hard-coded or fabricated.',
+            ],
+            'latestVerifiedDraw' => $lastDraw,
+            'historicalDrawsAnalyzed' => $n,
+            'dataset' => $dataset,
+            'lastSync' => $this->syncState(),
+            'mainNumberAnalysis' => $this->intelligenceFieldStats($mainStats, $recentMain, 'main'),
+            'starAnalysis' => $this->intelligenceFieldStats($starStats, $recentStar, 'stars'),
+            'recurringCombinations' => [
+                'mainPairs' => $this->intelligenceGroups($pairs, 5),
+                'mainTriplets' => $this->intelligenceGroups($triplets, 5),
+                'starPairs' => $this->intelligenceGroups($starPairs, 5),
+                'note' => 'Recurring groups are historical co-occurrence counts only. They do not change the probability of any future combination.',
+            ],
+            'distribution' => [
+                'oddEven' => $dist['oddEven'] ?? [],
+                'oddEvenPct' => $dist['oddEvenPct'] ?? [],
+                'lowHigh' => $dist['lowHigh'] ?? [],
+                'lowHighPct' => $dist['lowHighPct'] ?? [],
+                'sum' => $dist['sum'] ?? [],
+                'spread' => $dist['spread'] ?? [],
+                'consecutive' => $dist['consecutive'] ?? [],
+            ],
+            'candidates' => $candidates,
+            'bestLine' => $bestLine,
+            'averageScore' => $scores !== [] ? round(array_sum($scores) / count($scores), 1) : null,
+            'scoreWeights' => CombinationAnalyzer::WEIGHTS,
+            'scoreMeaning' => 'The score is a STATISTICAL BALANCE SCORE (0–100): how closely a line matches the typical composition of the stored historical draws (sum, odd/even, low/high, spread, consecutive patterns). It is NOT a probability and it does not indicate how likely the line is to be drawn.',
+            'factors' => $factors,
+            'disclaimer' => LotteryStatisticsEngine::DISCLAIMER,
+            'honestyNote' => 'Every valid EuroMillions combination has exactly the same mathematical chance of being drawn. A number that appeared frequently, or has not appeared recently, is NOT more likely to appear next — these are suggestions shaped by historical statistics only, not predictions, and no suggestion can guarantee or predict the winning numbers.',
+        ];
+    }
+
+    /**
+     * Refresh and persist a Lottery Intelligence report: syncs the configured
+     * provider first (idempotent), then analyses the verified dataset, then
+     * persists the report as a combination row + AI decision (audited). This is
+     * the action behind "Run Lottery Intelligence" and the scheduled job.
+     *
+     * @return array<string,mixed> the report + ['saved' => [combinationId, decisionId]]
+     */
+    public function runIntelligence(int $lines = 5, ?int $seed = null, bool $syncFirst = true, string $actor = 'system'): array
+    {
+        $syncResult = null;
+        if ($syncFirst) {
+            $limit = $this->verifiedDrawCount() === 0 ? self::FULL_HISTORY_LIMIT : 100;
+            try {
+                $syncResult = $this->sync($limit);
+            } catch (\Throwable $e) {
+                $syncResult = ['status' => 'FAILED', 'message' => mb_substr($e->getMessage(), 0, 300), 'imported' => 0];
+            }
+        }
+        $report = $this->intelligenceReport($lines, $seed);
+        $report['sync'] = $syncResult;
+
+        $storedLines = array_map(
+            fn($c) => ['mains' => $c['mains'], 'stars' => $c['stars'], 'score' => $c['score']],
+            $report['candidates']
+        );
+        $now = gmdate('c');
+        $comb = $this->repo->saveCombination([
+            'lottery_code' => self::LOTTERY,
+            'mode' => self::INTELLIGENCE_MODE,
+            'model_version' => $report['model'],
+            'seed' => (string) $report['seed'],
+            'line_count' => count($storedLines),
+            'lines' => json_encode($storedLines, JSON_UNESCAPED_SLASHES),
+            'constraints' => json_encode([
+                'dataState' => $report['dataState'],
+                'drawsUsed' => $report['historicalDrawsAnalyzed'],
+                'mode' => $report['mode'],
+                'seed' => $report['seed'],
+            ], JSON_UNESCAPED_SLASHES),
+            'score_summary' => json_encode([
+                'bestScore' => $report['bestLine']['score'] ?? null,
+                'averageScore' => $report['averageScore'],
+            ], JSON_UNESCAPED_SLASHES),
+            'created_by' => is_numeric($actor) ? (int) $actor : null,
+            'created_at' => $now,
+        ]);
+        $cid = (int) $comb['row']['id'];
+        $decision = $this->repo->saveAiDecision([
+            'lottery_code' => self::LOTTERY,
+            'combination_id' => $cid,
+            'model_version' => $report['model'],
+            'mode' => self::INTELLIGENCE_MODE,
+            'decision' => json_encode($report, JSON_UNESCAPED_SLASHES),
+            'created_at' => $now,
+        ]);
+        $this->audit->emit('LOTTERY_INTELLIGENCE_RUN',
+            'Lottery Intelligence analysis: ' . $report['historicalDrawsAnalyzed'] . ' verified draw(s), '
+            . count($report['candidates']) . ' candidate line(s), best score ' . ($report['bestLine']['score'] ?? 'n/a'),
+            [
+                'combinationId' => $cid,
+                'decisionId' => (int) $decision['row']['id'],
+                'dataState' => $report['dataState'],
+                'drawsAnalyzed' => $report['historicalDrawsAnalyzed'],
+                'seed' => $report['seed'],
+            ], $actor);
+        return $report + ['saved' => ['combinationId' => $cid, 'decisionId' => (int) $decision['row']['id']]];
+    }
+
+    /** Newest persisted INTELLIGENCE report, or null before the first run. */
+    public function latestIntelligenceReport(): ?array
+    {
+        foreach ($this->repo->listAiDecisions(null, 30) as $d) {
+            if (($d['mode'] ?? '') === self::INTELLIGENCE_MODE && is_array($d['decision'] ?? null)) {
+                return $d['decision'];
+            }
+        }
+        return null;
+    }
+
+    /** Report + live status, the single payload behind GET /api/lottery/intelligence. */
+    public function intelligenceSnapshot(): array
+    {
+        $status = $this->status();
+        return [
+            'report' => $this->latestIntelligenceReport(),
+            'live' => [
+                'latestVerifiedDraw' => $status['lastDraw'],
+                'verifiedDraws' => $status['verifiedDraws'],
+                'historicalDataset' => $status['historicalDataset'],
+                'syncStatus' => $status['syncStatus'],
+                'lastSuccessfulSync' => $status['lastSuccessfulSync'],
+                'lastSyncAttempt' => $status['lastSyncAttempt'],
+                'syncMessage' => $status['syncMessage'],
+            ],
+        ];
+    }
+
+    /** Top numbers by a per-number metric. @param list<int> $key */
+    private function intelligenceFieldStats(array $stats, array $recentStats, string $field): array
+    {
+        $numbers = $stats['numbers'];
+        $byFreq = $numbers;
+        uasort($byFreq, fn($a, $b) => ($b['appearances'] <=> $a['appearances']) ?: ($a['number'] <=> $b['number']));
+        $byRecent = $recentStats['numbers'];
+        uasort($byRecent, fn($a, $b) => ($b['recentAppearances'] <=> $a['recentAppearances']) ?: ($a['number'] <=> $b['number']));
+        $absent = array_values(array_filter($numbers, fn($x) => $x['drawsSinceLast'] !== null));
+        usort($absent, fn($a, $b) => ($b['drawsSinceLast'] <=> $a['drawsSinceLast']) ?: ($a['number'] <=> $b['number']));
+
+        $pick = fn(array $rows, int $limit, callable $map) => array_map($map, array_slice(array_values($rows), 0, $limit));
+        return [
+            'field' => $field,
+            'mostFrequent' => $pick($byFreq, 5, fn($x) => ['number' => $x['number'], 'appearances' => $x['appearances'], 'appearancePct' => $x['appearancePct']]),
+            'leastFrequent' => $pick(array_reverse(array_values($byFreq)), 5, fn($x) => ['number' => $x['number'], 'appearances' => $x['appearances'], 'appearancePct' => $x['appearancePct']]),
+            'recentHot' => $pick($byRecent, 5, fn($x) => ['number' => $x['number'], 'recentAppearances' => $x['recentAppearances'], 'window' => $recentStats['window'] ?? 26]),
+            'longestAbsence' => $pick($absent, 5, fn($x) => ['number' => $x['number'], 'drawsSinceLast' => $x['drawsSinceLast'], 'lastAppearance' => $x['lastAppearance']]),
+            'note' => 'Frequency, recent appearance and absence are historical observations. They do NOT make any number more or less likely to appear next — every number keeps its exact probability in every draw.',
+        ];
+    }
+
+    /** @return list<int> top numbers by a per-number stat (skip-null option for absence). */
+    private function intelligenceTop(array $stats, string $metric, int $limit, bool $skipNull = false): array
+    {
+        $rows = $stats['numbers'] ?? [];
+        if ($skipNull) $rows = array_values(array_filter($rows, fn($x) => ($x[$metric] ?? null) !== null));
+        usort($rows, fn($a, $b) => ($b[$metric] <=> $a[$metric]) ?: ($a['number'] <=> $b['number']));
+        return array_map(fn($x) => (int) $x['number'], array_slice($rows, 0, $limit));
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function intelligenceGroups(array $stats, int $limit): array
+    {
+        $out = [];
+        foreach (array_slice(array_values($stats['top'] ?? []), 0, $limit) as $g) {
+            $out[] = [
+                'members' => array_map('intval', $g['members']),
+                'count' => (int) $g['count'],
+                'lastSeen' => $g['lastSeen'],
+            ];
+        }
+        return $out;
+    }
+
+    /** Most common key of a count map (e.g. "3 odd / 2 even"), ties → first. */
+    private function modeKey(array $counts): ?string
+    {
+        $best = null;
+        $bestCount = -1;
+        foreach ($counts as $key => $count) {
+            if ($count > $bestCount) { $best = (string) $key; $bestCount = (int) $count; }
+        }
+        return $best;
+    }
+
+    /** @return list<string> why this line was selected — historical, honest, factor-based */
+    private function intelligenceExplanation(array $line, array $profile, ?float $sumAvg, float $sumStd, ?string $oddEvenMode, ?string $lowHighMode, ?float $spreadAvg, array $freqMain, array $absentMain): array
+    {
+        $out = [];
+        $comp = $profile['composition'];
+        $sum = (int) $comp['sum']['value'];
+        $spread = (int) $comp['spread']['value'];
+        $oe = (string) $comp['oddEven']['label'];
+        $lh = (string) $comp['lowHigh']['label'];
+        $adj = (int) $comp['consecutives']['adjacentPairs'];
+
+        if ($sumAvg !== null) {
+            $lo = (int) round($sumAvg - $sumStd);
+            $hi = (int) round($sumAvg + $sumStd);
+            $out[] = 'Sum ' . $sum . ' — the historical sum average is ' . (int) round($sumAvg) . ' (typical range ' . $lo . '–' . $hi . ').';
+        }
+        if ($oddEvenMode !== null) {
+            $out[] = $oe . ' — ' . ($oe === $oddEvenMode ? 'matches' : 'differs from') . ' the most common historical split (' . $oddEvenMode . ').';
+        }
+        if ($lowHighMode !== null) {
+            $out[] = $lh . ' — ' . ($lh === $lowHighMode ? 'matches' : 'differs from') . ' the most common historical split (' . $lowHighMode . ').';
+        }
+        if ($spreadAvg !== null) {
+            $out[] = 'Spread ' . $spread . ' (historical average ' . (int) round($spreadAvg) . ').';
+        }
+        $out[] = $adj === 0 ? 'No adjacent pairs.' : ($adj === 1 ? 'One adjacent pair.' : $adj . ' adjacent pairs.');
+
+        $mains = array_map('intval', $line['mains']);
+        $hotIn = array_values(array_intersect($mains, $freqMain));
+        if ($hotIn !== []) $out[] = 'Includes ' . count($hotIn) . ' of the most frequent main numbers (' . implode(', ', $hotIn) . ').';
+        $absIn = array_values(array_intersect($mains, $absentMain));
+        if ($absIn !== []) $out[] = 'Includes ' . count($absIn) . ' main number(s) with the longest current absence (' . implode(', ', $absIn) . ') — absence is a historical observation, not a reason to expect them.';
+
+        return $out;
     }
 
     /**
