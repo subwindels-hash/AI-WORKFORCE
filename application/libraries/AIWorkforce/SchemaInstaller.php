@@ -90,11 +90,35 @@ final class SchemaInstaller
         return str_contains($driver, 'sqlite') || $sub === 'sqlite';
     }
 
-    /** @return list<string> existing module SQL paths */
-    public static function files(bool $sqlite): array
+    /** PostgreSQL driver (native `postgre` or PDO `pdo_pgsql`). */
+    public static function isPgsql(object|string $dbOrDriver): bool
+    {
+        if (is_string($dbOrDriver)) {
+            $d = strtolower($dbOrDriver);
+            return str_contains($d, 'pgsql') || str_contains($d, 'postgre');
+        }
+        $driver = strtolower((string) ($dbOrDriver->dbdriver ?? ''));
+        $sub = strtolower((string) ($dbOrDriver->subdriver ?? ''));
+        return str_contains($driver, 'pgsql') || str_contains($driver, 'postgre') || $sub === 'pgsql';
+    }
+
+    /** Normalised dialect key: 'sqlite' | 'pgsql' | 'mysql'. */
+    public static function dialect(object|string $dbOrDriver): string
+    {
+        if (self::isSqlite($dbOrDriver)) return 'sqlite';
+        if (self::isPgsql($dbOrDriver)) return 'pgsql';
+        return 'mysql';
+    }
+
+    /** @return list<string> existing module SQL paths for one dialect */
+    public static function files(string $dialect): array
     {
         $dir = self::databaseDir();
-        $ext = $sqlite ? 'sqlite' : 'mysql';
+        $ext = match ($dialect) {
+            'sqlite' => 'sqlite',
+            'pgsql' => 'pgsql',
+            default => 'mysql',
+        };
         $out = [];
         foreach (self::MODULES as $stem) {
             $path = $dir . DIRECTORY_SEPARATOR . $stem . '.' . $ext . '.sql';
@@ -119,9 +143,9 @@ final class SchemaInstaller
     }
 
     /** @param callable(string):mixed $exec */
-    public static function applyFiles(callable $exec, bool $sqlite): void
+    public static function applyFiles(callable $exec, string $dialect): void
     {
-        foreach (self::files($sqlite) as $file) {
+        foreach (self::files($dialect) as $file) {
             $sql = (string) file_get_contents($file);
             if (str_contains(basename($file), 'langlearn.') && !str_contains($sql, 'daily_minutes')) {
                 throw new \RuntimeException('langlearn schema is missing daily_minutes: ' . $file);
@@ -134,51 +158,61 @@ final class SchemaInstaller
 
     /** Idempotent ALTERs + indexes for databases created from older schemas. */
     /** @param callable(string):mixed $exec */
-    public static function upgrade(callable $exec, bool $sqlite): void
+    /** Idempotent ALTERs + indexes for databases created from older schemas. */
+    /** @param callable(string):mixed $exec */
+    public static function upgrade(callable $exec, string $dialect): void
     {
-        $text = $sqlite ? 'TEXT' : 'VARCHAR(255) NULL';
+        $sqlite = $dialect === 'sqlite';
+        $pgsql = $dialect === 'pgsql';
+        /** Pick the statement for this dialect: (sqlite, mysql, pgsql). */
+        $pick = static fn(string $sq, string $my, ?string $pg = null): string => $sqlite ? $sq : ($pgsql ? ($pg ?? $my) : $my);
+
         $alters = [
-            $sqlite
-                ? 'ALTER TABLE user_language_profiles ADD COLUMN daily_minutes INTEGER NOT NULL DEFAULT 20'
-                : 'ALTER TABLE user_language_profiles ADD COLUMN daily_minutes INT NOT NULL DEFAULT 20',
-            $sqlite ? 'ALTER TABLE sports_tickets ADD COLUMN stake REAL' : 'ALTER TABLE sports_tickets ADD COLUMN stake DECIMAL(12,2) NULL',
-            $sqlite ? 'ALTER TABLE sports_tickets ADD COLUMN pnl REAL' : 'ALTER TABLE sports_tickets ADD COLUMN pnl DECIMAL(14,4) NULL',
-            $sqlite ? 'ALTER TABLE sports_predictions ADD COLUMN odds REAL' : 'ALTER TABLE sports_predictions ADD COLUMN odds DECIMAL(14,6) NULL',
-            $sqlite ? 'ALTER TABLE sports_predictions ADD COLUMN odds_timestamp TEXT' : 'ALTER TABLE sports_predictions ADD COLUMN odds_timestamp VARCHAR(32) NULL',
-            $sqlite ? 'ALTER TABLE lottery_sync_runs ADD COLUMN payload TEXT' : 'ALTER TABLE lottery_sync_runs ADD COLUMN payload MEDIUMTEXT NULL',
-            $sqlite ? 'ALTER TABLE sports_matches ADD COLUMN round_id TEXT' : 'ALTER TABLE sports_matches ADD COLUMN round_id VARCHAR(64) NULL',
-            'ALTER TABLE users ADD COLUMN username ' . ($sqlite ? 'TEXT' : 'VARCHAR(64) NULL'),
-            'ALTER TABLE users ADD COLUMN user_uid ' . ($sqlite ? 'TEXT' : 'CHAR(6) NULL'),
-            'ALTER TABLE users ADD COLUMN profile_image ' . ($sqlite ? 'TEXT' : 'VARCHAR(255) NULL'),
-            'ALTER TABLE users ADD COLUMN phone ' . ($sqlite ? 'TEXT' : 'VARCHAR(40) NULL'),
-            'ALTER TABLE users ADD COLUMN address ' . ($sqlite ? 'TEXT' : 'VARCHAR(255) NULL'),
-            'ALTER TABLE users ADD COLUMN security_pin ' . ($sqlite ? 'TEXT' : 'CHAR(4) NULL'),
-            'ALTER TABLE users ADD COLUMN security_question ' . ($sqlite ? 'TEXT' : 'VARCHAR(255) NULL'),
-            'ALTER TABLE users ADD COLUMN security_answer ' . ($sqlite ? 'TEXT' : 'VARCHAR(255) NULL'),
+            $pick(
+                'ALTER TABLE user_language_profiles ADD COLUMN daily_minutes INTEGER NOT NULL DEFAULT 20',
+                'ALTER TABLE user_language_profiles ADD COLUMN daily_minutes INT NOT NULL DEFAULT 20',
+                'ALTER TABLE user_language_profiles ADD COLUMN IF NOT EXISTS daily_minutes INTEGER NOT NULL DEFAULT 20',
+            ),
+            $pick('ALTER TABLE sports_tickets ADD COLUMN stake REAL', 'ALTER TABLE sports_tickets ADD COLUMN stake DECIMAL(12,2) NULL', 'ALTER TABLE sports_tickets ADD COLUMN IF NOT EXISTS stake DECIMAL(12,2)'),
+            $pick('ALTER TABLE sports_tickets ADD COLUMN pnl REAL', 'ALTER TABLE sports_tickets ADD COLUMN pnl DECIMAL(14,4) NULL', 'ALTER TABLE sports_tickets ADD COLUMN IF NOT EXISTS pnl DECIMAL(14,4)'),
+            $pick('ALTER TABLE sports_predictions ADD COLUMN odds REAL', 'ALTER TABLE sports_predictions ADD COLUMN odds DECIMAL(14,6) NULL', 'ALTER TABLE sports_predictions ADD COLUMN IF NOT EXISTS odds DECIMAL(14,6)'),
+            $pick('ALTER TABLE sports_predictions ADD COLUMN odds_timestamp TEXT', 'ALTER TABLE sports_predictions ADD COLUMN odds_timestamp VARCHAR(32) NULL', 'ALTER TABLE sports_predictions ADD COLUMN IF NOT EXISTS odds_timestamp VARCHAR(32)'),
+            $pick('ALTER TABLE lottery_sync_runs ADD COLUMN payload TEXT', 'ALTER TABLE lottery_sync_runs ADD COLUMN payload MEDIUMTEXT NULL', 'ALTER TABLE lottery_sync_runs ADD COLUMN IF NOT EXISTS payload TEXT'),
+            $pick('ALTER TABLE sports_matches ADD COLUMN round_id TEXT', 'ALTER TABLE sports_matches ADD COLUMN round_id VARCHAR(64) NULL', 'ALTER TABLE sports_matches ADD COLUMN IF NOT EXISTS round_id VARCHAR(64)'),
+            $pick('ALTER TABLE users ADD COLUMN username TEXT', 'ALTER TABLE users ADD COLUMN username VARCHAR(64) NULL', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(64)'),
+            $pick('ALTER TABLE users ADD COLUMN user_uid TEXT', 'ALTER TABLE users ADD COLUMN user_uid CHAR(6) NULL', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS user_uid CHAR(6)'),
+            $pick('ALTER TABLE users ADD COLUMN profile_image TEXT', 'ALTER TABLE users ADD COLUMN profile_image VARCHAR(255) NULL', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image VARCHAR(255)'),
+            $pick('ALTER TABLE users ADD COLUMN phone TEXT', 'ALTER TABLE users ADD COLUMN phone VARCHAR(40) NULL', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(40)'),
+            $pick('ALTER TABLE users ADD COLUMN address TEXT', 'ALTER TABLE users ADD COLUMN address VARCHAR(255) NULL', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS address VARCHAR(255)'),
+            $pick('ALTER TABLE users ADD COLUMN security_pin TEXT', 'ALTER TABLE users ADD COLUMN security_pin CHAR(4) NULL', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS security_pin CHAR(4)'),
+            $pick('ALTER TABLE users ADD COLUMN security_question TEXT', 'ALTER TABLE users ADD COLUMN security_question VARCHAR(255) NULL', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS security_question VARCHAR(255)'),
+            $pick('ALTER TABLE users ADD COLUMN security_answer TEXT', 'ALTER TABLE users ADD COLUMN security_answer VARCHAR(255) NULL', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS security_answer VARCHAR(255)'),
             // Football: the daily provider-request counter is only trusted for the
             // day it was written, so a ceiling cannot leak across midnight.
-            'ALTER TABLE football_providers ADD COLUMN requests_used_date ' . ($sqlite ? 'TEXT' : 'DATE NULL'),
-            'ALTER TABLE leads ADD COLUMN email ' . $text,
-            'ALTER TABLE leads ADD COLUMN job_title ' . $text,
-            'ALTER TABLE leads ADD COLUMN company_name ' . $text,
-            'ALTER TABLE leads ADD COLUMN linkedin_url ' . ($sqlite ? 'TEXT' : 'TEXT NULL'),
-            $sqlite
-                ? "ALTER TABLE leads ADD COLUMN lead_kind TEXT NOT NULL DEFAULT 'business'"
-                : "ALTER TABLE leads ADD COLUMN lead_kind VARCHAR(20) NOT NULL DEFAULT 'business'",
+            $pick('ALTER TABLE football_providers ADD COLUMN requests_used_date TEXT', 'ALTER TABLE football_providers ADD COLUMN requests_used_date DATE NULL', 'ALTER TABLE football_providers ADD COLUMN IF NOT EXISTS requests_used_date DATE'),
+            $pick('ALTER TABLE leads ADD COLUMN email TEXT', 'ALTER TABLE leads ADD COLUMN email VARCHAR(255) NULL', 'ALTER TABLE leads ADD COLUMN IF NOT EXISTS email VARCHAR(255)'),
+            $pick('ALTER TABLE leads ADD COLUMN job_title TEXT', 'ALTER TABLE leads ADD COLUMN job_title VARCHAR(255) NULL', 'ALTER TABLE leads ADD COLUMN IF NOT EXISTS job_title VARCHAR(255)'),
+            $pick('ALTER TABLE leads ADD COLUMN company_name TEXT', 'ALTER TABLE leads ADD COLUMN company_name VARCHAR(255) NULL', 'ALTER TABLE leads ADD COLUMN IF NOT EXISTS company_name VARCHAR(255)'),
+            $pick('ALTER TABLE leads ADD COLUMN linkedin_url TEXT', 'ALTER TABLE leads ADD COLUMN linkedin_url TEXT NULL', 'ALTER TABLE leads ADD COLUMN IF NOT EXISTS linkedin_url TEXT'),
+            $pick(
+                "ALTER TABLE leads ADD COLUMN lead_kind TEXT NOT NULL DEFAULT 'business'",
+                "ALTER TABLE leads ADD COLUMN lead_kind VARCHAR(20) NOT NULL DEFAULT 'business'",
+                "ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_kind VARCHAR(20) NOT NULL DEFAULT 'business'",
+            ),
         ];
         foreach ($alters as $sql) {
             try { $exec($sql); } catch (\Throwable $e) { /* column already exists */ }
         }
 
-        $userBrokers = $sqlite
-            ? "CREATE TABLE IF NOT EXISTS user_broker_connections (
+        $userBrokers = $pick(
+            "CREATE TABLE IF NOT EXISTS user_broker_connections (
                   id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, broker TEXT NOT NULL,
                   label TEXT NULL, base_url TEXT NOT NULL, extra_url TEXT NULL, token_ciphertext TEXT NULL,
                   token_nonce TEXT NULL, account_hint TEXT NULL, enabled INTEGER NOT NULL DEFAULT 0,
                   trading_enabled INTEGER NOT NULL DEFAULT 0, live_allowed INTEGER NOT NULL DEFAULT 0,
                   last_test_ok INTEGER NULL, last_test_message TEXT NULL, last_test_at TEXT NULL,
-                  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(user_id, broker))"
-            : "CREATE TABLE IF NOT EXISTS user_broker_connections (
+                  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(user_id, broker))",
+            "CREATE TABLE IF NOT EXISTS user_broker_connections (
                   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL, broker VARCHAR(40) NOT NULL,
                   label VARCHAR(120) NULL, base_url VARCHAR(255) NOT NULL, extra_url VARCHAR(255) NULL,
                   token_ciphertext TEXT NULL, token_nonce VARCHAR(64) NULL, account_hint VARCHAR(120) NULL,
@@ -187,101 +221,85 @@ final class SchemaInstaller
                   last_test_message VARCHAR(255) NULL, last_test_at VARCHAR(32) NULL,
                   created_at VARCHAR(32) NOT NULL, updated_at VARCHAR(32) NOT NULL,
                   UNIQUE KEY uq_user_broker (user_id, broker), KEY idx_user_enabled (user_id, enabled)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+            "CREATE TABLE IF NOT EXISTS user_broker_connections (
+                  id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, broker VARCHAR(40) NOT NULL,
+                  label VARCHAR(120) NULL, base_url VARCHAR(255) NOT NULL, extra_url VARCHAR(255) NULL,
+                  token_ciphertext TEXT NULL, token_nonce VARCHAR(64) NULL, account_hint VARCHAR(120) NULL,
+                  enabled SMALLINT NOT NULL DEFAULT 0, trading_enabled SMALLINT NOT NULL DEFAULT 0,
+                  live_allowed SMALLINT NOT NULL DEFAULT 0, last_test_ok SMALLINT NULL,
+                  last_test_message VARCHAR(255) NULL, last_test_at VARCHAR(32) NULL,
+                  created_at VARCHAR(32) NOT NULL, updated_at VARCHAR(32) NOT NULL,
+                  CONSTRAINT uq_user_broker UNIQUE (user_id, broker))",
+        );
         try { $exec($userBrokers); } catch (\Throwable $e) { /* already exists */ }
 
-        $outreach = $sqlite
-            ? "CREATE TABLE IF NOT EXISTS lead_outreach (
+        $outreach = $pick(
+            "CREATE TABLE IF NOT EXISTS lead_outreach (
                   id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, lead_id TEXT NOT NULL,
                   actor_id INTEGER, channel TEXT NOT NULL, subject TEXT, body TEXT NOT NULL,
                   status TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL
-                )"
-            : "CREATE TABLE IF NOT EXISTS lead_outreach (
+                )",
+            "CREATE TABLE IF NOT EXISTS lead_outreach (
                   id VARCHAR(36) PRIMARY KEY, organization_id VARCHAR(80) NOT NULL, lead_id VARCHAR(36) NOT NULL,
                   actor_id INT NULL, channel VARCHAR(20) NOT NULL, subject VARCHAR(200) NULL, body TEXT NOT NULL,
                   status VARCHAR(20) NOT NULL, detail LONGTEXT NOT NULL, created_at VARCHAR(32) NOT NULL,
                   KEY idx_outreach_lead (organization_id, lead_id, created_at)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+            "CREATE TABLE IF NOT EXISTS lead_outreach (
+                  id VARCHAR(36) PRIMARY KEY, organization_id VARCHAR(80) NOT NULL, lead_id VARCHAR(36) NOT NULL,
+                  actor_id INTEGER NULL, channel VARCHAR(20) NOT NULL, subject VARCHAR(200) NULL, body TEXT NOT NULL,
+                  status VARCHAR(20) NOT NULL, detail TEXT NOT NULL DEFAULT '{}', created_at VARCHAR(32) NOT NULL)",
+        );
         try { $exec($outreach); } catch (\Throwable $e) { /* already exists */ }
 
+        // `IF NOT EXISTS` is supported by SQLite and PostgreSQL; MySQL uses the
+        // classic form. The two unique user indexes carry MySQL's canonical names.
+        $ifne = $sqlite || $pgsql ? 'IF NOT EXISTS ' : '';
         $indexes = [
-            $sqlite
-                ? 'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)'
-                : 'CREATE UNIQUE INDEX uq_users_username ON users(username)',
-            $sqlite
-                ? 'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_user_uid ON users(user_uid)'
-                : 'CREATE UNIQUE INDEX uq_users_user_uid ON users(user_uid)',
-            $sqlite
-                ? 'CREATE INDEX IF NOT EXISTS idx_outreach_lead ON lead_outreach(organization_id, lead_id, created_at)'
-                : 'CREATE INDEX idx_outreach_lead ON lead_outreach(organization_id, lead_id, created_at)',
-            $sqlite
-                ? 'CREATE INDEX IF NOT EXISTS idx_sports_odds_provider ON sports_odds (provider_id, observed_at)'
-                : 'CREATE INDEX idx_sports_odds_provider ON sports_odds (provider_id, observed_at)',
-            $sqlite
-                ? 'CREATE INDEX IF NOT EXISTS idx_sports_matches_provider_kickoff ON sports_matches (provider_id, kickoff_at)'
-                : 'CREATE INDEX idx_sports_matches_provider_kickoff ON sports_matches (provider_id, kickoff_at)',
-            $sqlite
-                ? 'CREATE INDEX IF NOT EXISTS idx_sports_matches_round ON sports_matches (provider_id, round_id)'
-                : 'CREATE INDEX idx_sports_matches_round ON sports_matches (provider_id, round_id)',
-            $sqlite
-                ? 'CREATE INDEX IF NOT EXISTS idx_sports_predictions_market ON sports_predictions (market, created_at)'
-                : 'CREATE INDEX idx_sports_predictions_market ON sports_predictions (market, created_at)',
-            $sqlite
-                ? 'CREATE INDEX IF NOT EXISTS idx_sports_selections_market ON sports_ticket_selections (market, selection)'
-                : 'CREATE INDEX idx_sports_selections_market ON sports_ticket_selections (market, selection)',
-            $sqlite
-                ? 'CREATE INDEX IF NOT EXISTS idx_sports_selections_match ON sports_ticket_selections (match_id)'
-                : 'CREATE INDEX idx_sports_selections_match ON sports_ticket_selections (match_id)',
-            $sqlite
-                ? 'CREATE INDEX IF NOT EXISTS idx_sports_predictions_created ON sports_predictions (created_at)'
-                : 'CREATE INDEX idx_sports_predictions_created ON sports_predictions (created_at)',
-            $sqlite
-                ? 'CREATE INDEX IF NOT EXISTS idx_sports_health_provider ON sports_provider_health (provider_id, observed_at)'
-                : 'CREATE INDEX idx_sports_health_provider ON sports_provider_health (provider_id, observed_at)',
+            $pick('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)', 'CREATE UNIQUE INDEX uq_users_username ON users(username)', 'CREATE UNIQUE INDEX IF NOT EXISTS uq_users_username ON users(username)'),
+            $pick('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_user_uid ON users(user_uid)', 'CREATE UNIQUE INDEX uq_users_user_uid ON users(user_uid)', 'CREATE UNIQUE INDEX IF NOT EXISTS uq_users_user_uid ON users(user_uid)'),
+            'CREATE INDEX ' . $ifne . 'idx_outreach_lead ON lead_outreach(organization_id, lead_id, created_at)',
+            'CREATE INDEX ' . $ifne . 'idx_sports_odds_provider ON sports_odds (provider_id, observed_at)',
+            'CREATE INDEX ' . $ifne . 'idx_sports_matches_provider_kickoff ON sports_matches (provider_id, kickoff_at)',
+            'CREATE INDEX ' . $ifne . 'idx_sports_matches_round ON sports_matches (provider_id, round_id)',
+            'CREATE INDEX ' . $ifne . 'idx_sports_predictions_market ON sports_predictions (market, created_at)',
+            'CREATE INDEX ' . $ifne . 'idx_sports_selections_market ON sports_ticket_selections (market, selection)',
+            'CREATE INDEX ' . $ifne . 'idx_sports_selections_match ON sports_ticket_selections (match_id)',
+            'CREATE INDEX ' . $ifne . 'idx_sports_predictions_created ON sports_predictions (created_at)',
+            'CREATE INDEX ' . $ifne . 'idx_sports_health_provider ON sports_provider_health (provider_id, observed_at)',
             // Football intelligence read paths: date board, live sweep, settlement queue.
-            $sqlite
-                ? 'CREATE INDEX IF NOT EXISTS idx_football_fixture_kickoff ON football_fixtures (kickoff_at)'
-                : 'CREATE INDEX idx_football_fixture_kickoff ON football_fixtures (kickoff_at)',
-            $sqlite
-                ? 'CREATE INDEX IF NOT EXISTS idx_football_fixture_status ON football_fixtures (status, kickoff_at)'
-                : 'CREATE INDEX idx_football_fixture_status ON football_fixtures (status, kickoff_at)',
-            $sqlite
-                ? 'CREATE INDEX IF NOT EXISTS idx_football_fixture_settle ON football_fixtures (settled_at, status)'
-                : 'CREATE INDEX idx_football_fixture_settle ON football_fixtures (settled_at, status)',
-            $sqlite
-                ? 'CREATE INDEX IF NOT EXISTS idx_football_prediction_generated ON football_match_predictions (generated_at)'
-                : 'CREATE INDEX idx_football_prediction_generated ON football_match_predictions (generated_at)',
-            $sqlite
-                ? 'CREATE INDEX IF NOT EXISTS idx_football_prediction_settle ON football_match_predictions (settlement_state, generated_at)'
-                : 'CREATE INDEX idx_football_prediction_settle ON football_match_predictions (settlement_state, generated_at)',
-            $sqlite
-                ? 'CREATE INDEX IF NOT EXISTS idx_football_settlement_settled ON football_prediction_settlements (settled_at)'
-                : 'CREATE INDEX idx_football_settlement_settled ON football_prediction_settlements (settled_at)',
-            $sqlite
-                ? 'CREATE INDEX IF NOT EXISTS idx_football_team_stats_team ON football_team_statistics (team_external_id, fetched_at)'
-                : 'CREATE INDEX idx_football_team_stats_team ON football_team_statistics (team_external_id, fetched_at)',
-            $sqlite
-                ? 'CREATE INDEX IF NOT EXISTS idx_football_sync_job ON football_provider_sync_logs (job_type, started_at)'
-                : 'CREATE INDEX idx_football_sync_job ON football_provider_sync_logs (job_type, started_at)',
+            'CREATE INDEX ' . $ifne . 'idx_football_fixture_kickoff ON football_fixtures (kickoff_at)',
+            'CREATE INDEX ' . $ifne . 'idx_football_fixture_status ON football_fixtures (status, kickoff_at)',
+            'CREATE INDEX ' . $ifne . 'idx_football_fixture_settle ON football_fixtures (settled_at, status)',
+            'CREATE INDEX ' . $ifne . 'idx_football_prediction_generated ON football_match_predictions (generated_at)',
+            'CREATE INDEX ' . $ifne . 'idx_football_prediction_settle ON football_match_predictions (settlement_state, generated_at)',
+            'CREATE INDEX ' . $ifne . 'idx_football_settlement_settled ON football_prediction_settlements (settled_at)',
+            'CREATE INDEX ' . $ifne . 'idx_football_team_stats_team ON football_team_statistics (team_external_id, fetched_at)',
+            'CREATE INDEX ' . $ifne . 'idx_football_sync_job ON football_provider_sync_logs (job_type, started_at)',
         ];
         foreach ($indexes as $sql) {
             try { $exec($sql); } catch (\Throwable $e) { /* already exists */ }
         }
     }
 
+
     /** First-request / CI boot: create any missing modules, then run upgrades. */
     public static function ensure(object $db): void
     {
         if (self::$done) return;
         self::$done = true;
-        $sqlite = self::isSqlite($db);
+        $dialect = self::dialect($db);
         // Apply module files whenever any expected table is missing, not just core.
         // CREATE IF NOT EXISTS makes this idempotent and cheap on healthy boots.
         $missing = false;
         try {
             $have = [];
-            if (self::isSqlite($db)) {
+            if ($dialect === 'sqlite') {
                 $r = $db->query("SELECT name FROM sqlite_master WHERE type='table'");
+                foreach ($r->result_array() as $row) $have[] = (string) (reset($row));
+            } elseif ($dialect === 'pgsql') {
+                $r = $db->query("SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()");
                 foreach ($r->result_array() as $row) $have[] = (string) (reset($row));
             } else {
                 $r = $db->query('SHOW TABLES');
@@ -292,20 +310,20 @@ final class SchemaInstaller
         $exec = function (string $sql) use ($db) {
             try { $db->query($sql); } catch (\Throwable $e) { /* duplicate / racing request */ }
         };
-        if ($missing) self::applyFiles($exec, $sqlite);
-        self::upgrade($exec, $sqlite);
+        if ($missing) self::applyFiles($exec, $dialect);
+        self::upgrade($exec, $dialect);
     }
 
     public static function installCi(object $db): void
     {
-        $sqlite = self::isSqlite($db);
+        $dialect = self::dialect($db);
         $exec = function (string $sql) use ($db) {
             $db->query($sql);
         };
-        self::applyFiles($exec, $sqlite);
+        self::applyFiles($exec, $dialect);
         self::upgrade(function (string $sql) use ($db) {
             try { $db->query($sql); } catch (\Throwable $e) { /* duplicate */ }
-        }, $sqlite);
+        }, $dialect);
         self::$done = true;
     }
 
@@ -316,16 +334,18 @@ final class SchemaInstaller
      */
     public static function installPdo(\PDO $pdo, string $driver): array
     {
-        $sqlite = self::isSqlite($driver);
+        $dialect = self::dialect($driver);
         $exec = function (string $sql) use ($pdo) {
             $pdo->exec($sql);
         };
-        self::applyFiles($exec, $sqlite);
+        self::applyFiles($exec, $dialect);
         self::upgrade(function (string $sql) use ($pdo) {
             try { $pdo->exec($sql); } catch (\Throwable $e) { /* duplicate */ }
-        }, $sqlite);
-        if ($sqlite) {
+        }, $dialect);
+        if ($dialect === 'sqlite') {
             $rows = $pdo->query("SELECT name FROM sqlite_master WHERE type='table'")->fetchAll(\PDO::FETCH_COLUMN);
+        } elseif ($dialect === 'pgsql') {
+            $rows = $pdo->query("SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()")->fetchAll(\PDO::FETCH_COLUMN);
         } else {
             $rows = $pdo->query('SHOW TABLES')->fetchAll(\PDO::FETCH_COLUMN);
         }

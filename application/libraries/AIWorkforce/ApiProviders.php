@@ -304,6 +304,8 @@ final class ApiProviders
         self::$schemaReady = true;
         $driver = (string) ($db->dbdriver ?? '');
         $sqlite = str_contains($driver, 'sqlite') || (string) ($db->subdriver ?? '') === 'sqlite';
+        $pgsql = str_contains(strtolower($driver), 'pgsql') || str_contains(strtolower($driver), 'postgre')
+            || strtolower((string) ($db->subdriver ?? '')) === 'pgsql';
         try {
             if ($sqlite) {
                 $db->query("CREATE TABLE IF NOT EXISTS api_providers (
@@ -325,6 +327,28 @@ final class ApiProviders
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL,
                   updated_by INTEGER
+                )");
+                $db->query('CREATE INDEX IF NOT EXISTS idx_api_providers_service ON api_providers(service, enabled, role)');
+            } elseif ($pgsql) {
+                $db->query("CREATE TABLE IF NOT EXISTS api_providers (
+                  id SERIAL PRIMARY KEY,
+                  service VARCHAR(64) NOT NULL,
+                  driver VARCHAR(64) NOT NULL,
+                  label VARCHAR(190) NOT NULL,
+                  enabled SMALLINT NOT NULL DEFAULT 0,
+                  role VARCHAR(16) NOT NULL DEFAULT 'unused',
+                  environment VARCHAR(16) NOT NULL DEFAULT 'live',
+                  base_url VARCHAR(500) NULL,
+                  account_id VARCHAR(190) NULL,
+                  extra_json TEXT NULL,
+                  secret_blob TEXT NULL,
+                  last_test_at VARCHAR(32) NULL,
+                  last_test_ok SMALLINT NULL,
+                  last_test_ms INTEGER NULL,
+                  last_test_message VARCHAR(255) NULL,
+                  created_at VARCHAR(32) NOT NULL,
+                  updated_at VARCHAR(32) NOT NULL,
+                  updated_by INTEGER NULL
                 )");
                 $db->query('CREATE INDEX IF NOT EXISTS idx_api_providers_service ON api_providers(service, enabled, role)');
             } else {

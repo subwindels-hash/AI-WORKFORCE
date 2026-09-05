@@ -60,6 +60,8 @@ class AdminPortal
         try { \AIWorkforce\EmailTemplates::ensure($db); } catch (\Throwable $_) {}
         $driver = (string) $db->dbdriver;
         $isSqlite = str_contains($driver, 'sqlite');
+        $isPgsql = str_contains(strtolower($driver), 'pgsql') || str_contains(strtolower($driver), 'postgre')
+            || strtolower((string) ($db->subdriver ?? '')) === 'pgsql';
         if ($isSqlite) {
             $db->query("CREATE TABLE IF NOT EXISTS admin_activity_logs (
               id INTEGER PRIMARY KEY AUTOINCREMENT, admin_id INTEGER NOT NULL, admin_label TEXT NOT NULL,
@@ -76,6 +78,25 @@ class AdminPortal
               sender_role TEXT NOT NULL DEFAULT 'user', sender_label TEXT NOT NULL DEFAULT '',
               body TEXT NOT NULL, read_by_user INTEGER NOT NULL DEFAULT 0, read_by_admin INTEGER NOT NULL DEFAULT 0,
               created_at TEXT NOT NULL)");
+            $db->query("CREATE INDEX IF NOT EXISTS idx_dm_thread ON direct_messages(user_id, created_at)");
+        } elseif ($isPgsql) {
+            $db->query("CREATE TABLE IF NOT EXISTS admin_activity_logs (
+              id SERIAL PRIMARY KEY, admin_id INTEGER NOT NULL, admin_label VARCHAR(190) NOT NULL,
+              action VARCHAR(64) NOT NULL, target_type VARCHAR(32) NULL, target_id VARCHAR(64) NULL,
+              target_label VARCHAR(190) NULL, result VARCHAR(16) NOT NULL DEFAULT 'ok', ip VARCHAR(45) NULL,
+              detail TEXT NULL, created_at VARCHAR(32) NOT NULL)");
+            $db->query("CREATE INDEX IF NOT EXISTS idx_admin_logs_created ON admin_activity_logs(created_at)");
+            $db->query("CREATE TABLE IF NOT EXISTS impersonation_sessions (
+              id SERIAL PRIMARY KEY, admin_id INTEGER NOT NULL, target_user_id INTEGER NOT NULL,
+              started_at VARCHAR(32) NOT NULL, ended_at VARCHAR(32) NULL, ip VARCHAR(45) NULL)");
+            $db->query("CREATE TABLE IF NOT EXISTS platform_settings (
+              k VARCHAR(80) NOT NULL PRIMARY KEY, v TEXT NOT NULL, category VARCHAR(32) NOT NULL DEFAULT 'general',
+              updated_at VARCHAR(32) NOT NULL, updated_by INTEGER NULL)");
+            $db->query("CREATE TABLE IF NOT EXISTS direct_messages (
+              id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, sender_id INTEGER NOT NULL,
+              sender_role VARCHAR(10) NOT NULL DEFAULT 'user', sender_label VARCHAR(190) NOT NULL DEFAULT '',
+              body TEXT NOT NULL, read_by_user SMALLINT NOT NULL DEFAULT 0, read_by_admin SMALLINT NOT NULL DEFAULT 0,
+              created_at VARCHAR(32) NOT NULL)");
             $db->query("CREATE INDEX IF NOT EXISTS idx_dm_thread ON direct_messages(user_id, created_at)");
         } else {
             $db->query("CREATE TABLE IF NOT EXISTS admin_activity_logs (
