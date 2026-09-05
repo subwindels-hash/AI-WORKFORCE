@@ -227,6 +227,35 @@
   padding: 0;
 }
 .ai_workforce-chat-listen:hover { color: #fff; }
+
+/* Standalone typing session wrapper — clearly above controls */
+.ai_workforce-chat-typing-session {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 2px 2px;
+  background: transparent;
+}
+.ai_workforce-chat-typing-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #7a869d;
+  padding-left: 2px;
+}
+/* Controls row is visually separate BELOW typing session */
+.ai_workforce-chat-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px dashed #1e2738;
+  margin-top: 2px;
+}
+
 .ai_workforce-chat-voice-status {
   margin: 0;
   padding: 0 14px 6px;
