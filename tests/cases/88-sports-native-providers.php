@@ -1199,3 +1199,36 @@ test('thesportsdb driver advertises team search in provider-drivers', function (
     $api = file_get_contents(FCPATH . 'application/controllers/Api_sports.php');
     assert_contains("'capabilities' => ['fixtures', 'results', 'leagues', 'teams', 'team_search']", (string) $api, 'capability listed');
 });
+
+test('env-registered sports providers are native adapters with full capabilities', function () {
+    // Regression: env keys once registered through the legacy
+    // FootballApiProvider wrapper, which hid round(), teamStatistics(),
+    // standings() and topPlayers() from capability checks — env setups
+    // silently lost form enrichment, round sync and smoke layers.
+    $keys = ['WINDELS_API_FOOTBALL_KEY' => 'env-test-key', 'WINDELS_THESPORTSDB_KEY' => '3', 'WINDELS_SPORTMONKS_TOKEN' => 'env-test-token'];
+    $prev = [];
+    foreach ($keys as $name => $value) {
+        $prev[$name] = getenv($name);
+        putenv($name . '=' . $value);
+    }
+    try {
+        $audit = new class implements \AIWorkforce\Persistence\AuditRepository {
+            public function emit(string $t, string $s, array $d = [], string $a = 'system'): void {}
+            public function recent(int $l = 100): array { return []; }
+        };
+        $intel = new \AIWorkforce\Sports\SportsIntelligence(new SportsRepositoryStub(), $audit);
+        $af = $intel->providers->provider('api-football');
+        $tdb = $intel->providers->provider('thesportsdb');
+        $sm = $intel->providers->provider('sportmonks');
+        assert_true($af instanceof ApiFootballProvider, 'env api-football is the native adapter');
+        assert_true($tdb instanceof TheSportsDbProvider, 'env thesportsdb is the native adapter');
+        assert_true($sm instanceof SportMonksProvider, 'env sportmonks is the native adapter');
+        assert_true(method_exists($af, 'teamStatistics') && method_exists($af, 'topPlayers'), 'env api-football exposes enrichment APIs');
+        assert_true(method_exists($sm, 'round') && method_exists($sm, 'standings'), 'env sportmonks exposes round + standings APIs');
+    } finally {
+        foreach ($prev as $name => $value) {
+            if ($value === false) putenv($name);
+            else putenv($name . '=' . $value);
+        }
+    }
+});

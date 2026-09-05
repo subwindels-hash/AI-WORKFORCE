@@ -6,7 +6,6 @@ use AIWorkforce\Persistence\AuditRepository;
 use AIWorkforce\Persistence\SportsRepository;
 use AIWorkforce\Sports\Providers\ApiFootballProvider;
 use AIWorkforce\Sports\Providers\HttpSportsProvider;
-use AIWorkforce\Sports\Providers\FootballApiProvider;
 use AIWorkforce\Sports\Providers\ProviderException;
 use AIWorkforce\Sports\Providers\SandboxSportsProvider;
 use AIWorkforce\Sports\Providers\SportMonksProvider;
@@ -123,7 +122,19 @@ class SportsIntelligence
             $key = getenv($keyName);
             if (is_string($key) && $key !== '') {
                 $base = (string)(getenv('WINDELS_'.strtoupper(str_replace('-', '_', $id)).'_BASE_URL') ?: $defaultBase);
-                $this->providers->register(new FootballApiProvider($id, $base, $key, $kind, (int)(getenv('WINDELS_SPORTS_HTTP_TIMEOUT') ?: 10)));
+                $timeout = (int)(getenv('WINDELS_SPORTS_HTTP_TIMEOUT') ?: 10);
+                // Register the native adapter directly (not the legacy
+                // FootballApiProvider wrapper): capability checks
+                // (method_exists/instanceof for round sync, team statistics,
+                // standings, top players) must see the real class, otherwise
+                // env-configured providers silently lose form enrichment,
+                // round sync and the smoke-test layers.
+                $native = match ($kind) {
+                    'api-football' => new ApiFootballProvider($key, $base, $timeout),
+                    'thesportsdb' => new TheSportsDbProvider($key, $base, $timeout),
+                    'sportmonks' => new SportMonksProvider($key, $base, $timeout),
+                };
+                $this->providers->register($native);
             }
         }
         // Also discover native providers from the central ApiProviders store
