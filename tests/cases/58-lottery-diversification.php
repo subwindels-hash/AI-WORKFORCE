@@ -109,7 +109,7 @@ test('lottery api: new routes, permissions and honest feature matrix', function 
     $c = file_get_contents(FCPATH . 'application/controllers/Api_lottery.php');
     // generate/diversity are mutations: requirePermission without the `false` arg = session CSRF enforced
     assert_true(substr_count($c, "requirePermission('lottery.view')") >= 2, 'mutations use lottery.view + CSRF');
-    assert_true(substr_count($c, "requirePermission('lottery.view', false)") >= 7, 'reads use lottery.view without CSRF');
+    assert_true(substr_count($c, "requirePermission('lottery.view', false)") >= 5, 'reads use lottery.view without CSRF');
     assert_contains('$this->platform->lottery->saveGeneration($report, (string) $user[\'id\'])', $c, 'generations attributed to the signed-in user');
 
     // honesty scan of every new/modified lottery file

@@ -197,7 +197,12 @@ final class LoteriasApiProvider implements LotteryProvider
     public function draws(?string $from = null, ?string $to = null, int $limit = 100): array
     {
         if (!$this->configured()) return [];
-        $limit = min(1000, max(1, $limit));
+        // Full history (spec §3): EuroMillions has ~2,300 draws since its
+        // 2004 launch, so the backfill cap must comfortably exceed that.
+        // The vendor's 365-day /range cap still splits the window into
+        // consecutive chunks, so the real bound is the plan's request quota,
+        // not this ceiling.
+        $limit = min(5000, max(1, $limit));
         $explicitFrom = $this->validDate($from) ? $from : null;
         $explicitTo = $this->validDate($to) ? $to : null;
         $queryTo = $explicitTo ?? gmdate('Y-m-d');
@@ -207,6 +212,12 @@ final class LoteriasApiProvider implements LotteryProvider
             // EuroMillions draws twice a week — ask for a window wide enough
             // to cover `limit` draws plus a margin for schedule changes.
             $weeks = (int) ceil($limit / 2) + 2;
+            // Don't reach back before any supported lottery existed: an
+            // unbounded 5000-draw backfill otherwise derives a ~48-year window
+            // and wastes ~26 empty /range calls (pre-2004) against a plan with
+            // a request quota. ~25 years still covers the whole EuroMillions
+            // archive from its 2004 launch.
+            $weeks = min($weeks, 1300);
             $queryFrom = gmdate('Y-m-d', strtotime($queryTo . ' -' . $weeks . ' weeks'));
         }
 

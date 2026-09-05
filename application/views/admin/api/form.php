@@ -62,6 +62,12 @@ $action = $row ? '/admin/api/' . (int) $row['id'] . '/save' : '/admin/api/save';
             <button class="btn" type="submit">Test Connection</button>
           </form>
         <?php endif; ?>
+        <?php if (!empty($canManage) && ($row['service'] ?? '') === 'lottery'): ?>
+          <form method="post" action="/admin/api/<?= (int) $row['id'] ?>/sync" onsubmit="return confirm('Synchronize historical EuroMillions draws from this provider now?');">
+            <input type="hidden" name="csrf_token" value="<?= e($csrf) ?>">
+            <button class="btn primary" type="submit">Sync Now</button>
+          </form>
+        <?php endif; ?>
         <?php if (!empty($canManage)): ?>
           <form method="post" action="/admin/api/<?= (int) $row['id'] ?>/<?= !empty($row['enabled']) ? 'disable' : 'enable' ?>">
             <input type="hidden" name="csrf_token" value="<?= e($csrf) ?>">

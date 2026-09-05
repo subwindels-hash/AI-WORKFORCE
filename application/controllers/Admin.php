@@ -1103,6 +1103,47 @@ class Admin extends App_Controller
         redirect('/admin/api/' . (int) $id);
     }
 
+    /**
+     * Manually trigger a historical-draw synchronization for a configured
+     * provider (spec §8). Only the lottery service has a syncable dataset;
+     * other services answer an honest "not syncable" instead of silently
+     * doing nothing. Gated on admin.api.manage + session CSRF, and audited.
+     */
+    public function api_sync($id = 0)
+    {
+        $actor = $this->gate('admin.api.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/api/' . (int) $id); return; }
+        $row = \AIWorkforce\ApiProviders::find($this->AIWorkforce_model->db, (int) $id);
+        if (!$row) { $this->flash('error', 'Provider not found.'); redirect('/admin/api'); return; }
+        if (($row['service'] ?? '') !== 'lottery') {
+            $this->flash('error', 'Manual synchronization is only available for the lottery service.');
+            redirect('/admin/api/' . (int) $id);
+            return;
+        }
+        try {
+            $result = $this->platform->lottery->sync(\AIWorkforce\Lottery\LotteryIntelligence::FULL_HISTORY_LIMIT);
+        } catch (\Throwable $e) {
+            log_message('error', 'api_sync failed for provider ' . (int) $id . ': ' . $e->getMessage());
+            $this->flash('error', 'Sync failed: ' . $e->getMessage());
+            redirect('/admin/api/' . (int) $id);
+            return;
+        }
+        $imported = (int) ($result['imported'] ?? 0);
+        $unchanged = (int) ($result['unchanged'] ?? 0);
+        $failed = (int) ($result['failed'] ?? 0);
+        $verified = (int) ($result['verifiedDraws'] ?? 0);
+        $this->portal->log($actor, 'API_PROVIDER_SYNCED', $failed === 0 ? 'ok' : 'error', [
+            'type' => 'api_provider', 'id' => (string) $id, 'label' => $row['label'],
+        ], [
+            'service' => $row['service'], 'imported' => $imported, 'unchanged' => $unchanged,
+            'failed' => $failed, 'verifiedDraws' => $verified, 'status' => $result['status'] ?? null,
+        ], $this->ip());
+        $detail = 'Sync complete: ' . $imported . ' imported, ' . $unchanged . ' unchanged, '
+            . $failed . ' rejected; ' . $verified . ' verified draws stored.';
+        $this->flash($failed === 0 ? 'notice' : 'error', $detail);
+        redirect('/admin/api/' . (int) $id);
+    }
+
     public function api_enable($id = 0)
     {
         $this->apiToggle((int) $id, true);

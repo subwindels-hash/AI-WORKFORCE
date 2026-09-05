@@ -740,3 +740,101 @@ test('lottery dashboard view renders sync status, verified draws and the feed ja
     assert_contains("mode: 'HISTORICAL'", $js, 'Generate 5 AI lines uses the historical dataset');
     assert_contains('count: 5', $js, 'five lines, using the API field name');
 });
+
+test('loteriasapi: latest verified draw retrieval returns the newest VERIFIED draw', function () {
+    $repo = new LotteryRepositoryStub();
+    [$provider] = fx_loterias_history_provider(6);
+    $intel = new LotteryIntelligence($repo, fx_loterias_audit(), $provider);
+
+    assert_null($intel->latestVerifiedDraw(), 'no verified draw exists before the first sync');
+
+    $sync = $intel->sync(50);
+    assert_equals(6, $sync['imported']);
+
+    $latest = $intel->latestVerifiedDraw();
+    assert_not_null($latest);
+    assert_equals('2026-04-10', $latest['draw_date'], 'the NEWEST verified draw is returned');
+    assert_equals([1, 11, 21, 31, 41], $latest['main_numbers']);
+    assert_equals([1, 7], $latest['lucky_stars']);
+    assert_equals('VERIFIED', $latest['verification_status'], 'only verified rows are ever surfaced');
+    assert_true(str_contains((string) $latest['source'], 'loteriasapi'));
+
+    // The dashboard "Last Verified Draw" section reads the same accessor.
+    $status = $intel->status();
+    assert_not_null($status['lastDraw']);
+    assert_equals('2026-04-10', $status['lastDraw']['draw_date']);
+});
+
+test('loteriasapi: a successful resync imports only the new draws and keeps the rest', function () {
+    $repo = new LotteryRepositoryStub();
+    $audit = fx_loterias_audit();
+
+    // First sync: 5 draws are published.
+    [$first] = fx_loterias_history_provider(5);
+    $intel = new LotteryIntelligence($repo, $audit, $first);
+    $one = $intel->sync(50);
+    assert_equals(5, $one['imported']);
+    assert_equals(5, $intel->verifiedDrawCount());
+
+    // Later the feed carries the same 5 plus 3 freshly-drawn results.
+    [$second] = fx_loterias_history_provider(8);
+    $again = (new LotteryIntelligence($repo, $audit, $second))->sync(50);
+    assert_equals('OK', $again['status']);
+    assert_equals(3, $again['imported'], 'only the new draws are stored');
+    assert_equals(5, $again['unchanged'], 'existing draws are recognised, not duplicated');
+    assert_equals(0, $again['failed']);
+    assert_equals(8, $intel->verifiedDrawCount(), 'no duplicate rows after resync');
+    assert_equals(8, $intel->drawCount());
+});
+
+test('loteriasapi: a database failure during import is reported, not hidden', function () {
+    $repo = new class extends LotteryRepositoryStub {
+        public function saveDraw(array $d): array {
+            throw new \RuntimeException('SQLSTATE[HY000] connection lost during saveDraw');
+        }
+    };
+    $audit = fx_loterias_audit();
+    [$provider] = fx_loterias_history_provider(4);
+    $intel = new LotteryIntelligence($repo, $audit, $provider);
+
+    $sync = $intel->sync(50);
+    assert_equals(LotteryIntelligence::STATUS_DATA_UNAVAILABLE, $sync['status'], 'a DB write failure is a failed sync, not OK');
+    assert_equals(0, $sync['imported']);
+    assert_contains('DATA UNAVAILABLE', $sync['message']);
+    assert_contains('connection lost', $sync['message'], 'the underlying database error is surfaced');
+    assert_equals(0, $intel->verifiedDrawCount());
+    assert_true(in_array('LOTTERY_SYNC_FAILED', array_column($audit->events, 'type'), true), 'the persistence failure is audited');
+});
+
+test('loteriasapi: Admin → API exposes a manual Sync Now route for the lottery service', function () {
+    $routes = file_get_contents(FCPATH . 'application/config/routes.php');
+    assert_contains("\$route['admin/api/(:num)/sync'] = 'admin/api_sync/\$1';", $routes);
+
+    $c = file_get_contents(FCPATH . 'application/controllers/Admin.php');
+    assert_contains('public function api_sync(', $c, 'the sync action exists');
+    assert_contains("'lottery'", $c, 'sync is scoped to the lottery service');
+    assert_contains('$this->platform->lottery->sync(', $c, 'the action delegates to the live sync engine');
+    assert_contains('FULL_HISTORY_LIMIT', $c, 'manual sync backfills the whole archive');
+
+    $view = file_get_contents(FCPATH . 'application/views/admin/api/form.php');
+    assert_contains('Sync Now', $view, 'the manual sync button is rendered');
+    assert_contains("=== 'lottery'", $view, 'the button only appears for the lottery service');
+});
+
+test('loteriasapi: a first-run backfill imports more than the old 520-draw ceiling', function () {
+    $repo = new LotteryRepositoryStub();
+    $audit = fx_loterias_audit();
+    // EuroMillions has drawn far more than 520 times since 2004 — a full
+    // first-run backfill must not truncate at the old 520-draw ceiling.
+    [$provider] = fx_loterias_history_provider(600);
+    $intel = new LotteryIntelligence($repo, $audit, $provider);
+
+    $cron = new \AIWorkforce\Lottery\LotteryCronService($repo, $audit, $intel);
+    $result = $cron->run('sync', '2026-04-11');
+    assert_equals('OK', $result['status']);
+    assert_equals(600, $intel->verifiedDrawCount(), 'the full archive is imported, not capped at 520');
+    assert_equals(600, $result['imported']);
+
+    // The shared backfill ceiling comfortably exceeds the EuroMillions archive.
+    assert_true(LotteryIntelligence::FULL_HISTORY_LIMIT >= 5000, 'the backfill limit covers the whole archive');
+});
