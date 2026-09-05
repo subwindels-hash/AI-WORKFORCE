@@ -105,6 +105,9 @@ $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
   <?php if (admin_can('admin.settings.manage')): ?>
   <a href="/admin/settings" class="<?= $active === 'settings' ? 'active' : '' ?>"><?= $ic ?><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.3.6.9 1 1.6 1.1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>System Settings</span></a>
   <?php endif; ?>
+  <?php if (admin_can('admin.settings.manage')): ?>
+  <a href="/admin/cron" class="<?= $active === 'cron' ? 'active' : '' ?>"><?= $ic ?><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>Cron Jobs</span></a>
+  <?php endif; ?>
   <?php if (admin_can('admin.admins.manage')): ?>
   <a href="/admin/admins" class="<?= $active === 'admins' ? 'active' : '' ?>"><?= $ic ?><path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5z"/></svg><span>Admin Accounts</span></a>
   <?php endif; ?>
