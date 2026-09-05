@@ -943,10 +943,33 @@ class SportMonksProvider implements SportsDataProvider
     public function fixtures(array $query): array
     {
         $from = (string) ($query['from'] ?? gmdate('Y-m-d'));
-        $to = (string) ($query['to'] ?? $from);
-        $params = [];
-        if (!empty($query['league'])) $params['leagues'] = (string) $query['league'];
-        $filter = 'starts_between:' . $from . ',' . $to;
+        $to   = (string) ($query['to'] ?? $from);
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $from) !== 1 || preg_match('/^\d{4}-\d{2}-\d{2}$/', $to) !== 1) {
+            throw new ProviderException('fixtures: from/to must be YYYY-MM-DD dates', ProviderException::DATA_ERROR);
+        }
+        $start = strtotime($from . ' 00:00:00 UTC');
+        $end   = strtotime($to . ' 00:00:00 UTC');
+        $days  = (int) floor(($end - $start) / 86400);
+        if ($days < 0) throw new ProviderException('fixtures: from must not be after to', ProviderException::DATA_ERROR);
+        if ($days > 100) {
+            throw new ProviderException('fixtures: the SportMonks v3 date-range endpoint allows at most 100 days per request — narrow the window', ProviderException::DATA_ERROR);
+        }
+        // The v3 API dates fixtures through DEDICATED path endpoints. The
+        // v2-era `filter[starts_between:...]` query parameter no longer
+        // exists and is SILENTLY IGNORED (the API would return its oldest
+        // fixtures unfiltered), and the old top-level `leagues=` parameter
+        // is invalid as well. Canonical v3 surface (verified against the
+        // v3 docs, 2026-09):
+        //   single day → GET /fixtures/date/{date}
+        //   range      → GET /fixtures/between/{start}/{end}  (max 100 days)
+        //   league     → &filters=fixtureLeagues:{id}
+        //   season     → &filters=fixtureSeasons:{id}
+        $path = $days === 0
+            ? '/fixtures/date/' . $from
+            : '/fixtures/between/' . $from . '/' . $to;
+        $filters = [];
+        if (!empty($query['league'])) $filters[] = 'fixtureLeagues:' . (string) $query['league'];
+        if (!empty($query['season'])) $filters[] = 'fixtureSeasons:' . (string) $query['season'];
         $includes = 'participants;scores;league;venue;referee';
         // /fixtures paginates (25 per page by default). Follow the cursor
         // until has_more=false so a busy multi-league day is not silently
@@ -955,14 +978,17 @@ class SportMonksProvider implements SportsDataProvider
         $cursor = null;
         $pages = 0;
         do {
-            $pageParams = $params;
+            $params = ['include' => $includes];
             if ($cursor !== null) {
-                $pageParams['cursor'] = $cursor;
+                $params['cursor'] = $cursor;
             } else {
-                $pageParams['per_page'] = 50;
+                $params['per_page'] = 50;
             }
-            $qs = http_build_query(array_merge($pageParams, ['include' => $includes]));
-            $resp = $this->doRequest('/fixtures?filter[' . $filter . ']&' . $qs);
+            $qs = http_build_query($params);
+            foreach ($filters as $filter) {
+                $qs .= '&' . rawurlencode('filters') . '=' . rawurlencode($filter);
+            }
+            $resp = $this->doRequest($path . '?' . $qs);
             $json = $this->decodeJson($resp);
             $rows = array_merge($rows, $this->extractList($json));
             $pagination = $json['pagination'] ?? [];
@@ -1098,29 +1124,49 @@ class SportMonksProvider implements SportsDataProvider
         return $this->mapResults([$data]);
     }
 
-    /** Fetch standings for a league + season. */
+    /**
+     * Fetch standings for a league + season.
+     *
+     * GET /standings/seasons/{season} with `filters=standingLeagues:{id}` —
+     * the old top-level `leagues=` parameter is invalid in v3 and was
+     * silently ignored (the API returned every league's standings). The
+     * base standing row only carries position/points; the team name comes
+     * from `include=participant` and W/D/L/goals from `include=details`
+     * (standing-detail type ids per the v3 types definitions:
+     * 129 played, 130 won, 131 draw, 132 lost, 133 goals for, 134 conceded).
+     * The endpoint is not paginated (verified against the v3 docs).
+     */
     public function standings(string $leagueId, string $season): array
     {
-        $resp = $this->doRequest('/standings/seasons/' . rawurlencode($season) . '?leagues=' . rawurlencode($leagueId));
+        $params = [
+            'filters' => 'standingLeagues:' . $leagueId,
+            'include' => 'participant;details',
+        ];
+        $resp = $this->doRequest('/standings/seasons/' . rawurlencode($season) . '?' . http_build_query($params));
         $rows = $this->extractList($this->decodeJson($resp));
         $out = [];
-        foreach ($rows as $r) {
-            foreach (($r['standings'] ?? []) as $entry) {
-                $out[] = [
-                    'leagueId' => $leagueId,
-                    'season' => $season,
-                    'rank' => (int) ($entry['rank'] ?? 0),
-                    'team' => $entry['team']['name'] ?? '',
-                    'teamId' => (string) ($entry['team']['id'] ?? ''),
-                    'played' => (int) ($entry['results']['played'] ?? 0),
-                    'wins' => (int) ($entry['results']['wins'] ?? 0),
-                    'draws' => (int) ($entry['results']['draws'] ?? 0),
-                    'losses' => (int) ($entry['results']['losses'] ?? 0),
-                    'goalsFor' => (int) ($entry['results']['goals_scored'] ?? 0),
-                    'goalsAgainst' => (int) ($entry['results']['goals_conceded'] ?? 0),
-                    'points' => (int) ($entry['results']['points'] ?? 0),
-                ];
+        foreach ($rows as $entry) {
+            $participant = is_array($entry['participant'] ?? null) ? $entry['participant'] : [];
+            $details = [];
+            foreach (($entry['details'] ?? []) as $d) {
+                if (is_array($d) && isset($d['type_id'], $d['value'])) {
+                    $details[(int) $d['type_id']] = (int) $d['value'];
+                }
             }
+            $out[] = [
+                'leagueId' => $leagueId,
+                'season' => $season,
+                'rank' => (int) ($entry['position'] ?? 0),
+                'team' => (string) ($participant['name'] ?? ''),
+                'teamId' => (string) ($participant['id'] ?? ''),
+                'played' => $details[129] ?? 0,
+                'wins' => $details[130] ?? 0,
+                'draws' => $details[131] ?? 0,
+                'losses' => $details[132] ?? 0,
+                'goalsFor' => $details[133] ?? 0,
+                'goalsAgainst' => $details[134] ?? 0,
+                'points' => (int) ($entry['points'] ?? 0),
+            ];
         }
         return $out;
     }
@@ -1138,21 +1184,46 @@ class SportMonksProvider implements SportsDataProvider
         ], $rows);
     }
 
-    /** Fetch squad/lineup for a fixture. */
+    /**
+     * Fetch the team sheets for a fixture.
+     *
+     * v3 has NO /lineups/fixtures/{id} endpoint (that was v2). Lineups are
+     * an include on the fixture itself:
+     *   GET /fixtures/{id}?include=lineups;participants;lineups.position
+     *
+     * Each entry in data.lineups[] is flat: {player_id, team_id,
+     * position_id, player_name, jersey_number, type_id} where
+     * type_id 11 = starting player, 12 = substitute. The position NAME
+     * requires the nested `lineups.position` include (Goalkeeper /
+     * Defender / Midfielder / Attacker).
+     */
     public function lineups(string $fixtureId): array
     {
         try {
-            $resp = $this->doRequest('/lineups/fixtures/' . rawurlencode($fixtureId) . '?include=player;position');
-            $rows = $this->extractList($this->decodeJson($resp));
-            return array_map(fn($r) => [
-                'fixtureId' => $fixtureId,
-                'teamId' => (string) ($r['team']['id'] ?? ''),
-                'team' => $r['team']['name'] ?? '',
-                'playerId' => (string) ($r['player']['id'] ?? ''),
-                'player' => $r['player']['name'] ?? '',
-                'position' => $r['position'] ?? '',
-                'starter' => !empty($r['starter']),
-            ], $rows);
+            $resp = $this->doRequest('/fixtures/' . rawurlencode($fixtureId) . '?' . http_build_query([
+                'include' => 'lineups;participants;lineups.position',
+            ]));
+            $json = $this->decodeJson($resp);
+            $data = is_array($json['data'] ?? null) ? $json['data'] : [];
+            $teams = [];
+            foreach (($data['participants'] ?? []) as $pt) {
+                if (isset($pt['id'], $pt['name'])) $teams[(string) $pt['id']] = (string) $pt['name'];
+            }
+            $out = [];
+            foreach (($data['lineups'] ?? []) as $l) {
+                $position = is_array($l['position'] ?? null) ? (string) ($l['position']['name'] ?? '') : '';
+                $out[] = [
+                    'fixtureId' => $fixtureId,
+                    'teamId' => (string) ($l['team_id'] ?? ''),
+                    'team' => $teams[(string) ($l['team_id'] ?? '')] ?? '',
+                    'playerId' => (string) ($l['player_id'] ?? ''),
+                    'player' => (string) ($l['player_name'] ?? (is_array($l['player'] ?? null) ? ($l['player']['name'] ?? '') : '')),
+                    'position' => $position,
+                    'jerseyNumber' => (int) ($l['jersey_number'] ?? 0),
+                    'starter' => (int) ($l['type_id'] ?? 0) === 11,
+                ];
+            }
+            return $out;
         } catch (ProviderException $e) {
             return [];
         }

@@ -310,6 +310,99 @@ test('sportmonks fixtures pagination is bounded even when has_more stays true', 
     assert_equals(40, count($fixtures));
 });
 
+test('sportmonks fixtures use the v3 date endpoints and filters parameter', function () {
+    $urls = [];
+    $transport = function (string $url, array $headers) use (&$urls) {
+        $urls[] = $url;
+        return ['status' => 200, 'body' => json_encode(['data' => [], 'pagination' => ['has_more' => false, 'next_cursor' => null]])];
+    };
+    $p = new SportMonksProvider('t', 'https://api.test', 10, $transport);
+    $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15', 'league' => '501']);
+    assert_true(str_starts_with($urls[0], 'https://api.test/fixtures/date/2026-09-15'), 'a single day uses GET /fixtures/date/{date}');
+    assert_true(str_contains($urls[0], 'filters=fixtureLeagues%3A501'), 'league scope via the v3 filters parameter');
+    assert_false(str_contains($urls[0], 'filter['), 'the v2-era filter[...] syntax is invalid in v3 (silently ignored)');
+    assert_false(str_contains($urls[0], 'leagues='), 'the top-level leagues parameter is invalid in v3 (silently ignored)');
+    $p->fixtures(['from' => '2026-09-01', 'to' => '2026-09-05']);
+    assert_true(str_starts_with($urls[1], 'https://api.test/fixtures/between/2026-09-01/2026-09-05'), 'a multi-day window uses GET /fixtures/between/{start}/{end}');
+});
+
+test('sportmonks fixtures reject a date range wider than the 100-day API limit', function () {
+    $p = new SportMonksProvider('t', 'https://api.test', 10, function () {
+        throw new \RuntimeException('no network expected');
+    });
+    assert_throws(ProviderException::class, fn() => $p->fixtures(['from' => '2026-01-01', 'to' => '2026-06-30']), 'the between endpoint allows at most 100 days');
+});
+
+test('sportmonks standings use the v3 league filter, includes and detail type ids', function () {
+    $url = '';
+    $body = json_encode(['data' => [
+        ['id' => 1, 'participant_id' => 55, 'position' => 1, 'points' => 9, 'result' => 'equal',
+         'participant' => ['id' => 55, 'name' => 'Real Madrid'],
+         'details' => [
+             ['type_id' => 129, 'value' => 3],
+             ['type_id' => 130, 'value' => 3],
+             ['type_id' => 131, 'value' => 0],
+             ['type_id' => 132, 'value' => 0],
+             ['type_id' => 133, 'value' => 7],
+             ['type_id' => 134, 'value' => 2],
+         ]],
+    ]]);
+    $transport = function (string $u, array $headers) use (&$url, $body) {
+        $url = $u;
+        return ['status' => 200, 'body' => $body];
+    };
+    $p = new SportMonksProvider('t', 'https://api.test', 10, $transport);
+    $rows = $p->standings('501', '2026-2027');
+    assert_true(str_starts_with($url, 'https://api.test/standings/seasons/2026-2027?'), 'standings are fetched by season id');
+    assert_true(str_contains($url, 'filters=standingLeagues%3A501'), 'league scope via filters=standingLeagues (the old leagues= param is ignored by the API)');
+    assert_true(str_contains($url, 'include=participant%3Bdetails'), 'team name + W/D/L/goals require the participant and details includes');
+    assert_equals(1, count($rows));
+    $r = $rows[0];
+    assert_equals(1, $r['rank']);
+    assert_equals('Real Madrid', $r['team']);
+    assert_equals('55', $r['teamId']);
+    assert_equals(3, $r['played']);
+    assert_equals(3, $r['wins']);
+    assert_equals(0, $r['draws']);
+    assert_equals(0, $r['losses']);
+    assert_equals(7, $r['goalsFor']);
+    assert_equals(2, $r['goalsAgainst']);
+    assert_equals(9, $r['points']);
+});
+
+test('sportmonks lineups use the fixture endpoint with the lineups include', function () {
+    $url = '';
+    $body = json_encode(['data' => [
+        'id' => 98765,
+        'participants' => [
+            ['id' => 55, 'name' => 'Real Madrid', 'meta' => ['location' => 'home']],
+            ['id' => 60, 'name' => 'Barcelona', 'meta' => ['location' => 'away']],
+        ],
+        'lineups' => [
+            ['id' => 1, 'player_id' => 1001, 'team_id' => 55, 'position_id' => 24,
+             'player_name' => 'Thibaut Courtois', 'jersey_number' => 1, 'type_id' => 11,
+             'position' => ['name' => 'Goalkeeper']],
+            ['id' => 2, 'player_id' => 1002, 'team_id' => 55, 'position_id' => 25,
+             'player_name' => 'Luka Modric', 'jersey_number' => 10, 'type_id' => 12,
+             'position' => ['name' => 'Midfielder']],
+        ],
+    ]]);
+    $transport = function (string $u, array $h) use (&$url, $body) {
+        $url = $u;
+        return ['status' => 200, 'body' => $body];
+    };
+    $p = new SportMonksProvider('t', 'https://api.test', 10, $transport);
+    $rows = $p->lineups('98765');
+    assert_true(str_starts_with($url, 'https://api.test/fixtures/98765?'), 'lineups come from the fixture endpoint (no /lineups/... endpoint exists in v3)');
+    assert_true(str_contains($url, 'include=lineups%3Bparticipants%3Blineups.position'), 'lineups include with the nested position names');
+    assert_equals(2, count($rows));
+    assert_equals('Goalkeeper', $rows[0]['position']);
+    assert_equals(true, $rows[0]['starter'], 'type_id 11 = starting player');
+    assert_equals('Real Madrid', $rows[0]['team']);
+    assert_equals(1, $rows[0]['jerseyNumber']);
+    assert_equals(false, $rows[1]['starter'], 'type_id 12 = substitute');
+});
+
 test('sportmonks maps live status codes correctly', function () {
     $body = json_encode(['data' => [
         ['id' => 1, 'starting_at' => '2026-09-15T19:00:00Z', 'status' => 7,

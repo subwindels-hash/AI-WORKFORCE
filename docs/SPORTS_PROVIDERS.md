@@ -79,16 +79,57 @@ full seasons) requires a premium key.
 
 ## SportMonks notes
 
-SportMonks uses the token query parameter and the Football API v3 endpoints. Fixtures use participants, scores, and league includes, and are mapped using participant location (`home`/`away`). Ensure the token has access to the leagues and includes used by the deployment.
+SportMonks uses the token query parameter (`api_token`) and the Football
+API **v3** endpoints. Fixtures use participants, scores, and league
+includes, and are mapped using participant location (`home`/`away`).
+Ensure the token has access to the leagues and includes used by the
+deployment.
+
+> **v3 gotcha (audited against the official v3 docs, 2026-09):** the v2-era
+> query parameters are **silently ignored** by the v3 API — a v2-style
+> `filter[starts_between:...]` on `/fixtures` returns the API's oldest
+> fixtures unfiltered, and a top-level `leagues=`/`season=` parameter
+> filters nothing. All SportMonks requests below use the documented v3
+> surface; do not "restore" the old parameter style.
+
+### Date endpoints and filters (fixtures)
+
+`SportMonksProvider::fixtures(['from' => 'Y-m-d', 'to' => 'Y-m-d',
+'league' => id, 'season' => id])` maps to the v3 date endpoints:
+
+- single day → `GET /fixtures/date/{date}`
+- range → `GET /fixtures/between/{start}/{end}` (**max 100 days** — wider
+  windows throw a `ProviderException` instead of hitting a limit the API
+  enforces)
+- league scope → `&filters=fixtureLeagues:{id}`
+- season scope → `&filters=fixtureSeasons:{id}`
 
 ### Pagination
 
-`SportMonksProvider::fixtures()` follows the v3 cursor pagination of
-`GET /fixtures` (the endpoint defaults to 25 fixtures per page): the first
+`SportMonksProvider::fixtures()` follows the v3 cursor pagination of the
+date endpoints above (they default to 25 fixtures per page): the first
 request sets `per_page=50`, subsequent requests pass `next_cursor` until
 `has_more` is false, with a hard cap of 40 pages (2000 fixtures) so a
 busy multi-league day is never silently truncated to the first page. The
-round endpoints do not paginate.
+round, standings and lineups endpoints do not paginate.
+
+### Standings
+
+`SportMonksProvider::standings($leagueId, $season)` calls
+`GET /standings/seasons/{season}?filters=standingLeagues:{id}&include=participant;details`.
+The base standing row only carries `position` and `points`; the team name
+comes from the `participant` include and W/D/L/goals from the `details`
+include (standing-detail type ids: 129 played, 130 won, 131 draw,
+132 lost, 133 goals for, 134 conceded).
+
+### Lineups
+
+`SportMonksProvider::lineups($fixtureId)` calls
+`GET /fixtures/{id}?include=lineups;participants;lineups.position` — v3
+has no `/lineups/...` endpoint, lineups are a fixture include. Each
+entry's `type_id` marks the role (11 = starting player, 12 = substitute)
+and the nested `lineups.position` include provides the position name.
+Failures degrade to an empty array (lineups are optional data).
 
 ### Round-based bulk fetch
 
