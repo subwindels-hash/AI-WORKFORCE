@@ -173,3 +173,31 @@ AI qualification, enrichment, website analysis, and ICP matching are future phas
 No AI inference is currently presented as a fact. Verification is derived
 exclusively from explicit provider signals (Apollo `email_status.verified`,
 direct phone presence, Google Places listing) — never fabricated.
+
+## Apollo.io provider (auth & endpoints)
+
+Docs: https://docs.apollo.io/reference/apollo-api — base URL
+`https://api.apollo.io/api/v1`.
+
+- **Authentication:** the API key is sent in the **`x-api-key` request header**
+  on every call (https://docs.apollo.io/reference/authentication). The legacy
+  `api_key`-in-JSON-body mechanism is deprecated and is rejected by the current
+  API — using it is what produced the `apollo.io ✕ Connection failed` result.
+- **Connection test:** the admin "Test connection" button calls the documented,
+  credit-free key check `GET /api/v1/auth/health` with `x-api-key`. It returns
+  `{"healthy":true,"is_logged_in":true}` for a valid key and `401` for a bad
+  one. (The previous build pinged a paid search endpoint with body auth, which
+  failed even with a valid key.)
+- **Search:** the adapter first tries `POST /mixed_people/search` (legacy;
+  returns full email/phone/LinkedIn on paid plans) and transparently falls back
+  to the documented `POST /mixed_people/api_search` on `404/405/410`. Filters
+  are sent as query parameters in Apollo's bracket-array form
+  (`person_titles[]=…`, `person_seniorities[]=…`, `person_locations[]=…`,
+  `q_keywords`, `q_person_name`, `per_page`).
+- **Free-tier privacy:** the public `api_search` endpoint returns privacy-safe
+  rows (obfuscated surname, `has_email` / `has_direct_phone` flags) and does not
+  expose email addresses or phone numbers. Those rows are normalised honestly
+  with `metadata.privacy_safe = true` and empty `email`/`phone`; Person Mode's
+  free-webmail filter then yields no contacts on a free Apollo plan. Full
+  emails/phones require a paid Apollo plan (returned via the legacy endpoint or
+  Apollo's people-enrichment endpoints).

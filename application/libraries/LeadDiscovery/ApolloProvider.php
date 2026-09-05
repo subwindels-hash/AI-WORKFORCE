@@ -2,35 +2,48 @@
 namespace LeadDiscovery;
 
 /**
- * Apollo.io people/business search adapter for Lead Discovery.
+ * Apollo.io people search adapter for Lead Discovery.
  *
- * Apollo exposes a REST search API at https://api.apollo.io/v1/mixed_people/search
- * (and /organizations/search) that returns enriched people/company records with
- * verified business emails (when the calling plan includes them). We use the
- * mixed_people/search endpoint because it returns people with their current
- * organization — which is the shape AI_WORKFORCE needs for B2B lead discovery
- * (decision-maker name + title + company + email/phone + LinkedIn).
+ * Docs: https://docs.apollo.io/reference/apollo-api
+ * Base URL: https://api.apollo.io/api/v1
  *
- * Docs: https://apolloio.github.io/apollo-api-docs/
+ * Authentication
+ * --------------
+ * Apollo authenticates with the API key passed in the **x-api-key request
+ * header** on every call (https://docs.apollo.io/reference/authentication).
+ * The old `api_key`-in-body mechanism is deprecated and is rejected by the
+ * current API, which is why the legacy build of this adapter reported
+ * "Connection failed" even with a valid key.
  *
- * Auth: API key passed as `api_key` in the POST JSON body OR via the
- * X-Api-Key header. We send it in the body per Apollo's canonical examples.
+ * Endpoints
+ * ---------
+ *  • POST /mixed_people/api_search  — current documented search. Free accounts
+ *    (registered with a work email) get search results, but the public search
+ *    returns privacy-safe rows (obfuscated surname, has_email/has_direct_phone
+ *    flags) and does not hand back emails/phone numbers.
+ *  • POST /mixed_people/search      — legacy search that still returns full
+ *    contact data (email/phone/LinkedIn) on paid plans. We try it first for
+ *    paying workspaces and transparently fall back to api_search when Apollo
+ *    answers 404/410/405 (endpoint retired for this key) so free workspaces
+ *    still get real people results. Auth/plan errors (401/403/422) surface
+ *    immediately — retrying them against another endpoint cannot help.
  *
- * The adapter:
- *   - Reads its key from ApiProviders config under driver `apollo_io` (preferred)
- *     or from the APOLLO_IO_API_KEY env var.
- *   - Returns the same normalized LeadDiscoveryProvider contract Google Places
- *     uses; metadata carries apollo-specific fields (person name, title,
- *     seniority, linkedin, email_status, employee_count).
- *   - Never fabricates — throws ProviderException when the API reports an
- *     error, and the ProviderRegistry surface fails over or returns an honest
- *     error.
+ * Filters are sent as query parameters in Apollo's documented bracket-array
+ * form: person_titles[]=CEO&person_seniorities[]=c_suite …
+ *
+ * The adapter reads its key from ApiProviders config (driver `apollo_io`) or
+ * the APOLLO_IO_API_KEY / APOLLO_API_KEY env var. It never fabricates data:
+ * an API error becomes a ProviderException that the registry surfaces.
  */
 class ApolloProvider implements LeadDiscoveryProvider
 {
     private const DEFAULT_URL = 'https://api.apollo.io';
+    /** Current documented search endpoint (free-tier friendly, privacy-safe rows). */
+    private const PEOPLE_API_SEARCH = '/api/v1/mixed_people/api_search';
+    /** Legacy search endpoint that returns enriched email/phone on paid plans. */
     private const PEOPLE_SEARCH = '/api/v1/mixed_people/search';
-    private const ORG_SEARCH = '/api/v1/mixed_companies/search';
+    /** Documented key-validation ping (https://docs.apollo.io/docs/test-api-key). */
+    public const AUTH_HEALTH = '/api/v1/auth/health';
 
     public function __construct(
         private ?string $apiKey = null,
@@ -56,20 +69,22 @@ class ApolloProvider implements LeadDiscoveryProvider
     public function healthCheck(): array
     {
         return $this->apiKey && $this->apiKey !== ''
-            ? ['status' => 'IMPLEMENTED', 'detail' => 'Apollo.io REST API (mixed_people/search) — key configured']
+            ? ['status' => 'IMPLEMENTED', 'detail' => 'Apollo.io REST API (mixed_people/api_search) — key configured']
             : ['status' => 'DISABLED', 'detail' => 'APOLLO_IO_API_KEY not configured'];
     }
 
     /**
      * Input:
-     *   query            — free-text search (person_titles, q_organization_name,
-     *                      locations etc. are supported as additional keys).
-     *   limit            — max results (1-100, default 20).
-     *   titles           — optional array of job titles (e.g. ["CEO","Founder"]).
-     *   locations        — optional array of locations (e.g. ["London, UK"]).
-     *   organizations    — optional array of company name fragments.
-     *   seniorities      — optional array (e.g. ["owner","founder","c_suite"]).
-     *   person_locations / organization_locations / etc. passed through as-is.
+     *   query       — free-text keyword search (q_keywords).
+     *   limit       — max results (1-100, default 20).
+     *   titles      — optional array of job titles (person_titles[]).
+     *   locations   — optional array of locations (person_locations[]).
+     *   seniorities — optional array (owner|founder|c_suite|partner|vp|head|
+     *                 director|manager|senior|entry|intern) (person_seniorities[]).
+     *   names       — optional first-name list (folded into q_person_name /
+     *                 q_keywords); controller post-filters strict starts-with.
+     *   person_titles / person_locations / contact_email_status / etc. pass
+     *                 through as documented Apollo parameters.
      */
     public function searchBusinesses(array $input): array
     {
@@ -80,49 +95,66 @@ class ApolloProvider implements LeadDiscoveryProvider
 
         $limit = min(100, max(1, (int)($input['limit'] ?? 20)));
         $q = trim((string)($input['query'] ?? ''));
-        $payload = [
-            'api_key' => $this->apiKey,
-            'page' => 1,
-            'per_page' => $limit,
+
+        // Build Apollo's documented query parameters. Arrays use the [] suffix
+        // Apollo expects; scalars pass straight through.
+        $params = ['page' => 1, 'per_page' => $limit];
+        if ($q !== '') $params['q_keywords'] = $q;
+
+        $listKeys = [
+            'person_titles', 'person_locations', 'organization_locations',
+            'person_seniorities', 'seniorities', 'contact_email_status',
+            'organizations', 'industries', 'departments', 'q_organization_domains_list',
         ];
-        // Apollo uses q_keywords for generic keyword matching, but we also
-        // support explicit titles / organizations / locations filters for
-        // structured UI inputs.
-        if ($q !== '') $payload['q_keywords'] = $q;
-        foreach (['person_titles','person_locations','organization_locations','organizations','seniorities','industries','contact_email_status','departments'] as $k) {
+        foreach ($listKeys as $k) {
             $val = $input[$k] ?? null;
-            if (is_array($val) && $val !== []) $payload[$k] = array_values($val);
-            elseif (is_string($val) && $val !== '') $payload[$k] = [$val];
+            if (is_array($val) && $val !== []) {
+                $params[$k] = array_values(array_filter(array_map('strval', $val), fn($s) => trim($s) !== ''));
+            } elseif (is_string($val) && trim($val) !== '') {
+                $params[$k] = [trim($val)];
+            }
         }
         // Shorthand aliases the front-end can pass without learning Apollo's schema.
         if (!empty($input['titles']) && is_array($input['titles'])) {
-            $payload['person_titles'] = array_values(array_unique(array_merge($payload['person_titles'] ?? [], $input['titles'])));
+            $params['person_titles'] = array_values(array_unique(array_merge($params['person_titles'] ?? [], array_map('strval', $input['titles']))));
         }
         if (!empty($input['locations']) && is_array($input['locations'])) {
-            $payload['person_locations'] = array_values(array_unique(array_merge($payload['person_locations'] ?? [], $input['locations'])));
+            $params['person_locations'] = array_values(array_unique(array_merge($params['person_locations'] ?? [], array_map('strval', $input['locations']))));
         }
-        if (!empty($input['organizations']) && is_array($input['organizations'])) {
-            $payload['organizations'] = array_values(array_unique($payload['organizations']));
+        // `seniorities` is the controller's alias for Apollo's person_seniorities[].
+        if (!empty($params['seniorities'])) {
+            $params['person_seniorities'] = array_values(array_unique(array_merge($params['person_seniorities'] ?? [], $params['seniorities'])));
+            unset($params['seniorities']);
         }
-        // Person-mode first-name lists are folded into q_keywords so Apollo
-        // returns people whose name starts with any of the requested names.
+        // Name search: Apollo exposes q_person_name (matches all words). A single
+        // name maps to it; multiple names are folded into q_keywords and the
+        // controller post-filters strict starts-with.
         if (!empty($input['first_names']) && is_array($input['first_names'])) {
-            $kw = $payload['q_keywords'] ?? '';
-            $extra = implode(' ', array_values(array_filter($input['first_names'], 'is_string')));
-            $payload['q_keywords'] = trim($kw . ' ' . $extra);
-            // Apollo offers a per-contact first_name parameter for single-value
-            // lookups; when multiple names are requested we rely on q_keywords
-            // and rely on the controller's post-filter for strict starts-with.
+            $names = array_values(array_filter(array_map('strval', $input['first_names']), fn($s) => trim($s) !== ''));
+            if (count($names) === 1) {
+                $params['q_person_name'] = trim($names[0]);
+            } elseif ($names !== []) {
+                $params['q_keywords'] = trim(($params['q_keywords'] ?? '') . ' ' . implode(' ', $names));
+            }
         }
 
+        // Paid/legacy search first (full emails/phones), then documented public
+        // search as fallback. Auth errors are not retried against a 2nd endpoint.
         $last = null;
-        for ($attempt = 1; $attempt <= $this->maxAttempts; $attempt++) {
-            try {
-                return $this->normalize($this->post(self::PEOPLE_SEARCH, $payload));
-            } catch (ProviderException $e) {
-                $last = $e;
-                if (!$e->retryable || $attempt === $this->maxAttempts) throw $e;
-                usleep(250000 * $attempt);
+        foreach ([self::PEOPLE_SEARCH, self::PEOPLE_API_SEARCH] as $path) {
+            for ($attempt = 1; $attempt <= $this->maxAttempts; $attempt++) {
+                try {
+                    return $this->normalize($this->post($path, $params));
+                } catch (ProviderException $e) {
+                    $last = $e;
+                    // Auth/plan-validation errors won't succeed on the other endpoint.
+                    if (in_array($e->httpStatus, [400, 401, 403, 422], true)) throw $e;
+                    // Endpoint retired for this key — fall through to api_search.
+                    if (in_array($e->httpStatus, [404, 405, 410], true)) break;
+                    // Transient: retry same endpoint, then fall back.
+                    if (!$e->retryable || $attempt === $this->maxAttempts) break;
+                    usleep(250000 * $attempt);
+                }
             }
         }
         throw $last ?: new ProviderException('Apollo.io request failed');
@@ -130,49 +162,143 @@ class ApolloProvider implements LeadDiscoveryProvider
 
     /* ---- transport ---- */
 
-    protected function post(string $path, array $payload): array
+    /**
+     * Issue an authenticated Apollo request. Filters are query parameters
+     * (bracket arrays), the key is in the x-api-key header.
+     *
+     * Separated as protected so tests can stage a deterministic transport.
+     *
+     * @param array<string,mixed> $params
+     * @return array{status:int,raw:string,json:?array}
+     */
+    protected function request(string $method, string $path, array $params = []): array
     {
         $url = $this->baseUrl . $path;
-        $body = json_encode($payload);
-        $headers = "Content-Type: application/json\r\nAccept: application/json\r\nCache-Control: no-cache\r\n";
-        $ctx = stream_context_create([
-            'http' => [
-                'method' => 'POST',
+        $query = $this->buildQuery($params);
+        if ($query !== '') {
+            $url .= (str_contains($url, '?') ? '&' : '?') . $query;
+        }
+        $headers = [
+            'Accept: application/json',
+            'Content-Type: application/json',
+            'Cache-Control: no-cache',
+            'x-api-key: ' . (string)$this->apiKey,
+            'User-Agent: WINDELS-AIWorkforce/1.0 (+lead-discovery)',
+        ];
+        $status = 0;
+        $raw = null;
+
+        if (function_exists('curl_init')) {
+            $ch = curl_init($url);
+            if ($ch !== false) {
+                $opts = [
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_FOLLOWLOCATION => true,
+                    CURLOPT_MAXREDIRS => 3,
+                    CURLOPT_CONNECTTIMEOUT => $this->timeoutSeconds,
+                    CURLOPT_TIMEOUT => $this->timeoutSeconds,
+                    CURLOPT_HTTPHEADER => $headers,
+                    CURLOPT_SSL_VERIFYPEER => true,
+                    CURLOPT_SSL_VERIFYHOST => 2,
+                    CURLOPT_ENCODING => '',
+                ];
+                if (strtoupper($method) === 'POST') {
+                    $opts[CURLOPT_POST] = true;
+                    // Empty JSON body keeps the Content-Type honest; Apollo reads
+                    // filters from the query string.
+                    $opts[CURLOPT_POSTFIELDS] = '{}';
+                }
+                curl_setopt_array($ch, $opts);
+                $raw = curl_exec($ch);
+                $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                $errno = curl_errno($ch);
+                curl_close($ch);
+                if ($raw !== false && $raw !== null) {
+                    return ['status' => $status, 'raw' => (string)$raw, 'json' => json_decode((string)$raw, true)];
+                }
+                if ($status > 0) {
+                    return ['status' => $status, 'raw' => '', 'json' => null];
+                }
+                // cURL reported a transport failure — fall through to streams.
+                unset($errno);
+            }
+        }
+
+        if (ini_get('allow_url_fopen')) {
+            $hdr = implode("\r\n", $headers) . "\r\n";
+            $http = [
+                'method' => strtoupper($method),
                 'timeout' => $this->timeoutSeconds,
                 'ignore_errors' => true,
-                'header' => $headers,
-                'content' => $body,
-            ],
-            'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
-        ]);
-        $respBody = @file_get_contents($url, false, $ctx);
-        $status = 0;
-        foreach (($http_response_header ?? []) as $line) {
-            if (preg_match('#HTTP/\S+\s+(\d+)#', $line, $m)) { $status = (int)$m[1]; break; }
+                'header' => $hdr,
+            ];
+            if (strtoupper($method) === 'POST') $http['content'] = '{}';
+            $ctx = stream_context_create([
+                'http' => $http,
+                'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
+            ]);
+            $respBody = @file_get_contents($url, false, $ctx);
+            foreach (($http_response_header ?? []) as $line) {
+                if (preg_match('#HTTP/\S+\s+(\d+)#', $line, $m)) { $status = (int)$m[1]; break; }
+            }
+            $raw = is_string($respBody) ? $respBody : false;
         }
-        if ($respBody === false) {
+
+        if ($raw === false || $raw === null) {
             throw new ProviderException('Apollo.io request timed out or could not connect', 503, true);
         }
-        $decoded = json_decode($respBody, true);
+        return ['status' => $status, 'raw' => (string)$raw, 'json' => json_decode((string)$raw, true)];
+    }
+
+    /**
+     * Perform a request and turn Apollo's error envelopes into a ProviderException.
+     *
+     * @param array<string,mixed> $params
+     */
+    public function post(string $path, array $params = []): array
+    {
+        $resp = $this->request('POST', $path, $params);
+        $status = (int)($resp['status'] ?? 0);
+        $decoded = $resp['json'] ?? null;
         if (!is_array($decoded)) {
             throw new ProviderException('Apollo.io returned a non-JSON response', 502, true);
         }
-        // Apollo errors: {status: "401", code: "API_KEY_MISSING", message: "..."}
-        // or {message: "..."} on 4xx/5xx.
+        // Apollo errors look like: {status:"401", code:"API_KEY_MISSING", message:"…"}
+        // or {error:"…", message:"…"} / {error_code:"API_INACCESSIBLE", …}.
         $errMsg = null;
         if (isset($decoded['message']) && is_string($decoded['message'])) $errMsg = $decoded['message'];
         if (isset($decoded['error']) && is_string($decoded['error'])) $errMsg = $decoded['error'];
-        if (isset($decoded['code']) && is_string($decoded['code']) && !isset($decoded['people'])) {
-            $errMsg = $decoded['code'] . ': ' . ($errMsg ?? 'request failed');
+        $code = $decoded['code'] ?? $decoded['error_code'] ?? null;
+        if (is_string($code) && $code !== '' && !isset($decoded['people']) && !isset($decoded['contacts'])) {
+            $errMsg = $code . ': ' . ($errMsg ?? 'request failed');
         }
-        if ($status >= 400 && $errMsg !== null) {
+        $isHealthy = isset($decoded['people']) || isset($decoded['contacts']) || isset($decoded['breadcrumbs'])
+            || ($status >= 200 && $status < 300 && ($errMsg === null || isset($decoded['people'])));
+        if ($status >= 400) {
             $retryable = $status === 429 || $status >= 500;
-            throw new ProviderException('Apollo.io: ' . $errMsg, $status ?: 502, $retryable);
+            throw new ProviderException('Apollo.io: ' . ($errMsg ?? ('request failed (HTTP ' . $status . ')')), $status ?: 502, $retryable);
         }
-        if ($errMsg !== null && !isset($decoded['people']) && !isset($decoded['contacts'])) {
+        if ($errMsg !== null && !$isHealthy) {
             throw new ProviderException('Apollo.io: ' . $errMsg, 502, true);
         }
         return $decoded;
+    }
+
+    /** Build Apollo's query string with bracket-array keys and proper encoding. */
+    private function buildQuery(array $params): string
+    {
+        $parts = [];
+        foreach ($params as $key => $value) {
+            if (is_array($value)) {
+                $bracket = preg_match('/\[\]$/', $key) ? $key : ($key . '[]');
+                foreach ($value as $item) {
+                    $parts[] = rawurlencode($bracket) . '=' . rawurlencode((string)$item);
+                }
+            } else {
+                $parts[] = rawurlencode((string)$key) . '=' . rawurlencode((string)$value);
+            }
+        }
+        return implode('&', $parts);
     }
 
     /* ---- normalization ---- */
@@ -188,7 +314,10 @@ class ApolloProvider implements LeadDiscoveryProvider
             if ($id === '') continue;
             $org = is_array($p['organization'] ?? null) ? $p['organization'] : [];
             $first = (string)($p['first_name'] ?? '');
+            // Public search returns last_name_obfuscated ("Do***e"); legacy
+            // search returns full last_name.
             $last = (string)($p['last_name'] ?? '');
+            if ($last === '' && isset($p['last_name_obfuscated'])) $last = (string)$p['last_name_obfuscated'];
             $name = trim($first . ' ' . $last);
             if ($name === '' && isset($p['name'])) $name = (string)$p['name'];
             if ($name === '' && isset($org['name'])) $name = (string)$org['name'];
@@ -200,17 +329,11 @@ class ApolloProvider implements LeadDiscoveryProvider
             $addressParts = array_filter([$city, $state, $country], fn($s) => $s !== '');
             $address = implode(', ', $addressParts) ?: null;
             $phone = null;
-            foreach (['phone_number','sanitized_phone','direct_dial_phone','mobile_phone'] as $k) {
+            foreach (['phone_number', 'sanitized_phone', 'direct_dial_phone', 'mobile_phone'] as $k) {
                 if (!empty($p[$k]) && is_string($p[$k])) { $phone = $p[$k]; break; }
             }
             $email = null;
             if (!empty($p['email']) && is_string($p['email'])) $email = $p['email'];
-            elseif (!empty($p['email_status']) && is_array($p['email_status'])) {
-                // Apollo sometimes returns an array of candidate emails; pick the first verified.
-                foreach ($p['email_status'] as $cand) {
-                    if (is_array($cand) && !empty($cand['email']) && ($cand['verified'] ?? false)) { $email = $cand['email']; break; }
-                }
-            }
             $website = null;
             if (!empty($org['website_url'])) $website = (string)$org['website_url'];
             elseif (!empty($p['organization_website_url'])) $website = (string)$p['organization_website_url'];
@@ -218,10 +341,32 @@ class ApolloProvider implements LeadDiscoveryProvider
             if (!empty($p['linkedin_url'])) $linkedin = (string)$p['linkedin_url'];
             $category = $title !== '' ? $title : ((string)($org['industry'] ?? null) ?: 'business');
             $sourceId = 'apollo:' . $id;
-            $meta = array_filter([
+
+            // Privacy flags from the documented public search (emails/phones are
+            // not returned, but Apollo tells us whether enrichment exists).
+            $hasEmail = array_key_exists('has_email', $p) ? (bool)$p['has_email'] : ($email !== null);
+            $hasPhone = null;
+            if (array_key_exists('has_direct_phone', $p)) {
+                $v = $p['has_direct_phone'];
+                $hasPhone = is_string($v) ? stripos($v, 'yes') === 0 : (bool)$v;
+            } elseif ($phone !== null) {
+                $hasPhone = true;
+            }
+            $obfuscated = !empty($p['last_name_obfuscated']) && empty($p['last_name']);
+            $privacySafe = $obfuscated || ($email === null && $phone === null && $linkedin === null);
+
+            // Boolean capability flags are always present (even when false);
+            // optional scalar fields are dropped when empty so the lead record
+            // stays compact.
+            $meta = [
                 'provider' => 'Apollo.io',
                 'source' => 'apollo',
                 'person_id' => $id,
+                'has_email' => (bool)$hasEmail,
+                'has_direct_phone' => (bool)$hasPhone,
+                'privacy_safe' => (bool)$privacySafe,
+            ];
+            foreach ([
                 'title' => $title !== '' ? $title : null,
                 'company' => $company !== '' ? $company : null,
                 'email' => $email,
@@ -232,7 +377,9 @@ class ApolloProvider implements LeadDiscoveryProvider
                 'organization_id' => $org['id'] ?? ($p['organization_id'] ?? null),
                 'employee_count' => $org['employee_count'] ?? null,
                 'industry' => $org['industry'] ?? null,
-            ], fn($v) => $v !== null && $v !== '' && $v !== []);
+            ] as $mk => $mv) {
+                if ($mv !== null && $mv !== '' && $mv !== []) $meta[$mk] = $mv;
+            }
             $out[] = [
                 'sourceId' => $sourceId,
                 'name' => $name !== '' ? $name : ($company ?: 'Unknown'),
