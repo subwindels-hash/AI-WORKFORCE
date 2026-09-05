@@ -15,12 +15,12 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
           <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
           <input type="date" name="date" value="<?= e(gmdate('Y-m-d')) ?>" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px" title="Ticket date (UTC)">
           <button class="btn small" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700;letter-spacing:0.02em">
-            🎯 GENERATE (odds <b>prediction</b> ticket)
+            🎯 Odds Prediction Ticket
           </button>
         </form>
         <a class="btn small" href="/sports">Sports Intelligence →</a>
       <?php else: ?>
-        <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">🎯 GENERATE (odds <b>prediction</b> ticket) — needs sports.manage</button>
+        <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">🎯 Odds Prediction Ticket — needs sports.manage</button>
         <a class="btn small" href="/sports">Sports Intelligence →</a>
       <?php endif; ?>
     </div>
@@ -39,13 +39,13 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
           <form method="post" action="/sports/generate-ticket" style="display:flex;gap:6px;align-items:center" onsubmit="return confirm('Generate odds prediction ticket now?')">
             <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
             <input type="hidden" name="date" value="<?= e(gmdate('Y-m-d')) ?>">
-            <button class="btn small primary" style="font-weight:700">🎯 GENERATE (odds <b>prediction</b> ticket)</button>
+            <button class="btn small primary" style="font-weight:700">🎯 Odds Prediction Ticket</button>
           </form>
           <span class="dim" style="font-size:11px">Builds from stored fixtures & odds — no external call, idempotent</span>
         <?php endif; ?>
       </div>
       <?php if (empty($tickets)): ?>
-        <p class="dim">No tickets generated yet. Press <b>GENERATE (odds prediction ticket)</b> to build one from stored data.</p>
+        <p class="dim">No tickets generated yet. Select <b>Odds Prediction Ticket</b> to build one from stored data.</p>
       <?php else: ?>
         <table class="tbl">
           <thead><tr><th>Ticket</th><th>Created (UTC)</th><th class="num">Odds</th><th class="num">Sel.</th><th class="num">Conf.</th><th>Risk</th><th>Approval</th><th>Settlement</th><th class="num">P/L</th><th></th></tr></thead>

@@ -22,14 +22,14 @@
     </header>
     <div class="ai_workforce-chat-messages" aria-live="polite"><div class="ai_workforce-chat-message agent">Hi — WINDELS Assistant for AI WORKFORCE. Ask about a real module (agents, languages, leads, trading, sports, EuroMillions, multiplier) and I will give the path and how it actually works. <button type="button" class="ai_workforce-chat-listen" data-listen="Hi — WINDELS Assistant for AI WORKFORCE. Ask about a real module and I will give the path and how it actually works.">🔊 Listen</button></div></div>
     <p class="ai_workforce-chat-voice-status" id="ai_workforce-chat-voice-status" hidden></p>
-        <form class="ai_workforce-chat-form">
+    <form class="ai_workforce-chat-form">
       <div class="ai_workforce-chat-typing-session">
-        <label class="ai_workforce-chat-typing-label" for="ai_workforce-chat-input">Typing session</label>
+        <label class="ai_workforce-chat-typing-label" for="ai_workforce-chat-input">WINDELS Assistant typing session</label>
         <input id="ai_workforce-chat-input" name="message" maxlength="1000" required placeholder="Ask about a page or feature…" autocomplete="off" aria-label="Message" class="ai_workforce-chat-input">
       </div>
       <div class="ai_workforce-chat-controls">
         <div class="ai_workforce-chat-voice-controls">
-          <button type="button" class="ai_workforce-chat-mic" id="ai_workforce-chat-mic" aria-label="Tap to speak">🎤 Speak</button>
+          <button type="button" class="ai_workforce-chat-mic" id="ai_workforce-chat-mic" aria-label="Speak">🎤 Speak</button>
           <button type="button" class="ai_workforce-chat-mic-stop" id="ai_workforce-chat-mic-stop" aria-label="Stop listening" disabled>⏹ Stop</button>
         </div>
         <button type="submit" class="ai_workforce-chat-send" aria-label="Send message">Send</button>

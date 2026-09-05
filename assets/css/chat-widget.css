@@ -185,6 +185,7 @@
 .ai_workforce-chat-form input[name="message"] {
   width: 100%;
   min-width: 0;
+  box-sizing: border-box;
   flex: none;
   display: block;
   border: 1px solid #2a3548;
@@ -228,19 +229,22 @@
 }
 .ai_workforce-chat-listen:hover { color: #fff; }
 
-/* Standalone typing session wrapper — clearly above controls */
+/* Standalone typing session box — clearly above the controls */
 .ai_workforce-chat-typing-session {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 4px 2px 2px;
-  background: transparent;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid #2a3548;
+  border-radius: 12px;
+  background: #0f1623;
 }
 .ai_workforce-chat-typing-label {
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
   color: #7a869d;
   padding-left: 2px;
 }
@@ -249,7 +253,7 @@
   display: flex;
   gap: 8px;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   flex-wrap: wrap;
   padding-top: 8px;
   border-top: 1px dashed #1e2738;
@@ -281,7 +285,7 @@
   min-height: 36px;
 }
 .ai_workforce-chat-send {
-  margin-left: auto;
+  margin-left: 0;
   min-width: 64px;
 }
 .ai_workforce-chat-form button {
