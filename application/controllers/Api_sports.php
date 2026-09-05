@@ -486,6 +486,18 @@ class Api_sports extends Api_controller
         try {
             if ($type === 'fixtures') {
                 $query = ['from' => $g['from'] ?? gmdate('Y-m-d'), 'to' => $g['to'] ?? $g['from'] ?? gmdate('Y-m-d')];
+                // Forward optional api-football filters so callers can narrow
+                // a range without hitting the generic 31-day date-loop limit
+                // (e.g. &league=39&season=2026) or request a single calendar
+                // day via date. The provider also accepts these directly.
+                foreach (['league', 'season', 'team', 'status', 'timezone', 'round', 'venue', 'date'] as $k) {
+                    if (!empty($g[$k])) $query[$k] = (string) $g[$k];
+                }
+                // date is a single-day shortcut — from/to are irrelevant when
+                // it is present (provider maps it to /fixtures?date=YYYY-MM-DD).
+                if (!empty($query['date'])) {
+                    unset($query['from'], $query['to']);
+                }
                 $result = $this->platform->sports->sync->syncFixtures($provider, $query, 'api-sync-' . $providerId . '-' . gmdate('YmdHis'));
             } elseif ($type === 'odds') {
                 if (empty($g['fixtureId'])) return $this->jsonError('fixtureId is required for odds sync');

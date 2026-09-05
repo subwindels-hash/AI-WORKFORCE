@@ -124,7 +124,12 @@ trait HttpTransport
             $status = array_key_exists('token', $errors)
                 ? ProviderException::AUTHENTICATION_ERROR
                 : ProviderException::DATA_ERROR;
-            throw new ProviderException('provider error: ' . mb_substr((string) $msg, 0, 200), $status);
+            $hint = '';
+            if (str_contains(strtolower((string) $msg), 'from field')) {
+                $hint = ' — api-football from/to requires league+season or team+season (e.g. &league=39&season=2026). '
+                    . 'For all fixtures in a date range omit league/season (per-day date mode is used) or pass &date=YYYY-MM-DD for a single day.';
+            }
+            throw new ProviderException('provider error: ' . mb_substr((string) $msg, 0, 200) . $hint, $status);
         }
         return $decoded;
     }
@@ -281,14 +286,89 @@ class ApiFootballProvider implements SportsDataProvider
 
     public function fixtures(array $query): array
     {
+        // Direct date query (single day) — the documented way to fetch all
+        // fixtures for a calendar day across leagues.
+        if (!empty($query['date'])) {
+            $date = (string) $query['date'];
+            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) !== 1) {
+                throw new ProviderException('fixtures: date must be YYYY-MM-DD', ProviderException::DATA_ERROR);
+            }
+            $params = ['date' => $date];
+            if (!empty($query['league'])) $params['league'] = (string) $query['league'];
+            if (!empty($query['season'])) $params['season'] = (string) $query['season'];
+            if (!empty($query['team'])) $params['team'] = (string) $query['team'];
+            if (!empty($query['status'])) $params['status'] = (string) $query['status'];
+            if (!empty($query['timezone'])) $params['timezone'] = (string) $query['timezone'];
+            if (!empty($query['round'])) $params['round'] = (string) $query['round'];
+            if (!empty($query['venue'])) $params['venue'] = (string) $query['venue'];
+            $rows = $this->fetchAllPages('/fixtures', $params);
+            return $this->mapFixtures($rows);
+        }
+
         $from = (string) ($query['from'] ?? gmdate('Y-m-d'));
         $to = (string) ($query['to'] ?? $from);
-        $params = ['from' => $from, 'to' => $to];
-        if (!empty($query['league'])) $params['league'] = (string) $query['league'];
-        if (!empty($query['season'])) $params['season'] = (string) $query['season'];
-        if (!empty($query['status'])) $params['status'] = (string) $query['status'];
-        $rows = $this->fetchAllPages('/fixtures', $params);
-        return $this->mapFixtures($rows);
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $from) !== 1 || preg_match('/^\d{4}-\d{2}-\d{2}$/', $to) !== 1) {
+            throw new ProviderException('fixtures: from/to must be YYYY-MM-DD dates', ProviderException::DATA_ERROR);
+        }
+
+        // api-football's /fixtures?from=&to= requires a disambiguating
+        // filter (league+season, team+season, etc.). When none is provided
+        // the API answers 200 with errors.from = "The From field need
+        // another parameter." — that surfaced as a provider error and the
+        // sync stored nothing. For the common "all fixtures in a date
+        // range" case (cron, daily ticket, smoke, generic sync) we fall
+        // back to per-day date queries, which IS the documented way to
+        // fetch all fixtures for a calendar day:
+        //   GET /fixtures?date=YYYY-MM-DD
+        // (optionally combined with league/season/team/status).
+        $hasDisambiguatingFilter = !empty($query['league']) || !empty($query['season'])
+            || !empty($query['team']) || !empty($query['round']) || !empty($query['venue'])
+            || !empty($query['ids']) || !empty($query['live']) || !empty($query['next'])
+            || !empty($query['last']);
+
+        if ($hasDisambiguatingFilter) {
+            $params = ['from' => $from, 'to' => $to];
+            if (!empty($query['league'])) $params['league'] = (string) $query['league'];
+            if (!empty($query['season'])) $params['season'] = (string) $query['season'];
+            if (!empty($query['team'])) $params['team'] = (string) $query['team'];
+            if (!empty($query['status'])) $params['status'] = (string) $query['status'];
+            if (!empty($query['timezone'])) $params['timezone'] = (string) $query['timezone'];
+            if (!empty($query['round'])) $params['round'] = (string) $query['round'];
+            if (!empty($query['venue'])) $params['venue'] = (string) $query['venue'];
+            $rows = $this->fetchAllPages('/fixtures', $params);
+            return $this->mapFixtures($rows);
+        }
+
+        // No disambiguating filter: use per-day date queries.
+        $start = strtotime($from . ' 00:00:00 UTC');
+        $end = strtotime($to . ' 00:00:00 UTC');
+        $days = (int) floor(($end - $start) / 86400);
+        if ($days < 0) {
+            throw new ProviderException('fixtures: from must not be after to', ProviderException::DATA_ERROR);
+        }
+        if ($days > 31) {
+            throw new ProviderException(
+                'fixtures: from/to range without league/team/season is limited to 31 days — narrow the window or add league & season filters',
+                ProviderException::DATA_ERROR
+            );
+        }
+        $allRows = [];
+        $current = $from;
+        $guard = 0;
+        while ($current <= $to && $guard++ < 32) {
+            $params = ['date' => $current];
+            if (!empty($query['status'])) $params['status'] = (string) $query['status'];
+            if (!empty($query['timezone'])) $params['timezone'] = (string) $query['timezone'];
+            if (!empty($query['league'])) $params['league'] = (string) $query['league'];
+            if (!empty($query['season'])) $params['season'] = (string) $query['season'];
+            if (!empty($query['team'])) $params['team'] = (string) $query['team'];
+            if (!empty($query['round'])) $params['round'] = (string) $query['round'];
+            if (!empty($query['venue'])) $params['venue'] = (string) $query['venue'];
+            $rows = $this->fetchAllPages('/fixtures', $params);
+            $allRows = array_merge($allRows, $rows);
+            $current = gmdate('Y-m-d', strtotime($current . ' +1 day'));
+        }
+        return $this->mapFixtures($allRows);
     }
 
     public function odds(string $fixtureExternalId): array
