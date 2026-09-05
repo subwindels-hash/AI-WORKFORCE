@@ -75,8 +75,9 @@
     input.value = '';
     addMessage(message, 'user');
     var pending = addMessage('Thinking…', 'agent pending');
-    var button = form.querySelector('button');
-    button.disabled = true;
+    // Send button is now BELOW typing session — target it explicitly (was first button before)
+    var button = form.querySelector('button[type="submit"]') || form.querySelector('.ai_workforce-chat-send') || form.querySelector('button');
+    if (button) button.disabled = true;
     fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -103,7 +104,7 @@
         pending.className = 'ai_workforce-chat-message error';
         pending.textContent = error.message || 'The assistant is unavailable.';
       })
-      .finally(function () { button.disabled = false; });
+      .finally(function () { if (button) button.disabled = false; });
   });
 
   function attachVoice() {
