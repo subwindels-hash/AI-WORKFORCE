@@ -787,12 +787,15 @@ class Admin extends App_Controller
         if ($category === 'ai' || $category === 'accounts') {
             foreach ($values as $k => $v) $values[$k] = $v === '1' ? '1' : '0';
         }
+        if ($category === 'announcement') {
+            $values['announcement_enabled'] = ($values['announcement_enabled'] ?? '') === '1' ? '1' : '0';
+        }
         if ($category === 'security') {
             $values['login_max_attempts'] = (string) max(3, min(20, (int) ($values['login_max_attempts'] ?? 5)));
             $values['login_lockout_seconds'] = (string) max(60, min(86400, (int) ($values['login_lockout_seconds'] ?? 900)));
         }
         try {
-            $this->portal->saveSettings($values, $category, (int) $actor['id']);
+            $this->portal->saveSettings($values, $category, (int) $actor['id'], $category === 'announcement' ? 2000 : 500);
             $this->portal->log($actor, 'SETTINGS_CHANGED', 'ok', ['type' => 'settings', 'id' => $category, 'label' => $category], array_keys($values), $this->ip());
             $this->flash('notice', '✓ Changes saved successfully');
         } catch (Throwable $e) {

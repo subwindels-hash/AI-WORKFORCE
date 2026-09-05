@@ -9,22 +9,17 @@ defined('BASEPATH') or exit('No direct script access allowed');
  * regardless of which stylesheet the host page loads. On the dashboard grid
  * (.app-shell) it spans both columns so it never collides with the sidebar.
  *
- * Content is operator-configurable via the VP_ANNOUNCEMENT environment
- * variable; multiple messages are separated by "|". Nothing sensitive lives
- * here.
+ * Content is edited by super admins at System Settings → Announcement
+ * (one message per line, with a show/hide toggle); without a saved override
+ * it falls back to the VP_ANNOUNCEMENT environment variable ("|" separated)
+ * and then to built-in defaults. Nothing sensitive lives here.
  */
 if (!function_exists('ann_escape')) {
     function ann_escape(?string $s): string { return htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8'); }
 }
-$raw = (string) (getenv('VP_ANNOUNCEMENT') ?: getenv('ANNOUNCEMENT') ?: '');
-if (trim($raw) === '') {
-    $raw = 'Welcome to WINDELS AI WORKFORCE — your AI-powered workforce platform.'
-        . '|NEW: Open the AI Language Teacher for instant translation, listening and speaking practice.'
-        . '|Enterprise-grade analysis, language learning and lead discovery — evidence-first, audited, fail-closed.';
-}
-$messages = array_values(array_filter(array_map('trim', explode('|', $raw)), fn($m) => $m !== ''));
-if (!$messages) $messages = ['WINDELS AI WORKFORCE'];
-$joined = implode('    •    ', $messages); // separator between messages on the track
+$annState = \AIWorkforce\AnnouncementBar::content(get_instance()->AIWorkforce_model->db ?? null);
+if (empty($annState['enabled']) || empty($annState['messages'])) return;
+$joined = implode('    •    ', $annState['messages']); // separator between messages on the track
 ?>
 <style>
 .ann-bar{background:#ffffff;color:#000000;width:100%;overflow:hidden;border-bottom:1px solid #e2e2e2;font:600 13px/1 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;letter-spacing:.01em;}

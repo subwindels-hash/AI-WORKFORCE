@@ -41,6 +41,10 @@ class AdminPortal
             'seo_og_image' => '',
             'seo_theme_color' => '',
         ],
+        'announcement' => [
+            'announcement_enabled' => '1',
+            'announcement_messages' => '',
+        ],
     ];
 
     public function __construct(private \AIWorkforce_model $model) {}
@@ -111,13 +115,13 @@ class AdminPortal
         return $out;
     }
 
-    public function saveSettings(array $values, string $category, ?int $actorId): void
+    public function saveSettings(array $values, string $category, ?int $actorId, int $maxLen = 500): void
     {
         $allowed = self::SETTING_DEFAULTS[$category] ?? [];
         foreach ($values as $key => $value) {
             if (!array_key_exists($key, $allowed)) continue;
             $value = is_string($value) ? trim($value) : (string) $value;
-            if (strlen($value) > 500) $value = substr($value, 0, 500);
+            if (strlen($value) > $maxLen) $value = substr($value, 0, $maxLen);
             $existing = $this->model->db->get_where('platform_settings', ['k' => $key], 1)->row_array();
             $row = ['k' => $key, 'v' => $value, 'category' => $category, 'updated_at' => gmdate('c'), 'updated_by' => $actorId];
             if ($existing) $this->model->db->where('k', $key)->update('platform_settings', $row);

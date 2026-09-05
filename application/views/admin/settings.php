@@ -5,6 +5,7 @@ $ai = $set['ai'] ?? [];
 $security = $set['security'] ?? [];
 $accounts = $set['accounts'] ?? [];
 $seo = $set['seo'] ?? [];
+$ann = $set['announcement'] ?? [];
 $smtp = $smtp ?? [];
 ?>
 <div class="page-head">
@@ -111,6 +112,20 @@ $smtp = $smtp ?? [];
       <label>Social share image URL (og:image)<input name="seo_og_image" maxlength="500" placeholder="https://example.com/assets/images/share.png" value="<?= e($seo['seo_og_image'] ?? '') ?>"></label>
       <label>Browser theme color<input name="seo_theme_color" maxlength="20" placeholder="#07090e" value="<?= e($seo['seo_theme_color'] ?? '') ?>"></label>
       <button class="btn primary" type="submit">Save SEO</button>
+    </form>
+  </div>
+</section>
+
+<section class="panel" id="announcement" style="margin-top:14px">
+  <h3>Announcement Bar</h3>
+  <div class="body">
+    <p class="dim">The scrolling message bar at the top of every page. One message per line; blank lines are ignored. Switch the bar off — or clear every line — to show nothing.</p>
+    <form method="post" action="/admin/settings/save" class="admin-form">
+      <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+      <input type="hidden" name="category" value="announcement">
+      <label class="choice"><input type="checkbox" name="announcement_enabled" value="1" <?= ($ann['announcement_enabled'] ?? '1') === '1' ? 'checked' : '' ?>> Show the announcement bar</label>
+      <label>Messages (one per line)<textarea name="announcement_messages" rows="4" maxlength="2000" placeholder="Welcome to WINDELS AI WORKFORCE — your AI-powered workforce platform."><?= e($ann['announcement_messages'] ?? '') ?></textarea></label>
+      <button class="btn primary" type="submit">Save announcement</button>
     </form>
   </div>
 </section>
