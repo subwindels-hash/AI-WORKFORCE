@@ -113,6 +113,19 @@ trait HttpTransport
     {
         $decoded = json_decode($resp['body'] ?? '', true);
         if (!is_array($decoded)) throw new ProviderException('invalid JSON response', ProviderException::DATA_ERROR);
+        // api-football answers some failures (missing key, bad parameters)
+        // with HTTP 200 and a non-empty `errors` object. Surface it as a
+        // classified error instead of letting callers read the empty
+        // `response` as "no data" (a blank key must never read as ONLINE).
+        if (!empty($decoded['errors'])) {
+            $errors = (array) $decoded['errors'];
+            $first = reset($errors);
+            $msg = is_string($first) ? $first : json_encode($decoded['errors']);
+            $status = array_key_exists('token', $errors)
+                ? ProviderException::AUTHENTICATION_ERROR
+                : ProviderException::DATA_ERROR;
+            throw new ProviderException('provider error: ' . mb_substr((string) $msg, 0, 200), $status);
+        }
         return $decoded;
     }
 

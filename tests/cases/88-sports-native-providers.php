@@ -1001,3 +1001,33 @@ test('api-football pagination is bounded when paging.total misbehaves', function
     $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15']);
     assert_equals(40, count($urls), 'hard cap of 40 pages prevents an endless loop');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6. API-FOOTBALL SOFT ERRORS (HTTP 200 + non-empty errors object)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('api-football: missing key must not read as ONLINE (HTTP 200 soft error)', function () {
+    // The real API answers a missing/blank key with HTTP 200 and
+    // errors.token — the old code parsed that as a healthy, keyless ONLINE.
+    $body = json_encode([
+        'get' => '', 'parameters' => [],
+        'errors' => ['token' => 'Missing application key, Check our documentation on how to add your API key in headers.'],
+        'results' => 0, 'paging' => ['current' => 1, 'total' => 1], 'response' => [],
+    ]);
+    $p = new ApiFootballProvider(' ', 'https://v3.football.api-sports.io', 10, makeTransport(200, $body));
+    $health = $p->health();
+    assert_equals('AUTHENTICATION_ERROR', $health['status'], 'token soft error classifies as auth failure');
+    assert_throws(ProviderException::class, fn() => $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15']), 'soft error must not read as zero fixtures');
+});
+
+test('api-football: non-token soft errors classify as data errors', function () {
+    $body = json_encode(['errors' => ['league' => 'The league you are searching for does not exist'], 'response' => []]);
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, makeTransport(200, $body));
+    try {
+        $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15']);
+        throw new Exception('expected a ProviderException for the soft error');
+    } catch (ProviderException $e) {
+        assert_equals(ProviderException::DATA_ERROR, $e->status, 'non-token soft error is a data error');
+        assert_contains('league', $e->getMessage(), 'the API message is surfaced');
+    }
+});
