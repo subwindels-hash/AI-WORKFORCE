@@ -2,8 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { EuroMillionsWidget, LotteryWidget } from '../../components/lottery';
-import type { LiDashboard } from '../../components/lottery/types';
+import { EuroMillionsWidget } from '../../../components/lottery';
+import type { LiDashboard } from '../../../components/lottery/types';
 
 export default function DashboardPage() {
   const [lotteryDashboard, setLotteryDashboard] = useState<LiDashboard | null>(null);
@@ -31,8 +31,8 @@ export default function DashboardPage() {
         const hotResponse = await fetch('/api/lottery/statistics/hot-cold?window=0');
         if (hotResponse.ok) {
           const data = await hotResponse.json();
-          setHotNumbers(data.data?.hot || []);
-          setColdNumbers(data.data?.cold || []);
+          setHotNumbers(Array.isArray(data.hot) ? data.hot : []);
+          setColdNumbers(Array.isArray(data.cold) ? data.cold : []);
         }
       } catch (error) {
         console.error('Failed to fetch statistics:', error);

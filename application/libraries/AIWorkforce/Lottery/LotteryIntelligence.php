@@ -169,13 +169,35 @@ class LotteryIntelligence
     public function presentDraw(array $row): array
     {
         $payload = is_array($row['payload'] ?? null) ? $row['payload'] : [];
-        $mains = array_map('intval', (array) ($payload['main'] ?? []));
-        $stars = array_map('intval', (array) ($payload['stars'] ?? []));
+        // Ascending canonical form, even for rows stored before normalization —
+        // the Last Verified Draw and every list surface the same sorted line.
+        $mains = self::normalizeGroup($payload['main'] ?? []);
+        $stars = self::normalizeGroup($payload['stars'] ?? []);
         $row['numbers'] = ['main' => $mains, 'stars' => $stars];
         $row['main_numbers'] = $mains;
         $row['lucky_stars'] = $stars;
         $row['draw_no'] = $row['external_id'] ?? ($row['id'] ?? '');
         return $row;
+    }
+
+    /**
+     * Canonical form of one number group: integers, ascending. EuroMillions is
+     * a single shared draw — the winning combination is a SET, so matching and
+     * storage never depend on the order the feed happened to send it in.
+     * @param mixed $values
+     * @return list<int>
+     */
+    private static function normalizeGroup($values): array
+    {
+        $out = array_values(array_map('intval', (array) ($values ?? [])));
+        sort($out);
+        return $out;
+    }
+
+    /** Two number groups hold the same values regardless of order. */
+    private static function sameNumbers(array $a, array $b): bool
+    {
+        return self::normalizeGroup($a) === self::normalizeGroup($b);
     }
 
     public function drawCount(): int
@@ -455,11 +477,22 @@ class LotteryIntelligence
                 ], 'system');
                 continue;
             }
-            $numbers = ['main' => array_values($raw['main']), 'stars' => array_values($raw['stars'])];
+            // Normalize each group to ints in ascending order: EuroMillions is
+            // ONE shared draw and the winning combination is order-insensitive —
+            // "46 27 12 19 11" IS "11 12 19 27 46". Storing ascending makes the
+            // database the single canonical form every consumer (Last Verified
+            // Draw, statistics, Strategy Lab, backtesting) reads.
+            $numbers = [
+                'main' => self::normalizeGroup($raw['main'] ?? null),
+                'stars' => self::normalizeGroup($raw['stars'] ?? null),
+            ];
             $existing = $this->repo->findDrawByExternal(self::LOTTERY, $externalId);
             if ($existing) {
                 $existingPayload = is_array($existing['payload'] ?? null) ? $existing['payload'] : [];
-                $same = ($existingPayload['main'] ?? null) === $numbers['main'] && ($existingPayload['stars'] ?? null) === $numbers['stars'];
+                // Idempotency is order-insensitive too: the same five mains in a
+                // different order are the same draw, never a conflict.
+                $same = self::sameNumbers((array) ($existingPayload['main'] ?? []), $numbers['main'])
+                    && self::sameNumbers((array) ($existingPayload['stars'] ?? []), $numbers['stars']);
                 if ($same) {
                     $summary['unchanged']++; // idempotent — verified data never silently touched
                     continue;
@@ -467,7 +500,9 @@ class LotteryIntelligence
                 if (($existing['verification_status'] ?? '') === 'VERIFIED') {
                     $summary['conflicts']++;
                     $this->audit->emit('LOTTERY_RESULT_CONFLICT', 'Verified draw ' . $externalId . ' differs from provider data — NOT overwritten; manual correction required', [
-                        'externalId' => $externalId, 'existing' => $numbers, 'incoming' => $numbers,
+                        'externalId' => $externalId,
+                        'existing' => ['main' => $existingPayload['main'] ?? null, 'stars' => $existingPayload['stars'] ?? null],
+                        'incoming' => $numbers,
                         'existingMain' => $existingPayload['main'] ?? null, 'incomingMain' => $numbers['main'],
                     ], 'system');
                     continue;
@@ -500,6 +535,9 @@ class LotteryIntelligence
             'source' => (string) $raw['source'],
             'source_timestamp' => (string) $raw['sourceTimestamp'],
             'retrieved_at' => gmdate('c'),
+            // `drawRow()` is only ever called after LotteryResultValidator has
+            // passed the draw — so a row is marked VERIFIED strictly after
+            // successful validation, never before and never for a rejected draw.
             'verification_status' => 'VERIFIED',
             'payload' => json_encode([
                 'main' => $numbers['main'], 'stars' => $numbers['stars'],
@@ -529,10 +567,16 @@ class LotteryIntelligence
 
     // ----------------------------------------------------------------- reads
 
-    /** @return array<int,array<string,mixed>> */
+    /**
+     * @return array<int,array<string,mixed>> newest first; every row is
+     * presented in canonical ascending form (`numbers`/`main_numbers`/
+     * `lucky_stars`) so the workspace \"Recent Draw Results\" and the API
+     * draws list render the exact same sorted line as the Last Verified Draw.
+     */
     public function listDraws(int $limit = 50, ?string $from = null, ?string $to = null): array
     {
-        return $this->repo->listDraws(['lotteryCode' => self::LOTTERY, 'from' => $from, 'to' => $to], $limit);
+        $rows = $this->repo->listDraws(['lotteryCode' => self::LOTTERY, 'from' => $from, 'to' => $to], $limit);
+        return array_map(fn(array $row) => $this->presentDraw($row), $rows);
     }
 
     /** @return array<string,mixed>|null */
