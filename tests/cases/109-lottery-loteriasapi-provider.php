@@ -671,6 +671,39 @@ test('empty dataset: AI generation refuses to fake history instead of falling ba
     assert_false($random['dataset']['usedForGeneration']);
 });
 
+test('a down feed with stored history reads STORED DATA, never NO_DATA', function () {
+    $repo = new LotteryRepositoryStub();
+    [$live] = fx_loterias_history_provider(6);
+    $intel = new LotteryIntelligence($repo, fx_loterias_audit(), $live);
+    $intel->sync(50);
+    assert_equals(6, $intel->verifiedDrawCount());
+
+    // Same database, but the feed is now unreachable.
+    [$down] = fx_loterias_provider(fn() => ['status' => 503, 'body' => 'gateway down']);
+    $status = (new LotteryIntelligence($repo, fx_loterias_audit(), $down))->status();
+    assert_equals('STORED DATA', $status['status'], 'stored verified draws are never reported as NO_DATA');
+    assert_true($status['dataAvailable']);
+    assert_equals(6, $status['verifiedDraws']);
+    assert_equals(6, $status['historicalDataset']['draws'], 'statistics still have their dataset');
+});
+
+test('sync state falls back to the stored draws when the active provider has no health row', function () {
+    $repo = new LotteryRepositoryStub();
+    [$live] = fx_loterias_history_provider(5);
+    (new LotteryIntelligence($repo, fx_loterias_audit(), $live))->sync(50);
+
+    // A different provider instance (reconfigured feed) has no health history.
+    [$other] = fx_loterias_provider(fn() => fx_loterias_json(fx_loterias_live_envelope(fx_loterias_live_payload())));
+    $fresh = new LotteryIntelligence(new LotteryRepositoryStub(), fx_loterias_audit(), $other);
+    assert_equals('NEVER_SYNCED', $fresh->status()['syncStatus'], 'an empty database really has never synced');
+
+    $repo->health = [];   // drop the health history, keep the draws
+    $stale = (new LotteryIntelligence($repo, fx_loterias_audit(), $other))->status();
+    assert_equals('STALE', $stale['syncStatus']);
+    assert_not_null($stale['lastSuccessfulSync'], 'the stored draws date the last successful ingestion');
+    assert_contains('stored verified draws', $stale['syncMessage']);
+});
+
 test('lottery reports DATA UNAVAILABLE when LoteriasAPI cannot be reached', function () {
     $repo = new LotteryRepositoryStub();
     $audit = fx_loterias_audit();

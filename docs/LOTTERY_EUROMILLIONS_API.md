@@ -258,7 +258,7 @@ random numbers; `RANDOM` remains available as an explicitly labeled baseline.
 | `verifiedDraws` | VERIFIED draws currently in the database |
 | `lastSuccessfulSync` | newest `last_success_at` in the provider health history |
 | `lastSyncAttempt` | when the last sync ran, successful or not |
-| `syncStatus` | `OK` / `DEGRADED` / `FAILED` / `NEVER_SYNCED` |
+| `syncStatus` | `OK` / `DEGRADED` / `STALE` / `FAILED` / `NEVER_SYNCED` |
 | `syncMessage` | human-readable explanation |
 | `dataAvailable` | whether any verified draw is stored |
 | `jackpotSource` | `PROVIDER_FEED` or `STORED_DRAW` — proves the amount is not hardcoded |

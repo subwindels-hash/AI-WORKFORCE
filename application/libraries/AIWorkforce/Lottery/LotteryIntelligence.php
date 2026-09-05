@@ -25,6 +25,8 @@ class LotteryIntelligence
     public const ENGINE_ACTIVE = 'ACTIVE';
     /** Honest dashboard state: the feed failed AND nothing verified is stored. */
     public const STATUS_DATA_UNAVAILABLE = 'DATA UNAVAILABLE';
+    /** The live feed is not serving, but verified historical draws ARE stored. */
+    public const STATUS_STORED_DATA = 'STORED DATA';
     public const VERIFIED = 'VERIFIED';
 
     public readonly LotteryStatisticsEngine $statistics;
@@ -95,11 +97,18 @@ class LotteryIntelligence
         // nothing verified is stored, the module says DATA UNAVAILABLE — it
         // never presents an empty dataset as "no lottery data exists".
         // A feed that is configured but unreachable is DATA UNAVAILABLE; an
-        // unconfigured feed stays NO_DATA (nothing was ever connected).
+        // unconfigured feed stays NO_DATA (nothing was ever connected). When
+        // verified draws ARE stored, the module never claims NO_DATA — the
+        // live feed is down, the historical dataset is not.
         $dataAvailable = $verified > 0;
         $providerState = (string) ($health['state'] ?? '');
-        if (!$enabled && !$dataAvailable && ($providerState === 'OFFLINE' || $providerState === 'DEGRADED' || $providerState === 'ERROR')) {
-            $uiStatus = self::STATUS_DATA_UNAVAILABLE;
+        $feedFailed = in_array($providerState, ['OFFLINE', 'DEGRADED', 'ERROR'], true);
+        if (!$enabled) {
+            if ($dataAvailable) {
+                $uiStatus = self::STATUS_STORED_DATA;
+            } elseif ($feedFailed) {
+                $uiStatus = self::STATUS_DATA_UNAVAILABLE;
+            }
         }
         return [
             'module' => 'lottery-intelligence',
@@ -225,6 +234,17 @@ class LotteryIntelligence
         $lastAttempt = $latest !== null ? (string) ($latest['observed_at'] ?? '') : null;
         if ($lastAttempt === '') $lastAttempt = null;
         if ($latest === null) {
+            // No health row for the ACTIVE provider (e.g. the feed was
+            // reconfigured, or draws were ingested by another provider). The
+            // stored draws still prove when data last landed — report that
+            // rather than claiming nothing ever synchronized.
+            $stored = $this->repo->listDraws(['lotteryCode' => self::LOTTERY, 'verificationStatus' => self::VERIFIED], 1);
+            $retrieved = $stored !== [] ? (string) ($stored[0]['retrieved_at'] ?? '') : '';
+            if ($retrieved !== '') {
+                return ['status' => 'STALE', 'lastSuccessAt' => $retrieved, 'lastAttemptAt' => $retrieved,
+                    'message' => 'Serving stored verified draws. The active provider has not synchronized yet — '
+                        . 'the newest verified data was retrieved at ' . $retrieved . '.'];
+            }
             return ['status' => 'NEVER_SYNCED', 'lastSuccessAt' => null, 'lastAttemptAt' => null,
                 'message' => 'No synchronization has run yet for this provider.'];
         }

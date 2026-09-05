@@ -69,7 +69,7 @@ window.__AI_LOTTERY_STATE__ = <?= $stateJson ?>;
         ? '<span class="badge b-red">DATA UNAVAILABLE</span>'
         : '<span class="badge b-amber">'+e(s.status)+'</span>');
 
-  const syncBadgeClass = { OK: 'b-green', DEGRADED: 'b-amber', FAILED: 'b-red', NEVER_SYNCED: 'b-amber' }[s.syncStatus] || 'b-amber';
+  const syncBadgeClass = { OK: 'b-green', DEGRADED: 'b-amber', STALE: 'b-amber', FAILED: 'b-red', NEVER_SYNCED: 'b-amber' }[s.syncStatus] || 'b-amber';
   const verified = (s.verifiedDraws != null ? s.verifiedDraws : (s.imported || 0));
   const ds = s.historicalDataset || {};
   const js = s.jackpotSource || {};
