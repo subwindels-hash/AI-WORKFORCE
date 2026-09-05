@@ -344,7 +344,7 @@ class Workspace extends App_Controller
         return $out;
     }
 
-    private function windellsAIWidgetData(): array
+    private function windelsAIWidgetData(): array
     {
         $out = [
             'agents' => [],
