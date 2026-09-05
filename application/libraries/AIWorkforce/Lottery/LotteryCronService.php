@@ -15,7 +15,7 @@ use AIWorkforce\Persistence\LotteryRepository;
  */
 class LotteryCronService
 {
-    public const JOBS = ['sync', 'health', 'statistics', 'systems', 'tickets', 'backtests', 'cleanup'];
+    public const JOBS = ['sync', 'health', 'statistics', 'systems', 'tickets', 'backtests', 'intelligence', 'cleanup'];
 
     public function __construct(
         private LotteryRepository $repo,
@@ -49,6 +49,7 @@ class LotteryCronService
             'systems' => $this->jobSystems(),
             'tickets' => $this->jobTickets(),
             'backtests' => $this->jobBacktests($date),
+            'intelligence' => $this->jobIntelligence($date),
             'cleanup' => $this->jobCleanup(),
             default => throw new \InvalidArgumentException('unknown lottery job: ' . $job),
         };
@@ -251,5 +252,52 @@ class LotteryCronService
         $this->repo->deleteOldJobRuns($runCutoff);
         $this->repo->deleteOldHealth($healthCutoff);
         return ['status' => 'OK', 'runCutoff' => $runCutoff, 'healthCutoff' => $healthCutoff];
+    }
+
+    /**
+     * Lottery Intelligence report refresh (scheduled): regenerate the ranked
+     * candidate analysis only when a NEW verified draw has landed since the
+     * latest persisted report. Idempotent per day + newest draw date — a
+     * re-run for the same data is a no-op, so it is safe to schedule after
+     * every `sync`.
+     */
+    private function jobIntelligence(string $date): array
+    {
+        $latestDraw = $this->lottery->latestVerifiedDraw();
+        if ($latestDraw === null) {
+            return ['status' => 'SKIPPED_NO_DATA', 'note' => 'no verified draws stored yet — run the sync job first'];
+        }
+        $report = $this->lottery->latestIntelligenceReport();
+        $covered = $report['asOfDrawDate'] ?? null;
+        if ($report !== null && $covered === (string) $latestDraw['draw_date']) {
+            return ['status' => 'UP_TO_DATE', 'note' => 'the analysis already covers the newest verified draw (' . $latestDraw['draw_date'] . ')'];
+        }
+        $key = 'intelligence:EUROMILLIONS:' . $date . ':' . $latestDraw['draw_date'];
+        $run = $this->repo->startJobRun([
+            'id' => \AIWorkforce\Backtest\Backtester::uuid(),
+            'jobType' => 'intelligence',
+            'executionKey' => $key,
+        ]);
+        if ($run === null) {
+            return ['status' => 'ALREADY_RUN', 'note' => 'intelligence already generated for ' . $latestDraw['draw_date'] . ' (idempotent)'];
+        }
+        try {
+            $result = $this->lottery->runIntelligence(5, null, false, 'system');
+            $this->repo->finishJobRun((string) $run['id'], [
+                'status' => 'OK',
+                'processed' => (int) $result['historicalDrawsAnalyzed'],
+                'created' => 1,
+                'updated' => 0,
+                'errors' => [],
+            ]);
+            return ['status' => 'OK', 'drawsAnalyzed' => $result['historicalDrawsAnalyzed'], 'bestLine' => $result['bestLine'] ?? null];
+        } catch (\Throwable $e) {
+            $this->repo->finishJobRun((string) $run['id'], [
+                'status' => 'FAILED', 'processed' => 0, 'created' => 0, 'updated' => 0,
+                'errors' => [mb_substr($e->getMessage(), 0, 300)],
+            ]);
+            $this->audit->emit('LOTTERY_INTELLIGENCE_FAILED', 'Scheduled Lottery Intelligence analysis failed: ' . $e->getMessage(), [], 'system');
+            return ['status' => 'FAILED', 'error' => mb_substr($e->getMessage(), 0, 300)];
+        }
     }
 }

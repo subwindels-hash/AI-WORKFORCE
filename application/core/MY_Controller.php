@@ -292,6 +292,7 @@ class Api_controller extends MY_Controller
         'api_lottery/backtests' => true,
         'api_lottery/models' => true,
         'api_lottery/performance' => true,
+        'api_lottery/intelligence' => true,
         'api_lottery/providers' => true,
         'api_lottery/health' => true,
         'api_lottery/jobs' => true,

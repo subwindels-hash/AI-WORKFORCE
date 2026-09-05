@@ -50,6 +50,9 @@ class Lottery extends App_Controller
         try {
             $backtests = $this->platform->lottery->listBacktests(10);
         } catch (\Throwable $e) { $backtests = []; }
+        try {
+            $intelligence = $this->platform->lottery->intelligenceSnapshot();
+        } catch (\Throwable $e) { $intelligence = ['report' => null, 'live' => []]; }
 
         $data = [
             'title' => 'EuroMillions · Lottery Intelligence',
@@ -65,6 +68,7 @@ class Lottery extends App_Controller
                 'myTickets' => $myTickets,
                 'recentCombinations' => $recentCombinations,
                 'backtests' => $backtests,
+                'intelligence' => $intelligence,
                 'me' => ['id' => (int)$user['id'], 'name' => (string)($user['name'] ?? ''), 'canManage' => $canManage],
                 'endpoints' => [
                     'status' => '/api/lottery/status',
@@ -81,6 +85,8 @@ class Lottery extends App_Controller
                     'backtests' => '/api/lottery/backtests',
                     'models' => '/api/lottery/models',
                     'performance' => '/api/lottery/performance',
+                    'intelligence' => '/api/lottery/intelligence',
+                    'intelligenceRun' => '/api/lottery/intelligence/run',
                 ],
             ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
         ];

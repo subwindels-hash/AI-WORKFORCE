@@ -553,6 +553,36 @@ class Api_lottery extends Api_controller
         $this->json($this->platform->lottery->performance());
     }
 
+    /**
+     * Lottery Intelligence analysis + candidate suggestions (read-only, public).
+     * Returns the latest persisted report plus live status (latest verified
+     * draw, sync state). Nothing here exposes the provider API key — the
+     * report only ever carries the provider id and draw-level source.
+     */
+    public function intelligence()
+    {
+        // Public endpoint - no auth required (read-only, no secrets, no PII).
+        $this->json($this->platform->lottery->intelligenceSnapshot());
+    }
+
+    /**
+     * "Run Lottery Intelligence" (Super Admin / lottery.manage): sync the
+     * configured provider, re-analyse the verified dataset and persist the
+     * ranked candidate report. POST {lines?: 1-20, seed?: int}.
+     */
+    public function intelligence_run()
+    {
+        if (!$this->requirePermission('lottery.manage')) return;
+        $body = $this->jsonBody();
+        $lines = min(20, max(1, (int) ($body['lines'] ?? 5)));
+        $seed = isset($body['seed']) && $body['seed'] !== null ? (int) $body['seed'] : null;
+        try {
+            $this->json($this->platform->lottery->runIntelligence($lines, $seed, true, (string) $this->identity['id']));
+        } catch (\InvalidArgumentException $e) {
+            $this->jsonError($e->getMessage(), 400);
+        }
+    }
+
     /** Synchronize draws from the configured provider (idempotent, audited). */
     public function sync()
     {
