@@ -32,9 +32,14 @@ $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
 .wf-msg.assistant .wf-bubble{background:var(--panel2);color:var(--text);border-bottom-left-radius:2px}
 .wf-msg.user .wf-bubble{background:var(--brand);color:#fff;border-bottom-right-radius:2px}
 .wf-msg.system .wf-bubble{background:transparent;border:1px dashed var(--line);color:var(--dim);font-size:11px;max-width:100%}
-.wf-chat-foot{padding:14px 18px;border-top:1px solid var(--line);display:flex;gap:8px}
-.wf-chat-foot textarea{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 12px;color:var(--text);font:inherit;resize:none;min-height:44px}
+.wf-chat-foot{padding:14px 18px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+.wf-chat-typing-session{display:flex;flex-direction:column;gap:6px;width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface)}
+.wf-chat-typing-label{font-size:10px;font-weight:700;letter-spacing:.02em;color:var(--dim)}
+.wf-chat-foot textarea{width:100%;box-sizing:border-box;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 12px;color:var(--text);font:inherit;resize:none;min-height:44px}
 .wf-chat-foot textarea:focus{outline:none;border-color:var(--brand)}
+.wf-chat-controls{display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;padding-top:8px;border-top:1px dashed var(--line)}
+.wf-chat-voice-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.wf-chat-send{margin-left:0}
 .wf-chat-foot button{background:var(--brand);color:#fff;border:none;border-radius:var(--radius-sm);padding:10px 18px;font:600 13px/1 inherit;cursor:pointer;transition:background .15s}
 .wf-chat-foot button:hover:not(:disabled){background:var(--brand-hover,var(--brand))}
 .wf-chat-foot button:disabled{opacity:.5;cursor:not-allowed}
@@ -159,10 +164,17 @@ $ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
   </div>
   <div class="wf-chat-body" id="chat-body"></div>
   <div class="wf-chat-foot">
-    <button type="button" id="wf-chat-mic" class="wf-chat-mic" aria-label="Tap to speak">🎤 Tap to Speak</button>
-    <button type="button" id="wf-chat-mic-stop" class="wf-chat-mic-stop" disabled>⏹ Stop</button>
-    <textarea id="chat-input" placeholder="Ask the agent a question..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"></textarea>
-    <button id="chat-send" onclick="sendMessage()"><?= $ic ?><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg> Send</button>
+    <div class="wf-chat-typing-session">
+      <label class="wf-chat-typing-label" for="chat-input">WINDELS Assistant typing session</label>
+      <textarea id="chat-input" placeholder="Ask the agent a question..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"></textarea>
+    </div>
+    <div class="wf-chat-controls">
+      <div class="wf-chat-voice-controls">
+        <button type="button" id="wf-chat-mic" class="wf-chat-mic" aria-label="Speak">🎤 Speak</button>
+        <button type="button" id="wf-chat-mic-stop" class="wf-chat-mic-stop" disabled>⏹ Stop</button>
+      </div>
+      <button id="chat-send" class="wf-chat-send" onclick="sendMessage()"><?= $ic ?><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg> Send</button>
+    </div>
   </div>
 </div>
 
@@ -318,10 +330,10 @@ document.getElementById('chat-input').addEventListener('input', function() {
   var chatInput = document.getElementById('chat-input');
   if (!speech || !micBtn || !chatInput) return;
 
-  // Wire 🎤 Tap to Speak with 30s min wait + Stop button.
+  // Wire 🎤 Speak with 30s min wait + Stop button.
   speech.bindMic(micBtn, chatInput, {
     locale: 'en-GB',
-    idleLabel: '🎤 Tap to Speak',
+    idleLabel: '🎤 Speak',
     recordingLabel: '🎤 Listening…',
     stopButton: micStop,
     minListenMs: 30000,
