@@ -35,6 +35,14 @@ class Api_lottery extends Api_controller
             'lastDraw' => null,
             'recentDraws' => [],
             'imported' => 0,
+            'verifiedDraws' => 0,
+            'dataAvailable' => false,
+            'jackpotSource' => null,
+            'historicalDataset' => null,
+            'lastSuccessfulSync' => null,
+            'lastSyncAttempt' => null,
+            'syncStatus' => 'UNKNOWN',
+            'syncMessage' => 'DATA UNAVAILABLE — the lottery module could not be read.',
             'myTicketsCount' => 0,
             'rules' => ['mains' => 5, 'mainMax' => 50, 'stars' => 2, 'starMax' => 12],
             'lotteries' => [['code' => 'euromillions', 'name' => 'EuroMillions']],
@@ -47,6 +55,14 @@ class Api_lottery extends Api_controller
             $out['nextEstimated'] = $status['nextEstimated'] ?? null;
             $out['lastDraw'] = $status['lastDraw'] ?? null;
             $out['imported'] = $status['imported'] ?? 0;
+            $out['verifiedDraws'] = $status['verifiedDraws'] ?? 0;
+            $out['dataAvailable'] = (bool) ($status['dataAvailable'] ?? false);
+            $out['jackpotSource'] = $status['jackpotSource'] ?? null;
+            $out['historicalDataset'] = $status['historicalDataset'] ?? null;
+            $out['lastSuccessfulSync'] = $status['lastSuccessfulSync'] ?? null;
+            $out['lastSyncAttempt'] = $status['lastSyncAttempt'] ?? null;
+            $out['syncStatus'] = $status['syncStatus'] ?? 'UNKNOWN';
+            $out['syncMessage'] = $status['syncMessage'] ?? '';
             $out['rules'] = $status['rules'] ?? $out['rules'];
             $out['lotteries'] = $status['lotteries'] ?? $out['lotteries'];
             
@@ -64,6 +80,7 @@ class Api_lottery extends Api_controller
             
             // Get recent draws
             $out['recentDraws'] = $this->platform->lottery->listDraws(3, null, null);
+
             
             // Get user's tickets count
             if ($userId) {

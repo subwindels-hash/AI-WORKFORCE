@@ -62,9 +62,20 @@ window.__AI_LOTTERY_STATE__ = <?= $stateJson ?>;
   root.innerHTML = '';
 
   const s = state.status;
+  const dataUnavailable = s.status === 'DATA UNAVAILABLE';
   const statusBadge = s.status === 'ONLINE' || s.status === 'OK'
     ? '<span class="badge b-green">'+e(s.status)+'</span>'
-    : '<span class="badge b-amber">'+e(s.status)+'</span>';
+    : (dataUnavailable
+        ? '<span class="badge b-red">DATA UNAVAILABLE</span>'
+        : '<span class="badge b-amber">'+e(s.status)+'</span>');
+
+  const syncBadgeClass = { OK: 'b-green', DEGRADED: 'b-amber', FAILED: 'b-red', NEVER_SYNCED: 'b-amber' }[s.syncStatus] || 'b-amber';
+  const verified = (s.verifiedDraws != null ? s.verifiedDraws : (s.imported || 0));
+  const ds = s.historicalDataset || {};
+  const js = s.jackpotSource || {};
+  const jackpotOrigin = js.origin === 'PROVIDER_FEED'
+    ? 'live LoteriasAPI response' + (js.observedAt ? ' (observed ' + e(js.observedAt) + ')' : '')
+    : (js.origin === 'STORED_DRAW' ? 'stored verified draw' : 'no feed value — nothing displayed');
 
   const lastDraw = s.lastDraw;
   let lastDrawHtml = '<p class="dim">No verified draw imported yet. Connect an official EuroMillions source (e.g. LoteriasAPI) in Admin → API.</p>';
@@ -79,7 +90,8 @@ window.__AI_LOTTERY_STATE__ = <?= $stateJson ?>;
     <div class="lottery-grid">
       <div class="lottery-card">
         <h3>Next draw ${statusBadge}</h3>
-        <div class="lottery-jackpot">${e(s.jackpot || '—')}</div>
+        <div class="lottery-jackpot">${e(s.jackpot ? '€' + Number(s.jackpot).toLocaleString('en-GB') : '—')}</div>
+        <div class="lottery-meta">jackpot source: ${jackpotOrigin}</div>
         <div class="lottery-meta">provider: ${e((s.provider && (s.provider.source || s.provider.id)) || s.providerLabel || 'none')} · imported ${e(s.imported||s.drawsTracked||0)} verified draws</div>
         <div class="lottery-meta">${e((s.provider && s.provider.message) || '')}</div>
         <div class="lottery-actions">
@@ -91,6 +103,14 @@ window.__AI_LOTTERY_STATE__ = <?= $stateJson ?>;
       <div class="lottery-card">
         <h3>Last verified draw</h3>
         ${lastDrawHtml}
+      </div>
+      <div class="lottery-card" data-panel="sync-status">
+        <h3>Historical data sync <span class="badge ${syncBadgeClass}">${e(s.syncStatus || 'UNKNOWN')}</span></h3>
+        <div class="lottery-meta">verified draws in database: <strong data-verified-draws>${e(verified)}</strong></div>
+        <div class="lottery-meta">last successful sync: <strong>${e(s.lastSuccessfulSync || 'never')}</strong></div>
+        <div class="lottery-meta">last sync attempt: ${e(s.lastSyncAttempt || 'never')}</div>
+        <div class="lottery-meta">dataset: ${ds.available ? e(ds.draws) + ' draws (' + e(ds.from) + ' → ' + e(ds.to) + ')' : 'DATA UNAVAILABLE — no verified historical draws stored'}</div>
+        <div class="lottery-meta">${e(s.syncMessage || '')}</div>
       </div>
       <div class="lottery-card">
         <h3>Quick links</h3>

@@ -133,7 +133,7 @@ php index.php tools lottery-cron sync
 php index.php tools scheduler lottery
 
 # 4. Automated tests
-php index.php tools tests            # includes tests/cases/109-lottery-loteriasapi-provider.php (17 tests)
+php index.php tools tests            # includes tests/cases/109-lottery-loteriasapi-provider.php (24 tests)
 ```
 
 `lottery-smoke` output on a working key:
@@ -205,3 +205,70 @@ Two consequences the adapter already handles, but operators should know:
 
 The daily `sync` cron job needs only a handful of calls per draw day
 (EuroMillions draws Tuesday and Friday).
+
+
+---
+
+## Historical draw synchronization
+
+`sync()` walks three sources in order of richness, so a plan without the
+`/range` endpoint still builds a real history instead of a single draw:
+
+```
+1. GET /results/{game}/range?from=&to=&page=&limit=   (365-day windows, paged)
+2. GET /results/{game}?page=&limit=&sort=&order=      (paged history listing)
+3. GET /results/{game}/latest                         (single draw, last resort)
+```
+
+Every returned draw is de-duplicated by `externalId|drawDate`, validated by
+`LotteryResultValidator` (5 mains + 2 stars in range, valid date, source and
+source timestamp present) and only then stored as `VERIFIED`. Re-importing the
+same draw is a no-op; a stored VERIFIED draw is never silently overwritten.
+
+Each stored row records: draw date, the 5 main numbers, the 2 Lucky Stars, the
+jackpot, the full prize breakdown (`payload.prizes`: category, label, winners,
+amount) and the jackpot winner count where the feed supplies them.
+
+The first cron sync backfills up to 520 draws (~5 years); later runs pull the
+100-draw delta.
+
+### One dataset for every consumer
+
+`LotteryIntelligence::historicalDataset()` is the single accessor for the
+stored VERIFIED draws. Statistics, the per-line analyzer, the **Strategy Lab**
+(backtests + comparison) and the **AI combination generator** all read it, and
+each report carries a `dataset` stamp:
+
+```json
+{ "source": "VERIFIED_HISTORICAL_DATABASE", "draws": 60,
+  "from": "2026-01-11", "to": "2026-09-04", "datasetVersion": "n=60;last=2026-09-04" }
+```
+
+**Generate 5 AI lines** posts `{"mode":"HISTORICAL","count":5}`. History-backed
+modes (`BALANCED`, `HISTORICAL`, `ANTI-POPULAR`, `DIVERSIFIED`) refuse to run on
+an empty dataset with a `DATA UNAVAILABLE` error rather than degrading into
+random numbers; `RANDOM` remains available as an explicitly labeled baseline.
+
+### Dashboard sync panel
+
+`status()` (and `/api/lottery/dashboard`) expose:
+
+| Field | Meaning |
+|---|---|
+| `verifiedDraws` | VERIFIED draws currently in the database |
+| `lastSuccessfulSync` | newest `last_success_at` in the provider health history |
+| `lastSyncAttempt` | when the last sync ran, successful or not |
+| `syncStatus` | `OK` / `DEGRADED` / `FAILED` / `NEVER_SYNCED` |
+| `syncMessage` | human-readable explanation |
+| `dataAvailable` | whether any verified draw is stored |
+| `jackpotSource` | `PROVIDER_FEED` or `STORED_DRAW` — proves the amount is not hardcoded |
+| `historicalDataset` | dataset provenance stamp (see above) |
+
+### DATA UNAVAILABLE
+
+If LoteriasAPI is configured but unreachable, the module does **not** pretend
+no lottery data exists. The health failure is recorded, audited as
+`LOTTERY_SYNC_FAILED`, `sync()` returns `status: "DATA UNAVAILABLE"`, and the
+dashboard renders a red **DATA UNAVAILABLE** badge together with the last
+successful sync. An unconfigured feed still reads as `NO_DATA` (nothing was
+ever connected).

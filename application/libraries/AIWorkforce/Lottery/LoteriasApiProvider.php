@@ -223,6 +223,16 @@ final class LoteriasApiProvider implements LotteryProvider
         }
         $fromLatest = false;
         if ($rows === []) {
+            // Not every plan exposes /range. The documented listing route
+            // (GET /results/{game}?page=&limit=&sort=&order=) is the second
+            // source of history before we degrade to a single latest draw.
+            try {
+                $rows = $this->historyRows($limit);
+            } catch (\Throwable $e) {
+                $rows = [];
+            }
+        }
+        if ($rows === []) {
             try {
                 $single = $this->latest();
                 $rows = ($single !== [] && (isset($single['combination']) || isset($single['numbers'])
@@ -235,6 +245,7 @@ final class LoteriasApiProvider implements LotteryProvider
         }
 
         $out = [];
+        $seen = [];
         foreach ($rows as $row) {
             // Only the /latest fallback borrows the envelope timestamp: it is
             // the vendor's own stamp for that single draw.
@@ -244,6 +255,10 @@ final class LoteriasApiProvider implements LotteryProvider
             // upstream range filter is authoritative.
             if ($explicitFrom !== null && $draw['drawDate'] < $explicitFrom) continue;
             if ($explicitTo !== null && $draw['drawDate'] > $explicitTo) continue;
+            // Windowed/paged queries can overlap — one draw id is one draw.
+            $key = (string) $draw['externalId'] . '|' . (string) $draw['drawDate'];
+            if (isset($seen[$key])) continue;
+            $seen[$key] = true;
             $out[] = $draw;
         }
         usort($out, static fn(array $a, array $b): int => strcmp((string) $b['drawDate'], (string) $a['drawDate']));
@@ -332,6 +347,31 @@ final class LoteriasApiProvider implements LotteryProvider
                 'to' => $to,
                 'page' => $page,
                 'limit' => min(self::PAGE_SIZE, max(1, $limit - count($rows))),
+            ]));
+            $batch = $this->rows($payload);
+            if ($batch === []) break;
+            foreach ($batch as $row) $rows[] = $row;
+            $meta = is_array($payload['meta'] ?? null) ? $payload['meta'] : [];
+            if (empty($meta['hasNext'])) break;
+        }
+        return $rows;
+    }
+
+    /**
+     * Paged history listing: GET /results/{game}?page=&limit=&sort=&order=.
+     * Used when /range yields nothing (plan restriction, empty window) so a
+     * history sync still has a real source before falling back to /latest.
+     * @return list<array<string,mixed>>
+     */
+    private function historyRows(int $limit): array
+    {
+        $rows = [];
+        for ($page = 1; $page <= self::MAX_PAGES && count($rows) < $limit; $page++) {
+            $payload = $this->get($this->endpoint('/results/' . rawurlencode($this->game), [
+                'page' => $page,
+                'limit' => min(self::PAGE_SIZE, max(1, $limit - count($rows))),
+                'sort' => 'drawDate',
+                'order' => 'desc',
             ]));
             $batch = $this->rows($payload);
             if ($batch === []) break;
@@ -447,6 +487,28 @@ final class LoteriasApiProvider implements LotteryProvider
             if ($jackpot !== null && (float) $jackpot <= 0) $jackpot = null;
         }
 
+        // Full prize breakdown (category, label, winners, amount) so the
+        // historical database records prize information and winners where the
+        // vendor supplies them (spec §29: only what is reliably supported).
+        $prizeRows = [];
+        $totalWinners = null;
+        foreach ($prizes as $tier) {
+            if (!is_array($tier)) continue;
+            $winners = isset($tier['winners']) && is_numeric($tier['winners']) ? (int) $tier['winners'] : null;
+            if ($winners !== null) $totalWinners = (int) $totalWinners + $winners;
+            $prizeRows[] = [
+                'category' => isset($tier['category']) && is_scalar($tier['category']) ? (string) $tier['category'] : null,
+                'label' => isset($tier['categoryName']) && is_scalar($tier['categoryName'])
+                    ? (string) $tier['categoryName']
+                    : (isset($tier['match']) && is_scalar($tier['match']) ? (string) $tier['match'] : null),
+                'winners' => $winners,
+                'amount' => $this->parseMoney($tier['formattedPrize'] ?? null)
+                    ?? $this->rawAmount($tier['prizeAmount'] ?? null, true)
+                    ?? $this->rawAmount($tier['prize'] ?? null, false),
+                'currency' => 'EUR',
+            ];
+        }
+
         $timestamp = $row['sourceTimestamp'] ?? ($row['updatedAt'] ?? ($row['createdAt'] ?? ($row['updated_at']
             ?? ($meta['updated_at'] ?? $envelopeTimestamp))));
 
@@ -458,6 +520,8 @@ final class LoteriasApiProvider implements LotteryProvider
             'jackpot' => $jackpot,
             'rollover' => $rollover,
             'winners' => $jackpotWinners,
+            'prizes' => $prizeRows,
+            'totalWinners' => $totalWinners,
             'source' => $this->source,
             'sourceTimestamp' => is_scalar($timestamp) && trim((string) $timestamp) !== ''
                 ? trim((string) $timestamp)

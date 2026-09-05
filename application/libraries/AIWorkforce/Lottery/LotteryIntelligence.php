@@ -23,6 +23,9 @@ class LotteryIntelligence
     public const LOTTERY = 'EUROMILLIONS';
     public const ENGINE_DISABLED = 'DISABLED_NO_PROVIDER';
     public const ENGINE_ACTIVE = 'ACTIVE';
+    /** Honest dashboard state: the feed failed AND nothing verified is stored. */
+    public const STATUS_DATA_UNAVAILABLE = 'DATA UNAVAILABLE';
+    public const VERIFIED = 'VERIFIED';
 
     public readonly LotteryStatisticsEngine $statistics;
     public readonly CombinationAnalyzer $analyzer;
@@ -66,12 +69,38 @@ class LotteryIntelligence
         $last = $this->repo->listDraws(['lotteryCode' => self::LOTTERY], 1);
         $lastDraw = $last !== [] ? $this->presentDraw($last[0]) : null;
         $jackpot = $lastDraw['jackpot'] ?? null;
+        // Where the displayed amount came from — the dashboard must be able to
+        // prove the jackpot is feed data, never a hardcoded figure.
+        $jackpotSource = $jackpot !== null && $jackpot !== ''
+            ? ['origin' => 'STORED_DRAW', 'provider' => $this->provider->id(),
+               'observedAt' => $lastDraw['source_timestamp'] ?? null, 'currency' => 'EUR']
+            : null;
         $jpInfo = $this->provider->jackpotInfo();
         if (is_array($jpInfo) && ($jpInfo['value'] ?? null) !== null && ($jpInfo['value'] ?? '') !== '') {
             $jackpot = $jpInfo['value'];
+            $jackpotSource = [
+                'origin' => 'PROVIDER_FEED',
+                'provider' => $this->provider->id(),
+                'feed' => (string) ($jpInfo['source'] ?? $this->provider->id()),
+                'observedAt' => $jpInfo['observedAt'] ?? null,
+                'currency' => (string) ($jpInfo['currency'] ?? 'EUR'),
+                'hardcoded' => false,
+            ];
         }
         $imported = $this->drawCount();
+        $verified = $this->verifiedDrawCount();
+        $sync = $this->syncState();
         $uiStatus = $enabled ? 'ONLINE' : (($health['state'] ?? '') === 'UNCONFIGURED' ? 'NO_DATA' : (string) ($health['state'] ?? 'NO_DATA'));
+        // Honest failure state (spec §41): when the feed cannot be reached and
+        // nothing verified is stored, the module says DATA UNAVAILABLE — it
+        // never presents an empty dataset as "no lottery data exists".
+        // A feed that is configured but unreachable is DATA UNAVAILABLE; an
+        // unconfigured feed stays NO_DATA (nothing was ever connected).
+        $dataAvailable = $verified > 0;
+        $providerState = (string) ($health['state'] ?? '');
+        if (!$enabled && !$dataAvailable && ($providerState === 'OFFLINE' || $providerState === 'DEGRADED' || $providerState === 'ERROR')) {
+            $uiStatus = self::STATUS_DATA_UNAVAILABLE;
+        }
         return [
             'module' => 'lottery-intelligence',
             'activeLottery' => self::LOTTERY,
@@ -96,7 +125,15 @@ class LotteryIntelligence
             // Dashboard / widget aliases (views/lottery/index.php)
             'status' => $uiStatus,
             'jackpot' => $jackpot,
+            'jackpotSource' => $jackpotSource,
             'imported' => $imported,
+            'verifiedDraws' => $verified,
+            'dataAvailable' => $dataAvailable,
+            'historicalDataset' => $this->datasetInfo(),
+            'lastSuccessfulSync' => $sync['lastSuccessAt'],
+            'lastSyncAttempt' => $sync['lastAttemptAt'],
+            'syncStatus' => $sync['status'],
+            'syncMessage' => $sync['message'],
             'nextEstimated' => $this->nextDrawHint(),
         ];
     }
@@ -131,6 +168,82 @@ class LotteryIntelligence
         return $this->repo->countDraws(self::LOTTERY);
     }
 
+    /**
+     * Draws that passed validation and are stored as official results. Only
+     * these feed the statistics and the AI generator.
+     */
+    public function verifiedDrawCount(): int
+    {
+        return count($this->repo->listDraws([
+            'lotteryCode' => self::LOTTERY,
+            'verificationStatus' => self::VERIFIED,
+        ], 100000));
+    }
+
+    /**
+     * The verified historical dataset every statistical/generation path reads.
+     * A single accessor keeps Strategy Lab, statistics and the generator on
+     * exactly the same rows (and makes "which dataset was used" auditable).
+     * @return list<array{drawDate:string,main:list<int>,stars:list<int>}>
+     */
+    public function historicalDataset(int $limit = 100000): array
+    {
+        return $this->repo->drawsForStats(self::LOTTERY, $limit);
+    }
+
+    /** Dataset provenance stamp shown on the dashboard and every report. */
+    public function datasetInfo(): array
+    {
+        $draws = $this->historicalDataset();
+        $n = count($draws);
+        $first = $n > 0 ? (string) $draws[0]['drawDate'] : null;
+        $last = $n > 0 ? (string) $draws[$n - 1]['drawDate'] : null;
+        return [
+            'source' => 'VERIFIED_HISTORICAL_DATABASE',
+            'draws' => $n,
+            'from' => $first,
+            'to' => $last,
+            'available' => $n > 0,
+            'datasetVersion' => 'n=' . $n . ';last=' . ($last ?? 'none'),
+        ];
+    }
+
+    /**
+     * Last sync attempt / last SUCCESSFUL sync and a coarse status, read from
+     * the recorded provider-health history (never invented).
+     * @return array{status:string,lastSuccessAt:?string,lastAttemptAt:?string,message:string}
+     */
+    public function syncState(): array
+    {
+        $pid = $this->providerRowId();
+        $latest = $pid !== null ? $this->repo->latestHealth($pid) : null;
+        $history = $pid !== null ? $this->repo->listHealth($pid, 50) : [];
+        $lastSuccess = null;
+        foreach ($history as $h) {
+            if (!empty($h['last_success_at'])) { $lastSuccess = (string) $h['last_success_at']; break; }
+        }
+        $lastAttempt = $latest !== null ? (string) ($latest['observed_at'] ?? '') : null;
+        if ($lastAttempt === '') $lastAttempt = null;
+        if ($latest === null) {
+            return ['status' => 'NEVER_SYNCED', 'lastSuccessAt' => null, 'lastAttemptAt' => null,
+                'message' => 'No synchronization has run yet for this provider.'];
+        }
+        $state = strtoupper((string) ($latest['status'] ?? ''));
+        $status = match ($state) {
+            'ONLINE' => 'OK',
+            'DEGRADED' => 'DEGRADED',
+            default => 'FAILED',
+        };
+        if ($lastSuccess === null && $status === 'OK') $lastSuccess = $lastAttempt;
+        $message = match ($status) {
+            'OK' => 'Last synchronization succeeded' . ($lastSuccess !== null ? ' at ' . $lastSuccess : '') . '.',
+            'DEGRADED' => 'The last synchronization returned no usable draws — historical data may be incomplete.',
+            default => 'DATA UNAVAILABLE — the last synchronization failed'
+                . ($lastSuccess !== null ? '; the newest verified data is from ' . $lastSuccess : ' and no verified data has been stored') . '.',
+        };
+        return ['status' => $status, 'lastSuccessAt' => $lastSuccess, 'lastAttemptAt' => $lastAttempt, 'message' => $message];
+    }
+
     // ------------------------------------------------------------------- ingestion
 
     /**
@@ -141,21 +254,55 @@ class LotteryIntelligence
     {
         $health = $this->provider->health();
         if ($health['state'] !== 'ONLINE') {
+            // A configured-but-unreachable feed is a FAILURE, not "no provider":
+            // record it so the dashboard can say DATA UNAVAILABLE honestly.
+            $offline = in_array((string) ($health['state'] ?? ''), ['OFFLINE', 'DEGRADED', 'ERROR'], true);
+            if ($offline) {
+                $pid = $this->providerRowId();
+                if ($pid !== null) {
+                    $this->repo->saveHealth($pid, [
+                        'status' => 'OFFLINE',
+                        'response_ms' => 0,
+                        'records_received' => 0,
+                        'invalid_records' => 0,
+                        'last_success_at' => null,
+                        'last_failure_at' => gmdate('c'),
+                        'last_draw_retrieved' => null,
+                        'synthetic' => !empty($health['synthetic']) ? 1 : 0,
+                    ]);
+                }
+                $this->audit->emit('LOTTERY_SYNC_FAILED', 'Lottery sync could not run: ' . (string) ($health['message'] ?? 'provider unavailable'), [
+                    'provider' => $this->provider->id(), 'state' => $health['state'] ?? null,
+                ], 'system');
+                return ['status' => self::STATUS_DATA_UNAVAILABLE, 'provider' => $this->provider->id(),
+                    'imported' => 0, 'failed' => 0, 'unchanged' => 0, 'conflicts' => 0, 'corrected' => 0,
+                    'verifiedDraws' => $this->verifiedDrawCount(),
+                    'errors' => [['provider' => $this->provider->id(), 'errors' => [(string) ($health['message'] ?? 'provider unavailable')]]],
+                    'message' => 'DATA UNAVAILABLE — ' . (string) ($health['message'] ?? 'the lottery feed is unreachable')];
+            }
             return ['status' => 'NO_PROVIDER', 'provider' => $this->provider->id(), 'imported' => 0, 'failed' => 0, 'unchanged' => 0, 'conflicts' => 0, 'errors' => []];
         }
         $t0 = microtime(true);
-        $raw = $this->provider->draws(null, null, $limit);
+        $error = null;
+        try {
+            $raw = $this->provider->draws(null, null, $limit);
+        } catch (\Throwable $e) {
+            $raw = [];
+            $error = mb_substr($e->getMessage(), 0, 300);
+        }
         $summary = $this->importDraws($raw);
         $respMs = (int) round((microtime(true) - $t0) * 1000);
         $pid = $this->providerRowId();
         $ok = count($raw) > 0;
+        // The newest date in the batch, whichever order the feed used.
         $lastDraw = null;
-        foreach (array_reverse($raw) as $d) {
-            if (!empty($d['drawDate'])) { $lastDraw = (string) $d['drawDate']; break; }
+        foreach ($raw as $d) {
+            $date = (string) ($d['drawDate'] ?? '');
+            if ($date !== '' && ($lastDraw === null || $date > $lastDraw)) $lastDraw = $date;
         }
         if ($pid !== null) {
             $this->repo->saveHealth($pid, [
-                'status' => $ok ? 'ONLINE' : 'DEGRADED',
+                'status' => $ok ? 'ONLINE' : ($error !== null ? 'OFFLINE' : 'DEGRADED'),
                 'response_ms' => $respMs,
                 'records_received' => count($raw),
                 'invalid_records' => (int) $summary['failed'],
@@ -165,7 +312,26 @@ class LotteryIntelligence
                 'synthetic' => !empty($health['synthetic']) ? 1 : 0,
             ]);
         }
-        return $summary + ['status' => $ok ? 'OK' : 'NO_DATA', 'provider' => $this->provider->id(), 'response_ms' => $respMs];
+        $verified = $this->verifiedDrawCount();
+        if ($ok) {
+            $this->audit->emit('LOTTERY_SYNC_COMPLETED',
+                'Lottery sync: ' . (int) $summary['imported'] . ' imported, ' . (int) $summary['unchanged'] . ' unchanged, '
+                . (int) $summary['failed'] . ' rejected; ' . $verified . ' verified draws stored', [
+                    'provider' => $this->provider->id(), 'received' => count($raw),
+                    'imported' => (int) $summary['imported'], 'verifiedDraws' => $verified,
+                    'latestDraw' => $lastDraw,
+                ], 'system');
+        }
+        $status = $ok ? 'OK' : ($error !== null ? self::STATUS_DATA_UNAVAILABLE : 'NO_DATA');
+        return $summary + [
+            'status' => $status,
+            'provider' => $this->provider->id(),
+            'response_ms' => $respMs,
+            'received' => count($raw),
+            'verifiedDraws' => $verified,
+            'latestDraw' => $lastDraw,
+            'dataset' => $this->datasetInfo(),
+        ] + ($error !== null ? ['message' => 'DATA UNAVAILABLE — ' . $error] : []);
     }
 
     /**
@@ -242,6 +408,11 @@ class LotteryIntelligence
                 'main' => $numbers['main'], 'stars' => $numbers['stars'],
                 'jackpot' => $raw['jackpot'] ?? null, 'rollover' => !empty($raw['rollover']),
                 'winners' => $raw['winners'] ?? null, 'source' => (string) $raw['source'],
+                // Prize breakdown / winner counts where the feed supplies them
+                // (spec §29 — recorded only when reliably provided).
+                'prizes' => is_array($raw['prizes'] ?? null) && $raw['prizes'] !== [] ? $raw['prizes'] : null,
+                'totalWinners' => isset($raw['totalWinners']) && is_numeric($raw['totalWinners']) ? (int) $raw['totalWinners'] : null,
+                'drawDate' => (string) $raw['drawDate'],
                 // Provider-specific extras (e.g. LoteriasAPI El Millón code,
                 // next-draw jackpot) travel with the draw without changing the
                 // provider-neutral contract every engine reads.
@@ -319,10 +490,10 @@ class LotteryIntelligence
      */
     public function statistics(string $kind = 'numbers', int $window = 0): array
     {
-        $draws = $this->repo->drawsForStats(self::LOTTERY, 10000);
+        $draws = $this->historicalDataset();
         $r = $this->rules;
         $kind = self::normalizeStatsKind($kind);
-        return match ($kind) {
+        $stats = match ($kind) {
             'numbers', 'frequency' => array_merge(
                 $this->statistics->numberStats($draws, $r->mainMin(), $r->mainMax(), $window),
                 ['hotCold' => $this->statistics->hotCold($draws, 'main', $r->mainMin(), $r->mainMax(), $window > 0 ? $window : 50)]
@@ -336,6 +507,10 @@ class LotteryIntelligence
             'star-pairs' => $this->statistics->groupStats($draws, 'stars', $r->starMin(), $r->starMax(), 2),
             default => throw new \InvalidArgumentException('unknown statistics kind: ' . $kind),
         };
+        // Statistical analysis always states which stored dataset produced it
+        // (Strategy Lab and the statistics pages read this).
+        $stats['dataset'] = $this->datasetInfo();
+        return $stats;
     }
 
     // ------------------------------------------------- combination intelligence
@@ -348,7 +523,7 @@ class LotteryIntelligence
      */
     public function analyzeLine(array $mains, array $stars): array
     {
-        $draws = $this->repo->drawsForStats(self::LOTTERY, 10000);
+        $draws = $this->historicalDataset();
         $profile = $this->analyzer->analyze(array_map('intval', $mains), array_map('intval', $stars), $draws);
         $last = $draws !== [] ? (string) end($draws)['drawDate'] : null;
         return $profile + [
@@ -365,9 +540,28 @@ class LotteryIntelligence
      */
     public function generate(array $opts = []): array
     {
-        $draws = $this->repo->drawsForStats(self::LOTTERY, 10000);
-        return $this->generator->generate($draws, $opts);
+        $draws = $this->historicalDataset();
+        $dataset = $this->datasetInfo();
+        $mode = strtoupper((string) ($opts['mode'] ?? 'RANDOM'));
+        // Modes that are defined by the historical record must never silently
+        // degrade into a random fallback on an empty dataset (spec §41).
+        if ($draws === [] && in_array($mode, self::HISTORY_BACKED_MODES, true)) {
+            throw new \InvalidArgumentException(
+                'DATA UNAVAILABLE — ' . $mode . ' generation requires the verified historical dataset, which is empty. '
+                . 'Synchronize the lottery provider first (Admin → API Management → lottery), or use mode RANDOM for an explicit random baseline.'
+            );
+        }
+        $report = $this->generator->generate($draws, $opts);
+        // Provenance: which dataset actually produced these lines.
+        $report['dataset'] = $dataset + [
+            'usedForGeneration' => in_array($mode, self::HISTORY_BACKED_MODES, true),
+            'randomBaseline' => $mode === 'RANDOM',
+        ];
+        return $report;
     }
+
+    /** Modes whose output is derived from the stored historical draws. */
+    public const HISTORY_BACKED_MODES = ['BALANCED', 'HISTORICAL', 'ANTI-POPULAR', 'DIVERSIFIED'];
 
     /**
      * Persist a generated report: one lottery_combinations row (the lines +
@@ -724,10 +918,10 @@ class LotteryIntelligence
     public function backtest(string $strategy, int $lines = 1, int $window = 0): array
     {
         $this->ensureModelVersion();
-        $draws = $this->repo->drawsForStats(self::LOTTERY, 100000);
+        $draws = $this->historicalDataset();
         $report = $this->backtester->run($draws, $strategy, $lines, $window);
         $saved = $this->persistBacktest($strategy, $report, $draws);
-        return $report + ['saved' => ['backtestId' => (int) $saved['row']['id']]];
+        return $report + ['dataset' => $this->datasetInfo(), 'saved' => ['backtestId' => (int) $saved['row']['id']]];
     }
 
     /**
@@ -738,10 +932,10 @@ class LotteryIntelligence
     public function backtestCompare(array $strategies, int $lines = 1, int $window = 0): array
     {
         $this->ensureModelVersion();
-        $draws = $this->repo->drawsForStats(self::LOTTERY, 100000);
+        $draws = $this->historicalDataset();
         $report = $this->backtester->compare($draws, $strategies, $lines, $window);
         $saved = $this->persistBacktest('COMPARISON', $report, $draws);
-        return $report + ['saved' => ['backtestId' => (int) $saved['row']['id']]];
+        return $report + ['dataset' => $this->datasetInfo(), 'saved' => ['backtestId' => (int) $saved['row']['id']]];
     }
 
     private function persistBacktest(string $strategy, array $report, array $draws): array
