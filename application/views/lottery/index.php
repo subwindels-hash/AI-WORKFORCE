@@ -5,7 +5,7 @@
     <p>Frequency, gap and hot/cold analysis, per-line AI combination reports, a 5-mode generator with lock/exclude, system (wheel) builder, saved tickets, and a Strategy Lab that always compares against a mandatory same-period random baseline.</p>
   </div>
   <?php if (!empty($canManage)): ?>
-    <a class="btn" href="/admin/api?service=official_lottery">Official source & admin controls →</a>
+    <a class="btn" href="/admin/api/create?service=lottery">Official source & admin controls →</a>
   <?php endif; ?>
 </div>
 
@@ -67,7 +67,7 @@ window.__AI_LOTTERY_STATE__ = <?= $stateJson ?>;
     : '<span class="badge b-amber">'+e(s.status)+'</span>';
 
   const lastDraw = s.lastDraw;
-  let lastDrawHtml = '<p class="dim">No verified draw imported yet. Connect an official EuroMillions source in Admin → API.</p>';
+  let lastDrawHtml = '<p class="dim">No verified draw imported yet. Connect an official EuroMillions source (e.g. LoteriasAPI) in Admin → API.</p>';
   if (lastDraw && lastDraw.numbers) {
     const mains = (lastDraw.numbers.main || []).map(n => '<span class="ball">'+n+'</span>').join('');
     const stars = (lastDraw.numbers.stars || []).map(n => '<span class="lucky-star">'+n+'</span>').join('');
@@ -80,7 +80,8 @@ window.__AI_LOTTERY_STATE__ = <?= $stateJson ?>;
       <div class="lottery-card">
         <h3>Next draw ${statusBadge}</h3>
         <div class="lottery-jackpot">${e(s.jackpot || '—')}</div>
-        <div class="lottery-meta">provider: ${e((s.provider && s.provider.id) || s.providerLabel || s.provider || 'none')} · imported ${e(s.imported||s.drawsTracked||0)} verified draws</div>
+        <div class="lottery-meta">provider: ${e((s.provider && (s.provider.source || s.provider.id)) || s.providerLabel || 'none')} · imported ${e(s.imported||s.drawsTracked||0)} verified draws</div>
+        <div class="lottery-meta">${e((s.provider && s.provider.message) || '')}</div>
         <div class="lottery-actions">
           <a class="btn primary" href="/api/lottery/generate" data-lottery-generate>Generate 5 AI lines</a>
           <a class="btn" href="/lottery/tickets">My tickets</a>

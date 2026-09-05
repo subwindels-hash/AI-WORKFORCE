@@ -265,3 +265,50 @@ test('platform prefers a configured LoteriasAPI feed over the sandbox simulation
     $sandbox = strpos($platform, 'SandboxLotteryProvider');
     assert_true($pos !== false && $sandbox !== false && $pos < $sandbox, 'the real feed is selected before the simulation');
 });
+
+test('lottery status and dashboard surface the live feed identity honestly', function () {
+    $repo = new LotteryRepositoryStub();
+    [$provider] = fx_loterias_provider(fn() => fx_loterias_json(fx_loterias_payload()));
+    $status = (new LotteryIntelligence($repo, fx_loterias_audit(), $provider))->status();
+    assert_equals('loteriasapi', $status['provider']['id'], 'status names the active provider');
+    assert_equals('euromillones', $status['provider']['game']);
+    assert_equals('ONLINE', $status['status']);
+    assert_false(str_contains(json_encode($status), 'live-key-secret-123'), 'status never carries the key');
+
+    // Admin deep-link must use the SERVICE code (lottery), not a driver name,
+    // or the provider form cannot preselect the category.
+    $view = file_get_contents(FCPATH . 'application/views/lottery/index.php');
+    assert_contains('/admin/api/create?service=lottery', $view);
+    assert_false(str_contains($view, 'service=official_lottery'), 'driver names are not service codes');
+
+    // An unconfigured feed must still read honestly, never as ONLINE.
+    $offline = new LoteriasApiProvider(null, '', null, true, fn() => fx_loterias_json([]));
+    $offStatus = (new LotteryIntelligence(new LotteryRepositoryStub(), fx_loterias_audit(), $offline))->status();
+    assert_equals('DISABLED_NO_PROVIDER', $offStatus['engine']);
+    assert_equals('NO_DATA', $offStatus['status']);
+});
+
+test('scheduled lottery sync ingests LoteriasAPI draws and is idempotent per day', function () {
+    $repo = new LotteryRepositoryStub();
+    $audit = fx_loterias_audit();
+    [$provider] = fx_loterias_provider(function (string $url) {
+        if (str_contains($url, '/latest')) return fx_loterias_json(fx_loterias_payload());
+        return fx_loterias_json(['results' => [
+            fx_loterias_payload('2026-04-10', '2026/029'),
+            fx_loterias_payload('2026-04-07', '2026/028'),
+        ]]);
+    });
+    $intel = new LotteryIntelligence($repo, $audit, $provider);
+    $cron = new \AIWorkforce\Lottery\LotteryCronService($repo, $audit, $intel);
+
+    $first = $cron->run('sync', '2026-04-11');
+    assert_not_equals('SKIPPED_NO_PROVIDER', $first['status'] ?? '', 'a configured feed is never skipped');
+    assert_equals(2, $intel->drawCount());
+
+    $repeat = $cron->run('sync', '2026-04-11');
+    assert_equals('ALREADY_RUN', $repeat['status'], 'same-day re-run is a no-op');
+
+    $health = $cron->run('health', '2026-04-11');
+    assert_true(is_array($health));
+    assert_false(str_contains(json_encode($repo->health), 'live-key-secret-123'), 'health history never stores the key');
+});

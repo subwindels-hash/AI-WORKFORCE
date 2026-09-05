@@ -15,7 +15,8 @@ Lottery Intelligence pipeline.
 | Provider selection | `application/libraries/AIWorkforce/Platform.php` |
 | API Management driver `loteriasapi` + connectivity test | `application/libraries/AIWorkforce/ApiProviders.php` |
 | Live CLI smoke test | `php index.php tools lottery-smoke` (`Tools::lottery_smoke`) |
-| Tests (11) | `tests/cases/109-lottery-loteriasapi-provider.php` |
+| Dashboard + admin deep-link | `application/views/lottery/index.php` |
+| Tests (13) | `tests/cases/109-lottery-loteriasapi-provider.php` |
 
 The adapter implements the same `LotteryProvider` interface every other lottery
 source uses, so statistics, combination generation, the system builder,
@@ -103,7 +104,11 @@ php index.php tools lottery-smoke
 # 2. Pull draws into the historical database (validated + idempotent)
 php index.php tools lottery-cron sync
 
-# 3. Automated tests
+# 3. Automatic scheduled sync (Lottery sweep, every 6 hours; sync is
+#    idempotent once per day per lottery)
+php index.php tools scheduler lottery
+
+# 4. Automated tests
 php index.php tools tests            # includes tests/cases/109-lottery-loteriasapi-provider.php
 ```
 
@@ -120,8 +125,11 @@ php index.php tools tests            # includes tests/cases/109-lottery-loterias
 }
 ```
 
-The UI surfaces the same state: **Lottery → status** shows the provider health
-message, draws tracked, latest draw and the published next-draw jackpot.
+The UI surfaces the same state: **Lottery → status** shows the active provider
+id/source, its health message, draws tracked, the latest verified draw and the
+published next-draw jackpot. The page's admin link points at
+`/admin/api/create?service=lottery`, which preselects the Lottery service so the
+LoteriasAPI driver can be chosen directly.
 
 ---
 

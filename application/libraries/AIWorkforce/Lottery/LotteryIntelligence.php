@@ -86,7 +86,7 @@ class LotteryIntelligence
                 'mainMax' => $this->rules->mainMax(),
                 'starMax' => $this->rules->starMax(),
             ],
-            'provider' => $health,
+            'provider' => $health + ['id' => $this->provider->id(), 'name' => $this->provider->name()],
             'providerLabel' => (string) ($health['message'] ?? $this->provider->id()),
             'engine' => $enabled ? self::ENGINE_ACTIVE : self::ENGINE_DISABLED,
             'modelVersion' => self::MODEL_VERSION,
