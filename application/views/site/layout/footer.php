@@ -4,13 +4,7 @@
     <div>
       <strong>WINDELS AI WORKFORCE</strong>
       <p>An evidence-first AI-powered platform for language learning, market analysis, sports research, lottery study and lead discovery. Analysis and simulation software — not investment advice.</p>
-      <?php
-        $footPhone = (string) ($contact['phone'] ?? '');
-        $footAddress = (string) ($contact['address'] ?? '');
-        $footCity = (string) ($contact['city'] ?? 'Abuja, Nigeria');
-      ?>
-      <?php if ($footPhone !== ''): ?><a href="tel:<?= e(preg_replace('/[^0-9+\-() ]/', '', $footPhone)) ?>"><?= e($footPhone) ?></a><?php endif; ?>
-      <?php if ($footAddress !== ''): ?><p><?= e($footAddress) ?><?= $footCity !== '' ? ' · ' . e($footCity) : '' ?></p><?php endif; ?>
+      <?php /* Contact phone/address intentionally not shown here — see /contact. */ ?>
     </div>
     <div>
       <span>Explore</span>
