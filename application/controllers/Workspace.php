@@ -8,12 +8,24 @@ class Workspace extends App_Controller
     public function index()
     {
         $user = $this->identity;
-        $state = $this->platform->state();
-        $inbox = $this->platform->notifications->inbox((int) $user['id'], false, 8);
-        $history = $this->platform->model->analysis->history(6);
-        $accounts = $this->platform->model->paper->listAccounts();
+        $userId = (int) $user['id'];
+        // Every fetch below is independently guarded: the dashboard is an
+        // aggregate page and a single failing/slow subsystem must never 500
+        // the whole page. Widgets already degrade to NO_DATA/empty states.
+        $state = ['tradingMode' => 'ANALYSIS_ONLY', 'killSwitch' => ['active' => true]];
+        try { $state = $this->platform->state(); } catch (Throwable $e) { log_message('error', 'dashboard state failed: ' . $e->getMessage()); }
+        $inbox = ['unread' => 0, 'notifications' => []];
+        try { $inbox = $this->platform->notifications->inbox($userId, false, 8); } catch (Throwable $e) { log_message('error', 'dashboard inbox failed: ' . $e->getMessage()); }
+        $history = [];
+        try { $history = $this->platform->model->analysis->history(6); } catch (Throwable $e) { log_message('error', 'dashboard history failed: ' . $e->getMessage()); }
+        $accounts = [];
+        try { $accounts = $this->platform->model->paper->listAccounts(); } catch (Throwable $e) { log_message('error', 'dashboard paper accounts failed: ' . $e->getMessage()); }
         $profiles = [];
-        try { $profiles = $this->platform->langlearn->profiles((int) $user['id']); } catch (Throwable $e) { $profiles = []; }
+        try { $profiles = $this->platform->langlearn->profiles($userId); } catch (Throwable $e) { $profiles = []; }
+        $messagesUnread = 0;
+        try { $messagesUnread = $this->AIWorkforce_model->messages->unreadForUser($userId); } catch (Throwable $e) { log_message('error', 'dashboard messages unread failed: ' . $e->getMessage()); }
+        $latestMessage = null;
+        try { $latestMessage = $this->AIWorkforce_model->messages->latestForUser($userId); } catch (Throwable $e) { log_message('error', 'dashboard latest message failed: ' . $e->getMessage()); }
         $data = [
             'title' => 'Dashboard',
             'active' => 'home',
@@ -22,14 +34,18 @@ class Workspace extends App_Controller
             'status' => [
                 'tradingMode' => $state['tradingMode'],
                 'killSwitch' => $state['killSwitch'],
-                'providers' => $this->platform->providers->getAllHealth(),
+                // Deliberately NOT calling providers->getAllHealth() here: the
+                // layout header never renders provider health, and each probe
+                // is a blocking outbound HTTP call (up to ~12s per provider).
+                // Live health stays available via /api/market-data/* endpoints.
+                'providers' => [],
             ],
             'inbox' => $inbox,
             'history' => $history,
             'paperAccounts' => count($accounts),
             'languageProfiles' => count($profiles),
-            'messagesUnread' => $this->AIWorkforce_model->messages->unreadForUser((int) $user['id']),
-            'latestMessage' => $this->AIWorkforce_model->messages->latestForUser((int) $user['id']),
+            'messagesUnread' => $messagesUnread,
+            'latestMessage' => $latestMessage,
             'notice' => $this->session->flashdata('notice'),
             'error' => $this->session->flashdata('error'),
             'lotteryWidget' => $this->lotteryWidgetData((int) $user['id']),
@@ -163,20 +179,31 @@ class Workspace extends App_Controller
 
         try {
             $provider = \AIWorkforce\MultiplierIntelligence\CrashProviderFactory::fromPlatform($this->platform);
-            
+
+            // Dashboard must never block on the live crash feed: one refresh
+            // sweeps up to 5 endpoints × 8s, and updateMultiplier() forces a
+            // second sweep — together enough to exceed max_execution_time and
+            // 500 the whole page when the feed is unreachable. Serve the disk
+            // cache only here (last-known data or NO_DATA); /multiplier and
+            // /multiplier/live stay fully live.
+            if ($provider instanceof \AIWorkforce\MultiplierIntelligence\LiveCrashProvider) {
+                $provider->setOffline(true);
+            }
+
             $engine = new \AIWorkforce\MultiplierIntelligence\MultiplierIntelligenceEngine($provider);
             $dashboard = $engine->dashboard();
-            
+
             $out['historyCount'] = count($dashboard['history'] ?? []);
             $out['accuracy20'] = $dashboard['accuracy']['accuracy20'] ?? null;
             $out['accuracy50'] = $dashboard['accuracy']['accuracy50'] ?? null;
             $out['totalPredictions'] = (int)($dashboard['stats']['totalPredictions'] ?? 0);
-            
-            // Get current round state
-            $roundData = $provider->updateMultiplier();
-            $out['currentMultiplier'] = $roundData['currentMultiplier'] ?? 1.0;
-            $out['inRound'] = $roundData['inRound'] ?? false;
-            $out['roundId'] = $roundData['roundId'] ?? null;
+
+            // Read TTL-cached round state only. Do NOT call updateMultiplier()
+            // here — it resets the cache timer and forces a live refresh.
+            $out['currentMultiplier'] = $provider->currentMultiplier() ?? 1.0;
+            $out['inRound'] = $provider->isInRound();
+            $latest = $provider->latestRound();
+            $out['roundId'] = is_array($latest) ? ($latest['roundId'] ?? $latest['id'] ?? null) : null;
             
             // Generate a signal if we have enough history
             if ($out['historyCount'] >= 10) {
