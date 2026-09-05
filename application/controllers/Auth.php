@@ -41,13 +41,44 @@ class Auth extends MY_Controller
     public function register()
     {
         if ($this->sessionUser()) { redirect('/dashboard'); return; }
+        $protection = $this->signupProtection();
         $this->load->view('auth/register', [
             'title' => 'Create an account',
             'error' => $this->consumeFlash('error'),
             'notice' => $this->consumeFlash('notice'),
             'csrfToken' => $this->ensureVisitorCsrf(),
             'securityQuestions' => \AIWorkforce\IdentitySchema::SECURITY_QUESTIONS,
+            // Site key + provider only — the secret never reaches a view.
+            'captcha' => $protection->widget(),
+            'old' => $this->consumeOld(),
         ]);
+    }
+
+    /** Sign-up protection as configured on the super-admin settings page. */
+    private function signupProtection(): \AIWorkforce\SignupProtection
+    {
+        try {
+            $portal = new \AIWorkforce\AdminPortal($this->AIWorkforce_model);
+            $portal->ensureSchema();
+            return \AIWorkforce\SignupProtection::fromPortal($portal);
+        } catch (Throwable $e) {
+            log_message('error', 'signup protection settings unavailable: ' . $e->getMessage());
+            return \AIWorkforce\SignupProtection::fromSettings([]);
+        }
+    }
+
+    /** Re-populate the non-secret fields after a validation redirect. */
+    private function rememberOld(): void
+    {
+        $keep = [];
+        foreach (['username', 'email', 'phone', 'address', 'security_question'] as $f) $keep[$f] = (string) $this->input->post($f);
+        $this->session->set_flashdata('register_old', $keep);
+    }
+
+    private function consumeOld(): array
+    {
+        $old = $this->session->flashdata('register_old');
+        return is_array($old) ? $old : [];
     }
 
     public function register_submit()
@@ -58,15 +89,52 @@ class Auth extends MY_Controller
             redirect('/register');
             return;
         }
+        $portal = new \AIWorkforce\AdminPortal($this->AIWorkforce_model);
+        $portal->ensureSchema();
+        if ($portal->setting('registration_enabled', '1') !== '1') {
+            $this->flash('error', 'New account registration is currently closed.');
+            redirect('/register');
+            return;
+        }
+        $protection = \AIWorkforce\SignupProtection::fromPortal($portal);
+        $this->rememberOld();
+        // Honeypot: invisible to people; bots fill every field. Answer exactly
+        // like a captcha failure so automation learns nothing from the reply.
+        if (\AIWorkforce\SignupProtection::honeypotTripped($this->input->post(\AIWorkforce\SignupProtection::HONEYPOT_FIELD))) {
+            $this->AIWorkforce_model->audit->emit('SIGNUP_BLOCKED', 'Registration rejected: honeypot field filled', ['reason' => 'HONEYPOT', 'ip' => (string) $this->input->ip_address()], 'visitor');
+            $this->flash('error', 'Human verification failed. Please try again.');
+            redirect('/register');
+            return;
+        }
+        // reCAPTCHA — verified server-side, fails closed. Checked before the
+        // cheap field validation so a bot cannot probe the rules captcha-free.
+        $captcha = $protection->verifyCaptcha($this->input->post(\AIWorkforce\SignupProtection::CAPTCHA_FIELD), (string) $this->input->ip_address());
+        if (!$captcha['ok']) {
+            $this->AIWorkforce_model->audit->emit('SIGNUP_BLOCKED', 'Registration rejected by reCAPTCHA: ' . $captcha['reason'], [
+                'reason' => $captcha['reason'], 'score' => $captcha['score'], 'errorCodes' => $captcha['errorCodes'], 'ip' => (string) $this->input->ip_address(),
+            ], 'visitor');
+            $this->flash('error', $captcha['message']);
+            redirect('/register');
+            return;
+        }
         $username = strtolower(trim((string) $this->input->post('username')));
-        $email = strtolower(trim((string) $this->input->post('email')));
+        $emailCheck = $protection->validateEmail((string) $this->input->post('email'));
+        $email = $emailCheck['email'];
         $phone = \AIWorkforce\IdentitySchema::normalizePhone((string) $this->input->post('phone'));
         $address = \AIWorkforce\IdentitySchema::normalizeAddress((string) $this->input->post('address'));
         $password = (string) $this->input->post('password');
         $confirm = (string) $this->input->post('password_confirm');
         $terms = (string) $this->input->post('terms');
-        if (!$this->validUsername($username) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $this->flash('error', 'Enter a valid username (3–20 letters, numbers or underscores) and a valid email address.');
+        if (!$this->validUsername($username)) {
+            $this->flash('error', 'Enter a valid username (3–20 letters, numbers or underscores, starting with a letter).');
+            redirect('/register');
+            return;
+        }
+        if (!$emailCheck['ok']) {
+            if (in_array($emailCheck['reason'], ['DISPOSABLE', 'DOMAIN_BLOCKED', 'DOMAIN_NOT_ALLOWED'], true)) {
+                $this->AIWorkforce_model->audit->emit('SIGNUP_BLOCKED', 'Registration rejected: email ' . $emailCheck['reason'], ['reason' => $emailCheck['reason'], 'domain' => substr((string) strrchr($email, '@'), 1)], 'visitor');
+            }
+            $this->flash('error', $emailCheck['message']);
             redirect('/register');
             return;
         }
@@ -101,13 +169,6 @@ class Auth extends MY_Controller
         }
         if ($this->AIWorkforce_model->identity->usernameTaken($username)) {
             $this->flash('error', 'That username is already taken. Try a different one.');
-            redirect('/register');
-            return;
-        }
-        $portal = new \AIWorkforce\AdminPortal($this->AIWorkforce_model);
-        $portal->ensureSchema();
-        if ($portal->setting('registration_enabled', '1') !== '1') {
-            $this->flash('error', 'New account registration is currently closed.');
             redirect('/register');
             return;
         }
@@ -148,6 +209,7 @@ class Auth extends MY_Controller
             $user = $this->platform->identity->authenticate($username, $password);
             if (!$user) { $this->flash('error', 'Account created. Sign in to continue.'); redirect('/login'); return; }
             $this->establishSession($user);
+            $this->session->set_flashdata('register_old', null);
             $this->flash('notice', '✓ Changes saved successfully');
             redirect('/dashboard');
         } catch (Throwable $e) {

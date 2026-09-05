@@ -31,6 +31,9 @@ class AdminPortal
         'accounts' => [
             'registration_enabled' => '1',
         ],
+        // Sign-up protection (email validation + reCAPTCHA). The captcha
+        // secret is stored sealed; see SignupProtection.
+        'signup' => SignupProtection::DEFAULTS,
         'seo' => [
             'seo_site_name' => '',
             'seo_title_suffix' => '',

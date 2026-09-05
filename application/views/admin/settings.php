@@ -7,6 +7,9 @@ $accounts = $set['accounts'] ?? [];
 $seo = $set['seo'] ?? [];
 $ann = $set['announcement'] ?? [];
 $smtp = $smtp ?? [];
+$signupSet = $set['signup'] ?? [];
+$signup = is_array($signup ?? null) ? $signup : [];
+$signupWarnings = is_array($signupWarnings ?? null) ? $signupWarnings : [];
 ?>
 <div class="page-head">
   <div>
@@ -87,6 +90,46 @@ $smtp = $smtp ?? [];
       <input type="hidden" name="category" value="accounts">
       <label class="choice"><input type="checkbox" name="registration_enabled" value="1" <?= ($accounts['registration_enabled'] ?? '1') === '1' ? 'checked' : '' ?>> Allow public registration</label>
       <button class="btn primary" type="submit">Save account settings</button>
+    </form>
+  </div>
+</section>
+
+<section class="panel" id="signup" style="margin-top:14px">
+  <h3>Sign-up Protection</h3>
+  <div class="body">
+    <p class="dim">Email validation and reCAPTCHA for the public <span class="mono">/register</span> page. Both checks are enforced on the server; the browser widget is only a convenience. The reCAPTCHA secret is encrypted before it is stored and is never shown again here.</p>
+    <div class="stat-grid" style="margin:10px 0">
+      <div class="stat"><div class="k">reCAPTCHA</div><div class="v"><span class="badge <?= ($signup['captchaState'] ?? 'OFF') === 'ACTIVE' ? 'b-green' : (($signup['captchaState'] ?? 'OFF') === 'MISCONFIGURED' ? 'b-red' : 'b-gray') ?>"><?= e((string) ($signup['captchaState'] ?? 'OFF')) ?></span></div><div class="trend" style="font-size:11px"><?= e((string) ($signup['captchaLabel'] ?? 'Off')) ?></div></div>
+      <div class="stat"><div class="k">Site key</div><div class="v"><span class="badge <?= !empty($signup['siteKeyConfigured']) ? 'b-green' : 'b-gray' ?>"><?= !empty($signup['siteKeyConfigured']) ? 'SET' : 'MISSING' ?></span></div></div>
+      <div class="stat"><div class="k">Secret key</div><div class="v"><span class="badge <?= !empty($signup['secretConfigured']) ? 'b-green' : 'b-gray' ?>"><?= !empty($signup['secretConfigured']) ? 'SET' : 'MISSING' ?></span></div><div class="trend" style="font-size:11px"><?= !empty($signup['keysFromEnv']) ? 'from server environment' : 'stored encrypted' ?></div></div>
+      <div class="stat"><div class="k">Email check</div><div class="v" style="font-size:13px"><?= ($signup['emailMode'] ?? 'mx') === 'mx' ? 'Syntax + domain (MX)' : 'Syntax only' ?></div><div class="trend" style="font-size:11px"><?= !empty($signup['blockDisposable']) ? 'disposable inboxes blocked' : 'disposable inboxes allowed' ?> · <?= (int) ($signup['blockedDomains'] ?? 0) ?> blocked · <?= (int) ($signup['allowedDomains'] ?? 0) ?> allowed</div></div>
+    </div>
+    <?php if (!empty($signup['signupBlocked'])): ?><div class="notice err"><b>Sign-up is currently blocked.</b> reCAPTCHA is switched on but a key is missing — visitors see "Registration is temporarily unavailable" until both keys are set (or reCAPTCHA is switched off).</div><?php endif; ?>
+    <?php foreach ($signupWarnings as $w): ?><div class="notice warnbox"><?= e((string) $w) ?></div><?php endforeach; ?>
+    <form method="post" action="/admin/settings/save" class="admin-form" autocomplete="off">
+      <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+      <input type="hidden" name="category" value="signup">
+      <h4 style="margin:12px 0 4px">Email validation</h4>
+      <label>Validation level<select name="email_validation_mode">
+        <option value="mx" <?= ($signupSet['email_validation_mode'] ?? 'mx') === 'mx' ? 'selected' : '' ?>>Syntax + domain must accept mail (MX / A record lookup) — recommended</option>
+        <option value="syntax" <?= ($signupSet['email_validation_mode'] ?? 'mx') === 'syntax' ? 'selected' : '' ?>>Syntax only (no DNS lookup)</option>
+      </select></label>
+      <label class="choice"><input type="checkbox" name="email_block_disposable" value="1" <?= ($signupSet['email_block_disposable'] ?? '1') === '1' ? 'checked' : '' ?>> Block temporary / disposable email providers (built-in list of <?= count(\AIWorkforce\SignupProtection::DISPOSABLE_DOMAINS) ?> domains)</label>
+      <label>Additional blocked domains (one per line)<textarea name="email_blocked_domains" rows="3" maxlength="2000" placeholder="spam-domain.example&#10;another.example"><?= e((string) ($signupSet['email_blocked_domains'] ?? '')) ?></textarea></label>
+      <label>Allowed domains only — leave blank to accept any domain (one per line)<textarea name="email_allowed_domains" rows="2" maxlength="2000" placeholder="yourcompany.com"><?= e((string) ($signupSet['email_allowed_domains'] ?? '')) ?></textarea></label>
+
+      <h4 style="margin:16px 0 4px">reCAPTCHA</h4>
+      <p class="dim" style="margin:0 0 6px">Create keys at <span class="mono">google.com/recaptcha/admin</span> for this domain. v2 shows the "I'm not a robot" checkbox; v3 is invisible and scores each request. Server variables <span class="mono">VP_RECAPTCHA_SITE_KEY</span> / <span class="mono">VP_RECAPTCHA_SECRET</span> override the values stored here.</p>
+      <label>Provider<select name="captcha_provider">
+        <?php foreach (\AIWorkforce\SignupProtection::PROVIDERS as $pv): ?>
+        <option value="<?= e($pv) ?>" <?= ($signupSet['captcha_provider'] ?? 'off') === $pv ? 'selected' : '' ?>><?= e(\AIWorkforce\SignupProtection::providerLabel($pv)) ?></option>
+        <?php endforeach; ?>
+      </select></label>
+      <label>Site key (public)<input name="captcha_site_key" maxlength="200" autocomplete="off" spellcheck="false" placeholder="6Lc…" value="<?= e((string) ($signupSet['captcha_site_key'] ?? '')) ?>"></label>
+      <label>Secret key<input type="password" name="captcha_secret" maxlength="200" autocomplete="new-password" placeholder="<?= !empty($signup['secretConfigured']) ? 'Stored — leave blank to keep, type a new one to rotate' : 'Paste the secret key' ?>"></label>
+      <label class="choice"><input type="checkbox" name="captcha_secret_clear" value="1"> Remove the stored secret key</label>
+      <label>Minimum score (v3 only, 0.1 = lenient · 0.9 = strict)<input type="number" name="captcha_min_score" min="0.1" max="0.9" step="0.1" value="<?= e((string) ($signupSet['captcha_min_score'] ?? '0.5')) ?>"></label>
+      <button class="btn primary" type="submit">Save sign-up protection</button>
     </form>
   </div>
 </section>
