@@ -202,7 +202,7 @@ final class LoteriasApiProvider implements LotteryProvider
     }
 
     public function id(): string { return 'loteriasapi'; }
-    public function name(): string { return 'LoteriasAPI (loteriasapi.com) — EuroMillions results'; }
+    public function name(): string { return 'Windels API — EuroMillions results'; }
     public function game(): string { return $this->game; }
     public function baseUrl(): string { return $this->baseUrl; }
 
@@ -215,18 +215,18 @@ final class LoteriasApiProvider implements LotteryProvider
     {
         if (!$this->enabled) {
             return ['state' => 'DISABLED', 'licensed' => false, 'synthetic' => false,
-                'message' => 'LoteriasAPI is disabled — enable the lottery provider in Admin → API Management'];
+                'message' => 'Windels API is disabled — enable the lottery provider in Admin → API Management'];
         }
         if ($this->apiKey === '' || !$this->httpsUrl($this->baseUrl)) {
             return ['state' => 'UNCONFIGURED', 'licensed' => false, 'synthetic' => false,
-                'message' => 'LoteriasAPI needs an API key (x-api-key) and an HTTPS base URL — free key at https://loteriasapi.com/auth/register'];
+                'message' => 'Windels API needs an API key (x-api-key) and an HTTPS base URL — free key at https://loteriasapi.com/auth/register'];
         }
         try {
             $draw = $this->normalizeDraw($this->latest());
             $latestStatus = strtoupper(trim((string) ($draw['extra']['status'] ?? '')));
             return [
                 'state' => 'ONLINE', 'licensed' => true, 'synthetic' => false,
-                'message' => 'LoteriasAPI reachable'
+                'message' => 'Windels API reachable'
                     . ($draw['drawDate'] !== '' ? ' — latest draw ' . $draw['drawDate'] : '')
                     . ($latestStatus !== '' && $latestStatus !== 'COMPLETED' ? ' (' . strtolower($latestStatus) . ')' : ''),
                 'source' => $this->source,
@@ -236,7 +236,7 @@ final class LoteriasApiProvider implements LotteryProvider
             ];
         } catch (\Throwable $e) {
             return ['state' => 'OFFLINE', 'licensed' => true, 'synthetic' => false,
-                'message' => 'LoteriasAPI is configured but unavailable: ' . $this->safeMessage($e->getMessage()),
+                'message' => 'Windels API is configured but unavailable: ' . $this->safeMessage($e->getMessage()),
                 'source' => $this->source, 'licenseConfigured' => true, 'game' => $this->game];
         }
     }
@@ -598,7 +598,7 @@ final class LoteriasApiProvider implements LotteryProvider
     /** @return list<array<string,mixed>> */
     private function rows($payload): array
     {
-        if (!is_array($payload)) throw new \RuntimeException('LoteriasAPI returned invalid JSON');
+        if (!is_array($payload)) throw new \RuntimeException('Windels API returned invalid JSON');
         foreach ([$payload['data'] ?? null, $payload['results'] ?? null, $payload['draws'] ?? null, $payload] as $candidate) {
             if (is_array($candidate) && $this->isList($candidate)) {
                 return array_values(array_filter($candidate, 'is_array'));
@@ -945,7 +945,7 @@ final class LoteriasApiProvider implements LotteryProvider
             'value' => $value,
             'currency' => 'EUR',
             'observedAt' => is_scalar($observed) && (string) $observed !== '' ? (string) $observed : gmdate('c'),
-            'note' => 'Published jackpot from LoteriasAPI; not used to infer future draw outcomes',
+            'note' => 'Published jackpot from Windels API; not used to infer future draw outcomes',
         ];
     }
 

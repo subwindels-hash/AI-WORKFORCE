@@ -134,6 +134,27 @@ dashboard and carries the note *"not used to infer future draw outcomes"*.
 
 Keys are stored encrypted and never appear in views, JS, audit logs or errors.
 
+### Display name on the user dashboard
+
+The upstream vendor is `loteriasapi.com`, but users only ever see the product
+name. `LoteriasApiProvider::name()` and every dashboard-facing string
+(health message, jackpot-source note, the lottery view's own labels) read
+**`Windels API — EuroMillions`** / **`Windels API`**:
+
+```
+provider: loteriasapi.com (SELAE) · imported 42 verified draws
+Windels API reachable — latest draw 2026-09-04
+jackpot source: live Windels API response (observed 2026-09-04T22:00:00Z)
+```
+
+Admin → API Management, the CLI (`lottery-smoke`) and this document keep the
+vendor name, because an operator configuring the feed needs to know which
+upstream it is. The rename is a label only — the **source attribution stored
+with every draw stays `loteriasapi.com (SELAE)`**, and the provider id stays
+`loteriasapi`; test
+`lottery dashboard names the product feed, never the upstream vendor` locks
+both in.
+
 ### Option B — environment variables
 
 ```bash

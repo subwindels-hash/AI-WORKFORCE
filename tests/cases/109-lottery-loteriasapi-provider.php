@@ -758,6 +758,33 @@ test('lottery status and dashboard surface the live feed identity honestly', fun
     assert_equals('NO_DATA', $offStatus['status']);
 });
 
+test('lottery dashboard names the product feed, never the upstream vendor', function () {
+    $repo = new LotteryRepositoryStub();
+    [$provider] = fx_loterias_provider(fn() => fx_loterias_json(fx_loterias_live_envelope(fx_loterias_live_payload())));
+    $status = (new LotteryIntelligence($repo, fx_loterias_audit(), $provider))->status();
+
+    assert_equals('Windels API — EuroMillions results', $status['provider']['name'], 'the dashboard shows the product display name');
+    assert_contains('Windels API', (string) $status['provider']['message']);
+    assert_not_contains('LoteriasAPI', json_encode($status), 'no vendor brand in the dashboard payload');
+    assert_contains('Windels API', (string) $provider->jackpotInfo()['note']);
+
+    // Every health state carries the same label, not just ONLINE.
+    $off = new LoteriasApiProvider(null, '', null, true, fn() => fx_loterias_json([]));
+    assert_contains('Windels API', (string) $off->health()['message']);
+    $disabled = new LoteriasApiProvider(null, 'k', null, false, fn() => fx_loterias_json([]));
+    assert_contains('Windels API', (string) $disabled->health()['message']);
+
+    // … and so does the dashboard markup itself.
+    $view = file_get_contents(FCPATH . 'application/views/lottery/index.php');
+    assert_not_contains('LoteriasAPI', $view, 'no vendor name left on the user dashboard');
+    assert_contains('Windels API', $view);
+
+    // The rename is a label only — provenance still names the real source.
+    assert_equals('loteriasapi.com (SELAE)', $provider->normalizeDraw(fx_loterias_live_payload())['source'],
+        'renaming the display label never rewrites the source attribution');
+    assert_equals('loteriasapi', $status['provider']['id'], 'the provider id stays the vendor key');
+});
+
 test('scheduled lottery sync ingests LoteriasAPI draws and is idempotent per day', function () {
     $repo = new LotteryRepositoryStub();
     $audit = fx_loterias_audit();
