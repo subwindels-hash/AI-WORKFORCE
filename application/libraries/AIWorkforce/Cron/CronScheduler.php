@@ -38,6 +38,20 @@ class CronScheduler
             'description' => 'Fixtures, odds, results, quality, daily ticket, settlement, performance, monitoring and cleanup.',
             'defaultEnabled' => true,
         ],
+        'football' => [
+            'label' => 'Football refresh sweep',
+            'group' => 'Football Intelligence',
+            // Ticked at the runner's own granularity: the module's live cadence is
+            // 90 seconds, and a sweep slower than that could never honour it. The
+            // sweep itself is not the refresh interval — every job asks
+            // RefreshPolicy (own interval, provider backoff, deferral, work,
+            // budget) before it does anything, so an idle minute is a few indexed
+            // reads and no provider request at all.
+            'interval' => 60,
+            'schedule' => 'Every minute (each job self-gates)',
+            'description' => 'Fixtures, live scores, results, statistics, predictions, settlement, performance and cleanup. Each job runs only when RefreshPolicy says it is due, so the sweep is cheap when nothing is due; it never implies a fixed polling rate for the provider.',
+            'defaultEnabled' => true,
+        ],
         'lottery' => [
             'label' => 'Lottery sweep',
             'group' => 'Lottery Intelligence',

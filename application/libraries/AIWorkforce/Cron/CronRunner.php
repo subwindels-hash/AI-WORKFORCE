@@ -13,6 +13,7 @@ class CronRunner
         return [
             'ops' => fn() => self::ops($ci),
             'sports' => fn() => self::sports($ci),
+            'football' => fn() => self::football($ci),
             'lottery' => fn() => self::lottery($ci),
         ];
     }
@@ -41,6 +42,16 @@ class CronRunner
     {
         $service = new \AIWorkforce\Sports\SportsCronService($ci->AIWorkforce_model->sports, $ci->AIWorkforce_model->audit, $ci->platform->sports);
         return $service->runAll();
+    }
+
+    /**
+     * Football refresh sweep. The service asks RefreshPolicy before every job, so
+     * a five-minute tick costs nothing when nothing is due, and each job records
+     * its own row in football_provider_sync_logs for the diagnostics panel.
+     */
+    public static function football(object $ci): array
+    {
+        return $ci->platform->football->cron()->runAll();
     }
 
     /** Full lottery sweep (sync → health → statistics → systems …). */

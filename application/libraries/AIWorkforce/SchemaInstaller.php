@@ -18,6 +18,7 @@ final class SchemaInstaller
         'sports_decisions',
         'sports_results',
         'sports_intelligence',
+        'football_intelligence',
         'langlearn',
         'lottery',
         'admin_portal',
@@ -41,6 +42,11 @@ final class SchemaInstaller
         'sports_predictions', 'sports_tickets', 'sports_ticket_selections', 'sports_results',
         'sports_configurations', 'sports_calibrations', 'sports_job_runs', 'sports_backtests',
         'sports_model_metrics', 'sports_daily_tickets', 'sports_performance_snapshots',
+        'football_providers', 'football_competitions', 'football_teams', 'football_fixtures',
+        'football_team_statistics', 'football_fixture_statistics', 'football_head_to_head',
+        'football_model_versions', 'football_calibration_versions', 'football_match_predictions',
+        'football_score_probabilities', 'football_prediction_settlements',
+        'football_model_performance', 'football_provider_sync_logs',
         'languages', 'user_language_profiles', 'language_assessments', 'learning_paths',
         'learning_modules', 'lesson_attempts', 'study_sessions', 'language_progress',
         'conversation_sessions', 'writing_attempts', 'vocabulary', 'user_vocabulary',
@@ -59,7 +65,7 @@ final class SchemaInstaller
     ];
 
     /** Representative tables — if any are missing, re-apply CREATE IF NOT EXISTS. */
-    public const CORE_TABLES = ['users', 'languages', 'leads', 'lotteries', 'api_providers', 'sports_matches', 'contact_messages'];
+    public const CORE_TABLES = ['users', 'languages', 'leads', 'lotteries', 'api_providers', 'sports_matches', 'contact_messages', 'football_fixtures'];
 
     private static bool $done = false;
 
@@ -149,6 +155,9 @@ final class SchemaInstaller
             'ALTER TABLE users ADD COLUMN security_pin ' . ($sqlite ? 'TEXT' : 'CHAR(4) NULL'),
             'ALTER TABLE users ADD COLUMN security_question ' . ($sqlite ? 'TEXT' : 'VARCHAR(255) NULL'),
             'ALTER TABLE users ADD COLUMN security_answer ' . ($sqlite ? 'TEXT' : 'VARCHAR(255) NULL'),
+            // Football: the daily provider-request counter is only trusted for the
+            // day it was written, so a ceiling cannot leak across midnight.
+            'ALTER TABLE football_providers ADD COLUMN requests_used_date ' . ($sqlite ? 'TEXT' : 'DATE NULL'),
             'ALTER TABLE leads ADD COLUMN email ' . $text,
             'ALTER TABLE leads ADD COLUMN job_title ' . $text,
             'ALTER TABLE leads ADD COLUMN company_name ' . $text,
@@ -229,6 +238,31 @@ final class SchemaInstaller
             $sqlite
                 ? 'CREATE INDEX IF NOT EXISTS idx_sports_health_provider ON sports_provider_health (provider_id, observed_at)'
                 : 'CREATE INDEX idx_sports_health_provider ON sports_provider_health (provider_id, observed_at)',
+            // Football intelligence read paths: date board, live sweep, settlement queue.
+            $sqlite
+                ? 'CREATE INDEX IF NOT EXISTS idx_football_fixture_kickoff ON football_fixtures (kickoff_at)'
+                : 'CREATE INDEX idx_football_fixture_kickoff ON football_fixtures (kickoff_at)',
+            $sqlite
+                ? 'CREATE INDEX IF NOT EXISTS idx_football_fixture_status ON football_fixtures (status, kickoff_at)'
+                : 'CREATE INDEX idx_football_fixture_status ON football_fixtures (status, kickoff_at)',
+            $sqlite
+                ? 'CREATE INDEX IF NOT EXISTS idx_football_fixture_settle ON football_fixtures (settled_at, status)'
+                : 'CREATE INDEX idx_football_fixture_settle ON football_fixtures (settled_at, status)',
+            $sqlite
+                ? 'CREATE INDEX IF NOT EXISTS idx_football_prediction_generated ON football_match_predictions (generated_at)'
+                : 'CREATE INDEX idx_football_prediction_generated ON football_match_predictions (generated_at)',
+            $sqlite
+                ? 'CREATE INDEX IF NOT EXISTS idx_football_prediction_settle ON football_match_predictions (settlement_state, generated_at)'
+                : 'CREATE INDEX idx_football_prediction_settle ON football_match_predictions (settlement_state, generated_at)',
+            $sqlite
+                ? 'CREATE INDEX IF NOT EXISTS idx_football_settlement_settled ON football_prediction_settlements (settled_at)'
+                : 'CREATE INDEX idx_football_settlement_settled ON football_prediction_settlements (settled_at)',
+            $sqlite
+                ? 'CREATE INDEX IF NOT EXISTS idx_football_team_stats_team ON football_team_statistics (team_external_id, fetched_at)'
+                : 'CREATE INDEX idx_football_team_stats_team ON football_team_statistics (team_external_id, fetched_at)',
+            $sqlite
+                ? 'CREATE INDEX IF NOT EXISTS idx_football_sync_job ON football_provider_sync_logs (job_type, started_at)'
+                : 'CREATE INDEX idx_football_sync_job ON football_provider_sync_logs (job_type, started_at)',
         ];
         foreach ($indexes as $sql) {
             try { $exec($sql); } catch (\Throwable $e) { /* already exists */ }

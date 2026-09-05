@@ -20,7 +20,7 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
 <div class="page-head">
   <div>
     <h2>Sports Intelligence — daily ticket engine</h2>
-    <p>Daily ticket research from stored fixtures, odds and settled results. With no sports data connected the module stays off and fabricates nothing.</p>
+    <p>Daily ticket research from stored fixtures, odds and settled results. Football fixtures, predictions, settlement history and model calibration are reported once, on the Football Intelligence console.</p>
     <?php if (!empty($caps['sync'])): ?>
       <form method="post" action="/sports/sync" style="margin-top:10px" onsubmit="return confirm('Pull fresh fixtures, odds and results from the configured providers now?')">
         <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
@@ -34,13 +34,14 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
     <?php endif; ?>
   </div>
 </div>
+<p style="margin-top:8px"><a class="btn small" href="/football">Today's football predictions, settlement history and model state →</a></p>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 <?php if (!empty($sys['isDemoData'])): ?>
   <div class="notice warnbox"><b>SANDBOX / DEMO DATA</b> — sports figures are simulated, not real-world performance.</div>
 <?php endif; ?>
 <?php if ($disabled): ?>
-  <div class="notice warnbox"><b>No sports data connected</b> — no fixtures, odds, predictions or tickets are fabricated until a feed is available.</div>
+  <div class="notice warnbox"><b>No sports data provider connected.</b> Live fixtures and predictions are unavailable until a verified data source is configured — nothing is fabricated in the meantime.</div>
 <?php endif; ?>
 
 <div class="grid cols-main">
@@ -87,7 +88,7 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
     </div>
 
     <div class="panel">
-      <h3>30-day performance (stored settlements only)</h3>
+      <h3>30-day ticket performance (stored settlements only)</h3>
       <div class="body" style="padding-top:12px">
         <?php if (!empty($perf['demoBanner'])): ?><div class="notice warnbox"><?= e((string) $perf['demoBanner']) ?></div><?php endif; ?>
         <div class="stat-grid">
@@ -97,40 +98,14 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
           <div class="stat"><div class="k">Profit / loss</div><div class="v <?= ($perf['profitLoss'] ?? null) !== null && (float) $perf['profitLoss'] >= 0 ? 'up' : 'down' ?>"><?= ($perf['profitLoss'] ?? null) !== null ? e(number_format((float) $perf['profitLoss'], 2)) : '—' ?></div></div>
           <div class="stat"><div class="k">Max drawdown</div><div class="v"><?= ($perf['maxDrawdown'] ?? null) !== null ? e(number_format((float) $perf['maxDrawdown'], 2)) : '—' ?></div></div>
           <div class="stat"><div class="k">Avg odds</div><div class="v"><?= ($perf['averageOdds'] ?? null) !== null ? e(number_format((float) $perf['averageOdds'], 2)) : '—' ?></div></div>
-          <div class="stat"><div class="k">Model accuracy</div><div class="v"><?= ($perf['modelAccuracy'] ?? null) !== null ? e(number_format((float) $perf['modelAccuracy'] * 100, 1)) . '%' : '—' ?></div></div>
-          <div class="stat"><div class="k">Brier</div><div class="v mono"><?= ($perf['calibration']['brier'] ?? null) !== null ? e(number_format((float) $perf['calibration']['brier'], 3)) : '—' ?></div></div>
-          <div class="stat"><div class="k">ECE</div><div class="v mono"><?= ($perf['calibration']['ece'] ?? null) !== null ? e(number_format((float) $perf['calibration']['ece'], 3)) : '—' ?></div></div>
         </div>
         <?php if (empty($perf['dataAvailable'])): ?>
           <p class="dim" style="margin-top:12px">No settled tickets or selections yet — metrics are intentionally unavailable rather than invented.</p>
         <?php endif; ?>
+        <p class="dim" style="margin-top:10px;font-size:11px">Prediction accuracy, Brier, ECE and model/calibration state are reported once, on <a href="/football">Football Intelligence</a> and <a href="/football/models">Models &amp; calibration</a>.</p>
       </div>
     </div>
 
-    <div class="panel">
-      <h3>Models &amp; calibration</h3>
-      <div class="body scroll" style="padding-top:12px">
-        <?php if (empty($models['versions'])): ?>
-          <p class="dim">No model versions recorded yet.</p>
-        <?php else: ?>
-          <table class="tbl mono">
-            <thead><tr><th>Model</th><th>Version</th><th>Features</th><th>Calibration</th><th>Status</th></tr></thead>
-            <tbody>
-              <?php foreach ($models['versions'] as $v): ?>
-                <tr>
-                  <td style="font-weight:700"><?= e((string) ($v['modelName'] ?? '')) ?></td>
-                  <td><?= e((string) ($v['modelVersion'] ?? '')) ?></td>
-                  <td class="dim"><?= e((string) ($v['featureVersion'] ?? '')) ?></td>
-                  <td class="dim"><?= e((string) ($v['calibrationVersion'] ?? '—')) ?></td>
-                  <td><span class="badge b-gray"><?= e((string) ($v['status'] ?? '')) ?></span></td>
-                </tr>
-              <?php endforeach; ?>
-            </tbody>
-          </table>
-        <?php endif; ?>
-        <p class="dim" style="margin-top:10px;font-size:11px"><?= count($models['approvedCalibrations'] ?? []) ?> approved calibration version(s). A calibration is only usable after administrator approval — until then ticket-grade decisions report MODEL_NOT_CALIBRATED.</p>
-      </div>
-    </div>
   </div>
 
   <div class="stack">

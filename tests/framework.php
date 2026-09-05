@@ -43,6 +43,13 @@ function assert_equals($expected, $actual, string $msg = ''): void
     }
 }
 
+function assert_not_equals($unexpected, $actual, string $msg = ''): void
+{
+    if ($unexpected === $actual) {
+        throw new RuntimeException('ASSERT: ' . ($msg ?: 'value must not be ' . var_export($actual, true)));
+    }
+}
+
 function assert_close(float $expected, float $actual, float $tol, string $msg = ''): void
 {
     if (abs($expected - $actual) > $tol) {
@@ -695,5 +702,647 @@ class LotteryRepositoryStub implements \AIWorkforce\Persistence\LotteryRepositor
         $rows = $this->backtests;
         usort($rows, fn($a, $b) => (int) $b['id'] <=> (int) $a['id']);
         return array_map(fn($b) => $this->findBacktest((int) $b['id']), array_slice($rows, 0, min(500, max(1, $limit))));
+    }
+}
+
+/**
+ * In-memory FootballRepository for tests.
+ *
+ * Mirrors the semantics the database implementation promises — null-preserving
+ * updates, insert-once settlements, predictions frozen once settled, and
+ * aggregate metrics computed over the stored rows — so a test can assert the
+ * rules without a schema, and cannot pass by accidentally relying on SQL.
+ */
+class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballRepository
+{
+    public array $providers = [];
+    public array $competitions = [];
+    public array $teams = [];
+    public array $fixtures = [];
+    public array $teamStatistics = [];
+    public array $fixtureStatistics = [];
+    public array $headToHead = [];
+    public array $modelVersions = [];
+    public array $calibrations = [];
+    public array $predictions = [];
+    public array $scoreProbabilities = [];
+    public array $settlements = [];
+    public array $performance = [];
+    public array $syncRuns = [];
+    public int $autoId = 0;
+    /** @var list<string> every write, for assertions about what was touched */
+    public array $writes = [];
+
+    private function id(): int { return ++$this->autoId; }
+
+    /** camelCase input → snake_case storage, mirroring the SQL implementation. */
+    private static function normalise(array $row): array
+    {
+        $out = [];
+        foreach ($row as $key => $value) {
+            $column = strtolower((string) preg_replace('/(?<!^)[A-Z]/', '_$0', (string) $key)) ?: (string) $key;
+            if ($column !== $key && array_key_exists($column, $row)) continue;  // explicit snake wins
+            if ($column === 'over15') $column = 'over_15';
+            if ($column === 'over25') $column = 'over_25';
+            $out[$column] = $value;
+        }
+        return $out;
+    }
+
+    private function find(array $rows, callable $predicate): ?array
+    {
+        foreach ($rows as $row) { if ($predicate($row)) return $row; }
+        return null;
+    }
+
+    public function ensureProvider(string $code, array $attributes = []): array
+    {
+        $existing = $this->find($this->providers, fn(array $r) => ($r['provider_code'] ?? '') === $code);
+        if ($existing !== null) return $existing;
+        $row = ['id' => $this->id(), 'provider_code' => $code, 'display_name' => (string) ($attributes['displayName'] ?? $code),
+            'status' => (string) ($attributes['status'] ?? 'NOT_CONFIGURED'), 'enabled' => !empty($attributes['enabled']) ? 1 : 0,
+            'requests_used' => 0, 'requests_budget' => $attributes['requestsBudget'] ?? null, 'capabilities' => $attributes['capabilities'] ?? [],
+            'backoff_until' => null, 'last_success_at' => null, 'last_failure_at' => null, 'last_error' => null,
+            'created_at' => gmdate('c'), 'updated_at' => gmdate('c')];
+        $this->providers[] = $row;
+        $this->writes[] = 'provider:' . $code;
+        return $row;
+    }
+
+    public function updateProvider(int $id, array $patch): void
+    {
+        foreach ($this->providers as &$row) {
+            if ((int) $row['id'] !== $id) continue;
+            foreach ($patch as $key => $value) {
+                $column = match ($key) { 'displayName' => 'display_name', 'requestsUsed' => 'requests_used', 'requestsBudget' => 'requests_budget', 'requestsUsedDate' => 'requests_used_date',
+                    'backoffUntil' => 'backoff_until', 'lastSuccessAt' => 'last_success_at', 'lastFailureAt' => 'last_failure_at',
+                    'lastError' => 'last_error', 'demoMode' => 'demo_mode', default => $key };
+                $row[$column] = $value;
+            }
+            $row['updated_at'] = gmdate('c');
+            return;
+        }
+    }
+
+    public function listProviders(bool $enabledOnly = false): array
+    {
+        return $enabledOnly ? array_values(array_filter($this->providers, fn(array $r) => !empty($r['enabled']))) : $this->providers;
+    }
+
+    public function saveCompetition(int $providerId, array $row): array
+    {
+        $row = self::normalise($row);
+        $row['dataState'] = (string) ($row['data_state'] ?? 'DATA_UNAVAILABLE');
+        $external = (string) ($row['externalId'] ?? $row['external_id'] ?? '');
+        $season = $row['season'] ?? null;
+        $existing = $this->find($this->competitions, fn(array $r) => (int) $r['provider_id'] === $providerId && $r['external_id'] === $external && ($r['season'] ?? null) === $season);
+        $data = array_merge(['provider_id' => $providerId, 'external_id' => $external], array_intersect_key($row, array_flip(['name', 'country', 'code', 'season', 'tier', 'coefficient', 'reliability', 'payload', 'fetched_at'])),
+            ['data_state' => (string) ($row['data_state'] ?? 'DATA_UNAVAILABLE')]);
+        if ($existing !== null) {
+            foreach ($this->competitions as &$r) { if ((int) $r['id'] === (int) $existing['id']) { $r = array_merge($r, $data, ['updated_at' => gmdate('c')]); } }
+            unset($r);
+            return $this->competitions[0] === $existing ? $existing : $this->find($this->competitions, fn(array $r) => (int) $r['id'] === (int) $existing['id']) ?? $existing;
+        }
+        $row2 = array_merge(['id' => $this->id(), 'created_at' => gmdate('c'), 'updated_at' => gmdate('c')], $data);
+        $this->competitions[] = $row2;
+        $this->writes[] = 'competition:' . $external;
+        return $row2;
+    }
+
+    public function findCompetition(int $providerId, string $externalId, ?string $season = null): ?array
+    {
+        return $this->find($this->competitions, fn(array $r) => (int) $r['provider_id'] === $providerId && $r['external_id'] === $externalId
+            && ($season === null || ($r['season'] ?? null) === $season));
+    }
+
+    public function saveTeam(int $providerId, array $row): array
+    {
+        $external = (string) ($row['externalId'] ?? $row['external_id'] ?? '');
+        $existing = $this->find($this->teams, fn(array $r) => (int) $r['provider_id'] === $providerId && $r['external_id'] === $external);
+        if ($existing !== null) {
+            foreach ($this->teams as &$r) { if ((int) $r['id'] === (int) $existing['id']) { $r = array_merge($r, $row, ['id' => $r['id'], 'external_id' => $external, 'provider_id' => $providerId, 'updated_at' => gmdate('c')]); } }
+            unset($r);
+            return $this->find($this->teams, fn(array $r) => (int) $r['id'] === (int) $existing['id']) ?? $existing;
+        }
+        $stored = array_merge(['id' => $this->id(), 'provider_id' => $providerId, 'external_id' => $external, 'name' => (string) ($row['name'] ?? 'DATA_UNAVAILABLE'),
+            'created_at' => gmdate('c'), 'updated_at' => gmdate('c')], $row);
+        $this->teams[] = $stored;
+        $this->writes[] = 'team:' . $external;
+        return $stored;
+    }
+
+    public function findTeam(int $providerId, string $externalId): ?array
+    {
+        return $this->find($this->teams, fn(array $r) => (int) $r['provider_id'] === $providerId && $r['external_id'] === $externalId);
+    }
+
+    public function saveFixture(int $providerId, array $fixture): array
+    {
+        $external = (string) ($fixture['externalId'] ?? $fixture['external_id'] ?? '');
+        if ($external === '') throw new \InvalidArgumentException('fixture requires externalId');
+        $existing = $this->find($this->fixtures, fn(array $r) => (int) $r['provider_id'] === $providerId && $r['external_id'] === $external);
+        $map = ['externalId' => 'external_id', 'homeTeam' => 'home_team', 'awayTeam' => 'away_team', 'homeTeamId' => 'home_team_id',
+            'awayTeamId' => 'away_team_id', 'homeScore' => 'home_score', 'awayScore' => 'away_score', 'halfTimeHome' => 'half_time_home',
+            'halfTimeAway' => 'half_time_away', 'homeRedCards' => 'home_red_cards', 'awayRedCards' => 'away_red_cards',
+            'matchState' => 'match_state', 'extraMinute' => 'extra_minute', 'dataState' => 'data_state', 'sourceTimestamp' => 'source_timestamp',
+            'competitionId' => 'competition_id'];
+        $data = [];
+        foreach ($fixture as $key => $value) {
+            $data[$map[$key] ?? $key] = $value;
+        }
+        if (isset($fixture['kickoff'])) $data['kickoff_at'] = $fixture['kickoff'];
+        $data['external_id'] = $external;
+        $data['provider_id'] = $providerId;
+        if ($existing !== null) {
+            // Same freeze rules as SQL: a finished match keeps its final score and
+            // its terminal status, and never reverts to an earlier partial row.
+            if (($data['home_score'] ?? null) === null && ($existing['home_score'] ?? null) !== null) {
+                unset($data['home_score'], $data['away_score']);
+            }
+            if (in_array((string) ($existing['status'] ?? ''), ['FINISHED', 'CANCELLED', 'POSTPONED'], true)
+                && !in_array((string) ($data['status'] ?? ''), ['FINISHED', 'CANCELLED', 'POSTPONED'], true)) {
+                unset($data['status']);
+            }
+            foreach ($this->fixtures as &$row) {
+                if ((int) $row['id'] === (int) $existing['id']) $row = array_merge($row, $data, ['updated_at' => gmdate('c')]);
+            }
+            unset($row);
+            return $this->find($this->fixtures, fn(array $r) => (int) $r['id'] === (int) $existing['id']) ?? $existing;
+        }
+        $stored = array_merge(['id' => $this->id(), 'created_at' => gmdate('c'), 'updated_at' => gmdate('c'), 'settled_at' => null], $data);
+        $this->fixtures[] = $stored;
+        $this->writes[] = 'fixture:' . $external;
+        return $stored;
+    }
+
+    public function findFixtureById(int $id): ?array
+    {
+        $row = $this->find($this->fixtures, fn(array $r) => (int) $r['id'] === $id);
+        return $row === null ? null : $this->decorate($row);
+    }
+
+    public function findFixture(int $providerId, string $externalId): ?array
+    {
+        $row = $this->find($this->fixtures, fn(array $r) => (int) $r['provider_id'] === $providerId && $r['external_id'] === $externalId);
+        return $row === null ? null : $this->decorate($row);
+    }
+
+    public function listFixtures(array $filter = [], int $limit = 500): array
+    {
+        $rows = array_values(array_filter($this->fixtures, function (array $row) use ($filter) {
+            if (!empty($filter['providerId']) && (int) $row['provider_id'] !== (int) $filter['providerId']) return false;
+            if (!empty($filter['status']) && strtoupper((string) ($row['status'] ?? '')) !== strtoupper((string) $filter['status'])) return false;
+            if (!empty($filter['matchState']) && strtoupper((string) ($row['match_state'] ?? '')) !== strtoupper((string) $filter['matchState'])) return false;
+            if (!empty($filter['date']) && !str_starts_with((string) ($row['kickoff_at'] ?? ''), (string) $filter['date'])) return false;
+            if (!empty($filter['from']) && (string) ($row['kickoff_at'] ?? '') < (string) $filter['from']) return false;
+            if (!empty($filter['to']) && (string) ($row['kickoff_at'] ?? '') > (string) $filter['to']) return false;
+            if (!empty($filter['competition']) && !str_starts_with(strtolower((string) ($row['competition'] ?? '')), strtolower((string) $filter['competition']))) return false;
+            if (!empty($filter['team']) && stripos((string) ($row['home_team'] ?? '') . ' ' . (string) ($row['away_team'] ?? ''), (string) $filter['team']) === false) return false;
+            if (!empty($filter['settledOnly']) && empty($row['settled_at'])) return false;
+            if (!empty($filter['unsettledFinished']) && ((string) ($row['status'] ?? '') !== 'FINISHED' || !empty($row['settled_at']))) return false;
+            return true;
+        }));
+        usort($rows, fn(array $a, array $b) => strcmp((string) ($a['kickoff_at'] ?? ''), (string) ($b['kickoff_at'] ?? '')));
+        return array_map(fn(array $row) => $this->decorate($row), array_slice($rows, 0, max(1, $limit)));
+    }
+
+    private function decorate(array $row): array
+    {
+        $competition = empty($row['competition_id']) ? null : $this->find($this->competitions, fn(array $c) => (int) $c['id'] === (int) $row['competition_id']);
+        $row['competition_external_id'] = $competition['external_id'] ?? null;
+        $row['competition_country'] = $competition['country'] ?? null;
+        $row['competition_season'] = $competition['season'] ?? null;
+        $row['competition_data_state'] = $competition['data_state'] ?? 'DATA_UNAVAILABLE';
+        $provider = empty($row['provider_id']) ? null : $this->find($this->providers, fn(array $p) => (int) $p['id'] === (int) $row['provider_id']);
+        $row['provider_code'] = $provider['provider_code'] ?? null;
+        return $row;
+    }
+
+    public function markFixtureSettled(int $id, string $at): void
+    {
+        foreach ($this->fixtures as &$row) { if ((int) $row['id'] === $id) $row['settled_at'] = $at; }
+        unset($row);
+    }
+
+    public function linkFixtureCompetition(int $fixtureId, int $competitionId): void
+    {
+        foreach ($this->fixtures as &$row) { if ((int) $row['id'] === $fixtureId) $row['competition_id'] = $competitionId; }
+        unset($row);
+    }
+
+    public function listFixturesAwaitingResult(int $limit = 200, ?int $providerId = null): array
+    {
+        $rows = array_values(array_filter($this->fixtures, function (array $row) use ($providerId) {
+            if ($providerId !== null && (int) $row['provider_id'] !== $providerId) return false;
+            $status = strtoupper((string) ($row['status'] ?? ''));
+            if ($status === 'LIVE' || $status === 'SCHEDULED') return true;
+            return $status === 'FINISHED' && (empty($row['home_score']) && $row['home_score'] !== 0 || empty($row['settled_at']));
+        }));
+        usort($rows, fn(array $a, array $b) => strcmp((string) ($b['kickoff_at'] ?? ''), (string) ($a['kickoff_at'] ?? '')));
+        return array_map(fn(array $row) => $this->decorate($row), array_slice($rows, 0, max(1, min(500, $limit))));
+    }
+
+    public function saveTeamStatistics(int $providerId, array $row): array
+    {
+        $team = (string) ($row['teamExternalId'] ?? '');
+        if ($team === '') throw new \InvalidArgumentException('team statistics require teamExternalId');
+        $competition = $row['competitionExternalId'] ?? null;
+        $season = $row['season'] ?? null;
+        $key = static fn(array $r) => (int) $r['provider_id'] === $providerId && $r['team_external_id'] === $team
+            && ($r['competition_external_id'] ?? null) === $competition && ($r['season'] ?? null) === $season;
+        $existing = $this->find($this->teamStatistics, $key);
+        $data = ['provider_id' => $providerId, 'team_external_id' => $team, 'competition_external_id' => $competition, 'season' => $season];
+        foreach (['played', 'wins', 'draws', 'losses', 'goals_for', 'goals_against', 'points', 'position', 'home_played', 'home_wins', 'home_draws',
+            'home_losses', 'home_goals_for', 'home_goals_against', 'away_played', 'away_wins', 'away_draws', 'away_losses', 'away_goals_for',
+            'away_goals_against', 'clean_sheets', 'failed_to_score'] as $column) {
+            $camel = preg_replace_callback('/_([a-z])/', fn($m) => strtoupper($m[1]), $column) ?? $column;
+            $value = $row[$camel] ?? $row[$column] ?? null;
+            $data[$column] = is_numeric($value) ? (int) $value : null;
+        }
+        $data['team'] = (string) ($row['team'] ?? 'DATA_UNAVAILABLE');
+        $data['form_last5'] = $row['formLast5'] ?? null;
+        $data['form_last10'] = $row['formLast10'] ?? null;
+        $data['last_matches'] = $row['lastMatches'] ?? [];
+        $data['data_state'] = (string) ($row['dataState'] ?? 'DATA_UNAVAILABLE');
+        $data['coverage'] = $row['coverage'] ?? [];
+        $data['payload'] = $row['payload'] ?? $row;
+        $data['fetched_at'] = (string) ($row['fetchedAt'] ?? gmdate('c'));
+        if ($existing !== null) {
+            foreach ($this->teamStatistics as &$r) { if ((int) $r['id'] === (int) $existing['id']) $r = array_merge($r, $data, ['updated_at' => gmdate('c')]); }
+            unset($r);
+            $this->writes[] = 'teamStatistics:update:' . $team;
+            return $this->find($this->teamStatistics, $key) ?? $existing;
+        }
+        $stored = array_merge(['id' => $this->id(), 'created_at' => gmdate('c'), 'updated_at' => gmdate('c')], $data);
+        $this->teamStatistics[] = $stored;
+        $this->writes[] = 'teamStatistics:create:' . $team;
+        return $stored;
+    }
+
+    public function findTeamStatistics(int $providerId, string $teamExternalId, ?string $competitionExternalId = null, ?string $season = null): ?array
+    {
+        return $this->find($this->teamStatistics, fn(array $r) => (int) $r['provider_id'] === $providerId && $r['team_external_id'] === $teamExternalId
+            && ($r['competition_external_id'] ?? null) === $competitionExternalId
+            && ($season === null || ($r['season'] ?? null) === $season));
+    }
+
+    public function listTeamRecentResults(int $providerId, string $teamExternalId, int $limit = 10): array
+    {
+        if ($teamExternalId === '') return [];
+        $rows = array_values(array_filter($this->fixtures, fn(array $r) => (int) $r['provider_id'] === $providerId
+            && strtoupper((string) ($r['status'] ?? '')) === 'FINISHED'
+            && $r['home_score'] !== null && $r['away_score'] !== null
+            && (($r['home_team_id'] ?? null) === $teamExternalId || ($r['away_team_id'] ?? null) === $teamExternalId)));
+        usort($rows, fn(array $a, array $b) => strcmp((string) ($b['kickoff_at'] ?? ''), (string) ($a['kickoff_at'] ?? '')));
+        return array_slice($rows, 0, max(1, min(50, $limit)));
+    }
+
+    public function saveFixtureStatistics(int $fixtureId, int $providerId, string $kind, array $payload, array $coverage = []): array
+    {
+        $existing = $this->find($this->fixtureStatistics, fn(array $r) => (int) $r['fixture_id'] === $fixtureId && (int) $r['provider_id'] === $providerId && $r['kind'] === $kind);
+        $data = ['fixture_id' => $fixtureId, 'provider_id' => $providerId, 'kind' => $kind, 'payload' => $payload,
+            'data_state' => $coverage === [] ? 'DATA_UNAVAILABLE' : (string) ($coverage['state'] ?? 'LIMITED_DATA'),
+            'coverage' => $coverage, 'fetched_at' => gmdate('c')];
+        if ($existing !== null) {
+            foreach ($this->fixtureStatistics as &$r) { if ((int) $r['id'] === (int) $existing['id']) $r = array_merge($r, $data); }
+            unset($r);
+            return $this->find($this->fixtureStatistics, fn(array $x) => (int) $x['id'] === (int) $existing['id']) ?? $existing;
+        }
+        $stored = array_merge(['id' => $this->id(), 'created_at' => gmdate('c')], $data);
+        $this->fixtureStatistics[] = $stored;
+        return $stored;
+    }
+
+    public function findFixtureStatistics(int $fixtureId, ?string $kind = null): ?array
+    {
+        return $this->find($this->fixtureStatistics, fn(array $r) => (int) $r['fixture_id'] === $fixtureId && ($kind === null || $r['kind'] === $kind));
+    }
+
+    public function saveHeadToHead(int $providerId, array $row): array
+    {
+        $home = (string) ($row['homeTeamExternalId'] ?? '');
+        $away = (string) ($row['awayTeamExternalId'] ?? '');
+        $competition = $row['competitionExternalId'] ?? null;
+        $key = fn(array $r) => (int) $r['provider_id'] === $providerId && $r['home_team_external_id'] === $home
+            && $r['away_team_external_id'] === $away && ($r['competition_external_id'] ?? null) === $competition;
+        $existing = $this->find($this->headToHead, $key);
+        $normalised = self::normalise($row);
+        $data = array_merge(['provider_id' => $providerId, 'home_team_external_id' => $home, 'away_team_external_id' => $away,
+            'competition_external_id' => $competition], array_intersect_key($normalised, array_flip(['meetings', 'home_wins', 'draws', 'away_wins', 'avg_home_goals',
+            'avg_away_goals', 'both_teams_scored', 'over_15', 'over_25', 'oldest_kickoff', 'newest_kickoff', 'sample_age_days', 'weight', 'matches', 'fetched_at'])));
+        $data['data_state'] = (string) ($row['dataState'] ?? 'LIMITED_DATA');
+        if ($existing !== null) {
+            foreach ($this->headToHead as &$r) { if ((int) $r['id'] === (int) $existing['id']) $r = array_merge($r, $data, ['updated_at' => gmdate('c')]); }
+            unset($r);
+            return $this->find($this->headToHead, $key) ?? $existing;
+        }
+        $stored = array_merge(['id' => $this->id(), 'created_at' => gmdate('c')], $data);
+        $this->headToHead[] = $stored;
+        return $stored;
+    }
+
+    public function findHeadToHead(int $providerId, string $homeTeamExternalId, string $awayTeamExternalId, ?string $competitionExternalId = null): ?array
+    {
+        return $this->find($this->headToHead, fn(array $r) => (int) $r['provider_id'] === $providerId
+            && $r['home_team_external_id'] === $homeTeamExternalId && $r['away_team_external_id'] === $awayTeamExternalId
+            && ($competitionExternalId === null || ($r['competition_external_id'] ?? null) === $competitionExternalId));
+    }
+
+    public function saveModelVersion(array $row): array
+    {
+        $row = self::normalise($row);
+        $name = (string) ($row['model_name'] ?? $row['modelName'] ?? '');
+        $version = (string) ($row['model_version'] ?? $row['modelVersion'] ?? '');
+        if ($name === '' || $version === '') throw new \InvalidArgumentException('model version requires model_name and model_version');
+        $existing = $this->findModelVersionByName($name, $version);
+        if ($existing !== null) {
+            foreach ($this->modelVersions as &$r) { if ((int) $r['id'] === (int) $existing['id']) $r = array_merge($r, $row, ['id' => $r['id'], 'status' => (string) ($row['status'] ?? $r['status']), 'updated_at' => gmdate('c')]); }
+            unset($r);
+            return $this->findModelVersionByName($name, $version) ?? $existing;
+        }
+        $stored = array_merge(['id' => $this->id(), 'model_id' => 'football-model-' . $this->autoId, 'model_name' => $name, 'model_version' => $version,
+            'status' => 'DRAFT', 'created_at' => gmdate('c'), 'updated_at' => gmdate('c')], $row);
+        $this->modelVersions[] = $stored;
+        $this->writes[] = 'model:' . $name . '@' . $version . '=' . $stored['status'];
+        return $stored;
+    }
+
+    public function findModelVersion(int $id): ?array
+    {
+        return $this->find($this->modelVersions, fn(array $r) => (int) $r['id'] === $id);
+    }
+
+    public function findModelVersionByName(string $modelName, string $modelVersion): ?array
+    {
+        return $this->find($this->modelVersions, fn(array $r) => ($r['model_name'] ?? '') === $modelName && ($r['model_version'] ?? '') === $modelVersion);
+    }
+
+    public function listModelVersions(?string $status = null, int $limit = 50): array
+    {
+        $rows = $status === null ? $this->modelVersions : array_values(array_filter($this->modelVersions, fn(array $r) => ($r['status'] ?? '') === $status));
+        usort($rows, fn(array $a, array $b) => (int) $b['id'] <=> (int) $a['id']);
+        return array_slice($rows, 0, max(1, min(200, $limit)));
+    }
+
+    public function updateModelVersion(int $id, array $patch): void
+    {
+        $patch = self::normalise($patch);
+        foreach ($this->modelVersions as &$row) {
+            if ((int) $row['id'] === $id) { $row = array_merge($row, $patch, ['updated_at' => gmdate('c')]); return; }
+        }
+        unset($row);
+    }
+
+    public function saveCalibration(array $row): array
+    {
+        $row = self::normalise($row);
+        $modelId = (int) ($row['model_version_id'] ?? 0);
+        if ($modelId <= 0) throw new \InvalidArgumentException('calibration requires model_version_id');
+        $version = (string) ($row['calibration_version'] ?? '');
+        $existing = $this->find($this->calibrations, fn(array $r) => (int) $r['model_version_id'] === $modelId && ($r['calibration_version'] ?? '') === $version);
+        if ($existing !== null) return $existing;   // deterministic version → stored once
+        $stored = array_merge(['id' => $this->id(), 'status' => 'PENDING', 'created_at' => gmdate('c'), 'sample_size' => 0], $row, ['model_version_id' => $modelId, 'calibration_version' => $version]);
+        $this->calibrations[] = $stored;
+        $this->writes[] = 'calibration:' . $modelId . '@' . $version;
+        return $stored;
+    }
+
+    public function findCalibration(int $id): ?array
+    {
+        return $this->find($this->calibrations, fn(array $r) => (int) $r['id'] === $id);
+    }
+
+    public function listCalibrations(?int $modelVersionId = null, ?string $status = null, int $limit = 50): array
+    {
+        $rows = array_values(array_filter($this->calibrations, fn(array $r) => ($modelVersionId === null || (int) $r['model_version_id'] === $modelVersionId)
+            && ($status === null || ($r['status'] ?? '') === $status)));
+        usort($rows, fn(array $a, array $b) => strcmp((string) ($b['created_at'] ?? ''), (string) ($a['created_at'] ?? '')));
+        return array_slice($rows, 0, max(1, min(200, $limit)));
+    }
+
+    public function updateCalibration(int $id, array $patch): void
+    {
+        $patch = self::normalise($patch);
+        foreach ($this->calibrations as &$row) {
+            if ((int) $row['id'] === $id) { $row = array_merge($row, $patch); return; }
+        }
+        unset($row);
+    }
+
+    public function savePrediction(array $row): array
+    {
+        $row = self::normalise($row);
+        $id = (string) ($row['id'] ?? '');
+        if ($id === '') throw new \InvalidArgumentException('prediction requires an id');
+        $existing = $this->findPrediction($id);
+        if ($existing !== null && in_array((string) ($existing['settlement_state'] ?? 'OPEN'), ['SETTLED', 'VOID'], true)) {
+            return $existing;      // frozen: an evaluated prediction is immutable
+        }
+        if ($existing !== null) {
+            foreach ($this->predictions as &$r) { if ((string) $r['id'] === $id) $r = array_merge($r, $row, ['updated_at' => gmdate('c')]); }
+            unset($r);
+            $this->writes[] = 'prediction:update:' . $id;
+            return $this->findPrediction($id) ?? $existing;
+        }
+        $stored = array_merge(['id' => $id, 'created_at' => gmdate('c'), 'settlement_state' => 'OPEN'], $row);
+        $this->predictions[] = $stored;
+        $this->writes[] = 'prediction:create:' . $id;
+        return $stored;
+    }
+
+    public function findPrediction(string $id): ?array
+    {
+        return $this->find($this->predictions, fn(array $r) => (string) ($r['id'] ?? '') === $id);
+    }
+
+    public function listPredictions(array $filter = [], int $limit = 500): array
+    {
+        $rows = array_values(array_filter($this->predictions, function (array $row) use ($filter) {
+            if (!empty($filter['fixtureId']) && (int) ($row['fixture_id'] ?? 0) !== (int) $filter['fixtureId']) return false;
+            if (!empty($filter['kind']) && (string) ($row['prediction_kind'] ?? '') !== (string) $filter['kind']) return false;
+            if (!empty($filter['eligibility']) && (string) ($row['eligibility'] ?? '') !== (string) $filter['eligibility']) return false;
+            if (!empty($filter['modelVersionId']) && (int) ($row['model_version_id'] ?? 0) !== (int) $filter['modelVersionId']) return false;
+            if (!empty($filter['settlementState']) && (string) ($row['settlement_state'] ?? '') !== (string) $filter['settlementState']) return false;
+            if (!empty($filter['date']) && !str_starts_with((string) ($row['kickoff_at'] ?? ''), (string) $filter['date'])) return false;
+            if (!empty($filter['from']) && (string) ($row['generated_at'] ?? '') < (string) $filter['from']) return false;
+            if (!empty($filter['to']) && (string) ($row['generated_at'] ?? '') > (string) $filter['to']) return false;
+            return true;
+        }));
+        usort($rows, fn(array $a, array $b) => strcmp((string) ($b['generated_at'] ?? ''), (string) ($a['generated_at'] ?? '')));
+        return array_slice($rows, 0, max(1, min(2000, $limit)));
+    }
+
+    public function saveScoreProbabilities(string $predictionId, array $rows): void
+    {
+        $this->scoreProbabilities = array_values(array_filter($this->scoreProbabilities, fn(array $r) => (string) $r['prediction_id'] !== $predictionId));
+        foreach ($rows as $row) {
+            $home = (int) ($row['home'] ?? $row['home_goals'] ?? -1);
+            $away = (int) ($row['away'] ?? $row['away_goals'] ?? -1);
+            if ($home < 0 || $away < 0) continue;
+            $this->scoreProbabilities[] = ['prediction_id' => $predictionId, 'home_goals' => $home, 'away_goals' => $away,
+                'probability' => (float) ($row['probability'] ?? 0), 'rank' => (int) ($row['rank'] ?? 0),
+                'is_prediction' => !empty($row['isPrediction']) ? 1 : 0, 'created_at' => gmdate('c')];
+        }
+    }
+
+    public function listScoreProbabilities(string $predictionId, int $limit = 20): array
+    {
+        $rows = array_values(array_filter($this->scoreProbabilities, fn(array $r) => (string) $r['prediction_id'] === $predictionId));
+        usort($rows, fn(array $a, array $b) => (int) $a['rank'] <=> (int) $b['rank']);
+        return array_slice($rows, 0, max(1, min(100, $limit)));
+    }
+
+    public function saveSettlement(array $row): array
+    {
+        $predictionId = (string) ($row['prediction_id'] ?? '');
+        if ($predictionId === '') throw new \InvalidArgumentException('settlement requires prediction_id');
+        $existing = $this->findSettlement($predictionId);
+        if ($existing !== null) return ['row' => $existing, 'created' => false];
+        $stored = array_merge(['id' => $this->id(), 'created_at' => gmdate('c')], self::normalise($row));
+        $this->settlements[] = $stored;
+        $this->writes[] = 'settlement:' . $predictionId;
+        return ['row' => $stored, 'created' => true];
+    }
+
+    public function findSettlement(string $predictionId): ?array
+    {
+        return $this->find($this->settlements, fn(array $r) => (string) ($r['prediction_id'] ?? '') === $predictionId);
+    }
+
+    public function listSettlements(array $filter = [], int $limit = 2000): array
+    {
+        $rows = array_values(array_filter($this->settlements, function (array $row) use ($filter) {
+            if (!empty($filter['modelVersionId']) && (int) ($row['model_version_id'] ?? 0) !== (int) $filter['modelVersionId']) return false;
+            if (!empty($filter['fixtureId']) && (int) ($row['fixture_id'] ?? 0) !== (int) $filter['fixtureId']) return false;
+            if (!empty($filter['from']) && (string) ($row['settled_at'] ?? '') < (string) $filter['from']) return false;
+            if (!empty($filter['to']) && (string) ($row['settled_at'] ?? '') > (string) $filter['to']) return false;
+            return true;
+        }));
+        usort($rows, fn(array $a, array $b) => strcmp((string) ($b['settled_at'] ?? ''), (string) ($a['settled_at'] ?? '')));
+        return array_slice($rows, 0, max(1, min(5000, $limit)));
+    }
+
+    public function settlementAggregates(array $filter = []): array
+    {
+        $rows = $this->listSettlements($filter, 5000);
+        $evaluated = count($rows);
+        $correctResults = count(array_filter($rows, fn(array $r) => (int) ($r['correct_result'] ?? 0) === 1));
+        $correctScores = count(array_filter($rows, fn(array $r) => (int) ($r['correct_exact_score'] ?? 0) === 1));
+        $confidence = array_values(array_filter(array_map(fn(array $r) => $r['confidence'] ?? null, $rows), 'is_numeric'));
+        $quality = array_values(array_filter(array_map(fn(array $r) => $r['data_quality_score'] ?? null, $rows), 'is_numeric'));
+        $brier = array_values(array_filter(array_map(fn(array $r) => $r['brier'] ?? null, $rows), 'is_numeric'));
+        $logLoss = array_values(array_filter(array_map(fn(array $r) => $r['log_loss'] ?? null, $rows), 'is_numeric'));
+        return [
+            'evaluated' => $evaluated,
+            'correctResults' => $correctResults,
+            'correctScores' => $correctScores,
+            'averageConfidence' => $confidence === [] ? null : round(array_sum($confidence) / count($confidence), 2),
+            'averageDataQuality' => $quality === [] ? null : round(array_sum($quality) / count($quality), 2),
+            'brier' => $evaluated > 0 && count($brier) === $evaluated ? round(array_sum($brier) / $evaluated, 6) : null,
+            'logLoss' => $evaluated > 0 && count($logLoss) === $evaluated ? round(array_sum($logLoss) / $evaluated, 6) : null,
+        ];
+    }
+
+    public function listCalibrationSamples(array $filter = []): array
+    {
+        $rows = [];
+        foreach ($this->listSettlements($filter, (int) ($filter['limit'] ?? 5000)) as $settlement) {
+            $prediction = $this->findPrediction((string) ($settlement['prediction_id'] ?? ''));
+            if ($prediction === null) continue;
+            if ($settlement['actual_home_score'] === null || $settlement['actual_away_score'] === null) continue;
+            $rows[] = array_merge($settlement, [
+                'raw_home' => $prediction['raw_home'] ?? null, 'raw_draw' => $prediction['raw_draw'] ?? null, 'raw_away' => $prediction['raw_away'] ?? null,
+                'probability_home' => $prediction['probability_home'] ?? null, 'probability_draw' => $prediction['probability_draw'] ?? null,
+                'probability_away' => $prediction['probability_away'] ?? null, 'confidence' => $prediction['confidence'] ?? null,
+                'confidence_basis' => $prediction['confidence_basis'] ?? null, 'calibration_state' => $prediction['calibration_state'] ?? null,
+                'data_quality_band' => $prediction['data_quality_band'] ?? null, 'eligibility' => $prediction['eligibility'] ?? null,
+                'kickoff_at' => $prediction['kickoff_at'] ?? null, 'generated_at' => $prediction['generated_at'] ?? null,
+            ]);
+        }
+        return $rows;
+    }
+
+    public function savePerformanceSnapshot(array $row): array
+    {
+        $row = self::normalise($row);
+        $key = fn(array $r) => (int) ($r['model_version_id'] ?? 0) === (int) ($row['model_version_id'] ?? 0)
+            && (int) ($r['window_days'] ?? 0) === (int) ($row['window_days'] ?? 30)
+            && (string) ($r['window_start'] ?? '') === (string) ($row['window_start'] ?? '')
+            && (string) ($r['window_end'] ?? '') === (string) ($row['window_end'] ?? '');
+        $existing = $this->find($this->performance, $key);
+        if ($existing !== null) {
+            foreach ($this->performance as &$r) { if ((int) $r['id'] === (int) $existing['id']) $r = array_merge($r, $row); }
+            unset($r);
+            return $this->find($this->performance, $key) ?? $existing;
+        }
+        $stored = array_merge(['id' => $this->id(), 'window_days' => 30, 'computed_at' => gmdate('c')], $row);
+        $this->performance[] = $stored;
+        return $stored;
+    }
+
+    public function latestPerformanceSnapshot(int $windowDays, ?int $modelVersionId = null): ?array
+    {
+        $rows = array_values(array_filter($this->performance, fn(array $r) => (int) ($r['window_days'] ?? 0) === $windowDays
+            && ($modelVersionId === null || (int) ($r['model_version_id'] ?? 0) === $modelVersionId)));
+        usort($rows, fn(array $a, array $b) => strcmp((string) ($b['computed_at'] ?? ''), (string) ($a['computed_at'] ?? '')));
+        return $rows[0] ?? null;
+    }
+
+    public function startSyncRun(array $run): ?array
+    {
+        $key = (string) ($run['executionKey'] ?? '');
+        if ($key === '') throw new \InvalidArgumentException('sync run requires executionKey');
+        if ($this->find($this->syncRuns, fn(array $r) => $r['execution_key'] === $key) !== null) return null;
+        $stored = array_merge(['id' => $this->id(), 'status' => 'RUNNING', 'records_processed' => 0, 'records_created' => 0, 'records_updated' => 0,
+            'requests_made' => 0, 'errors' => [], 'started_at' => gmdate('c'), 'ended_at' => null, 'attempts' => 1,
+            'execution_key' => $key, 'job_type' => $run['jobType'] ?? null, 'window_start' => $run['windowStart'] ?? null,
+            'window_end' => $run['windowEnd'] ?? null, 'provider_code' => $run['providerCode'] ?? null, 'next_run_at' => null], $run);
+        unset($stored['executionKey'], $stored['jobType'], $stored['windowStart'], $stored['windowEnd']);
+        $this->syncRuns[] = $stored;
+        return $stored;
+    }
+
+    public function finishSyncRun(string $executionKey, array $result): void
+    {
+        foreach ($this->syncRuns as &$row) {
+            if ((string) $row['execution_key'] === $executionKey) {
+                $row = array_merge($row, ['status' => (string) ($result['status'] ?? 'COMPLETED'), 'records_processed' => (int) ($result['processed'] ?? 0),
+                    'records_created' => (int) ($result['created'] ?? 0), 'records_updated' => (int) ($result['updated'] ?? 0),
+                    'requests_made' => (int) ($result['requests'] ?? 0), 'errors' => (array) ($result['errors'] ?? []),
+                    'rate_limit_remaining' => $result['rateLimitRemaining'] ?? null, 'retry_after_seconds' => $result['retryAfterSeconds'] ?? null,
+                    'next_run_at' => $result['nextRunAt'] ?? null, 'ended_at' => gmdate('c'), 'attempts' => (int) $row['attempts'] + 1]);
+                return;
+            }
+        }
+        unset($row);
+    }
+
+    public function listSyncRuns(?string $jobType = null, int $limit = 50): array
+    {
+        $rows = $jobType === null ? $this->syncRuns : array_values(array_filter($this->syncRuns, fn(array $r) => (string) ($r['job_type'] ?? '') === $jobType));
+        usort($rows, fn(array $a, array $b) => strcmp((string) ($b['started_at'] ?? ''), (string) ($a['started_at'] ?? '')));
+        return array_slice($rows, 0, max(1, min(500, $limit)));
+    }
+
+    public function pruneSyncLogs(int $olderThanDays = 120): int
+    {
+        $cutoff = gmdate('c', time() - max(1, $olderThanDays) * 86400);
+        $before = count($this->syncRuns);
+        $this->syncRuns = array_values(array_filter($this->syncRuns, fn(array $r) => (string) ($r['started_at'] ?? '') >= $cutoff));
+        return $before - count($this->syncRuns);
+    }
+
+    public function pruneOrphanScoreRows(): int
+    {
+        $before = count($this->scoreProbabilities);
+        $this->scoreProbabilities = array_values(array_filter($this->scoreProbabilities, fn(array $r) => $this->findPrediction((string) $r['prediction_id']) !== null));
+        return $before - count($this->scoreProbabilities);
+    }
+
+    public function lastSyncRun(?string $jobType = null, ?int $providerId = null): ?array
+    {
+        $rows = $this->listSyncRuns($jobType, 500);
+        if ($providerId !== null) $rows = array_values(array_filter($rows, fn(array $r) => (int) ($r['provider_id'] ?? 0) === $providerId));
+        return $rows[0] ?? null;
     }
 }

@@ -20,6 +20,7 @@ class AIWorkforce_model extends CI_Model
     public object $audit;
     public object $identity;
     public object $sports;
+    public object $football;
     public object $analysis;
     public object $state;
     public object $paper;
@@ -304,7 +305,7 @@ class AIWorkforce_model extends CI_Model
             }
             public function finishSync(string $id, array $result): void { $this->db->where('id', $id)->update('sports_sync_runs', ['status' => $result['status'], 'ended_at' => gmdate('c'), 'records_processed' => $result['processed'] ?? 0, 'records_created' => $result['created'] ?? 0, 'records_updated' => $result['updated'] ?? 0, 'errors' => json_encode($result['errors'] ?? [])]); }
             public function listSyncRuns(?string $jobType = null, int $limit = 50): array { if ($jobType !== null) $this->db->where('job_type', $jobType); $rows = $this->db->order_by('started_at', 'DESC')->limit(min(500, max(1, $limit)))->get('sports_sync_runs')->result_array(); foreach ($rows as &$row) { $row['errors'] = json_decode((string) ($row['errors'] ?? '[]'), true) ?: []; } return $rows; }
-            public function ensureModelVersion(array $m): int { $row = $this->db->get_where('sports_model_versions', ['model_name' => $m['modelName'], 'model_version' => $m['modelVersion']], 1)->row_array(); if ($row) return (int)$row['id']; $this->db->insert('sports_model_versions', ['model_name' => $m['modelName'], 'model_version' => $m['modelVersion'], 'feature_version' => $m['featureVersion'], 'calibration_version' => $m['calibrationVersion'] ?? null, 'status' => $m['status'] ?? 'APPROVED', 'created_at' => gmdate('c')]); return (int)$this->db->insert_id(); }
+            public function ensureModelVersion(array $m): int { $row = $this->db->get_where('sports_model_versions', ['model_name' => $m['modelName'], 'model_version' => $m['modelVersion']], 1)->row_array(); if ($row) return (int)$row['id']; $this->db->insert('sports_model_versions', ['model_name' => $m['modelName'], 'model_version' => $m['modelVersion'], 'feature_version' => $m['featureVersion'], 'calibration_version' => $m['calibrationVersion'] ?? null, 'status' => $m['status'] ?? 'DRAFT', 'created_at' => gmdate('c')]); return (int)$this->db->insert_id(); }
             public function savePrediction(array $p): void { $this->db->insert('sports_predictions', $p); }
             public function saveTicket(array $t): void { $this->db->insert('sports_tickets', $t); }
             public function saveTicketSelection(array $s): void { $this->db->insert('sports_ticket_selections', $s); }
@@ -314,6 +315,11 @@ class AIWorkforce_model extends CI_Model
             public function listTickets(array $filter = [], int $limit = 500): array { if(!empty($filter['from']))$this->db->where('created_at >=',$filter['from']); if(!empty($filter['to']))$this->db->where('created_at <=',$filter['to']); if(!empty($filter['status']))$this->db->where('settlement_status',$filter['status']); if(!empty($filter['modelVersionId']))$this->db->where('model_version_id',(int)$filter['modelVersionId']); return $this->db->order_by('created_at','DESC')->limit(min(500,max(1,$limit)))->get('sports_tickets')->result_array(); }
             public function updateTicket(string $id, array $patch): void { $this->db->where('id', $id)->update('sports_tickets', $patch); }
         };
+
+        // Football Intelligence: a dedicated repository class (the module's
+        // contract is wide enough that an inline class would bury the rules it
+        // enforces — null-preserving writes, insert-once settlements).
+        $this->football = new AIWorkforce\Persistence\FootballRepositoryDatabase($db);
 
         $this->lottery = new class($db) implements AIWorkforce\Persistence\LotteryRepository {
             public function __construct(private object $db) {}

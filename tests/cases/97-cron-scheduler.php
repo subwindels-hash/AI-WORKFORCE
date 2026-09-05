@@ -45,8 +45,10 @@ test('cron runDue runs enabled + due jobs and records last runs', function () {
     $result = $scheduler->runDue(function (string $id) use (&$ran) {
         return function () use ($id, &$ran) { $ran[] = $id; return ['summary' => $id . ' ok']; };
     });
-    assert_equals(['ops', 'sports', 'lottery'], $ran);
-    foreach (['ops', 'sports', 'lottery'] as $id) {
+    // Registry order: the football sweep sits with the other domain sweeps, and
+    // each job's own interval (not the sweep's tick) decides when it does work.
+    assert_equals(['ops', 'sports', 'football', 'lottery'], $ran);
+    foreach (['ops', 'sports', 'football', 'lottery'] as $id) {
         assert_true($result[$id]['ran']);
         assert_equals('COMPLETED', $result[$id]['status']);
         $last = $scheduler->lastRun($id);
@@ -90,7 +92,7 @@ test('cron runDue isolates failures and marks partial sweeps honestly', function
             return [];
         };
     });
-    assert_equals(['ops', 'sports', 'lottery'], $ran, 'one failure does not abort the sweep');
+    assert_equals(['ops', 'sports', 'football', 'lottery'], $ran, 'one failure does not abort the sweep');
     assert_equals('FAILED', $result['sports']['status']);
     assert_contains('provider down', $result['sports']['error']);
     assert_equals('COMPLETED', $result['ops']['status']);
@@ -139,10 +141,12 @@ test('cron auto-trigger matrix: gating, throttle, due check, dispatch', function
     assert_equals('triggered', CronAutoRun::maybeTrigger($scheduler, $store, 'https://x/cron/run?key=k', $dispatch, $now, 'apache2handler'));
     assert_equals(['https://x/cron/run?key=k'], $hits);
     assert_equals('throttled', CronAutoRun::maybeTrigger($scheduler, $store, 'https://x/cron/run?key=k', $dispatch, $now, 'apache2handler'));
-    // Past the throttle window but with nothing due → quiet.
+    // Past the throttle window but with nothing due → quiet. Freshness is created
+    // by running the sweep at that moment rather than by assuming a minimum job
+    // interval, so a fast job (football ticks per-minute) cannot break the intent.
     $later = $now + CronAutoRun::THROTTLE_SECONDS + 1;
-    $scheduler->runDue(fn(string $id) => fn() => []);
     $scheduler2 = new CronScheduler($store, fn() => $later);
+    $scheduler2->runDue(fn(string $id) => fn() => []);
     assert_equals('not_due', CronAutoRun::maybeTrigger($scheduler2, $store, 'https://x/cron/run?key=k', $dispatch, $later, 'apache2handler'));
     assert_equals(1, count($hits), 'no dispatch when nothing is due');
     // A failing dispatch is reported, not thrown.

@@ -295,6 +295,11 @@ class Api_controller extends MY_Controller
         'api_lottery/providers' => true,
         'api_lottery/health' => true,
         'api_lottery/jobs' => true,
+        // Football Intelligence — the provider-state endpoint only. It exposes
+        // statuses (NOT_CONFIGURED / ONLINE, counts, cadence) and never a key,
+        // so a dashboard can explain why it is empty without a session.
+        'api_football/status' => true,
+        'api_football/provider_status' => true,
     ];
 
     public function __construct()

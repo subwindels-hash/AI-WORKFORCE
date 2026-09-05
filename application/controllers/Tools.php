@@ -18,7 +18,17 @@ class Tools extends MY_Controller
 
     public function index()
     {
-        echo "AI Workforce tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n  php index.php tools marketdata        — market-data connectivity report (add --activate to go live, --probe to fetch real bars)\n  php index.php tools cron              — scheduled operations: portfolio risk scan, broker transitions, proposal expiry\n  php index.php tools scheduler [job]   — unified scheduler: runs every enabled + due job (ops|sports|lottery)\n  php index.php tools sports-cron [job] — sports scheduled jobs (fixtures|odds|results|quality|ticket|settlement|performance|monitoring|cleanup)\n  php index.php tools lottery-cron [job] — lottery scheduled jobs (sync|health|statistics|systems|tickets|backtests|cleanup)\n";
+        // Both job lists are read from the live registries instead of being typed out
+        // here: these strings are the operator's only reference for which
+        // `tools scheduler <group>` and `tools football-cron <job>` ids are valid, and
+        // a hard-coded copy goes stale the moment a job is added or renamed.
+        $groups = class_exists(\AIWorkforce\Cron\CronScheduler::class)
+            ? implode('|', array_keys(\AIWorkforce\Cron\CronScheduler::JOBS))
+            : 'ops|sports|lottery';
+        $footballJobs = class_exists(\AIWorkforce\Football\FootballCronService::class)
+            ? implode('|', \AIWorkforce\Football\FootballCronService::JOBS)
+            : 'fixtures|upcoming|live|results|statistics|predict|settle|performance|cleanup';
+        echo "AI Workforce tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n  php index.php tools marketdata        — market-data connectivity report (add --activate to go live, --probe to fetch real bars)\n  php index.php tools cron              — scheduled operations: portfolio risk scan, broker transitions, proposal expiry\n  php index.php tools scheduler [job]   — unified scheduler: runs every enabled + due job ({$groups})\n  php index.php tools sports-cron [job] — sports scheduled jobs (fixtures|odds|results|quality|ticket|settlement|performance|monitoring|cleanup)\n  php index.php tools football-cron [job] — football refresh jobs ({$footballJobs}); --force bypasses cadence\n  php index.php tools lottery-cron [job] — lottery scheduled jobs (sync|health|statistics|systems|tickets|backtests|cleanup)\n";
     }
 
     public function install()
@@ -115,6 +125,34 @@ class Tools extends MY_Controller
             $summary = $service->runAll();
         }
         echo json_encode($summary, JSON_UNESCAPED_SLASHES), "\n";
+    }
+
+    /**
+     * Football Intelligence refresh sweep (spec §13). Cadence, provider backoff
+     * and request budgets are enforced by RefreshPolicy, so running this on a
+     * tight schedule is harmless: a job that is not due reports SKIPPED with the
+     * reason and never touches the provider.
+     *
+     *   php index.php tools football-cron                 — every due job
+     *   php index.php tools football-cron live           — one job
+     *   php index.php tools football-cron fixtures --force — run now, ignore cadence
+     */
+    public function football_cron()
+    {
+        $argv = (array) ($_SERVER['argv'] ?? []);
+        $job = trim((string) ($argv[3] ?? ''));
+        $force = in_array('--force', $argv, true);
+        $service = $this->platform->football->cron();
+        if ($job !== '' && $job !== '--force') {
+            if (!in_array($job, \AIWorkforce\Football\FootballCronService::JOBS, true)) {
+                fwrite(STDERR, 'unknown job. Valid: ' . implode(', ', \AIWorkforce\Football\FootballCronService::JOBS) . "\n");
+                exit(1);
+            }
+            $summary = $service->run($job, null, $force);
+        } else {
+            $summary = $service->runAll($force);
+        }
+        echo json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT), "\n";
     }
 
     /**

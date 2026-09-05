@@ -13,6 +13,7 @@ $priority = [
     $ai_workforceDir . '/Providers/MarketDataProvider.php',   // provider interface
     $ai_workforceDir . '/Sports/Providers/SportsDataProvider.php', // sports provider interface + manager
     $ai_workforceDir . '/Persistence/Repositories.php',      // repository interfaces
+    $ai_workforceDir . '/Persistence/FootballRepository.php', // football repository interface (before its implementations)
     $ai_workforceDir . '/Brokers/BrokerConnector.php',       // broker interface + manager
     $ai_workforceDir . '/Brokers/TradingConnector.php',      // order-capable broker interface
     $ai_workforceDir . '/MultiplierIntelligence/CrashGameProvider.php', // crash-game interface + abstract base (before AviatorProvider)
