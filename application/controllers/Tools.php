@@ -108,6 +108,25 @@ class Tools extends MY_Controller
     }
 
     /**
+     * Sports provider live smoke test — proves the configured providers
+     * actually work against the real APIs, layer by layer (health/auth,
+     * fixtures, odds, top players). Read-only; costs a few API requests.
+     *
+     *   php index.php tools sports-live              — all configured providers
+     *   php index.php tools sports-live api-football — one provider
+     *
+     * Exit codes: 0 all pass, 1 one or more failed, 2 none configured.
+     */
+    public function sports_live()
+    {
+        $only = trim((string) ($_SERVER['argv'][3] ?? ''));
+        $report = (new \AIWorkforce\Sports\SportsLiveSmoke())->run($this->platform->sports->providers, $only);
+        echo json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), "\n";
+        if (empty($report['configured'])) exit(2);
+        exit(!empty($report['pass']) ? 0 : 1);
+    }
+
+    /**
      * WINDELS Lottery Intelligence scheduled jobs (spec §40).
      * php /path/to/index.php tools lottery-cron [job]
      * Individual jobs: sync | health | statistics | cleanup

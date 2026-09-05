@@ -109,3 +109,18 @@ test('schema: sports_matches persists round_id end to end', function () {
     assert_not_null($row);
     assert_equals('cr-round-9', (string) ($row['round_id'] ?? ''), 'round_id column round-trips through the real repository');
 });
+
+test('cron: runAll executes the cleanup job instead of failing on it', function () {
+    $repo = ci()->AIWorkforce_model->sports;
+    $audit = fx_cron_audit();
+    $sports = new SportsIntelligence($repo, $audit);
+    $service = new SportsCronService($repo, $audit, $sports);
+    $summary = $service->runAll();
+
+    assert_true(isset($summary['cleanup']), 'cleanup is part of the scheduled sweep');
+    $status = (string) ($summary['cleanup']['status'] ?? '');
+    assert_true(in_array($status, ['COMPLETED', 'DUPLICATE_SKIPPED'], true), 'cleanup runs (got ' . ($status ?: 'none') . ')');
+    foreach ($summary as $job => $s) {
+        assert_true(($s['status'] ?? '') !== 'FAILED', "job {$job} must not fail in a no-provider sweep");
+    }
+});

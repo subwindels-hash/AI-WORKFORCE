@@ -53,6 +53,7 @@ class SportsCronService
             'settlement' => $this->jobSettlement($date),
             'performance' => $this->jobPerformance($date),
             'monitoring' => $this->jobMonitoring($date),
+            'cleanup' => $this->jobCleanup($date),
             default => throw new \InvalidArgumentException('unknown sports job: ' . $job),
         };
     }

@@ -137,6 +137,16 @@ round-capable provider is synced once via `syncRound(..., ['results' => false])`
 never re-written), and matches without a `round_id` — or on providers
 without the round endpoint — keep the legacy per-fixture `syncOdds` call.
 
+## Live smoke test
+
+`php index.php tools sports-live [provider]` proves the configured providers
+actually work against the real APIs, layer by layer: health/auth (+ quota
+usage) → today's fixtures → odds for the first fixture → top players where
+supported. Read-only; costs a handful of requests per provider. Exit codes:
+0 all pass, 1 one or more failed, 2 no providers configured. When a provider
+"doesn't work", this tells you exactly which layer fails (bad key,
+unreachable host, plan restriction) instead of guessing.
+
 ## Safe operation
 
 Provider data is untrusted input. The existing normalizers, data-quality gates, confidence checks, and ticket governance remain in the pipeline. Missing odds from providers without an odds feed must not be treated as fabricated odds; those predictions should be rejected or supplied by a separately licensed odds source.
