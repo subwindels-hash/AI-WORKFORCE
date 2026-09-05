@@ -29,6 +29,14 @@ namespace AIWorkforce\Lottery;
  *     prizes: [{ category: 1, categoryName: "5 + 2 estrellas", winners: 0,
  *                prizeAmount: "13000000000", formattedPrize: "130.000.000,00 €" }] }
  *
+ * Two layouts of the winning line are served, and both map to main + stars:
+ *  - two groups: `combination` = 5 numbers, `resultData.estrellas` = 2 stars;
+ *  - one flat list: `combination` = [7, 12, 29, 33, 45, 3, 9] — the numbers
+ *    followed by the stars. Left ungrouped, such a draw is rejected downstream
+ *    as "line must contain 5 main numbers (got 7)", so splitLine() re-groups
+ *    it (confirmed by the vendor's own star field, or by range) and records
+ *    the interpretation in extra.numberLayout / extra.rawCombination.
+ *
  * The adapter maps that payload into the provider-neutral shape the rest of
  * WINDELS Lottery Intelligence consumes (externalId / drawDate / main /
  * stars / jackpot / rollover / winners / source / sourceTimestamp). It never
@@ -80,6 +88,23 @@ final class LoteriasApiProvider implements LotteryProvider
      * such rows carry no numbers yet and are never offered as history.
      */
     private const UNFINISHED_STATUSES = ['PENDING', 'SCHEDULED', 'PROGRAMADO', 'PROCESSING', 'IN_PROGRESS', 'CANCELLED', 'CANCELED'];
+    /**
+     * Number layout of every game slug the adapter may read, as
+     *   slug => [main => [count, min, max], stars => [count, min, max]].
+     *
+     * The vendor serves the winning line in two shapes: the documented one
+     * keeps the groups apart (`combination` = 5 numbers, `resultData.estrellas`
+     * = 2 stars), while the live feed also serves the whole line as a single
+     * flat `combination` array — numbers first, then the stars. A flat list is
+     * only ever split back into groups for a game whose layout is known here,
+     * and only when the split is either confirmed by the vendor's own star
+     * field or plausible for every single value (see splitLine()); anything
+     * else is left untouched so the central validator rejects the draw instead
+     * of the adapter inventing a line.
+     */
+    private const GAME_FORMATS = [
+        'euromillones' => ['main' => [5, 1, 50], 'stars' => [2, 1, 12]],
+    ];
     /**
      * health() and jackpotInfo() both need the latest draw — one status render
      * should cost one request, not two, on plans with a small quota.
@@ -331,6 +356,27 @@ final class LoteriasApiProvider implements LotteryProvider
         return array_slice($out, 0, $limit);
     }
 
+    /**
+     * The vendor's own latest draw object, unmapped — diagnostics only.
+     *
+     * A feed whose shape changed is only diagnosable from what it actually
+     * sends: `php index.php tools lottery-smoke --raw` prints this row next to
+     * the mapped draw, so a rejected sync can be traced to a payload field
+     * instead of a guess. Nothing here is ingested.
+     *
+     * @return array<string,mixed>
+     */
+    public function rawLatest(): array
+    {
+        if (!$this->configured()) return [];
+        try {
+            $row = $this->latest();
+        } catch (\Throwable $e) {
+            return [];
+        }
+        return is_array($row) ? $row : [];
+    }
+
     /** Published jackpot from the feed (never used to infer future outcomes). */
     public function jackpotInfo(): ?array
     {
@@ -574,8 +620,10 @@ final class LoteriasApiProvider implements LotteryProvider
     {
         $resultData = $this->resultDataOf($row);
         $meta = is_array($row['meta'] ?? null) ? $row['meta'] : [];
-        $main = $this->mainOf($row);
-        $stars = $this->starsOf($row);
+        // The vendor publishes the winning line either as two groups
+        // (combination + resultData.estrellas) or as one flat list — numbers
+        // followed by the stars. Both map to main + stars here.
+        [$main, $stars, $layout, $rawNumbers] = $this->numbersOf($row);
 
         $drawDate = (string) ($row['drawDate'] ?? ($row['draw_date'] ?? ($row['date'] ?? ($row['fecha'] ?? ''))));
         $drawId = (string) ($row['drawId'] ?? ($row['draw_id'] ?? ($row['id'] ?? '')));
@@ -655,6 +703,11 @@ final class LoteriasApiProvider implements LotteryProvider
                 'feedSource' => isset($meta['source']) && is_scalar($meta['source']) ? (string) $meta['source'] : null,
                 'status' => isset($row['status']) && is_scalar($row['status']) ? strtoupper((string) $row['status']) : null,
                 'dayOfWeek' => isset($row['dayOfWeek']) && is_scalar($row['dayOfWeek']) ? (string) $row['dayOfWeek'] : null,
+                // Provenance of a re-grouped line: which interpretation was
+                // applied and the vendor's own number list, so a stored draw
+                // can always be traced back to what the feed actually sent.
+                'numberLayout' => $layout,
+                'rawCombination' => $layout !== null ? $rawNumbers : null,
             ],
         ];
     }
@@ -706,6 +759,112 @@ final class LoteriasApiProvider implements LotteryProvider
         ]);
     }
 
+    /** Number layout of the configured game, or null when it is unknown. */
+    private function gameFormat(): ?array
+    {
+        return self::GAME_FORMATS[$this->game] ?? null;
+    }
+
+    /**
+     * Main numbers + stars of one vendor row, in the shape the validator
+     * expects (main = mainCount values, stars = starCount values).
+     *
+     * @return array{0:list<mixed>|null,1:list<mixed>|null,2:?string,3:list<mixed>|null}
+     *         [main, stars, layout applied (null = none), raw number list]
+     */
+    private function numbersOf(array $row): array
+    {
+        $flat = $this->mainOf($row);
+        $stars = $this->starsOf($row);
+        [$main, $stars, $layout] = $this->splitLine($flat, $stars, $this->gameFormat());
+        return [$main, $stars, $layout, $flat];
+    }
+
+    /**
+     * Re-group a flat number list the vendor published as one array.
+     *
+     * A draw whose `combination` holds numbers + stars arrives as 7 values for
+     * EuroMillions and is rejected downstream as "line must contain 5 main
+     * numbers (got 7)". The trailing starCount values are moved into the star
+     * group only when one of these holds:
+     *
+     *  (a) the row also carries the stars in its own field and the flat list
+     *      begins or ends with exactly those values — the split is then
+     *      confirmed by the vendor itself, not assumed;
+     *  (b) no star field is present, the flat list is exactly
+     *      mainCount + starCount long, and every value fits its group's range
+     *      without repeating inside the group.
+     *
+     * Anything else (unknown game, implausible values, a list that is merely
+     * the wrong length) is returned unchanged: the draw is then rejected and
+     * audited with the vendor's own numbers rather than silently reshaped.
+     *
+     * @param list<mixed>|null $flat
+     * @param list<mixed>|null $stars
+     * @return array{0:list<mixed>|null,1:list<mixed>|null,2:?string}
+     */
+    private function splitLine($flat, $stars, ?array $format): array
+    {
+        if ($format === null || !is_array($flat)) return [$flat, $stars, null];
+        [$mainCount, $mainMin, $mainMax] = $format['main'];
+        [$starCount, $starMin, $starMax] = $format['stars'];
+        $values = array_values($flat);
+        // Already the documented two-group shape — nothing to reinterpret.
+        if (count($values) === $mainCount) return [$values, $stars, null];
+        if (count($values) !== $mainCount + $starCount) return [$values, $stars, null];
+
+        $head = array_slice($values, 0, $mainCount);
+        $tail = array_slice($values, $mainCount);
+        if (is_array($stars) && $stars !== [] && count($stars) === $starCount) {
+            if ($this->sameNumbers($stars, $tail)) {
+                return [$head, array_values($stars), 'flat-combination-split'];
+            }
+            // The same line, published stars first — again confirmed by the
+            // vendor's own star field, so no value is assumed either way.
+            if ($this->sameNumbers($stars, array_slice($values, 0, $starCount))) {
+                return [array_slice($values, $starCount), array_values($stars), 'flat-combination-split-stars-first'];
+            }
+        }
+        if ((!is_array($stars) || $stars === [])
+            && $this->allInRange($head, $mainMin, $mainMax)
+            && $this->allInRange($tail, $starMin, $starMax)) {
+            return [$head, $this->intsOf($tail), 'flat-combination-split'];
+        }
+        return [$values, $stars, null];
+    }
+
+    /** Two number lists that hold the same values (vendor ints vs. strings). */
+    private function sameNumbers(array $a, array $b): bool
+    {
+        $a = array_values($a);
+        $b = array_values($b);
+        if (count($a) !== count($b)) return false;
+        foreach ($a as $i => $v) {
+            if (!is_numeric($v) || !is_numeric($b[$i]) || (int) $v !== (int) $b[$i]) return false;
+        }
+        return true;
+    }
+
+    /** Every value numeric, inside [min,max] and unique inside the group. */
+    private function allInRange(array $values, int $min, int $max): bool
+    {
+        $seen = [];
+        foreach ($values as $v) {
+            if (!is_numeric($v)) return false;
+            $n = (int) $v;
+            if ($n < $min || $n > $max) return false;
+            if (isset($seen[$n])) return false;
+            $seen[$n] = true;
+        }
+        return true;
+    }
+
+    /** @return list<int> */
+    private function intsOf(array $values): array
+    {
+        return array_map(static fn($v): int => (int) $v, array_values($values));
+    }
+
     /** resultData as a map; some gateways deliver it as a JSON string. @return array<string,mixed> */
     private function resultDataOf(array $row): array
     {
@@ -727,7 +886,8 @@ final class LoteriasApiProvider implements LotteryProvider
     {
         $status = strtoupper(trim((string) ($row['status'] ?? '')));
         if ($status !== '' && !$this->statusIsFinished($status)) return false;
-        return $this->mainOf($row) !== null && $this->starsOf($row) !== null;
+        [$main, $stars] = $this->numbersOf($row);
+        return $main !== null && $stars !== null;
     }
 
     /**
