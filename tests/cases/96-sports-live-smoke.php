@@ -135,3 +135,36 @@ test('cli: documented hyphen commands have explicit routes (translate_uri_dashes
     assert_contains('$route[\'tools/lottery-cron\'] = \'tools/lottery_cron\';', $routes, 'documented lottery-cron form routed');
     assert_contains('$route[\'tools/sports-live\'] = \'tools/sports_live\';', $routes, 'sports-live form routed');
 });
+
+test('smoke: a truncated pull reports what could not be read', function () {
+    // An endpoint that advertises more pages but refuses the `page` parameter
+    // must still pass the smoke test — with the unread pages named, not hidden.
+    $provider = new \AIWorkforce\Sports\Providers\ApiFootballProvider('k', 'https://v3.football.api-sports.io', 10, function (string $url, array $headers): array {
+        if (str_contains($url, '/status')) {
+            return ['status' => 200, 'body' => json_encode(['response' => ['requests' => ['current' => 3, 'limit_day' => 100]]])];
+        }
+        if (str_contains($url, 'page=')) {
+            return ['status' => 200, 'body' => json_encode(['errors' => ['page' => 'The Page field do not exist.'], 'results' => 0, 'paging' => ['current' => 0, 'total' => 0], 'response' => []])];
+        }
+        if (str_contains($url, '/fixtures')) {
+            return ['status' => 200, 'body' => json_encode([
+                'errors' => [], 'results' => 1, 'paging' => ['current' => 1, 'total' => 4],
+                'response' => [[
+                    'fixture' => ['id' => 501, 'date' => '2026-09-05T15:00:00+00:00', 'status' => ['short' => 'NS']],
+                    'teams' => ['home' => ['id' => 1, 'name' => 'Arsenal'], 'away' => ['id' => 2, 'name' => 'Chelsea']],
+                    'league' => ['id' => 39, 'name' => 'Premier League', 'season' => 2026],
+                ]],
+            ])];
+        }
+        return ['status' => 200, 'body' => json_encode(['errors' => [], 'results' => 0, 'paging' => ['current' => 1, 'total' => 1], 'response' => []])];
+    });
+
+    $report = (new SportsLiveSmoke())->run(fx_smoke_manager([$provider]));
+    $entry = $report['providers']['api-football'];
+
+    assert_true($entry['steps']['fixtures']['ok'] === true, 'fixtures still succeed');
+    assert_equals(1, $entry['steps']['fixtures']['count'], 'the rows we did get are reported');
+    assert_true(isset($entry['steps']['fixtures']['paginationNotes']), 'the smoke report names the truncation');
+    assert_contains('page 2 refused', (string) $entry['steps']['fixtures']['paginationNotes'][0]);
+    assert_true($entry['pass'] === true, 'reachable + data returned still passes');
+});

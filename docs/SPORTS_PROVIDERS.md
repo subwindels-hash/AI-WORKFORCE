@@ -35,12 +35,25 @@ All upstream responses are converted to the internal fixture, odds, and result s
 
 API-Football uses the `x-apisports-key` header. Its odds response is flattened into the internal market/selection/decimalOdds shape. The provider's plan and quota determine which leagues and odds markets are available.
 
-**Pagination:** the v3 list endpoints paginate with the `page` parameter and
-report `paging: {current, total}` in every response (fixtures: 50/page,
-odds: 10/page). `fixtures()`, `odds()` and `leagues()` follow the pages
-until `current >= total` (hard cap: 40 pages), so busy days, full-season
-queries and fixtures with many bookmaker markets are not silently truncated
-to the first page.
+**Pagination:** every v3 list response carries `paging: {current, total}`, but
+only some endpoints actually paginate — `/players` at 20 rows/page and `/odds`
+at 10 rows/page take a `page` parameter, while `/fixtures` (a whole day or a
+whole season in one response) and `/leagues` return everything and reject an
+explicit `page` with HTTP 200 and
+`errors: {"page": "The Page field do not exist."}`.
+
+`fetchAllPages()` therefore omits `page` on the first request (page 1 is the
+provider default), sends `page=N` from 2 upwards only while
+`paging.current < paging.total` (hard cap: 40 pages), and — if a follow-up page
+is refused because the endpoint does not accept the parameter — keeps the rows
+already fetched and records the truncation in `paginationNotes()` (also
+reported by `health()` and by the live smoke test) instead of throwing the whole
+pull away. Any other provider error still propagates.
+
+> **History:** sending `page=1` on the first request made every non-paginated
+> endpoint fail — `fixtures()` for a calendar day and `leagues()` both answered
+> "The Page field do not exist.", the sync stored nothing and the dashboard
+> reported `Sync pulled nothing.`
 
 `ApiFootballProvider::topPlayers(leagueId, season, type)` wraps the four
 top-player endpoints of the Players tag

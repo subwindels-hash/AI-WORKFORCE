@@ -30,6 +30,14 @@ trait HttpTransport
     private int $failures = 0;
     private ?string $lastSuccess = null;
     private ?string $lastFailure = null;
+    /**
+     * Non-fatal pagination degradations observed by the last call — e.g. an
+     * endpoint that advertised more pages but refused the `page` parameter.
+     * Surfaced through health()/paginationNotes() so truncated pulls stay
+     * visible instead of passing as complete.
+     * @var array<int,string>
+     */
+    private array $paginationNotes = [];
 
     private function initTransport(int $timeout, ?callable $override = null): void
     {
@@ -109,6 +117,24 @@ trait HttpTransport
         return $resp;
     }
 
+    /**
+     * Pagination degradations recorded since this object was created, newest
+     * last. A truncated pull is still a pull: callers keep the rows, the
+     * reason they are incomplete is never dropped.
+     *
+     * @return array<int,string>
+     */
+    public function paginationNotes(): array
+    {
+        return $this->paginationNotes;
+    }
+
+    /** Forget recorded pagination notes (start of a fresh diagnostic round). */
+    public function resetPaginationNotes(): void
+    {
+        $this->paginationNotes = [];
+    }
+
     protected function decodeJson(array $resp): array
     {
         $decoded = json_decode($resp['body'] ?? '', true);
@@ -119,7 +145,8 @@ trait HttpTransport
         // `response` as "no data" (a blank key must never read as ONLINE).
         if (!empty($decoded['errors'])) {
             $errors = (array) $decoded['errors'];
-            $first = reset($errors);
+            $field = key($errors);      // api-football keys soft errors by the offending parameter
+            $first = current($errors);
             $msg = is_string($first) ? $first : json_encode($decoded['errors']);
             $status = array_key_exists('token', $errors)
                 ? ProviderException::AUTHENTICATION_ERROR
@@ -129,7 +156,12 @@ trait HttpTransport
                 $hint = ' — api-football from/to requires league+season or team+season (e.g. &league=39&season=2026). '
                     . 'For all fixtures in a date range omit league/season (per-day date mode is used) or pass &date=YYYY-MM-DD for a single day.';
             }
-            throw new ProviderException('provider error: ' . mb_substr((string) $msg, 0, 200) . $hint, $status);
+            throw new ProviderException(
+                'provider error: ' . mb_substr((string) $msg, 0, 200) . $hint,
+                $status,
+                null,
+                is_string($field) && $field !== '' ? ['errorField' => $field] : [],
+            );
         }
         return $decoded;
     }
@@ -261,7 +293,7 @@ class ApiFootballProvider implements SportsDataProvider
             $limit = is_array($requests)
                 ? ($requests['limit_day'] ?? null)
                 : ($rateInfo['limit_day'] ?? null);
-            return [
+            $health = [
                 'status' => 'ONLINE',
                 'reliability' => $this->reliability(),
                 'errorRate' => $this->errorRate(),
@@ -271,6 +303,10 @@ class ApiFootballProvider implements SportsDataProvider
                 'requestsToday' => $used,
                 'limitDaily' => $limit,
             ];
+            // A truncated pull still passes as ONLINE; the truncation is
+            // reported alongside it so it cannot hide behind a green status.
+            if ($this->paginationNotes !== []) $health['paginationNotes'] = $this->paginationNotes;
+            return $health;
         } catch (ProviderException $e) {
             return [
                 'status' => $e->status,
@@ -585,20 +621,40 @@ class ApiFootballProvider implements SportsDataProvider
     /**
      * Fetch every page of a paginated list endpoint.
      *
-     * api-football v3 list endpoints (fixtures, odds, leagues, ...) report
-     * `paging: {current, total}` in each response and are paged with the
-     * `page` parameter (50/page for fixtures, 10/page for odds, ...). Reading
-     * only the first page silently truncates busy days, full-season queries
-     * and fixtures with many bookmaker markets. Follow the pages until
-     * current >= total, hard-capped at 40 pages so a bad `total` cannot loop.
+     * api-football v3 answers every list endpoint with `paging: {current,
+     * total}`; the ones that actually paginate (/players 20/page, /odds
+     * 10/page, ...) take a `page` parameter. The ones that do not — /fixtures
+     * returns a whole day or a whole season in one response, /leagues returns
+     * everything — reject an explicit `page` with HTTP 200 and
+     * `errors: {"page": "The Page field do not exist."}`.
+     *
+     * Page 1 is the provider default, so the first request never sends
+     * `page`: sending `page=1` failed the entire call on the non-paginated
+     * endpoints (a whole matchday lost over an optional parameter). Follow-up
+     * requests send `page=N` from 2 upwards while `current < total`, hard-
+     * capped at 40 pages so a bad `total` cannot loop.
+     *
+     * If a follow-up page is rejected because the endpoint does not accept
+     * `page`, the rows collected so far are kept and the truncation is
+     * recorded in paginationNotes() — the data we did receive is real and
+     * usable, and losing it would make the whole sync report "nothing stored".
+     * Any other provider error still propagates.
      */
     private function fetchAllPages(string $path, array $params, int $maxPages = 40): array
     {
         $rows = [];
         $page = 1;
         do {
-            $resp = $this->doRequest($path . '?' . http_build_query($params + ['page' => $page]));
-            $json = $this->decodeJson($resp);
+            $query = $page > 1 ? $params + ['page' => $page] : $params;
+            try {
+                $json = $this->decodeJson($this->doRequest($path . ($query === [] ? '' : '?' . http_build_query($query))));
+            } catch (ProviderException $e) {
+                if ($page > 1 && $this->isRejectedPageParameter($e)) {
+                    $this->notePagination($path, $page, count($rows), $e->getMessage());
+                    break;
+                }
+                throw $e;
+            }
             $rows = array_merge($rows, $this->extractList($json));
             $paging = is_array($json['paging'] ?? null) ? $json['paging'] : [];
             $current = (int) ($paging['current'] ?? $page);
@@ -606,6 +662,33 @@ class ApiFootballProvider implements SportsDataProvider
             $page++;
         } while ($current < $total && $page <= $maxPages);
         return $rows;
+    }
+
+    /**
+     * True when the provider refused the `page` query parameter itself (an
+     * endpoint that does not paginate), as opposed to any other failure.
+     * Keyed off the machine-readable error field first, with the message as a
+     * fallback for providers that key their errors differently.
+     */
+    private function isRejectedPageParameter(ProviderException $e): bool
+    {
+        $field = strtolower((string) ($e->details['errorField'] ?? ''));
+        if ($field === 'page' || $field === 'pages') return true;
+        $msg = strtolower($e->getMessage());
+        return str_contains($msg, 'page') && str_contains($msg, 'field') && str_contains($msg, 'exist');
+    }
+
+    /** Record a truncated pull (bounded: the newest 10 notes are kept). */
+    private function notePagination(string $path, int $page, int $kept, string $reason): void
+    {
+        $this->paginationNotes[] = sprintf(
+            '%s: page %d refused (%s) — %d row(s) kept, remaining pages not read',
+            $path,
+            $page,
+            mb_substr(preg_replace('/^provider error:\s*/i', '', $reason) ?: $reason, 0, 120),
+            $kept,
+        );
+        $this->paginationNotes = array_slice($this->paginationNotes, -10);
     }
 
     private function doRequest(string $path): array

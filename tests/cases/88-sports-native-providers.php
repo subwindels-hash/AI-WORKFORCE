@@ -1053,6 +1053,23 @@ function afPageBody(array $rows, int $current, int $total): string
     return json_encode(['errors' => [], 'results' => count($rows), 'paging' => ['current' => $current, 'total' => $total], 'response' => $rows]);
 }
 
+/**
+ * api-football's answer to a query parameter the endpoint does not accept —
+ * HTTP 200 with the offending field named in `errors`. Verbatim message from
+ * the live API when `page` is sent to a non-paginated endpoint.
+ */
+function afPageRejectedBody(): string
+{
+    return json_encode([
+        'get' => 'fixtures',
+        'parameters' => ['date' => '2026-09-05', 'page' => '1'],
+        'errors' => ['page' => 'The Page field do not exist.'],
+        'results' => 0,
+        'paging' => ['current' => 0, 'total' => 0],
+        'response' => [],
+    ]);
+}
+
 function afOddsRow(string $bookmaker, float $odd): array
 {
     return [
@@ -1078,8 +1095,106 @@ test('api-football fixtures follow paging.total to the last page', function () {
 
     assert_equals(3, count($fixtures), 'all pages combined, none truncated');
     assert_equals(2, count($urls), 'exactly two page requests');
-    assert_true(str_contains($urls[0], 'page=1'), 'first request is page 1');
+    assert_not_contains('page=', $urls[0], 'page 1 is the provider default and must not be sent');
     assert_true(str_contains($urls[1], 'page=2'), 'follows to page 2');
+    assert_equals([], $p->paginationNotes(), 'a fully followed pull records no truncation');
+});
+
+test('api-football never sends page=1 (endpoints without pagination reject it)', function () {
+    // Regression: the first request used to carry page=1. /fixtures, /leagues
+    // and friends do not accept `page` and answer HTTP 200 with
+    // errors.page = "The Page field do not exist." — the whole sync then
+    // stored nothing and surfaced that message as the first error.
+    $urls = [];
+    $transport = function (string $url, array $headers) use (&$urls): array {
+        $urls[] = $url;
+        if (str_contains($url, 'page=')) {
+            return ['status' => 200, 'body' => afPageRejectedBody()];
+        }
+        return ['status' => 200, 'body' => afPageBody([afFixtureRow(1, 'A', 'B'), afFixtureRow(2, 'C', 'D')], 1, 1)];
+    };
+    $p = new ApiFootballProvider('k', 'https://v3.football.api-sports.io', 10, $transport);
+    $fixtures = $p->fixtures(['from' => '2026-09-05', 'to' => '2026-09-05']);
+
+    assert_equals(2, count($fixtures), 'the day is returned instead of failing');
+    assert_equals(1, count($urls), 'one request served the whole day');
+    assert_not_contains('page', $urls[0], 'no page parameter on the first request');
+    assert_contains('date=2026-09-05', $urls[0], 'the date filter is intact');
+    assert_equals([], $p->paginationNotes(), 'nothing was truncated, nothing recorded');
+});
+
+test('api-football leagues are fetched without a page parameter', function () {
+    $urls = [];
+    $transport = function (string $url, array $headers) use (&$urls): array {
+        $urls[] = $url;
+        if (str_contains($url, 'page=')) {
+            return ['status' => 200, 'body' => afPageRejectedBody()];
+        }
+        return ['status' => 200, 'body' => json_encode([
+            'errors' => [], 'results' => 1, 'paging' => ['current' => 1, 'total' => 1],
+            'response' => [['league' => ['id' => 39, 'name' => 'Premier League'], 'country' => ['name' => 'England'], 'seasons' => [['year' => 2026]]]],
+        ])];
+    };
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, $transport);
+    $leagues = $p->leagues();
+
+    assert_equals(1, count($leagues), 'leagues are returned');
+    assert_equals('Premier League', $leagues[0]['name']);
+    assert_equals('https://api.test/leagues', $urls[0], 'no page parameter and no empty query string');
+});
+
+test('api-football keeps page-1 rows when the endpoint refuses page=2', function () {
+    // paging.total says there is more, but the endpoint rejects `page`: keep
+    // what we got and record the truncation instead of throwing the day away.
+    $urls = [];
+    $transport = function (string $url, array $headers) use (&$urls): array {
+        $urls[] = $url;
+        if (str_contains($url, 'page=')) return ['status' => 200, 'body' => afPageRejectedBody()];
+        return ['status' => 200, 'body' => afPageBody([afFixtureRow(1, 'A', 'B'), afFixtureRow(2, 'C', 'D')], 1, 3)];
+    };
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, $transport);
+    $fixtures = $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15']);
+
+    assert_equals(2, count($fixtures), 'the rows from page 1 survive');
+    assert_equals(2, count($urls), 'one attempt at page 2, then stop');
+    assert_contains('page=2', $urls[1]);
+    $notes = $p->paginationNotes();
+    assert_equals(1, count($notes), 'the truncation is recorded');
+    assert_contains('page 2 refused', $notes[0]);
+    assert_contains('The Page field do not exist.', $notes[0], 'the provider message is kept');
+    assert_contains('2 row(s) kept', $notes[0]);
+});
+
+test('api-football reports truncation through health() instead of hiding it', function () {
+    $transport = function (string $url, array $headers): array {
+        if (str_contains($url, 'page=')) return ['status' => 200, 'body' => afPageRejectedBody()];
+        if (str_contains($url, '/status')) {
+            return ['status' => 200, 'body' => json_encode(['response' => ['requests' => ['current' => 5, 'limit_day' => 100]]])];
+        }
+        return ['status' => 200, 'body' => afPageBody([afFixtureRow(1, 'A', 'B')], 1, 5)];
+    };
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, $transport);
+    $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15']);
+    $health = $p->health();
+    assert_equals('ONLINE', $health['status'], 'a truncated pull is still reachable');
+    assert_true(isset($health['paginationNotes']), 'health carries the truncation note');
+    assert_equals($p->paginationNotes(), $health['paginationNotes']);
+    $p->resetPaginationNotes();
+    assert_equals([], $p->paginationNotes(), 'notes can be cleared for the next round');
+});
+
+test('api-football still propagates unrelated errors from a follow-up page', function () {
+    // Only the rejected `page` parameter degrades; a real failure mid-pull
+    // must not be swallowed into a silently short result set.
+    $transport = function (string $url, array $headers): array {
+        if (str_contains($url, 'page=')) {
+            return ['status' => 200, 'body' => json_encode(['errors' => ['token' => 'Invalid API key'], 'results' => 0, 'paging' => ['current' => 0, 'total' => 0], 'response' => []])];
+        }
+        return ['status' => 200, 'body' => afPageBody([afFixtureRow(1, 'A', 'B')], 1, 2)];
+    };
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, $transport);
+    assert_throws(ProviderException::class, fn() => $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15']));
+    assert_equals([], $p->paginationNotes(), 'a hard failure records no truncation note');
 });
 
 test('api-football odds follow paging (10 rows/page upstream)', function () {
@@ -1112,6 +1227,42 @@ test('api-football pagination is bounded when paging.total misbehaves', function
     $p = new ApiFootballProvider('k', 'https://api.test', 10, $transport);
     $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15']);
     assert_equals(40, count($urls), 'hard cap of 40 pages prevents an endless loop');
+});
+
+test('api-football: a whole matchday reaches the sync store on a page-rejecting API', function () {
+    // End to end through the real sync service — the "Sync now" button path
+    // (Sports::sync → syncFixtures for today+tomorrow). Before the fix this
+    // run stored nothing and reported
+    // "api-football: provider error: The Page field do not exist.".
+    $transport = function (string $url, array $headers): array {
+        if (str_contains($url, '/status')) {
+            return ['status' => 200, 'body' => json_encode(['response' => ['requests' => ['current' => 4, 'limit_day' => 100]]])];
+        }
+        if (str_contains($url, 'page=')) return ['status' => 200, 'body' => afPageRejectedBody()];
+        // Distinct fixture ids per requested day (the store is keyed on
+        // provider + external id, so a repeated id would read as an update).
+        $day = str_contains($url, '2026-09-06') ? 100 : 0;
+        return ['status' => 200, 'body' => afPageBody([
+            afFixtureRow(101 + $day, 'Arsenal', 'Chelsea'),
+            afFixtureRow(102 + $day, 'Everton', 'Leeds'),
+        ], 1, 1)];
+    };
+    $provider = new ApiFootballProvider('k', 'https://v3.football.api-sports.io', 10, $transport);
+    $repo = new SportsRepositoryStub();
+    $audit = new class implements \AIWorkforce\Persistence\AuditRepository {
+        public array $events = [];
+        public function emit(string $type, string $summary, array $detail = [], string $actor = 'system'): void { $this->events[] = $type; }
+        public function recent(int $limit = 100): array { return []; }
+    };
+    $sync = new \AIWorkforce\Sports\SportsSyncService($repo, $audit, new \AIWorkforce\Sports\DataQualityEngine());
+
+    $result = $sync->syncFixtures($provider, ['from' => '2026-09-05', 'to' => '2026-09-06'], 'web-sync:fixtures:e2e');
+
+    assert_equals('COMPLETED', $result['status'], 'the sync completes instead of failing');
+    assert_equals(4, $result['processed'], 'both days pulled (2 fixtures each)');
+    assert_equals(4, count($repo->matches), 'the fixtures are actually stored');
+    assert_equals([], $result['errors'], 'no errors surfaced to the dashboard');
+    assert_in_array('SPORTS_FIXTURE_SYNC_COMPLETED', $audit->events, 'audited as a completed sync');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
