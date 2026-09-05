@@ -181,8 +181,8 @@ final class ApiProviders
             'loteriasapi' => [
                 'label' => 'LoteriasAPI (loteriasapi.com) — EuroMillions',
                 'fields' => [
-                    $f('base_url', 'Base URL', false, false, 'Defaults to https://api.loteriasapi.com/v1 (the marketing host loteriasapi.com is auto-rewritten)'),
-                    $f('api_key', 'API Key (x-api-key)', true, true, 'Free key (1,000 requests/month) at https://loteriasapi.com/auth/register'),
+                    $f('base_url', 'Base URL', false, false, 'Defaults to https://api.loteriasapi.com/api/v1 — the /api prefix is required (a pasted /v1 or marketing URL is rewritten automatically)'),
+                    $f('api_key', 'API Key (x-api-key)', true, true, 'Key from https://loteriasapi.com/auth/register (free tier available; plan limits at https://loteriasapi.com/planes)'),
                     $f('game', 'Game code', false, false, 'Defaults to euromillones ("euromillions" is accepted and normalized)'),
                     $f('timeout', 'Timeout (seconds)', false, false),
                 ],
@@ -1016,25 +1016,39 @@ final class ApiProviders
     {
         $key = trim($key);
         if ($key === '') {
-            return ['ok' => false, 'message' => 'An API key is required. Get a free key (1,000 req/month) at https://loteriasapi.com/auth/register'];
+            return ['ok' => false, 'message' => 'An API key is required. Get a key (free tier available) at https://loteriasapi.com/auth/register — plan limits: https://loteriasapi.com/planes'];
         }
+        // Same canonicalisation the runtime adapter applies: the vendor serves
+        // the API under /api/v1 — the /v1 root its marketing pages advertise
+        // answers 404 on every route.
         $base = \AIWorkforce\Lottery\LoteriasApiProvider::normalizeBaseUrl($baseUrl);
         $game = \AIWorkforce\Lottery\LoteriasApiProvider::normalizeGame($game);
         $url = rtrim($base, '/') . '/results/' . rawurlencode($game) . '/latest';
         $resp = self::http($url, ['Accept: application/json', 'x-api-key: ' . $key]);
         $status = (int) ($resp['status'] ?? 0);
         $decoded = json_decode((string) ($resp['body'] ?? ''), true);
-        $data = is_array($decoded['data'] ?? null) ? $decoded['data'] : (is_array($decoded) ? $decoded : []);
+        $decoded = is_array($decoded) ? $decoded : [];
+        $data = is_array($decoded['data'] ?? null) ? $decoded['data'] : $decoded;
         if ($status >= 200 && $status < 300) {
-            if (is_array($data['numbers'] ?? null) && $data['numbers'] !== []) {
-                $date = isset($data['draw_date']) && is_scalar($data['draw_date']) ? (string) $data['draw_date'] : '';
+            // The vendor reports errors inside a 200 body as { success: false, error: { code } }.
+            if (array_key_exists('success', $decoded) && $decoded['success'] === false) {
+                $code = strtoupper((string) ($decoded['error']['code'] ?? ''));
+                if (in_array($code, ['UNAUTHORIZED', 'FORBIDDEN'], true)) {
+                    return ['ok' => false, 'message' => 'Invalid API key'];
+                }
+                return ['ok' => false, 'message' => 'LoteriasAPI rejected the request' . ($code !== '' ? ' (' . $code . ')' : '')];
+            }
+            $numbers = $data['combination'] ?? ($data['numbers'] ?? null);
+            if (is_array($numbers) && $numbers !== []) {
+                $rawDate = $data['drawDate'] ?? ($data['draw_date'] ?? null);
+                $date = is_scalar($rawDate) ? (string) $rawDate : '';
                 return ['ok' => true, 'message' => 'Connected to LoteriasAPI (' . $game . ')' . ($date !== '' ? ' — latest draw ' . $date : '')];
             }
             return ['ok' => false, 'message' => 'LoteriasAPI responded without a draw payload — check the game code (default: euromillones)'];
         }
         if ($status === 401 || $status === 403) return ['ok' => false, 'message' => 'Invalid API key'];
-        if ($status === 404) return ['ok' => false, 'message' => 'Endpoint not found (HTTP 404) — base URL must be https://api.loteriasapi.com/v1 and the game code valid'];
-        if ($status === 429) return ['ok' => false, 'message' => 'Rate limited — the free plan allows 1,000 requests/month'];
+        if ($status === 404) return ['ok' => false, 'message' => 'Endpoint not found (HTTP 404) — base URL must be https://api.loteriasapi.com/api/v1 (the /api prefix is required: the /v1 root answers 404 on every route)'];
+        if ($status === 429) return ['ok' => false, 'message' => 'Rate limited — the plan request quota is exhausted (limits: https://loteriasapi.com/planes)'];
         if ($status === 0) return ['ok' => false, 'message' => 'Could not reach LoteriasAPI (network/SSL/firewall). Check outbound HTTPS to api.loteriasapi.com'];
         return ['ok' => false, 'message' => 'Connection failed (HTTP ' . $status . ')'];
     }

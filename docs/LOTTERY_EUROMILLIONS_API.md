@@ -16,7 +16,7 @@ Lottery Intelligence pipeline.
 | API Management driver `loteriasapi` + connectivity test | `application/libraries/AIWorkforce/ApiProviders.php` |
 | Live CLI smoke test | `php index.php tools lottery-smoke` (`Tools::lottery_smoke`) |
 | Dashboard + admin deep-link | `application/views/lottery/index.php` |
-| Tests (14) | `tests/cases/109-lottery-loteriasapi-provider.php` |
+| Tests (17) | `tests/cases/109-lottery-loteriasapi-provider.php` |
 
 The adapter implements the same `LotteryProvider` interface every other lottery
 source uses, so statistics, combination generation, the system builder,
@@ -26,35 +26,58 @@ backtesting, tickets and cron jobs work unchanged.
 
 ## Vendor contract implemented
 
-Base URL: `https://api.loteriasapi.com/v1` · Auth header: `x-api-key: <key>`
+Base URL: `https://api.loteriasapi.com/api/v1` · Auth header: `X-API-Key: <key>`
+
+> **The `/api` prefix is required.** The vendor's marketing pages (including
+> <https://loteriasapi.com/en/euromillions-api>) advertise
+> `https://api.loteriasapi.com/v1`, which answers
+> `404 {"error":{"code":"NOT_FOUND","message":"Cannot GET /v1/results/..."}}`
+> on **every** route — the API is served from `/api/v1`
+> (see <https://loteriasapi.com/docs/getting-started>). A base URL without the
+> prefix produced *"Endpoint not found (HTTP 404)"* in Admin → API Management.
+> `LoteriasApiProvider::normalizeBaseUrl()` now rewrites a stored `/vN` base to
+> `/api/vN`, so existing configurations heal themselves without an operator
+> editing anything.
 
 | Purpose | Endpoint | Adapter method |
 |---|---|---|
 | Latest result | `GET /results/{game}/latest` | `health()`, `jackpotInfo()`, `draws()` fallback |
-| Historical range | `GET /results/{game}?from=&to=` | `draws($from, $to, $limit)` |
-| Single draw | `GET /results/{game}/{yyyy}/{nnn}` | `drawById('2026/029')` |
+| Historical range | `GET /results/{game}/range?from=&to=&page=&limit=` | `draws($from, $to, $limit)` (paged via `meta.hasNext`, chunked at 365 days) |
+| Draw by date | `GET /results/{game}/date/{yyyy-mm-dd}` | `drawById('2026-04-10')` |
+| Draw by vendor id | resolved through a windowed `/range` query | `drawById('2026029')` / `drawById('2026/029')` |
 
 Game code defaults to `euromillones` (the vendor's spelling); `euromillions` is
-accepted and normalized. The marketing host `loteriasapi.com` is auto-rewritten
-to the API host, so pasting the docs URL into Base URL still works.
+accepted and normalized. Other vendor slugs work too: `primitiva`, `bonoloto`,
+`gordo`, `nacional`, `eurodreams`, `quiniela`, `quinigol`, `lototurf`,
+`quintuple`. The marketing host `loteriasapi.com` is auto-rewritten to the API
+host, so pasting the docs URL into Base URL still works.
 
 ### Payload mapping
 
+Responses are wrapped in an envelope: `{ "success": true, "data": ..., "timestamp": ... }`
+(an error is `{ "success": false, "error": { "code", "message", "statusCode" } }` —
+a 200 carrying that envelope is treated as a failure, never as a draw).
+
 ```
-vendor                        → WINDELS provider-neutral draw
-draw_id      "2026/029"       → externalId
-draw_date    "2026-04-10"     → drawDate
-numbers      [7,12,29,33,44]  → main
-stars        [3,11]           → stars
-prizes[cat 1].prize           → jackpot        (when no explicit jackpot field)
-prizes[cat 1].winners == 0    → rollover=true, winners="0"
-meta.updated_at               → sourceTimestamp
-meta.source / feed identity   → source ("loteriasapi.com (SELAE)")
-el_millon, jackpot_next       → extra.elMillon, extra.jackpotNext
+vendor (live API)                            → WINDELS provider-neutral draw
+drawId       "2026029"                       → externalId
+drawDate     "2026-04-10"                    → drawDate
+combination  [7,12,29,33,45]                 → main
+resultData.estrellas [3,9]                   → stars
+jackpotFormatted "130.000.000,00 €"          → jackpot "130000000.00"
+  (fallback: jackpot "13000000000" = integer cents → euros)
+prizes[category 1].winners == 0              → rollover=true, winners="0"
+updatedAt / envelope timestamp               → sourceTimestamp
+feed identity                                → source ("loteriasapi.com (SELAE)")
+status, dayOfWeek, prizes count              → extra.status, extra.dayOfWeek, extra.prizeTiers
 ```
 
-`jackpot_next` is surfaced through `status().jackpot` on the lottery dashboard
-and carries the note *"not used to infer future draw outcomes"*.
+The legacy snake_case payload (`draw_id`, `draw_date`, `numbers`, `stars`,
+`el_millon`, `jackpot_next`, `meta.updated_at`) is still mapped, so both shapes
+ingest correctly.
+
+The published jackpot is surfaced through `status().jackpot` on the lottery
+dashboard and carries the note *"not used to infer future draw outcomes"*.
 
 ---
 
@@ -65,8 +88,9 @@ and carries the note *"not used to infer future draw outcomes"*.
 1. **Admin → API Providers → Add Provider**
 2. Service: **Lottery / EuroMillions**, Driver: **LoteriasAPI (loteriasapi.com) — EuroMillions**
 3. Fields:
-   - **API Key (x-api-key)** — required; free key (1,000 req/month, no card) at <https://loteriasapi.com/auth/register>
-   - **Base URL** — optional, defaults to `https://api.loteriasapi.com/v1`
+   - **API Key (x-api-key)** — required; register (free tier available) at <https://loteriasapi.com/auth/register>
+   - **Base URL** — optional, defaults to `https://api.loteriasapi.com/api/v1`
+     (a stored `/v1` value is rewritten automatically)
    - **Game code** — optional, defaults to `euromillones`
    - **Timeout (seconds)** — optional, defaults to 8
 4. Set **Enabled** + role **primary**, save, then press **Test** — a healthy
@@ -79,7 +103,7 @@ Keys are stored encrypted and never appear in views, JS, audit logs or errors.
 ```bash
 WINDELS_LOTTERY_LOTERIASAPI_KEY=your_api_key_here      # required (also enables the provider)
 WINDELS_LOTTERY_LOTERIASAPI_ENABLED=1                  # optional explicit switch
-WINDELS_LOTTERY_LOTERIASAPI_BASE_URL=https://api.loteriasapi.com/v1
+WINDELS_LOTTERY_LOTERIASAPI_BASE_URL=https://api.loteriasapi.com/api/v1
 WINDELS_LOTTERY_LOTERIASAPI_GAME=euromillones
 WINDELS_LOTTERY_LOTERIASAPI_TIMEOUT=8
 ```
@@ -109,7 +133,7 @@ php index.php tools lottery-cron sync
 php index.php tools scheduler lottery
 
 # 4. Automated tests
-php index.php tools tests            # includes tests/cases/109-lottery-loteriasapi-provider.php (14 tests)
+php index.php tools tests            # includes tests/cases/109-lottery-loteriasapi-provider.php (17 tests)
 ```
 
 `lottery-smoke` output on a working key:
@@ -118,8 +142,8 @@ php index.php tools tests            # includes tests/cases/109-lottery-loterias
 {
   "provider": "loteriasapi",
   "health": { "state": "ONLINE", "message": "LoteriasAPI reachable — latest draw 2026-04-10" },
-  "draws": [{ "externalId": "2026/029", "drawDate": "2026-04-10",
-              "main": [7,12,29,33,44], "stars": [3,11],
+  "draws": [{ "externalId": "2026029", "drawDate": "2026-04-10",
+              "main": [7,12,29,33,45], "stars": [3,9],
               "source": "loteriasapi.com (SELAE)" }],
   "jackpot": { "value": "130000000.00", "currency": "EUR" }
 }
@@ -151,15 +175,33 @@ LoteriasAPI driver can be chosen directly.
 
 | Upstream | Reported state | Operator message |
 |---|---|---|
-| 401 / 403 | `OFFLINE` (test: `Invalid API key`) | authentication rejected |
-| 404 | `OFFLINE` | check the game code and base URL |
+| 401 / 403 (or a 200 `success:false` `UNAUTHORIZED` body) | `OFFLINE` (test: `Invalid API key`) | authentication rejected |
+| 404 | `OFFLINE` | base URL must be `https://api.loteriasapi.com/api/v1` (the `/api` prefix is required) |
+| 400 | `OFFLINE` | game code or date range rejected (a `/range` query covers max 365 days) |
 | 429 | `OFFLINE` | rate limited — free plan allows 1,000 requests/month |
 | no response | `OFFLINE` | network/SSL/firewall — allow outbound HTTPS to `api.loteriasapi.com` |
 | non-JSON 200 | `OFFLINE` | invalid JSON payload |
 
 ## Rate limits & cost
 
-Free plan: 1,000 requests/month, no credit card. Paid from €9/month for 10,000
-requests. The `sync` cron job needs only a handful of calls per draw day
-(EuroMillions draws Tuesday and Friday), so the free tier is sufficient for
-normal operation.
+Per <https://loteriasapi.com/planes> (checked 2026-09-05 — the marketing pages
+still advertise "1,000 requests/month free", which the plans page contradicts):
+
+| Plan | Requests | Max results / request | History depth |
+|---|---|---|---|
+| Free (0 €) | 50 (lifetime) | 5 | 7 days |
+| Basic (9,90 €/mo) | 5,000 / month | 10 | 30 days |
+| Pro (29,90 €/mo) | 20,000 / month | 50 | 1 year |
+| Business (59,90 €/mo) | 50,000 / month | 75 | 50 years |
+
+Two consequences the adapter already handles, but operators should know:
+
+- **Page size is plan-capped.** The adapter asks for 100 rows per `/range` page
+  and follows `meta.hasNext`, so a plan that returns 5 or 10 rows per request
+  still fills the requested history — it just costs more requests.
+- **History depth is plan-capped.** On the free tier a `/range` query older than
+  ~7 days returns nothing, so a deep backfill needs a paid plan; the adapter
+  reports that as "no draws", never as invented ones.
+
+The daily `sync` cron job needs only a handful of calls per draw day
+(EuroMillions draws Tuesday and Friday).
