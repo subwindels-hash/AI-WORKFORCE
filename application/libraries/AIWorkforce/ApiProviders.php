@@ -38,7 +38,7 @@ final class ApiProviders
                 'label' => 'Lottery / EuroMillions',
                 'group' => 'EuroMillions',
                 'kind' => 'data',
-                'drivers' => ['official_lottery', 'custom_http'],
+                'drivers' => ['loteriasapi', 'official_lottery', 'custom_http'],
             ],
             'crypto_market' => [
                 'label' => 'Crypto Market Data',
@@ -176,6 +176,15 @@ final class ApiProviders
                     $f('token', 'API token', true, false),
                     $f('timeout', 'Timeout (seconds)', false, false),
                     $f('sports', 'Sports covered', false, false, 'e.g. football,basketball,tennis'),
+                ],
+            ],
+            'loteriasapi' => [
+                'label' => 'LoteriasAPI (loteriasapi.com) — EuroMillions',
+                'fields' => [
+                    $f('base_url', 'Base URL', false, false, 'Defaults to https://api.loteriasapi.com/v1 (the marketing host loteriasapi.com is auto-rewritten)'),
+                    $f('api_key', 'API Key (x-api-key)', true, true, 'Free key (1,000 requests/month) at https://loteriasapi.com/auth/register'),
+                    $f('game', 'Game code', false, false, 'Defaults to euromillones ("euromillions" is accepted and normalized)'),
+                    $f('timeout', 'Timeout (seconds)', false, false),
                 ],
             ],
             'official_lottery' => [
@@ -767,6 +776,7 @@ final class ApiProviders
                 'api_football' => self::testApiFootball(($base !== '' ? $base : 'https://v3.football.api-sports.io'), $secrets['api_key'] ?? ''),
                 'thesportsdb' => self::testTheSportsDb(($base !== '' ? $base : 'https://www.thesportsdb.com/api/v1/json'), $secrets['api_key'] ?? '123'),
                 'sportmonks' => self::testSportMonks(($base !== '' ? $base : 'https://api.sportmonks.com/v3/football'), $secrets['api_key'] ?? ''),
+                'loteriasapi' => self::testLoteriasApi((string) ($row['base_url'] ?? ''), (string) ($secrets['api_key'] ?? $secrets['token'] ?? ''), (string) ($extra['game'] ?? '')),
                 'official_lottery' => self::testGet((string) ($extra['health_url'] ?? ($base . '/health')), $secrets['token'] ?? $secrets['api_key'] ?? ''),
                 'libretranslate' => self::testGet(($base !== '' ? $base : '') . '/languages'),
                 'openai_compatible' => self::testOpenAi($base, (string) ($secrets['api_key'] ?? '')),
@@ -999,6 +1009,33 @@ final class ApiProviders
         if ($status === 0) {
             return ['ok' => false, 'message' => 'Could not reach API-Football (network/SSL/firewall). Check outbound HTTPS to v3.football.api-sports.io'];
         }
+        return ['ok' => false, 'message' => 'Connection failed (HTTP ' . $status . ')'];
+    }
+
+    private static function testLoteriasApi(string $baseUrl, string $key, string $game): array
+    {
+        $key = trim($key);
+        if ($key === '') {
+            return ['ok' => false, 'message' => 'An API key is required. Get a free key (1,000 req/month) at https://loteriasapi.com/auth/register'];
+        }
+        $base = \AIWorkforce\Lottery\LoteriasApiProvider::normalizeBaseUrl($baseUrl);
+        $game = \AIWorkforce\Lottery\LoteriasApiProvider::normalizeGame($game);
+        $url = rtrim($base, '/') . '/results/' . rawurlencode($game) . '/latest';
+        $resp = self::http($url, ['Accept: application/json', 'x-api-key: ' . $key]);
+        $status = (int) ($resp['status'] ?? 0);
+        $decoded = json_decode((string) ($resp['body'] ?? ''), true);
+        $data = is_array($decoded['data'] ?? null) ? $decoded['data'] : (is_array($decoded) ? $decoded : []);
+        if ($status >= 200 && $status < 300) {
+            if (is_array($data['numbers'] ?? null) && $data['numbers'] !== []) {
+                $date = isset($data['draw_date']) && is_scalar($data['draw_date']) ? (string) $data['draw_date'] : '';
+                return ['ok' => true, 'message' => 'Connected to LoteriasAPI (' . $game . ')' . ($date !== '' ? ' — latest draw ' . $date : '')];
+            }
+            return ['ok' => false, 'message' => 'LoteriasAPI responded without a draw payload — check the game code (default: euromillones)'];
+        }
+        if ($status === 401 || $status === 403) return ['ok' => false, 'message' => 'Invalid API key'];
+        if ($status === 404) return ['ok' => false, 'message' => 'Endpoint not found (HTTP 404) — base URL must be https://api.loteriasapi.com/v1 and the game code valid'];
+        if ($status === 429) return ['ok' => false, 'message' => 'Rate limited — the free plan allows 1,000 requests/month'];
+        if ($status === 0) return ['ok' => false, 'message' => 'Could not reach LoteriasAPI (network/SSL/firewall). Check outbound HTTPS to api.loteriasapi.com'];
         return ['ok' => false, 'message' => 'Connection failed (HTTP ' . $status . ')'];
     }
 

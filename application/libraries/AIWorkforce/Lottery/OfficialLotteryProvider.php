@@ -48,6 +48,9 @@ final class OfficialLotteryProvider implements LotteryProvider
     ) {
         $managed = class_exists(\AIWorkforce\ApiProviders::class) ? \AIWorkforce\ApiProviders::resolve('lottery') : null;
         $managed = is_array($managed) ? $managed : [];
+        // A managed row belonging to another lottery driver (e.g. loteriasapi)
+        // must not be read as this adapter's configuration.
+        if (($managed['driver'] ?? 'official_lottery') !== 'official_lottery' && ($managed['driver'] ?? '') !== 'custom_http') $managed = [];
         $this->url = trim($url ?? (($managed['base_url'] ?? '') ?: (getenv('WINDELS_LOTTERY_OFFICIAL_URL') ?: '')));
         $this->healthUrl = trim((string) (($managed['extra']['health_url'] ?? '') ?: (getenv('WINDELS_LOTTERY_OFFICIAL_HEALTH_URL') ?: '')));
         $this->token = trim($token ?? (($managed['secrets']['token'] ?? $managed['secrets']['api_key'] ?? '') ?: (getenv('WINDELS_LOTTERY_OFFICIAL_TOKEN') ?: '')));

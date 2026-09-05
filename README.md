@@ -387,8 +387,10 @@ Implemented and tested in this increment:
 - **Provider abstraction** (`LotteryProvider`): `UnavailableLotteryProvider`
   default (honest `DISABLED_NO_PROVIDER`) + clearly-labeled
   `SandboxLotteryProvider` (env-gated `WINDELS_LOTTERY_SANDBOX=1`,
-  deterministic, source `sandbox-simulation`) for pipeline testing. Official
-  licensed feeds are PLANNED, added one at a time.
+  deterministic, source `sandbox-simulation`) for pipeline testing, plus two
+  real feeds: **LoteriasAPI** (`LoteriasApiProvider`, loteriasapi.com — SELAE
+  EuroMillions results, `x-api-key`) and the generic authorized-feed adapter
+  (`OfficialLotteryProvider`). See `docs/LOTTERY_EUROMILLIONS_API.md`.
 - **Ingestion with validation** (spec §6): every imported draw must pass
   count/range/duplicate/date/source checks or it is marked
   `DATA_VALIDATION_FAILED` and audited — never stored as official. Imports
