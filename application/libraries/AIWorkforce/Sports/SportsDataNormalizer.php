@@ -21,6 +21,7 @@ class SportsDataNormalizer
             'sourceTimestamp' => self::timestamp($raw['sourceTimestamp'] ?? null),
             'simulated' => !empty($raw['simulated']),
             'context' => self::context($raw['context'] ?? null),
+            'roundId' => (string) ($raw['roundId'] ?? ''),
             'fieldsPresent' => array_keys($raw),
         ];
     }

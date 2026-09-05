@@ -173,6 +173,105 @@ test('daily ticket E2E: provider failure is graceful and reported', function () 
     assert_equals(0, count($repo->tickets));
 });
 
+/**
+ * Deterministic round-capable test provider: 3 fixtures sharing one round
+ * (roundId "r1"). round() returns all three OVER_1.5 odds in one call; the
+ * per-fixture odds() call is counted so tests can prove the N+1 path was
+ * (or was not) taken.
+ */
+function fx_daily_round_provider(bool $roundFails): SportsDataProvider
+{
+    $fixtures = [];
+    $oddsByExt = [];
+    $roundOdds = [];
+    $oddsValues = [1.55, 1.75, 1.90];
+    for ($i = 0; $i < 3; $i++) {
+        $fixtures[] = [
+            'externalId' => 'f' . $i,
+            'homeTeam' => 'Home' . $i, 'awayTeam' => 'Away' . $i,
+            'competition' => 'Test League',
+            'kickoff' => gmdate('Y-m-d\TH:i:00\+00:00', strtotime('+1 day ' . (10 + $i) . ':00:00')),
+            'status' => 'SCHEDULED',
+            'roundId' => 'r1',
+            'context' => [
+                'recentForm' => [
+                    'homeGoalsPerMatch' => 1.6, 'awayGoalsPerMatch' => 1.4,
+                    'homeConcededPerMatch' => 1.0, 'awayConcededPerMatch' => 0.9,
+                    'source' => 'test-verified', 'timestamp' => gmdate('c'),
+                ],
+                'marketLiquidity' => 50000,
+            ],
+        ];
+        $row = ['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => $oddsValues[$i], 'observedAt' => gmdate('c')];
+        $oddsByExt['f' . $i] = [$row];
+        $roundOdds[] = array_merge($row, ['bookmaker' => 'test-book', 'fixtureId' => 'f' . $i]);
+    }
+    return new class($fixtures, $oddsByExt, $roundOdds, $roundFails) implements SportsDataProvider {
+        public int $roundCalls = 0;
+        public int $oddsCalls = 0;
+        public function __construct(private array $fixtures, private array $odds, private array $roundOdds, private bool $roundFails) {}
+        public function id(): string { return 'daily-round-test'; }
+        public function health(): array { return ['status' => 'ONLINE', 'reliability' => 0.9]; }
+        public function fixtures(array $q): array { return $this->fixtures; }
+        public function round(string $roundId): array
+        {
+            $this->roundCalls++;
+            if ($this->roundFails) throw new \AIWorkforce\Sports\Providers\ProviderException('round endpoint down', \AIWorkforce\Sports\Providers\ProviderException::DATA_ERROR);
+            return [
+                'roundId' => $roundId, 'name' => '1', 'leagueId' => '1', 'league' => 'Test League',
+                'season' => '2026', 'startingAt' => null, 'endingAt' => null, 'finished' => false,
+                'fixtures' => $this->fixtures, 'odds' => $this->roundOdds, 'results' => [],
+            ];
+        }
+        public function odds(string $e): array { $this->oddsCalls++; return $this->odds[$e] ?? []; }
+        public function results(string $e): array { return []; }
+    };
+}
+
+function fx_daily_round_stack(bool $roundFails): array
+{
+    $repo = new SportsRepositoryStub();
+    $audit = fx_daily_audit();
+    $provider = fx_daily_round_provider($roundFails);
+    $providers = new SportsProviderManager();
+    $providers->register($provider);
+    $config = new ConfigurationService($repo, $audit);
+    $quality = new DataQualityEngine();
+    $pipeline = new PredictionPipeline(new MatchIntelligenceEngine(new OddsFreshnessEngine()), new FeatureEngineeringEngine(), new PredictionEngine(), new ValueEngine(), new RiskEngine(), new CorrelationEngine(), new ConfidenceEngine());
+    $governance = new TicketGovernance($repo, $audit, new CorrelationEngine());
+    $service = new DailyTicketService($repo, $audit, $providers, $config, $quality, $pipeline, new TicketOptimizer(new CorrelationEngine()), $governance, new DecisionRecorder($repo, $audit));
+    return [$repo, $audit, $service, $provider];
+}
+
+test('daily ticket E2E: bulk round odds replaces per-fixture odds calls', function () {
+    [$repo, $audit, $service, $provider] = fx_daily_round_stack(false);
+    fx_approve_calibration($repo);
+    $date = gmdate('Y-m-d', strtotime('+1 day'));
+    $run = $service->runDaily($date);
+    assert_equals('PENDING_USER_APPROVAL', $run['status']);
+    assert_equals(3, $run['evaluated']);
+    assert_equals(1, $provider->roundCalls, 'one round() call for the whole matchday');
+    assert_equals(0, $provider->oddsCalls, 'no per-fixture odds() calls when the round covers all fixtures');
+    assert_not_null($run['ticketId']);
+    $ticket = $repo->findTicket($run['ticketId']);
+    assert_true($ticket['total_odds'] >= 5.0 && $ticket['total_odds'] <= 8.0, 'odds inside configured range');
+    // odds were persisted for every evaluated match via the bulk fetch
+    assert_true(count($repo->odds) >= 3, 'bulk round odds persisted');
+});
+
+test('daily ticket E2E: round failure falls back to per-fixture odds', function () {
+    [$repo, $audit, $service, $provider] = fx_daily_round_stack(true);
+    fx_approve_calibration($repo);
+    $date = gmdate('Y-m-d', strtotime('+1 day'));
+    $run = $service->runDaily($date);
+    assert_equals('PENDING_USER_APPROVAL', $run['status']);
+    assert_equals(1, $provider->roundCalls, 'round attempted once per matchday');
+    assert_equals(3, $provider->oddsCalls, 'per-fixture odds used after the round failure');
+    assert_not_null($run['ticketId']);
+    $bulkFailures = array_values(array_filter($run['errors'], fn($e) => str_contains($e, 'bulk odds fetch failed')));
+    assert_equals(1, count($bulkFailures), 'round failure is reported, not hidden');
+});
+
 test('daily ticket E2E: engine mode VIEW_ONLY never generates tickets', function () {
     [$repo, $audit, $service] = fx_daily_stack();
     (new ConfigurationService($repo, $audit))->update(['engine_mode' => 'VIEW_ONLY'], 'admin', 'view only');

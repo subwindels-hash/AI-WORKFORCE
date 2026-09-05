@@ -15,6 +15,12 @@ defined('BASEPATH') or exit('No direct script access allowed');
  */
 class Api_sports extends Api_controller
 {
+    /** Season-level top-player lists change a few times a week; cache them to
+     * protect the provider's daily request quota from repeated UI loads. */
+    private const TOP_PLAYERS_CACHE_TTL = 900;
+    /** @var array<string,array{at:int,data:array}> */
+    private static array $topPlayersCache = [];
+
     // ---------------------------------------------------------------- public
     public function status()
     {
@@ -269,6 +275,43 @@ class Api_sports extends Api_controller
         $this->json(['alerts' => $alerts, 'note' => 'Tickets are optimized to stay under the configured correlation cap; these rows document measured pairwise classes.']);
     }
 
+    /**
+     * Top players for a league + season from a native provider.
+     * GET /api/sports/topplayers?league=61&season=2020&type=yellow_cards[&provider=api-football][&cache=0]
+     *
+     * provider is optional — when omitted, the first configured provider with
+     * top-player support is used (health-aware fallback). The response reports
+     * which provider served it. Cached per (provider, league, season, type)
+     * for 15 minutes; ?cache=0 bypasses.
+     */
+    public function top_players()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $league = trim((string) ($g['league'] ?? ''));
+        $season = trim((string) ($g['season'] ?? ''));
+        if ($league === '' || $season === '') return $this->jsonError('league and season are required');
+        $type = trim((string) ($g['type'] ?? 'scorers'));
+        $providerId = trim((string) ($g['provider'] ?? ''));
+        if ($providerId === '') $providerId = null;
+        $bypass = isset($g['cache']) && (string) $g['cache'] === '0';
+        $cacheKey = md5(implode('|', [$providerId ?? '', $league, $season, $type]));
+        if (!$bypass && isset(self::$topPlayersCache[$cacheKey]) && (time() - self::$topPlayersCache[$cacheKey]['at']) < self::TOP_PLAYERS_CACHE_TTL) {
+            $this->json(self::$topPlayersCache[$cacheKey]['data'], 200);
+            return;
+        }
+        try {
+            $data = $this->platform->sports->topPlayers($providerId, $league, $season, $type);
+            $data['cachedFor'] = self::TOP_PLAYERS_CACHE_TTL;
+            if (!$bypass) self::$topPlayersCache[$cacheKey] = ['at' => time(), 'data' => $data];
+            $this->json($data, 200);
+        } catch (\InvalidArgumentException $e) {
+            $this->jsonError($e->getMessage(), 422);
+        } catch (\Throwable $e) {
+            $this->jsonError($e->getMessage(), 409);
+        }
+    }
+
     // ------------------------------------------------------------------ admin
     public function update_configuration()
     {
@@ -427,6 +470,8 @@ class Api_sports extends Api_controller
     /**
      * Sync fixtures/odds/results from a specific named provider.
      * GET /api/sports/sync?provider=api-football&type=fixtures&from=2026-09-01&to=2026-09-07
+     * type=round bulk-syncs a whole matchday (fixtures + odds + results) in
+     * one provider request: ?provider=sportmonks&type=round&roundId=396698
      */
     public function sync_provider()
     {
@@ -448,8 +493,11 @@ class Api_sports extends Api_controller
             } elseif ($type === 'results') {
                 if (empty($g['fixtureId'])) return $this->jsonError('fixtureId is required for results sync');
                 $result = $this->platform->sports->sync->syncResults($provider, (string) $g['fixtureId'], 'api-sync-results-' . $providerId . '-' . gmdate('YmdHis'));
+            } elseif ($type === 'round') {
+                if (empty($g['roundId'])) return $this->jsonError('roundId is required for round sync (resolve with the provider season rounds)');
+                $result = $this->platform->sports->sync->syncRound($provider, (string) $g['roundId'], 'api-sync-round-' . $providerId . '-' . $g['roundId'] . '-' . gmdate('YmdHis'));
             } else {
-                return $this->jsonError('type must be fixtures, odds, or results');
+                return $this->jsonError('type must be fixtures, odds, results, or round');
             }
             $this->json(['sync' => $result, 'provider' => $providerId, 'type' => $type]);
         } catch (\Throwable $e) {
@@ -468,23 +516,23 @@ class Api_sports extends Api_controller
             'api-football' => [
                 'label' => 'API-Football (api-football.com)',
                 'docs' => 'https://www.api-football.com/documentation-v3',
-                'capabilities' => ['fixtures', 'odds', 'results', 'standings', 'team_statistics', 'leagues'],
+                'capabilities' => ['fixtures', 'odds', 'results', 'standings', 'team_statistics', 'top_players', 'leagues'],
                 'envKey' => 'WINDELS_API_FOOTBALL_KEY',
                 'configured' => $this->platform->sports->providers->provider('api-football') !== null,
             ],
             'thesportsdb' => [
                 'label' => 'TheSportsDB (thesportsdb.com)',
-                'docs' => 'https://www.thesportsdb.com/api',
-                'capabilities' => ['fixtures', 'results', 'leagues', 'teams'],
-                'notes' => 'No odds endpoint on any tier',
+                'docs' => 'https://www.thesportsdb.com/docs_api_examples',
+                'capabilities' => ['fixtures', 'results', 'leagues', 'teams', 'team_search'],
+                'notes' => 'No odds endpoint on any tier. Free key "3" caps list endpoints (e.g. 5 leagues, partial day/season); v2 livescore requires premium. Events carry an idAPIfootball cross-reference, surfaced as apiFootballId.',
                 'envKey' => 'WINDELS_THESPORTSDB_KEY',
                 'configured' => $this->platform->sports->providers->provider('thesportsdb') !== null,
             ],
             'sportmonks' => [
                 'label' => 'SportMonks (sportmonks.com)',
                 'docs' => 'https://docs.sportmonks.com/football/v3',
-                'capabilities' => ['fixtures', 'odds', 'results', 'standings', 'lineups', 'leagues'],
-                'notes' => 'Odds require the optional odds add-on subscription',
+                'capabilities' => ['fixtures', 'odds', 'results', 'standings', 'lineups', 'leagues', 'rounds'],
+                'notes' => 'Odds require the optional odds add-on subscription. round() fetches a full matchday (fixtures + odds + results) in one request.',
                 'envKey' => 'WINDELS_SPORTMONKS_TOKEN',
                 'configured' => $this->platform->sports->providers->provider('sportmonks') !== null,
             ],

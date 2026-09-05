@@ -23,11 +23,11 @@ A provider is registered only when its credential exists. Multiple configured pr
 
 ## Capabilities
 
-| Provider | Fixtures | Results | Odds |
-|---|---:|---:|---:|
-| API-Football | Yes | Yes | Yes, via the odds endpoint |
-| TheSportsDB | Yes | Yes | No bookmaker odds endpoint |
-| SportMonks | Yes | Yes | Requires the SportMonks odds add-on and a separate adapter |
+| Provider | Fixtures | Results | Odds | Top players |
+|---|---:|---:|---:|---:|
+| API-Football | Yes | Yes | Yes, via the odds endpoint | Yes (scorers / assists / yellow cards / red cards) |
+| TheSportsDB | Yes | Yes | No bookmaker odds endpoint | No |
+| SportMonks | Yes (incl. full-round bulk fetch) | Yes | Yes, per fixture and per round (odds add-on) | No |
 
 All upstream responses are converted to the internal fixture, odds, and result shapes before they reach the normalizers and persistence layer. The provider adapters do not expose credentials to the frontend.
 
@@ -35,13 +35,181 @@ All upstream responses are converted to the internal fixture, odds, and result s
 
 API-Football uses the `x-apisports-key` header. Its odds response is flattened into the internal market/selection/decimalOdds shape. The provider's plan and quota determine which leagues and odds markets are available.
 
+**Pagination:** the v3 list endpoints paginate with the `page` parameter and
+report `paging: {current, total}` in every response (fixtures: 50/page,
+odds: 10/page). `fixtures()`, `odds()` and `leagues()` follow the pages
+until `current >= total` (hard cap: 40 pages), so busy days, full-season
+queries and fixtures with many bookmaker markets are not silently truncated
+to the first page.
+
+`ApiFootballProvider::topPlayers(leagueId, season, type)` wraps the four
+top-player endpoints of the Players tag
+(`/players/topscorers`, `/players/topassists`, `/players/topyellowcards`,
+`/players/topredcards`). `league` and `season` are required upstream; the
+response is normalized to ranked entries (`rank`, `playerId`, `name`,
+`position`, `nationality`, `team`, `teamId`, `photo`) plus `value` — the
+headline number for the ranked metric — and the full per-season `statistics`
+profile as a keyed map. Unsupported `type` values throw instead of guessing a
+path.
+
+Exposed to the API as
+`GET /api/sports/topplayers?league=61&season=2020&type=yellow_cards`
+(`sports.view`). `provider` is optional — when omitted, the first configured
+provider with top-player support serves the request (health-aware fallback),
+and the response reports which provider answered. Results are cached per
+(provider, league, season, type) for 15 minutes to protect the provider's
+daily request quota (`?cache=0` bypasses).
+
 ## TheSportsDB notes
 
 TheSportsDB uses the numeric key as part of the URL path (`/api/v1/json/{key}/...`). The adapter uses the soccer events-by-day endpoint and maps `idEvent`, `strHomeTeam`, `strAwayTeam`, `strLeague`, and `dateEvent`.
 
+`searchTeams(name)` wraps `searchteams.php` (the endpoint from the
+official API examples) and returns the internal team shape including the
+vendor's `idAPIfootball` cross-reference. All TheSportsDB events also carry
+`idAPIfootball`; the mappers surface it as `apiFootballId` on fixtures and
+results so the same match/team can be matched across api-football and
+TheSportsDB.
+
+**Free tier (key "3") limits, verified live:** list endpoints are capped —
+`all_leagues.php` returns 5 leagues, `eventsday.php` a partial day, and
+`eventsseason.php` a partial season. The adapter never fabricates the
+missing rows; treat free-tier syncs as a sample of the day. v2 (livescore,
+full seasons) requires a premium key.
+
 ## SportMonks notes
 
-SportMonks uses the token query parameter and the Football API v3 endpoints. Fixtures use participants, scores, and league includes, and are mapped using participant location (`home`/`away`). Ensure the token has access to the leagues and includes used by the deployment.
+SportMonks uses the token query parameter (`api_token`) and the Football
+API **v3** endpoints. Fixtures use participants, scores, and league
+includes, and are mapped using participant location (`home`/`away`).
+Ensure the token has access to the leagues and includes used by the
+deployment.
+
+> **v3 gotcha (audited against the official v3 docs, 2026-09):** the v2-era
+> query parameters are **silently ignored** by the v3 API — a v2-style
+> `filter[starts_between:...]` on `/fixtures` returns the API's oldest
+> fixtures unfiltered, and a top-level `leagues=`/`season=` parameter
+> filters nothing. All SportMonks requests below use the documented v3
+> surface; do not "restore" the old parameter style.
+
+### Date endpoints and filters (fixtures)
+
+`SportMonksProvider::fixtures(['from' => 'Y-m-d', 'to' => 'Y-m-d',
+'league' => id, 'season' => id])` maps to the v3 date endpoints:
+
+- single day → `GET /fixtures/date/{date}`
+- range → `GET /fixtures/between/{start}/{end}` (**max 100 days** — wider
+  windows throw a `ProviderException` instead of hitting a limit the API
+  enforces)
+- league scope → `&filters=fixtureLeagues:{id}`
+- season scope → `&filters=fixtureSeasons:{id}`
+
+### Pagination
+
+`SportMonksProvider::fixtures()` follows the v3 cursor pagination of the
+date endpoints above (they default to 25 fixtures per page): the first
+request sets `per_page=50`, subsequent requests pass `next_cursor` until
+`has_more` is false, with a hard cap of 40 pages (2000 fixtures) so a
+busy multi-league day is never silently truncated to the first page. The
+round, standings and lineups endpoints do not paginate.
+
+### Standings
+
+`SportMonksProvider::standings($leagueId, $season)` calls
+`GET /standings/seasons/{season}?filters=standingLeagues:{id}&include=participant;details`.
+The base standing row only carries `position` and `points`; the team name
+comes from the `participant` include and W/D/L/goals from the `details`
+include (standing-detail type ids: 129 played, 130 won, 131 draw,
+132 lost, 133 goals for, 134 conceded).
+
+### Odds
+
+`SportMonksProvider::odds($fixtureId)` calls
+`GET /odds/pre-match/fixtures/{id}?include=market;bookmaker` (standard
+odds feed — requires the odds add-on; failures degrade to an empty
+array). The v2-era standalone path `/odds/fixtures/{id}` **does not
+exist** in v3 (verified live: "The requested endpoint does not exist").
+Round-embedded odds come from the same feed via the `fixtures.odds`
+include on `GET /rounds/{id}`.
+
+### Lineups
+
+`SportMonksProvider::lineups($fixtureId)` calls
+`GET /fixtures/{id}?include=lineups;participants;lineups.position` — v3
+has no `/lineups/...` endpoint, lineups are a fixture include. Each
+entry's `type_id` marks the role (11 = starting player, 12 = substitute)
+and the nested `lineups.position` include provides the position name.
+Failures degrade to an empty array (lineups are optional data).
+
+### Round-based bulk fetch
+
+`SportMonksProvider::round($roundExternalId)` retrieves an entire matchday in **one request** via `GET /rounds/{id}` with nested includes (`fixtures`, `fixtures.odds`, `fixtures.odds.market`, `fixtures.odds.bookmaker`, `fixtures.participants`, `fixtures.scores`, `fixtures.venue`, `fixtures.state`, `league`, `league.country`). It returns:
+
+```php
+[
+    'roundId' => '396698', 'name' => '25', 'leagueId' => '648', 'league' => 'Serie A',
+    'season' => '26763', 'startingAt' => '2026-08-29', 'endingAt' => '2026-08-31',
+    'finished' => true,
+    'fixtures' => [ /* internal fixture shape */ ],
+    'odds'     => [ /* internal odds shape, + impliedProbability/updatedAt/winning when the vendor supplies them */ ],
+    'results'  => [ /* internal result shape, from the embedded scores */ ],
+]
+```
+
+- Round ids are resolved with `SportMonksProvider::seasonRounds($seasonId)` (`GET /rounds/seasons/{id}`).
+- Round-embedded odds carry `original_label` (`1`/`Draw`/`2`) or a display `label` instead of a `selection` object; the mapper handles both shapes.
+- Fixture status is resolved from the v3 `state` include object, then `state_id` (official v3 state table, e.g. `5` = FT), with the legacy v2 numeric `status` codes as a fallback.
+- Consumer pattern through the fallback manager (rounds are a SportMonks-only capability, so guard with `method_exists`):
+
+```php
+$attempt = $providers->withFallback('round', function ($p) use ($roundId) {
+    if (!method_exists($p, 'round')) throw new ProviderException('round endpoint not supported', ProviderException::DATA_ERROR);
+    return $p->round($roundId);
+});
+```
+
+The daily ticket engine uses this path: when the serving provider exposes
+`round()` and the fetched fixtures carry a `roundId`, `DailyTicketService`
+bulk-fetches each matchday's odds with one `round()` call per round
+(`fetchRoundOdds`) and only falls back to the per-fixture `odds()` call for
+fixtures the round fetch did not cover (no `roundId`, or a failed round
+request). Odds already persisted for a match are never re-fetched.
+
+### Round sync job
+
+`SportsSyncService::syncRound($provider, $roundExternalId, $executionKey)`
+bulk-syncs a whole matchday in one provider request — fixtures, odds and
+results are persisted from the single `round()` payload (idempotent per
+execution key, job type `ROUND`, audited as `SPORTS_ROUND_SYNC_*`). It is
+exposed through the sync endpoint:
+
+```
+GET /api/sports/sync?provider=sportmonks&type=round&roundId=396698
+```
+
+Providers without a `round()` endpoint fail the job with an explicit
+"does not support round sync" error instead of silently no-op'ing.
+
+### Cron odds job on the round path
+
+`sports_matches` stores `round_id` (nullable, indexed on `provider_id,
+round_id` — new column added via the idempotent schema upgrade), populated
+from the provider fixture payload at sync time. The cron `odds` job groups
+the day's active matches by `(provider, round_id)`: every round on a
+round-capable provider is synced once via `syncRound(..., ['results' => false])`
+(one provider request per matchday, results skipped so verified results are
+never re-written), and matches without a `round_id` — or on providers
+without the round endpoint — keep the legacy per-fixture `syncOdds` call.
+
+## Live smoke test
+
+`php index.php tools sports-live [provider]` proves the configured providers
+actually work against the real APIs, layer by layer: health/auth (+ quota
+usage) → today's fixtures → odds for the first fixture → top players where
+supported. Read-only; costs a handful of requests per provider. Exit codes:
+0 all pass, 1 one or more failed, 2 no providers configured. When a provider
+"doesn't work", this tells you exactly which layer fails (bad key,
+unreachable host, plan restriction) instead of guessing.
 
 ## Safe operation
 

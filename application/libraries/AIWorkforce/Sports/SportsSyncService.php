@@ -48,6 +48,71 @@ class SportsSyncService
         return array_merge(['runId' => $run['id']], $result);
     }
 
+    /**
+     * Bulk-sync a whole matchday (round) in ONE provider request: fixtures,
+     * bookmaker odds and results together (SportMonks round endpoint).
+     * Idempotent per execution key like the per-fixture sync jobs; one bad
+     * fixture is counted, never hidden.
+     *
+     * $options: 'odds' (default true) persist the round's odds; 'results'
+     * (default true) persist the round's results. Callers that only refresh
+     * odds (e.g. the cron odds job) pass ['results' => false] so already
+     * verified results are never re-written.
+     */
+    public function syncRound(SportsDataProvider $provider, string $roundExternalId, string $executionKey, array $options = []): array
+    {
+        $withOdds = (bool) ($options['odds'] ?? true);
+        $withResults = (bool) ($options['results'] ?? true);
+        $source = $this->repo->ensureProvider($provider->id(), $provider->id());
+        $run = ['id' => Backtester::uuid(), 'providerId' => (int) $source['id'], 'jobType' => 'ROUND', 'executionKey' => $executionKey];
+        if ($this->repo->startSync($run) === null) return ['status' => 'DUPLICATE_SKIPPED', 'executionKey' => $executionKey];
+        $processed = 0; $created = 0; $updated = 0; $invalid = 0; $errors = [];
+        try {
+            $health = $provider->health();
+            $this->repo->saveHealth((int) $source['id'], array_merge($health, ['status' => $health['status'] ?? 'DATA_ERROR']));
+            if (($health['status'] ?? '') !== 'ONLINE') throw new \RuntimeException('provider is not ONLINE');
+            if (!method_exists($provider, 'round')) throw new \RuntimeException('provider does not support round sync (no round endpoint)');
+            $round = $provider->round($roundExternalId);
+            $oddsByFixture = [];
+            if ($withOdds) {
+                foreach (($round['odds'] ?? []) as $o) {
+                    if (is_array($o) && !empty($o['fixtureId'])) $oddsByFixture[(string) $o['fixtureId']][] = $o;
+                }
+            }
+            $resultsByFixture = [];
+            if ($withResults) {
+                foreach (($round['results'] ?? []) as $r) {
+                    if (is_array($r) && isset($r['externalId'])) $resultsByFixture[(string) $r['externalId']] = $r;
+                }
+            }
+            foreach (($round['fixtures'] ?? []) as $raw) {
+                $processed++;
+                try {
+                    $match = SportsDataNormalizer::fixture($raw, $provider->id());
+                    $existing = $this->repo->saveMatch((int) $source['id'], $match);
+                    !empty($existing['created_at']) && $existing['created_at'] === $existing['updated_at'] ? $created++ : $updated++;
+                    $assessment = $this->quality->assess($match, ['oddsAvailable' => $withOdds && isset($oddsByFixture[$match['externalId']]), 'recentFormAvailable' => !empty($match['context']['recentForm']), 'providerReliability' => (float) ($health['reliability'] ?? 0), 'dataAgeSeconds' => 0]);
+                    $this->repo->saveQuality((int) $existing['id'], $assessment);
+                    // Odds and result for this fixture come from the same round call.
+                    foreach (($oddsByFixture[$match['externalId']] ?? []) as $rawOdds) {
+                        $this->repo->saveOdds((int) $existing['id'], (int) $source['id'], SportsDataNormalizer::odds($rawOdds, $provider->id()));
+                    }
+                    $rawResult = $resultsByFixture[$match['externalId']] ?? null;
+                    if (is_array($rawResult) && ($rawResult['homeScore'] !== null || $rawResult['awayScore'] !== null)) {
+                        $this->repo->saveResult((int) $existing['id'], (int) $source['id'], SportsResultNormalizer::normalize($rawResult, $provider->id()));
+                    }
+                } catch (\Throwable $e) { $invalid++; $errors[] = mb_substr($e->getMessage(), 0, 200); }
+            }
+            if ($processed === 0) $errors[] = 'round returned no fixtures; nothing synchronized';
+            $result = ['status' => 'COMPLETED', 'processed' => $processed, 'created' => $created, 'updated' => $updated, 'errors' => $errors];
+        } catch (\Throwable $e) {
+            $result = ['status' => 'FAILED', 'processed' => $processed, 'created' => 0, 'updated' => 0, 'errors' => [mb_substr($e->getMessage(), 0, 200)]];
+        }
+        $this->repo->finishSync($run['id'], $result);
+        $this->audit->emit($result['status'] === 'COMPLETED' ? 'SPORTS_ROUND_SYNC_COMPLETED' : 'SPORTS_ROUND_SYNC_FAILED', 'Sports round sync ' . strtolower($result['status']) . ' for round ' . $roundExternalId, ['provider' => $provider->id(), 'round' => $roundExternalId, 'runId' => $run['id'], 'result' => $result]);
+        return array_merge(['runId' => $run['id']], $result);
+    }
+
     public function syncFixtures(SportsDataProvider $provider, array $query, string $executionKey): array
     {
         $source = $this->repo->ensureProvider($provider->id(), $provider->id());

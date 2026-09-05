@@ -4,6 +4,8 @@ namespace AIWorkforce\Sports;
 use AIWorkforce\Backtest\Backtester;
 use AIWorkforce\Persistence\AuditRepository;
 use AIWorkforce\Persistence\SportsRepository;
+use AIWorkforce\Sports\Providers\ProviderException;
+use AIWorkforce\Sports\Providers\SportsDataProvider;
 use AIWorkforce\Sports\Providers\SportsProviderManager;
 
 /**
@@ -75,6 +77,10 @@ class DailyTicketService
                     $providerId = (int) $this->repo->ensureProvider($provider, $provider)['id'];
                     // Enrich raw fixtures with recentForm from team statistics
                     $enrichedFixtures = $this->formResolver->enrich($this->providers->provider($provider), $attempt['result']);
+                    // Bulk-fetch the day's odds in one round() call per
+                    // matchday when the provider exposes the round endpoint.
+                    // Matches it does not cover fall back to per-fixture odds().
+                    $roundOdds = $this->fetchRoundOdds($provider, $this->providers->provider($provider), $enrichedFixtures, $errors);
                     $candidates = [];
                     foreach ($enrichedFixtures as $rawFixture) {
                         try {
@@ -90,11 +96,17 @@ class DailyTicketService
 
                         $oddsRow = $this->repo->latestOdds((int) $saved['id'], 'TOTAL_GOALS', 'OVER_1_5');
                         if ($oddsRow === null) {
-                            $oddsAttempt = $this->providers->withFallback('odds', fn($p) => $p->odds($match['externalId']), $provider);
-                            if ($oddsAttempt['ok'] && is_array($oddsAttempt['result'] ?? null)) {
-                                foreach ($oddsAttempt['result'] as $rawOdds) {
+                            // Prefer the bulk round fetch (one request per
+                            // matchday) over a per-fixture odds() call.
+                            $rawOdds = $roundOdds[$match['externalId']] ?? null;
+                            if ($rawOdds === null) {
+                                $oddsAttempt = $this->providers->withFallback('odds', fn($p) => $p->odds($match['externalId']), $provider);
+                                if ($oddsAttempt['ok'] && is_array($oddsAttempt['result'] ?? null)) $rawOdds = $oddsAttempt['result'];
+                            }
+                            if (is_array($rawOdds) && $rawOdds !== []) {
+                                foreach ($rawOdds as $rawOddsRow) {
                                     try {
-                                        $this->repo->saveOdds((int) $saved['id'], $providerId, SportsDataNormalizer::odds($rawOdds, $provider));
+                                        $this->repo->saveOdds((int) $saved['id'], $providerId, SportsDataNormalizer::odds($rawOddsRow, $provider));
                                     } catch (\Throwable $e) {
                                         $errors[] = 'odds rejected: ' . mb_substr($e->getMessage(), 0, 200);
                                     }
@@ -181,6 +193,38 @@ class DailyTicketService
             'rejections' => $rejections, 'rejectionSummary' => $rejectionSummary, 'message' => $message, 'provider' => $provider, 'errors' => $errors,
         ]);
         return ['status' => $status, 'ticketId' => $ticketId, 'date' => $date, 'message' => $message, 'evaluated' => $evaluated, 'predictionsRecorded' => $recorded, 'rejections' => $rejections, 'rejectionSummary' => $rejectionSummary, 'provider' => $provider, 'runId' => $run['id'], 'errors' => $errors];
+    }
+
+    /**
+     * Bulk-fetch the day's odds when the provider exposes the round endpoint
+     * (SportMonks): one request per matchday instead of one per fixture.
+     * Returns externalId → raw odds rows. Fixtures without a roundId, or a
+     * failed round fetch, are simply absent — the per-match loop falls back
+     * to the per-fixture odds() call for them (no fabricated odds, ever).
+     */
+    private function fetchRoundOdds(string $preferredId, ?SportsDataProvider $provider, array $rawFixtures, array &$errors): array
+    {
+        if ($provider === null || !method_exists($provider, 'round')) return [];
+        $roundIds = [];
+        foreach ($rawFixtures as $raw) {
+            $roundId = (string) ($raw['roundId'] ?? '');
+            if ($roundId !== '') $roundIds[$roundId] = true;
+        }
+        $out = [];
+        foreach (array_keys($roundIds) as $roundId) {
+            $attempt = $this->providers->withFallback('round', function (SportsDataProvider $p) use ($roundId) {
+                if (!method_exists($p, 'round')) throw new ProviderException('round endpoint not supported', ProviderException::DATA_ERROR);
+                return $p->round((string) $roundId);
+            }, $preferredId);
+            if (!$attempt['ok']) {
+                $errors[] = 'round ' . $roundId . ' bulk odds fetch failed: ' . json_encode($attempt['failures']);
+                continue;
+            }
+            foreach ((is_array($attempt['result'] ?? null) ? $attempt['result']['odds'] : []) ?? [] as $row) {
+                if (is_array($row) && !empty($row['fixtureId'])) $out[(string) $row['fixtureId']][] = $row;
+            }
+        }
+        return $out;
     }
 
     private function qualityContext(array $match, ?array $odds, float $reliability): array

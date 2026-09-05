@@ -10,6 +10,9 @@ test('sports fixture normalizer produces source-attributed canonical data', func
     $fixture = SportsDataNormalizer::fixture(['externalId' => 'f-1', 'homeTeam' => 'Home', 'awayTeam' => 'Away', 'competition' => 'League', 'kickoff' => '2026-09-01T12:00:00Z'], 'provider-a');
     assert_equals('provider-a', $fixture['provider']);
     assert_equals('SCHEDULED', $fixture['status']);
+    assert_equals('', $fixture['roundId'], 'roundId defaults to empty for providers without rounds');
+    $withRound = SportsDataNormalizer::fixture(['externalId' => 'f-2', 'homeTeam' => 'Home', 'awayTeam' => 'Away', 'competition' => 'League', 'kickoff' => '2026-09-01T12:00:00Z', 'roundId' => '396698'], 'provider-a');
+    assert_equals('396698', $withRound['roundId'], 'roundId is preserved for round-based sync');
 });
 
 test('sports odds normalizer rejects non-positive-value odds', function () {

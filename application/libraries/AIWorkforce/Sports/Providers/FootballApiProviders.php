@@ -113,6 +113,19 @@ trait HttpTransport
     {
         $decoded = json_decode($resp['body'] ?? '', true);
         if (!is_array($decoded)) throw new ProviderException('invalid JSON response', ProviderException::DATA_ERROR);
+        // api-football answers some failures (missing key, bad parameters)
+        // with HTTP 200 and a non-empty `errors` object. Surface it as a
+        // classified error instead of letting callers read the empty
+        // `response` as "no data" (a blank key must never read as ONLINE).
+        if (!empty($decoded['errors'])) {
+            $errors = (array) $decoded['errors'];
+            $first = reset($errors);
+            $msg = is_string($first) ? $first : json_encode($decoded['errors']);
+            $status = array_key_exists('token', $errors)
+                ? ProviderException::AUTHENTICATION_ERROR
+                : ProviderException::DATA_ERROR;
+            throw new ProviderException('provider error: ' . mb_substr((string) $msg, 0, 200), $status);
+        }
         return $decoded;
     }
 
@@ -274,16 +287,15 @@ class ApiFootballProvider implements SportsDataProvider
         if (!empty($query['league'])) $params['league'] = (string) $query['league'];
         if (!empty($query['season'])) $params['season'] = (string) $query['season'];
         if (!empty($query['status'])) $params['status'] = (string) $query['status'];
-        $qs = http_build_query($params);
-        $resp = $this->doRequest('/fixtures?' . $qs);
-        $rows = $this->extractList($this->decodeJson($resp));
+        $rows = $this->fetchAllPages('/fixtures', $params);
         return $this->mapFixtures($rows);
     }
 
     public function odds(string $fixtureExternalId): array
     {
-        $resp = $this->doRequest('/odds?fixture=' . rawurlencode($fixtureExternalId));
-        $rows = $this->extractList($this->decodeJson($resp));
+        // /odds paginates at 10 rows per page — a fixture with many bookmaker
+        // markets needs several pages; following them keeps the odds complete.
+        $rows = $this->fetchAllPages('/odds', ['fixture' => $fixtureExternalId]);
         return $this->mapOdds($rows);
     }
 
@@ -344,19 +356,176 @@ class ApiFootballProvider implements SportsDataProvider
         return $out;
     }
 
+    /**
+     * Top players for a league + season (api-football /players/top*).
+     *
+     * Docs: https://www.api-football.com/documentation-v3 (Players tag)
+     *   'scorers'      → /players/topscorers
+     *   'assists'      → /players/topassists
+     *   'yellow_cards' → /players/topyellowcards
+     *   'red_cards'    → /players/topredcards
+     *
+     * `league` and `season` are required by the API. The response holds the
+     * top 20 players in ranked order, each with their full per-season
+     * statistical profile — sourced from the provider, never fabricated.
+     *
+     * @param string $leagueId
+     * @param string $season
+     * @param string $type scorers|assists|yellow_cards|red_cards
+     * @return array{leagueId:string, season:string, type:string, league:?string,
+     *               players:array<int,array<string,mixed>>}
+     */
+    public function topPlayers(string $leagueId, string $season, string $type = 'scorers'): array
+    {
+        $path = match ($type) {
+            'scorers' => 'topscorers',
+            'assists' => 'topassists',
+            'yellow_cards' => 'topyellowcards',
+            'red_cards' => 'topredcards',
+            default => throw new ProviderException('unsupported top players type: ' . $type, ProviderException::DATA_ERROR),
+        };
+        $resp = $this->doRequest('/players/' . $path . '?league=' . rawurlencode($leagueId) . '&season=' . rawurlencode($season));
+        $rows = $this->extractList($this->decodeJson($resp));
+        $out = ['leagueId' => $leagueId, 'season' => $season, 'type' => $type, 'league' => null, 'players' => []];
+        $rank = 0;
+        foreach ($rows as $r) {
+            $player = is_array($r['player'] ?? null) ? $r['player'] : [];
+            $name = trim((string) ($player['name'] ?? ''));
+            if ($name === '') continue;
+            $league = is_array($r['league'] ?? null) ? $r['league'] : [];
+            if ($out['league'] === null && trim((string) ($league['name'] ?? '')) !== '') {
+                $out['league'] = (string) $league['name'];
+            }
+            $rank++;
+            $stats = $this->mapPlayerStatistics($r['statistics'] ?? [], $type);
+            $out['players'][] = [
+                'rank' => $rank,
+                'playerId' => (string) ($player['id'] ?? ''),
+                'name' => $name,
+                'position' => (string) ($player['position'] ?? ''),
+                'nationality' => (string) ($player['nationality'] ?? ''),
+                'team' => (string) ($player['team']['name'] ?? ''),
+                'teamId' => (string) ($player['team']['id'] ?? ''),
+                'photo' => $player['photo'] ?? null,
+                'value' => $stats['value'],
+                'statistics' => $stats['profile'],
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Normalize a top-players statistics payload into a keyed profile plus the
+     * headline number for the ranked metric.
+     *
+     * Canonical shape: a list of {"type": "Yellow Cards", "value": 7} entries.
+     * Some v3 payloads embed a season-statistics object instead ({"cards":
+     * {"yellow": 7, ...}}) — the known keys of that shape are flattened too.
+     */
+    private function mapPlayerStatistics(mixed $statistics, string $type): array
+    {
+        $profile = [];
+        if (is_array($statistics) && array_is_list($statistics)) {
+            foreach ($statistics as $entry) {
+                if (!is_array($entry)) continue;
+                $val = $this->statValue($entry['value'] ?? null);
+                if (isset($entry['type']) && $val !== null) {
+                    $profile[trim((string) $entry['type'])] = $val;
+                } else {
+                    $profile += $this->flattenSeasonStatistics($entry);
+                }
+            }
+        } elseif (is_array($statistics)) {
+            $profile = $this->flattenSeasonStatistics($statistics);
+        }
+        $headline = match ($type) {
+            'scorers' => 'Goals',
+            'assists' => 'Assists',
+            'yellow_cards' => 'Yellow Cards',
+            'red_cards' => 'Red Cards',
+            default => null,
+        };
+        return ['profile' => $profile, 'value' => $headline !== null ? ($profile[$headline] ?? null) : null];
+    }
+
+    /** Flatten the known keys of a nested season-statistics object. */
+    private function flattenSeasonStatistics(array $s): array
+    {
+        $out = [];
+        $flat = ['played' => 'Played', 'goals' => 'Goals', 'assists' => 'Assists'];
+        foreach ($flat as $key => $label) {
+            $v = $s[$key] ?? null;
+            if (is_array($v)) $v = $v['total'] ?? null;
+            $val = $this->statValue($v);
+            if ($val !== null) $out[$label] = $val;
+        }
+        $cards = is_array($s['cards'] ?? null) ? $s['cards'] : [];
+        $cardMap = ['yellow' => 'Yellow Cards', 'red' => 'Red Cards', 'yellowred' => 'Yellow-Red Cards'];
+        foreach ($cardMap as $key => $label) {
+            $val = $this->statValue($cards[$key] ?? null);
+            if ($val !== null) $out[$label] = $val;
+        }
+        $fouls = is_array($s['fouls'] ?? null) ? $s['fouls'] : [];
+        $foulMap = ['drawn' => 'Fouls Drawn', 'committed' => 'Fouls Committed'];
+        foreach ($foulMap as $key => $label) {
+            $val = $this->statValue($fouls[$key] ?? null);
+            if ($val !== null) $out[$label] = $val;
+        }
+        $penalty = is_array($s['penalty'] ?? null) ? $s['penalty'] : [];
+        $penaltyMap = ['won' => 'Penalty Won', 'scored' => 'Penalty Scored', 'missed' => 'Penalty Missed', 'saved' => 'Penalty Saved'];
+        foreach ($penaltyMap as $key => $label) {
+            $val = $this->statValue($penalty[$key] ?? null);
+            if ($val !== null) $out[$label] = $val;
+        }
+        return $out;
+    }
+
+    /** int|float when numeric (whole numbers stay ints), null otherwise. */
+    private function statValue(mixed $v): int|float|null
+    {
+        if (!is_numeric($v)) return null;
+        $f = (float) $v;
+        if (!is_finite($f)) return null;
+        return ($f == floor($f)) ? (int) $f : $f;
+    }
+
     /** Fetch available leagues for football. */
     public function leagues(?string $country = null): array
     {
         $params = $country ? ['country' => $country] : [];
-        $qs = http_build_query($params);
-        $resp = $this->doRequest('/leagues' . ($qs ? '?' . $qs : ''));
-        $rows = $this->extractList($this->decodeJson($resp));
+        $rows = $this->fetchAllPages('/leagues', $params);
         return array_map(fn($r) => [
             'leagueId' => (string) ($r['league']['id'] ?? ''),
             'name' => $r['league']['name'] ?? '',
             'country' => $r['country']['name'] ?? '',
             'seasons' => array_map(fn($s) => (string) ($s['year'] ?? ''), $r['seasons'] ?? []),
         ], $rows);
+    }
+
+    /**
+     * Fetch every page of a paginated list endpoint.
+     *
+     * api-football v3 list endpoints (fixtures, odds, leagues, ...) report
+     * `paging: {current, total}` in each response and are paged with the
+     * `page` parameter (50/page for fixtures, 10/page for odds, ...). Reading
+     * only the first page silently truncates busy days, full-season queries
+     * and fixtures with many bookmaker markets. Follow the pages until
+     * current >= total, hard-capped at 40 pages so a bad `total` cannot loop.
+     */
+    private function fetchAllPages(string $path, array $params, int $maxPages = 40): array
+    {
+        $rows = [];
+        $page = 1;
+        do {
+            $resp = $this->doRequest($path . '?' . http_build_query($params + ['page' => $page]));
+            $json = $this->decodeJson($resp);
+            $rows = array_merge($rows, $this->extractList($json));
+            $paging = is_array($json['paging'] ?? null) ? $json['paging'] : [];
+            $current = (int) ($paging['current'] ?? $page);
+            $total = (int) ($paging['total'] ?? 1);
+            $page++;
+        } while ($current < $total && $page <= $maxPages);
+        return $rows;
     }
 
     private function doRequest(string $path): array
@@ -605,7 +774,47 @@ class TheSportsDbProvider implements SportsDataProvider
             'country' => $team['strCountry'] ?? '',
             'formed' => $team['intFormedYear'] ?? null,
             'badge' => $team['strBadge'] ?? null,
+            'apiFootballId' => self::refId($team['idAPIfootball'] ?? null),
         ];
+    }
+
+    /**
+     * Search teams by name (searchteams.php — the endpoint shown in the
+     * TheSportsDB docs API examples). Returns the internal team shape,
+     * including the idAPIfootball cross-reference when the vendor has it.
+     */
+    public function searchTeams(string $name, int $limit = 10): array
+    {
+        $resp = $this->doRequest('/searchteams.php?t=' . rawurlencode($name));
+        $json = $this->decodeJson($resp);
+        $teams = $json['teams'] ?? [];
+        $out = [];
+        foreach ((is_array($teams) ? $teams : []) as $t) {
+            if (!is_array($t) || empty($t['strTeam'])) continue;
+            $out[] = [
+                'teamId' => (string) ($t['idTeam'] ?? ''),
+                'name' => (string) $t['strTeam'],
+                'shortName' => $t['strTeamShort'] ?? null,
+                'stadium' => $t['strStadium'] ?? null,
+                'league' => $t['strLeague'] ?? null,
+                'leagueId' => (string) ($t['idLeague'] ?? ''),
+                'country' => $t['strCountry'] ?? null,
+                'location' => $t['strLocation'] ?? null,
+                'formed' => isset($t['intFormedYear']) ? (int) $t['intFormedYear'] : null,
+                'badge' => $t['strBadge'] ?? null,
+                'apiFootballId' => self::refId($t['idAPIfootball'] ?? null),
+            ];
+            if (count($out) >= max(1, $limit)) break;
+        }
+        return $out;
+    }
+
+    /** Cross-reference ids are null/'' when the vendor has no mapping. */
+    private static function refId(mixed $v): ?string
+    {
+        if ($v === null) return null;
+        $s = trim((string) $v);
+        return $s === '' ? null : $s;
     }
 
     private function doRequest(string $path): array
@@ -635,13 +844,16 @@ class TheSportsDbProvider implements SportsDataProvider
                 'kickoff' => $kickoff,
                 'status' => $status,
                 'sport' => 'football',
-                'venue' => $r['strVenue'] ?? null,
-                'homeTeamId' => (string) ($r['idHomeTeam'] ?? ''),
-                'awayTeamId' => (string) ($r['idAwayTeam'] ?? ''),
-                'homeTeamLogo' => null,
-                'awayTeamLogo' => null,
-                'sourceTimestamp' => gmdate('c'),
-            ];
+            'venue' => $r['strVenue'] ?? null,
+            'homeTeamId' => (string) ($r['idHomeTeam'] ?? ''),
+            'awayTeamId' => (string) ($r['idAwayTeam'] ?? ''),
+            'homeTeamLogo' => null,
+            'awayTeamLogo' => null,
+            // TheSportsDB cross-references api-football fixture ids — keep it
+            // so the same match can be matched across providers.
+            'apiFootballId' => self::refId($r['idAPIfootball'] ?? null),
+            'sourceTimestamp' => gmdate('c'),
+        ];
         }
         return $out;
     }
@@ -654,6 +866,7 @@ class TheSportsDbProvider implements SportsDataProvider
             $out[] = [
                 'externalId' => (string) ($r['idEvent'] ?? ''),
                 'status' => $status,
+                'apiFootballId' => self::refId($r['idAPIfootball'] ?? null),
                 'homeScore' => isset($r['intHomeScore']) && $r['intHomeScore'] !== '' ? (int) $r['intHomeScore'] : null,
                 'awayScore' => isset($r['intAwayScore']) && $r['intAwayScore'] !== '' ? (int) $r['intAwayScore'] : null,
                 'halfTimeHome' => isset($r['intHomeHalfScore']) && $r['intHomeHalfScore'] !== '' ? (int) $r['intHomeHalfScore'] : null,
@@ -681,6 +894,9 @@ class TheSportsDbProvider implements SportsDataProvider
 // ─────────────────────────────────────────────────────────────────────────────
 // 3. SPORTMONKS (sportmonks.com)
 //    Docs: https://docs.sportmonks.com/football/v3
+//    Round-based bulk fetch: round() retrieves a whole matchday (fixtures +
+//    odds + results) in one request via /rounds/{id} with nested includes;
+//    seasonRounds() resolves the season's round ids.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class SportMonksProvider implements SportsDataProvider
@@ -727,23 +943,175 @@ class SportMonksProvider implements SportsDataProvider
     public function fixtures(array $query): array
     {
         $from = (string) ($query['from'] ?? gmdate('Y-m-d'));
-        $to = (string) ($query['to'] ?? $from);
-        $params = [];
-        if (!empty($query['league'])) $params['leagues'] = (string) $query['league'];
-        $filter = 'starts_between:' . $from . ',' . $to;
+        $to   = (string) ($query['to'] ?? $from);
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $from) !== 1 || preg_match('/^\d{4}-\d{2}-\d{2}$/', $to) !== 1) {
+            throw new ProviderException('fixtures: from/to must be YYYY-MM-DD dates', ProviderException::DATA_ERROR);
+        }
+        $start = strtotime($from . ' 00:00:00 UTC');
+        $end   = strtotime($to . ' 00:00:00 UTC');
+        $days  = (int) floor(($end - $start) / 86400);
+        if ($days < 0) throw new ProviderException('fixtures: from must not be after to', ProviderException::DATA_ERROR);
+        if ($days > 100) {
+            throw new ProviderException('fixtures: the SportMonks v3 date-range endpoint allows at most 100 days per request — narrow the window', ProviderException::DATA_ERROR);
+        }
+        // The v3 API dates fixtures through DEDICATED path endpoints. The
+        // v2-era `filter[starts_between:...]` query parameter no longer
+        // exists and is SILENTLY IGNORED (the API would return its oldest
+        // fixtures unfiltered), and the old top-level `leagues=` parameter
+        // is invalid as well. Canonical v3 surface (verified against the
+        // v3 docs, 2026-09):
+        //   single day → GET /fixtures/date/{date}
+        //   range      → GET /fixtures/between/{start}/{end}  (max 100 days)
+        //   league     → &filters=fixtureLeagues:{id}
+        //   season     → &filters=fixtureSeasons:{id}
+        $path = $days === 0
+            ? '/fixtures/date/' . $from
+            : '/fixtures/between/' . $from . '/' . $to;
+        $filters = [];
+        if (!empty($query['league'])) $filters[] = 'fixtureLeagues:' . (string) $query['league'];
+        if (!empty($query['season'])) $filters[] = 'fixtureSeasons:' . (string) $query['season'];
         $includes = 'participants;scores;league;venue;referee';
-        $qs = http_build_query(array_merge($params, ['include' => $includes]));
-        $resp = $this->doRequest('/fixtures?filter[' . $filter . ']&' . $qs);
-        $rows = $this->extractList($this->decodeJson($resp));
+        // /fixtures paginates (25 per page by default). Follow the cursor
+        // until has_more=false so a busy multi-league day is not silently
+        // truncated to the first page. Hard cap: 40 pages (2000 fixtures).
+        $rows = [];
+        $cursor = null;
+        $pages = 0;
+        do {
+            $params = ['include' => $includes];
+            if ($cursor !== null) {
+                $params['cursor'] = $cursor;
+            } else {
+                $params['per_page'] = 50;
+            }
+            $qs = http_build_query($params);
+            foreach ($filters as $filter) {
+                $qs .= '&' . rawurlencode('filters') . '=' . rawurlencode($filter);
+            }
+            $resp = $this->doRequest($path . '?' . $qs);
+            $json = $this->decodeJson($resp);
+            $rows = array_merge($rows, $this->extractList($json));
+            $pagination = $json['pagination'] ?? [];
+            $cursor = (!empty($pagination['has_more']) && !empty($pagination['next_cursor']))
+                ? (string) $pagination['next_cursor']
+                : null;
+            $pages++;
+        } while ($cursor !== null && $pages < 40);
         return $this->mapFixtures($rows);
+    }
+
+    /**
+     * Fetch an entire matchday (round) in a SINGLE request.
+     *
+     * GET /rounds/{id} with nested includes: fixtures (odds with market and
+     * bookmaker, participants, scores, venue, state) plus league (country).
+     * One HTTP call returns the full round — fixtures, bookmaker odds and
+     * results — instead of fixtures() + N×odds() + N×results().
+     *
+     * Round ids come from seasonRounds(). Odds still require the SportMonks
+     * odds add-on; without it the fixtures simply carry no odds entries.
+     *
+     * @return array{roundId:string, name:?string, leagueId:string, league:?string,
+     *               season:string, startingAt:?string, endingAt:?string, finished:bool,
+     *               fixtures:array<int,array<string,mixed>>,
+     *               odds:array<int,array<string,mixed>>,
+     *               results:array<int,array<string,mixed>>}
+     */
+    public function round(string $roundExternalId): array
+    {
+        $fullIncludes = [
+            'fixtures',
+            'fixtures.odds', 'fixtures.odds.market', 'fixtures.odds.bookmaker',
+            'fixtures.participants', 'fixtures.scores', 'fixtures.venue', 'fixtures.state',
+            'league', 'league.country',
+        ];
+        $plainIncludes = [
+            'fixtures',
+            'fixtures.participants', 'fixtures.scores', 'fixtures.venue', 'fixtures.state',
+            'league', 'league.country',
+        ];
+        try {
+            $resp = $this->doRequest($this->roundPath($roundExternalId, $fullIncludes));
+        } catch (ProviderException $e) {
+            if ($e->status !== ProviderException::DATA_ERROR) throw $e;
+            // The odds include may not be on this subscription (include
+            // exception 5013) — retry once without odds so the round is
+            // still usable for fixtures + results. Mirrors the odds()
+            // add-on fallback.
+            $resp = $this->doRequest($this->roundPath($roundExternalId, $plainIncludes));
+        }
+        $json = $this->decodeJson($resp);
+        $data = $json['data'] ?? $json;
+        if (!is_array($data) || !isset($data['id'])) {
+            throw new ProviderException('round payload is malformed (missing round id)', ProviderException::DATA_ERROR);
+        }
+        $league = is_array($data['league'] ?? null) ? $data['league'] : [];
+        $fixtures = [];
+        foreach (($data['fixtures'] ?? []) as $f) {
+            if (!is_array($f) || !isset($f['id'])) continue;
+            // Round payloads carry the league at the round level; the
+            // per-fixture mappers expect it on each row, so enrich the copy.
+            if (!isset($f['league']) && $league !== []) $f['league'] = $league;
+            if (!isset($f['season']) && isset($data['season_id'])) $f['season'] = ['id' => $data['season_id']];
+            $fixtures[] = $f;
+        }
+        return [
+            'roundId' => (string) $data['id'],
+            'name' => isset($data['name']) && (string) $data['name'] !== '' ? (string) $data['name'] : null,
+            'leagueId' => (string) ($league['id'] ?? $data['league_id'] ?? ''),
+            'league' => isset($league['name']) ? (string) $league['name'] : null,
+            'season' => (string) ($data['season_id'] ?? ''),
+            'startingAt' => $data['starting_at'] ?? null,
+            'endingAt' => $data['ending_at'] ?? null,
+            'finished' => !empty($data['finished']),
+            'fixtures' => $this->mapFixtures($fixtures),
+            'odds' => $this->mapRoundOdds($fixtures),
+            'results' => $this->mapResults($fixtures),
+        ];
+    }
+
+    /** List a season's rounds (id + metadata) so round() can be addressed by round id. */
+    public function seasonRounds(string $seasonId): array
+    {
+        $resp = $this->doRequest('/rounds/seasons/' . rawurlencode($seasonId));
+        $rows = $this->extractList($this->decodeJson($resp));
+        $out = [];
+        foreach ($rows as $r) {
+            if (!is_array($r) || !isset($r['id'])) continue;
+            $out[] = [
+                'roundId' => (string) $r['id'],
+                'name' => isset($r['name']) && (string) $r['name'] !== '' ? (string) $r['name'] : null,
+                'leagueId' => (string) ($r['league_id'] ?? ''),
+                'season' => (string) ($r['season_id'] ?? ''),
+                'finished' => !empty($r['finished']),
+                'isCurrent' => !empty($r['is_current']),
+                'startingAt' => $r['starting_at'] ?? null,
+                'endingAt' => $r['ending_at'] ?? null,
+            ];
+        }
+        return $out;
+    }
+
+    private function roundPath(string $roundExternalId, array $includes): string
+    {
+        return '/rounds/' . rawurlencode($roundExternalId) . '?include=' . rawurlencode(implode(';', $includes));
     }
 
     public function odds(string $fixtureExternalId): array
     {
         // SportMonks odds require the optional "odds" add-on subscription.
         // Attempt the endpoint and return empty if it fails.
+        // Canonical v3 path (verified live, 2026-09): the standalone v2-era
+        // path /odds/fixtures/{id} does NOT exist ("The requested endpoint
+        // does not exist") — pre-match odds live under
+        // GET /odds/pre-match/fixtures/{id} with includes market;bookmaker.
+        // The base odd row already carries label/original_label, so no
+        // undocumented `selection` include is requested (unknown includes
+        // raise an include exception and would fail the whole request).
         try {
-            $resp = $this->doRequest('/odds/fixtures/' . rawurlencode($fixtureExternalId) . '?include=bookmaker;market;selection');
+            $resp = $this->doRequest('/odds/pre-match/fixtures/' . rawurlencode($fixtureExternalId) . '?' . http_build_query([
+                'include' => 'market;bookmaker',
+            ]));
             $rows = $this->extractList($this->decodeJson($resp));
             return $this->mapOdds($rows);
         } catch (ProviderException $e) {
@@ -765,29 +1133,49 @@ class SportMonksProvider implements SportsDataProvider
         return $this->mapResults([$data]);
     }
 
-    /** Fetch standings for a league + season. */
+    /**
+     * Fetch standings for a league + season.
+     *
+     * GET /standings/seasons/{season} with `filters=standingLeagues:{id}` —
+     * the old top-level `leagues=` parameter is invalid in v3 and was
+     * silently ignored (the API returned every league's standings). The
+     * base standing row only carries position/points; the team name comes
+     * from `include=participant` and W/D/L/goals from `include=details`
+     * (standing-detail type ids per the v3 types definitions:
+     * 129 played, 130 won, 131 draw, 132 lost, 133 goals for, 134 conceded).
+     * The endpoint is not paginated (verified against the v3 docs).
+     */
     public function standings(string $leagueId, string $season): array
     {
-        $resp = $this->doRequest('/standings/seasons/' . rawurlencode($season) . '?leagues=' . rawurlencode($leagueId));
+        $params = [
+            'filters' => 'standingLeagues:' . $leagueId,
+            'include' => 'participant;details',
+        ];
+        $resp = $this->doRequest('/standings/seasons/' . rawurlencode($season) . '?' . http_build_query($params));
         $rows = $this->extractList($this->decodeJson($resp));
         $out = [];
-        foreach ($rows as $r) {
-            foreach (($r['standings'] ?? []) as $entry) {
-                $out[] = [
-                    'leagueId' => $leagueId,
-                    'season' => $season,
-                    'rank' => (int) ($entry['rank'] ?? 0),
-                    'team' => $entry['team']['name'] ?? '',
-                    'teamId' => (string) ($entry['team']['id'] ?? ''),
-                    'played' => (int) ($entry['results']['played'] ?? 0),
-                    'wins' => (int) ($entry['results']['wins'] ?? 0),
-                    'draws' => (int) ($entry['results']['draws'] ?? 0),
-                    'losses' => (int) ($entry['results']['losses'] ?? 0),
-                    'goalsFor' => (int) ($entry['results']['goals_scored'] ?? 0),
-                    'goalsAgainst' => (int) ($entry['results']['goals_conceded'] ?? 0),
-                    'points' => (int) ($entry['results']['points'] ?? 0),
-                ];
+        foreach ($rows as $entry) {
+            $participant = is_array($entry['participant'] ?? null) ? $entry['participant'] : [];
+            $details = [];
+            foreach (($entry['details'] ?? []) as $d) {
+                if (is_array($d) && isset($d['type_id'], $d['value'])) {
+                    $details[(int) $d['type_id']] = (int) $d['value'];
+                }
             }
+            $out[] = [
+                'leagueId' => $leagueId,
+                'season' => $season,
+                'rank' => (int) ($entry['position'] ?? 0),
+                'team' => (string) ($participant['name'] ?? ''),
+                'teamId' => (string) ($participant['id'] ?? ''),
+                'played' => $details[129] ?? 0,
+                'wins' => $details[130] ?? 0,
+                'draws' => $details[131] ?? 0,
+                'losses' => $details[132] ?? 0,
+                'goalsFor' => $details[133] ?? 0,
+                'goalsAgainst' => $details[134] ?? 0,
+                'points' => (int) ($entry['points'] ?? 0),
+            ];
         }
         return $out;
     }
@@ -805,21 +1193,46 @@ class SportMonksProvider implements SportsDataProvider
         ], $rows);
     }
 
-    /** Fetch squad/lineup for a fixture. */
+    /**
+     * Fetch the team sheets for a fixture.
+     *
+     * v3 has NO /lineups/fixtures/{id} endpoint (that was v2). Lineups are
+     * an include on the fixture itself:
+     *   GET /fixtures/{id}?include=lineups;participants;lineups.position
+     *
+     * Each entry in data.lineups[] is flat: {player_id, team_id,
+     * position_id, player_name, jersey_number, type_id} where
+     * type_id 11 = starting player, 12 = substitute. The position NAME
+     * requires the nested `lineups.position` include (Goalkeeper /
+     * Defender / Midfielder / Attacker).
+     */
     public function lineups(string $fixtureId): array
     {
         try {
-            $resp = $this->doRequest('/lineups/fixtures/' . rawurlencode($fixtureId) . '?include=player;position');
-            $rows = $this->extractList($this->decodeJson($resp));
-            return array_map(fn($r) => [
-                'fixtureId' => $fixtureId,
-                'teamId' => (string) ($r['team']['id'] ?? ''),
-                'team' => $r['team']['name'] ?? '',
-                'playerId' => (string) ($r['player']['id'] ?? ''),
-                'player' => $r['player']['name'] ?? '',
-                'position' => $r['position'] ?? '',
-                'starter' => !empty($r['starter']),
-            ], $rows);
+            $resp = $this->doRequest('/fixtures/' . rawurlencode($fixtureId) . '?' . http_build_query([
+                'include' => 'lineups;participants;lineups.position',
+            ]));
+            $json = $this->decodeJson($resp);
+            $data = is_array($json['data'] ?? null) ? $json['data'] : [];
+            $teams = [];
+            foreach (($data['participants'] ?? []) as $pt) {
+                if (isset($pt['id'], $pt['name'])) $teams[(string) $pt['id']] = (string) $pt['name'];
+            }
+            $out = [];
+            foreach (($data['lineups'] ?? []) as $l) {
+                $position = is_array($l['position'] ?? null) ? (string) ($l['position']['name'] ?? '') : '';
+                $out[] = [
+                    'fixtureId' => $fixtureId,
+                    'teamId' => (string) ($l['team_id'] ?? ''),
+                    'team' => $teams[(string) ($l['team_id'] ?? '')] ?? '',
+                    'playerId' => (string) ($l['player_id'] ?? ''),
+                    'player' => (string) ($l['player_name'] ?? (is_array($l['player'] ?? null) ? ($l['player']['name'] ?? '') : '')),
+                    'position' => $position,
+                    'jerseyNumber' => (int) ($l['jersey_number'] ?? 0),
+                    'starter' => (int) ($l['type_id'] ?? 0) === 11,
+                ];
+            }
+            return $out;
         } catch (ProviderException $e) {
             return [];
         }
@@ -849,7 +1262,7 @@ class SportMonksProvider implements SportsDataProvider
                 'leagueId' => (string) ($r['league']['id'] ?? ''),
                 'season' => (string) ($r['season']['id'] ?? ''),
                 'kickoff' => $kickoff,
-                'status' => $this->mapSportMonksStatus($r['status'] ?? 0),
+                'status' => $this->fixtureStatus($r),
                 'sport' => 'football',
                 'venue' => $r['venue']['name'] ?? null,
                 'referee' => $r['referee']['name'] ?? null,
@@ -858,6 +1271,7 @@ class SportMonksProvider implements SportsDataProvider
                 'homeTeamLogo' => $this->participantLogo($r, 'home'),
                 'awayTeamLogo' => $this->participantLogo($r, 'away'),
                 'round' => $r['round']['name'] ?? null,
+                'roundId' => isset($r['round_id']) && $r['round_id'] !== null ? (string) $r['round_id'] : '',
                 'sourceTimestamp' => gmdate('c'),
             ];
         }
@@ -868,13 +1282,20 @@ class SportMonksProvider implements SportsDataProvider
     {
         $out = [];
         foreach ($rows as $r) {
+            if (!isset($r['value'])) continue;
             $market = $r['market'] ?? [];
-            $selection = $r['selection'] ?? [];
             $bookmaker = $r['bookmaker'] ?? [];
-            if (!isset($selection['value']) || !isset($r['value'])) continue;
+            // Selection source: the standalone /odds endpoint returns a
+            // `selection` object; round-embedded odds carry `original_label`
+            // (bookmaker-native, e.g. "1"/"Draw"/"2") or a display `label`.
+            $rawSelection = null;
+            if (isset($r['selection']['value'])) $rawSelection = (string) $r['selection']['value'];
+            elseif (isset($r['original_label']) && (string) $r['original_label'] !== '') $rawSelection = (string) $r['original_label'];
+            elseif (isset($r['label']) && (string) $r['label'] !== '') $rawSelection = (string) $r['label'];
+            if ($rawSelection === null) continue;
             $normalizedMarket = self::normalizeMarket((string) ($market['name'] ?? 'UNKNOWN'));
-            $normalizedSelection = self::normalizeSelection($normalizedMarket, (string) ($selection['value'] ?? ''));
-            $out[] = [
+            $normalizedSelection = self::normalizeSelection($normalizedMarket, $rawSelection);
+            $row = [
                 'market' => $normalizedMarket,
                 'selection' => $normalizedSelection,
                 'decimalOdds' => (float) $r['value'],
@@ -882,8 +1303,30 @@ class SportMonksProvider implements SportsDataProvider
                 'bookmaker' => (string) ($bookmaker['name'] ?? ''),
                 'fixtureId' => (string) ($r['fixture_id'] ?? ''),
             ];
+            // Optional enrichment present on round-embedded odds.
+            if (isset($r['probability'])) {
+                $prob = (float) rtrim(trim((string) $r['probability']), '%');
+                if (is_finite($prob) && $prob >= 0.0) $row['impliedProbability'] = round($prob / 100, 4);
+            }
+            if (isset($r['latest_bookmaker_update']) && (string) $r['latest_bookmaker_update'] !== '') {
+                $row['updatedAt'] = (string) $r['latest_bookmaker_update'];
+            }
+            if (array_key_exists('winning', $r)) $row['winning'] = (bool) $r['winning'];
+            $out[] = $row;
         }
         return $out;
+    }
+
+    /** Flatten the odds embedded in a round payload's fixtures into mapOdds() rows. */
+    private function mapRoundOdds(array $fixtures): array
+    {
+        $rows = [];
+        foreach ($fixtures as $f) {
+            foreach (($f['odds'] ?? []) as $o) {
+                if (is_array($o)) $rows[] = $o;
+            }
+        }
+        return $this->mapOdds($rows);
     }
 
     private function mapResults(array $rows): array
@@ -893,7 +1336,7 @@ class SportMonksProvider implements SportsDataProvider
             $scores = $r['scores'] ?? [];
             $out[] = [
                 'externalId' => (string) ($r['id'] ?? ''),
-                'status' => $this->mapSportMonksStatus($r['status'] ?? 0),
+                'status' => $this->fixtureStatus($r),
                 'homeScore' => $scores['home']['score'] ?? $scores['home']['current'] ?? null,
                 'awayScore' => $scores['away']['score'] ?? $scores['away']['current'] ?? null,
                 'halfTimeHome' => $scores['home']['halftime']['score'] ?? $scores['home']['halftime']['current'] ?? null,
@@ -934,9 +1377,61 @@ class SportMonksProvider implements SportsDataProvider
         return $r[$side]['image_path'] ?? $r[$side]['logo'] ?? null;
     }
 
+    /**
+     * Resolve a SportMonks fixture's normalized status.
+     *
+     * Preference order (v3 payloads carry state_id or a `state` include
+     * object; legacy v2 payloads carried a numeric `status` code):
+     *   1. `state` include object (id/state/name/developer_name) — most explicit
+     *   2. `state_id` — official v3 fixture state table (see mapStateId)
+     *   3. legacy v2 numeric `status` codes (see mapSportMonksStatus)
+     */
+    private function fixtureStatus(array $r): string
+    {
+        if (isset($r['state']) && is_array($r['state'])) {
+            $code = (string) ($r['state']['developer_name'] ?? $r['state']['state'] ?? '');
+            $mapped = self::mapStateCode($code);
+            if ($mapped !== null) return $mapped;
+        }
+        if (isset($r['state_id'])) return self::mapStateId((int) $r['state_id']);
+        if (isset($r['status'])) return $this->mapSportMonksStatus((int) $r['status']);
+        return 'SCHEDULED';
+    }
+
+    /** Official v3 fixture state table (docs.sportmonks.com → API 3.0 → States). */
+    private static function mapStateId(int $stateId): string
+    {
+        return match ($stateId) {
+            1, 13, 16, 19, 26 => 'SCHEDULED',    // NS, TBA, DELAYED, AU, PENDING
+            2, 3, 4, 6, 9, 21, 22, 25 => 'LIVE', // 1st half, HT, ET break, ET, penalties, ET break, 2nd half, pen break
+            5, 7, 8, 14, 17 => 'FINISHED',       // FT, AET, FT_PEN, WO, AWARDED
+            10 => 'POSTPONED',                    // POSTPONED
+            11, 15, 18 => 'SUSPENDED',            // SUSPENDED, ABANDONED, INTERRUPTED
+            12, 20 => 'CANCELLED',                // CANCELLED, DELETED
+            default => 'SCHEDULED',
+        };
+    }
+
+    /** State codes from the `state` include object (FT, NS, INPLAY_1ST_HALF, …). */
+    private static function mapStateCode(string $code): ?string
+    {
+        $c = strtoupper(trim($code));
+        if ($c === '') return null;
+        return match ($c) {
+            'NS', 'TBA', 'DELAYED', 'AU', 'PENDING' => 'SCHEDULED',
+            'LIVE', 'INPLAY_1ST_HALF', 'INPLAY_2ND_HALF', 'HT', 'BREAK', 'INPLAY_ET', 'EXTRA_TIME_BREAK', 'INPLAY_PENALTIES', 'PEN_BREAK' => 'LIVE',
+            'FT', 'AET', 'FT_PEN', 'WO', 'AWARDED' => 'FINISHED',
+            'POSTPONED' => 'POSTPONED',
+            'SUSPENDED', 'ABANDONED', 'INTERRUPTED' => 'SUSPENDED',
+            'CANCELLED', 'DELETED' => 'CANCELLED',
+            default => null,
+        };
+    }
+
+    /** Legacy v2 numeric `status` codes (v3 payloads use state_id instead). */
     private function mapSportMonksStatus(int $statusCode): string
     {
-        // SportMonks status codes (v3):
+        // Legacy v2 status codes:
         // 6 = not started, 0 = TBD, 7/9/31 = live, 33/100 = finished
         // 40/50/60/70 = extras (extra time, penalties, etc.)
         // 35/45/55/80/100 = various end states

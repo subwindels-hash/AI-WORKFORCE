@@ -271,6 +271,157 @@ test('sportmonks maps fixtures correctly', function () {
     assert_equals('Round 5', $f['round']);
 });
 
+test('sportmonks fixtures follows the pagination cursor across pages', function () {
+    $fx = fn(int $i) => ['id' => 100 + $i, 'starting_at' => '2026-09-15T12:00:00Z',
+        'participants' => [['name' => 'H' . $i, 'meta' => ['location' => 'home']], ['name' => 'A' . $i, 'meta' => ['location' => 'away']]],
+        'league' => ['name' => 'L'], 'season' => ['id' => 2026]];
+    $urls = [];
+    $transport = function (string $url, array $headers) use (&$urls, $fx) {
+        $urls[] = $url;
+        if (str_contains($url, 'cursor=c1')) {
+            return ['status' => 200, 'body' => json_encode(['data' => [$fx(2)], 'pagination' => ['has_more' => false, 'next_cursor' => null]])];
+        }
+        return ['status' => 200, 'body' => json_encode(['data' => [$fx(0), $fx(1)], 'pagination' => ['has_more' => true, 'next_cursor' => 'c1']])];
+    };
+    $p = new SportMonksProvider('token', 'https://api.test', 10, $transport);
+    $fixtures = $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15']);
+    assert_equals(3, count($fixtures), 'fixtures from both pages are combined');
+    assert_equals(2, count($urls));
+    assert_true(str_contains($urls[0], 'per_page=50'), 'first request sets the page size');
+    assert_false(str_contains($urls[0], 'cursor='), 'first request has no cursor');
+    assert_true(str_contains($urls[1], 'cursor=c1'), 'second request follows the cursor');
+    assert_false(str_contains($urls[1], 'per_page='), 'cursor requests must not combine per_page (the API rejects the combination)');
+});
+
+test('sportmonks fixtures pagination is bounded even when has_more stays true', function () {
+    $n = 0;
+    $transport = function (string $url, array $headers) use (&$n) {
+        $n++;
+        return ['status' => 200, 'body' => json_encode([
+            'data' => [['id' => $n, 'starting_at' => '2026-09-15T12:00:00Z',
+                        'participants' => [['name' => 'H', 'meta' => ['location' => 'home']], ['name' => 'A', 'meta' => ['location' => 'away']]],
+                        'league' => ['name' => 'L'], 'season' => ['id' => 2026]]],
+            'pagination' => ['has_more' => true, 'next_cursor' => 'c' . $n],
+        ])];
+    };
+    $p = new SportMonksProvider('t', 'https://api.test', 10, $transport);
+    $fixtures = $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15']);
+    assert_equals(40, $n, 'hard cap of 40 pages stops the loop');
+    assert_equals(40, count($fixtures));
+});
+
+test('sportmonks fixtures use the v3 date endpoints and filters parameter', function () {
+    $urls = [];
+    $transport = function (string $url, array $headers) use (&$urls) {
+        $urls[] = $url;
+        return ['status' => 200, 'body' => json_encode(['data' => [], 'pagination' => ['has_more' => false, 'next_cursor' => null]])];
+    };
+    $p = new SportMonksProvider('t', 'https://api.test', 10, $transport);
+    $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15', 'league' => '501']);
+    assert_true(str_starts_with($urls[0], 'https://api.test/fixtures/date/2026-09-15'), 'a single day uses GET /fixtures/date/{date}');
+    assert_true(str_contains($urls[0], 'filters=fixtureLeagues%3A501'), 'league scope via the v3 filters parameter');
+    assert_false(str_contains($urls[0], 'filter['), 'the v2-era filter[...] syntax is invalid in v3 (silently ignored)');
+    assert_false(str_contains($urls[0], 'leagues='), 'the top-level leagues parameter is invalid in v3 (silently ignored)');
+    $p->fixtures(['from' => '2026-09-01', 'to' => '2026-09-05']);
+    assert_true(str_starts_with($urls[1], 'https://api.test/fixtures/between/2026-09-01/2026-09-05'), 'a multi-day window uses GET /fixtures/between/{start}/{end}');
+});
+
+test('sportmonks fixtures reject a date range wider than the 100-day API limit', function () {
+    $p = new SportMonksProvider('t', 'https://api.test', 10, function () {
+        throw new \RuntimeException('no network expected');
+    });
+    assert_throws(ProviderException::class, fn() => $p->fixtures(['from' => '2026-01-01', 'to' => '2026-06-30']), 'the between endpoint allows at most 100 days');
+});
+
+test('sportmonks standings use the v3 league filter, includes and detail type ids', function () {
+    $url = '';
+    $body = json_encode(['data' => [
+        ['id' => 1, 'participant_id' => 55, 'position' => 1, 'points' => 9, 'result' => 'equal',
+         'participant' => ['id' => 55, 'name' => 'Real Madrid'],
+         'details' => [
+             ['type_id' => 129, 'value' => 3],
+             ['type_id' => 130, 'value' => 3],
+             ['type_id' => 131, 'value' => 0],
+             ['type_id' => 132, 'value' => 0],
+             ['type_id' => 133, 'value' => 7],
+             ['type_id' => 134, 'value' => 2],
+         ]],
+    ]]);
+    $transport = function (string $u, array $headers) use (&$url, $body) {
+        $url = $u;
+        return ['status' => 200, 'body' => $body];
+    };
+    $p = new SportMonksProvider('t', 'https://api.test', 10, $transport);
+    $rows = $p->standings('501', '2026-2027');
+    assert_true(str_starts_with($url, 'https://api.test/standings/seasons/2026-2027?'), 'standings are fetched by season id');
+    assert_true(str_contains($url, 'filters=standingLeagues%3A501'), 'league scope via filters=standingLeagues (the old leagues= param is ignored by the API)');
+    assert_true(str_contains($url, 'include=participant%3Bdetails'), 'team name + W/D/L/goals require the participant and details includes');
+    assert_equals(1, count($rows));
+    $r = $rows[0];
+    assert_equals(1, $r['rank']);
+    assert_equals('Real Madrid', $r['team']);
+    assert_equals('55', $r['teamId']);
+    assert_equals(3, $r['played']);
+    assert_equals(3, $r['wins']);
+    assert_equals(0, $r['draws']);
+    assert_equals(0, $r['losses']);
+    assert_equals(7, $r['goalsFor']);
+    assert_equals(2, $r['goalsAgainst']);
+    assert_equals(9, $r['points']);
+});
+
+test('sportmonks lineups use the fixture endpoint with the lineups include', function () {
+    $url = '';
+    $body = json_encode(['data' => [
+        'id' => 98765,
+        'participants' => [
+            ['id' => 55, 'name' => 'Real Madrid', 'meta' => ['location' => 'home']],
+            ['id' => 60, 'name' => 'Barcelona', 'meta' => ['location' => 'away']],
+        ],
+        'lineups' => [
+            ['id' => 1, 'player_id' => 1001, 'team_id' => 55, 'position_id' => 24,
+             'player_name' => 'Thibaut Courtois', 'jersey_number' => 1, 'type_id' => 11,
+             'position' => ['name' => 'Goalkeeper']],
+            ['id' => 2, 'player_id' => 1002, 'team_id' => 55, 'position_id' => 25,
+             'player_name' => 'Luka Modric', 'jersey_number' => 10, 'type_id' => 12,
+             'position' => ['name' => 'Midfielder']],
+        ],
+    ]]);
+    $transport = function (string $u, array $h) use (&$url, $body) {
+        $url = $u;
+        return ['status' => 200, 'body' => $body];
+    };
+    $p = new SportMonksProvider('t', 'https://api.test', 10, $transport);
+    $rows = $p->lineups('98765');
+    assert_true(str_starts_with($url, 'https://api.test/fixtures/98765?'), 'lineups come from the fixture endpoint (no /lineups/... endpoint exists in v3)');
+    assert_true(str_contains($url, 'include=lineups%3Bparticipants%3Blineups.position'), 'lineups include with the nested position names');
+    assert_equals(2, count($rows));
+    assert_equals('Goalkeeper', $rows[0]['position']);
+    assert_equals(true, $rows[0]['starter'], 'type_id 11 = starting player');
+    assert_equals('Real Madrid', $rows[0]['team']);
+    assert_equals(1, $rows[0]['jerseyNumber']);
+    assert_equals(false, $rows[1]['starter'], 'type_id 12 = substitute');
+});
+
+test('sportmonks odds use the v3 pre-match feed path', function () {
+    $url = '';
+    $body = json_encode(['data' => [
+        ['fixture_id' => 100, 'value' => 1.85, 'label' => 'Home',
+         'market' => ['name' => 'Match Winner'], 'bookmaker' => ['name' => 'Bet365']],
+    ]]);
+    $transport = function (string $u, array $h) use (&$url, $body) {
+        $url = $u;
+        return ['status' => 200, 'body' => $body];
+    };
+    $p = new SportMonksProvider('t', 'https://api.test', 10, $transport);
+    $odds = $p->odds('100');
+    assert_true(str_starts_with($url, 'https://api.test/odds/pre-match/fixtures/100?'), 'v3 pre-match odds live under /odds/pre-match/fixtures/{id} (the v2-era /odds/fixtures/{id} does not exist)');
+    assert_true(str_contains($url, 'include=market%3Bbookmaker'), 'only the documented includes are requested');
+    assert_false(str_contains($url, 'selection'), 'the undocumented selection include would raise an include exception');
+    assert_equals('MATCH_RESULT', $odds[0]['market'], 'base-row label maps without the selection object');
+    assert_equals('HOME', $odds[0]['selection']);
+});
+
 test('sportmonks maps live status codes correctly', function () {
     $body = json_encode(['data' => [
         ['id' => 1, 'starting_at' => '2026-09-15T19:00:00Z', 'status' => 7,
@@ -340,6 +491,272 @@ test('sportmonks handles auth failure gracefully', function () {
     $p = new SportMonksProvider('bad-token', 'https://api.test', 10, makeTransport(401));
     $health = $p->health();
     assert_equals('AUTHENTICATION_ERROR', $health['status']);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3b. SPORTMONKS ROUND ENDPOINT (single request → fixtures + odds + results)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Modeled on the real SportMonks v3 GET /rounds/{id} response
+ * (Brazil Serie A, round 25). Note: the participants array is NOT
+ * home-first — meta.location decides the sides.
+ */
+function sportmonksRoundPayload(): array
+{
+    $fulltime = ['id' => 1, 'name' => 'Fulltime Result', 'developer_name' => 'FULLTIME_RESULT', 'has_winning_calculations' => true];
+    $bet365 = ['id' => 2, 'legacy_id' => 2, 'name' => 'bet365'];
+    return [
+        'id' => 396698,
+        'sport_id' => 1,
+        'league_id' => 648,
+        'season_id' => 26763,
+        'stage_id' => 77479548,
+        'name' => '25',
+        'finished' => true,
+        'is_current' => false,
+        'starting_at' => '2026-08-29',
+        'ending_at' => '2026-08-31',
+        'games_in_current_week' => false,
+        'fixtures' => [
+            [
+                'id' => 19621838,
+                'league_id' => 648,
+                'season_id' => 26763,
+                'round_id' => 396698,
+                'state_id' => 5,
+                'venue_id' => 10494,
+                'name' => 'Corinthians vs Santos',
+                'starting_at' => '2026-08-30 19:00:00',
+                'starting_at_timestamp' => 1788116400,
+                'result_info' => 'Santos won after full-time.',
+                'leg' => '1/1',
+                'length' => 90,
+                'has_odds' => true,
+                'has_premium_odds' => true,
+                'state' => ['id' => 5, 'state' => 'FT', 'name' => 'Full Time', 'short_name' => 'FT', 'developer_name' => 'FT'],
+                'venue' => ['id' => 10494, 'name' => 'Neo Química Arena'],
+                'odds' => [
+                    ['id' => 242217199009, 'fixture_id' => 19621838, 'market_id' => 1, 'bookmaker_id' => 2, 'label' => 'Away', 'value' => '4.50', 'original_label' => '2', 'probability' => '22.22%', 'winning' => true, 'latest_bookmaker_update' => '2026-08-30 18:50:47', 'market' => $fulltime, 'bookmaker' => $bet365],
+                    ['id' => 242217199008, 'fixture_id' => 19621838, 'market_id' => 1, 'bookmaker_id' => 2, 'label' => 'Draw', 'value' => '3.30', 'original_label' => 'Draw', 'probability' => '30.3%', 'winning' => false, 'latest_bookmaker_update' => '2026-08-30 18:50:47', 'market' => $fulltime, 'bookmaker' => $bet365],
+                    ['id' => 242217199007, 'fixture_id' => 19621838, 'market_id' => 1, 'bookmaker_id' => 2, 'label' => 'Home', 'value' => '1.90', 'original_label' => '1', 'probability' => '52.63%', 'winning' => false, 'latest_bookmaker_update' => '2026-08-30 18:50:47', 'market' => $fulltime, 'bookmaker' => $bet365],
+                ],
+                'participants' => [
+                    ['id' => 3684, 'name' => 'Santos', 'short_code' => 'STS', 'image_path' => 'https://cdn.sportmonks.com/images/soccer/teams/4/3684.png', 'meta' => ['location' => 'away', 'winner' => true, 'position' => 14]],
+                    ['id' => 303, 'name' => 'Corinthians', 'short_code' => 'CTH', 'image_path' => 'https://cdn.sportmonks.com/images/soccer/teams/15/303.png', 'meta' => ['location' => 'home', 'winner' => false, 'position' => 10]],
+                ],
+                'scores' => ['home' => ['score' => 0, 'halftime' => ['score' => 0]], 'away' => ['score' => 1, 'halftime' => ['score' => 1]]],
+            ],
+            [
+                'id' => 19621837,
+                'league_id' => 648,
+                'season_id' => 26763,
+                'round_id' => 396698,
+                'state_id' => 5,
+                'name' => 'Mirassol vs Palmeiras',
+                'starting_at' => '2026-08-30 21:30:00',
+                'starting_at_timestamp' => 1788125400,
+                'result_info' => 'Game ended in draw.',
+                'state' => ['id' => 5, 'state' => 'FT', 'name' => 'Full Time', 'short_name' => 'FT', 'developer_name' => 'FT'],
+                'venue' => ['id' => 7424, 'name' => 'Maião'],
+                'odds' => [
+                    ['id' => 242217061156, 'fixture_id' => 19621837, 'label' => 'Home', 'value' => '3.50', 'original_label' => '1', 'probability' => '28.57%', 'winning' => false, 'market' => $fulltime, 'bookmaker' => $bet365],
+                    ['id' => 242217061157, 'fixture_id' => 19621837, 'label' => 'Draw', 'value' => '3.40', 'original_label' => 'Draw', 'probability' => '29.41%', 'winning' => true, 'market' => $fulltime, 'bookmaker' => $bet365],
+                    ['id' => 242217061158, 'fixture_id' => 19621837, 'label' => 'Away', 'value' => '2.15', 'original_label' => '2', 'probability' => '46.51%', 'winning' => false, 'market' => $fulltime, 'bookmaker' => $bet365],
+                ],
+                'participants' => [
+                    ['id' => 11126, 'name' => 'Mirassol', 'short_code' => 'MIR', 'image_path' => 'https://cdn.sportmonks.com/images/soccer/teams/22/11126.png', 'meta' => ['location' => 'home', 'winner' => false, 'position' => 18]],
+                    ['id' => 3422, 'name' => 'Palmeiras', 'short_code' => 'PAL', 'image_path' => 'https://cdn.sportmonks.com/images/soccer/teams/30/3422.png', 'meta' => ['location' => 'away', 'winner' => false, 'position' => 1]],
+                ],
+                'scores' => ['home' => ['score' => 1], 'away' => ['score' => 1]],
+            ],
+        ],
+        'league' => ['id' => 648, 'sport_id' => 1, 'country_id' => 5, 'name' => 'Serie A', 'active' => true, 'short_code' => 'BRA CB', 'type' => 'league', 'sub_type' => 'domestic', 'country' => ['id' => 5, 'name' => 'Brazil', 'iso2' => 'BR', 'iso3' => 'BRA']],
+    ];
+}
+
+test('sportmonks round hits /rounds/{id} with nested includes and maps metadata', function () {
+    $captured = null;
+    $transport = function (string $url, array $headers) use (&$captured) {
+        $captured = $url;
+        return ['status' => 200, 'body' => json_encode(['data' => sportmonksRoundPayload()])];
+    };
+    $p = new SportMonksProvider('token', 'https://api.sportmonks.com/v3/football', 10, $transport);
+    $round = $p->round('396698');
+
+    assert_true(is_string($captured), 'transport was not called');
+    assert_true(str_contains($captured, '/rounds/396698?include='), 'expected /rounds/{id}?include= in ' . $captured);
+    assert_true(str_contains($captured, rawurlencode('fixtures.odds.market')), 'expected nested odds include');
+    assert_true(str_contains($captured, rawurlencode('fixtures.participants')), 'expected participants include');
+    assert_true(str_contains($captured, 'api_token='), 'expected api_token query param');
+
+    assert_equals('396698', $round['roundId']);
+    assert_equals('25', $round['name']);
+    assert_equals('648', $round['leagueId']);
+    assert_equals('Serie A', $round['league']);
+    assert_equals('26763', $round['season']);
+    assert_equals('2026-08-29', $round['startingAt']);
+    assert_equals('2026-08-31', $round['endingAt']);
+    assert_true($round['finished'], 'round should be finished');
+});
+
+test('sportmonks round maps fixtures using meta.location (participants are not home-first)', function () {
+    $p = new SportMonksProvider('token', 'https://api.test', 10, makeTransport(200, json_encode(['data' => sportmonksRoundPayload()])));
+    $round = $p->round('396698');
+    assert_equals(2, count($round['fixtures']));
+
+    // Fixture 1: away team (Santos) is listed FIRST in participants.
+    $f = $round['fixtures'][0];
+    assert_equals('19621838', $f['externalId']);
+    assert_equals('Corinthians', $f['homeTeam']);
+    assert_equals('Santos', $f['awayTeam']);
+    assert_equals('303', $f['homeTeamId']);
+    assert_equals('3684', $f['awayTeamId']);
+    assert_equals('https://cdn.sportmonks.com/images/soccer/teams/15/303.png', $f['homeTeamLogo']);
+    assert_equals('FINISHED', $f['status']);
+    assert_equals('football', $f['sport']);
+    assert_equals('Neo Química Arena', $f['venue']);
+    assert_equals('Serie A', $f['competition']);
+    assert_equals('26763', $f['season']);
+
+    $f2 = $round['fixtures'][1];
+    assert_equals('19621837', $f2['externalId']);
+    assert_equals('Mirassol', $f2['homeTeam']);
+    assert_equals('Palmeiras', $f2['awayTeam']);
+    assert_equals('FINISHED', $f2['status']);
+});
+
+test('sportmonks round maps embedded odds with labels, probability and winning flag', function () {
+    $p = new SportMonksProvider('token', 'https://api.test', 10, makeTransport(200, json_encode(['data' => sportmonksRoundPayload()])));
+    $round = $p->round('396698');
+    assert_equals(6, count($round['odds']));
+
+    // First fixture's odds (original_label 2 / Draw / 1).
+    $o = $round['odds'][0];
+    assert_equals('MATCH_RESULT', $o['market']);
+    assert_equals('AWAY', $o['selection']);
+    assert_equals(4.5, $o['decimalOdds']);
+    assert_equals('bet365', $o['bookmaker']);
+    assert_equals('19621838', $o['fixtureId']);
+    assert_close(0.2222, (float) $o['impliedProbability'], 0.0001, 'implied probability');
+    assert_true($o['winning'], 'away selection should be the winner');
+    assert_equals('2026-08-30 18:50:47', $o['updatedAt']);
+
+    $home = $round['odds'][2];
+    assert_equals('HOME', $home['selection']);
+    assert_equals(1.9, $home['decimalOdds']);
+    assert_false($home['winning']);
+
+    // Second fixture: draw won.
+    $draw = $round['odds'][4];
+    assert_equals('19621837', $draw['fixtureId']);
+    assert_equals('DRAW', $draw['selection']);
+    assert_equals(3.4, $draw['decimalOdds']);
+    assert_true($draw['winning']);
+});
+
+test('sportmonks round maps results from embedded scores', function () {
+    $p = new SportMonksProvider('token', 'https://api.test', 10, makeTransport(200, json_encode(['data' => sportmonksRoundPayload()])));
+    $round = $p->round('396698');
+    assert_equals(2, count($round['results']));
+    assert_equals('19621838', $round['results'][0]['externalId']);
+    assert_equals('FINISHED', $round['results'][0]['status']);
+    assert_equals(0, $round['results'][0]['homeScore']);
+    assert_equals(1, $round['results'][0]['awayScore']);
+    assert_equals(0, $round['results'][0]['halfTimeHome']);
+    assert_equals(1, $round['results'][0]['halfTimeAway']);
+});
+
+test('sportmonks round falls back to state_id when the state include is absent', function () {
+    $body = json_encode(['data' => [
+        'id' => 9, 'league_id' => 1, 'season_id' => 1, 'name' => '1', 'finished' => false,
+        'fixtures' => [
+            ['id' => 1, 'name' => 'A vs B', 'starting_at' => '2026-09-01 15:00:00', 'state_id' => 1,
+             'participants' => [['name' => 'A', 'meta' => ['location' => 'home']], ['name' => 'B', 'meta' => ['location' => 'away']]]],
+            ['id' => 2, 'name' => 'C vs D', 'starting_at' => '2026-09-01 15:00:00', 'state_id' => 2,
+             'participants' => [['name' => 'C', 'meta' => ['location' => 'home']], ['name' => 'D', 'meta' => ['location' => 'away']]]],
+            ['id' => 3, 'name' => 'E vs F', 'starting_at' => '2026-09-01 15:00:00', 'state_id' => 12,
+             'participants' => [['name' => 'E', 'meta' => ['location' => 'home']], ['name' => 'F', 'meta' => ['location' => 'away']]]],
+            ['id' => 4, 'name' => 'G vs H', 'starting_at' => '2026-09-01 15:00:00', 'state_id' => 10,
+             'participants' => [['name' => 'G', 'meta' => ['location' => 'home']], ['name' => 'H', 'meta' => ['location' => 'away']]]],
+        ],
+    ]]);
+    $p = new SportMonksProvider('t', 'https://api.test', 10, makeTransport(200, $body));
+    $round = $p->round('9');
+    assert_equals(['SCHEDULED', 'LIVE', 'CANCELLED', 'POSTPONED'], array_map(fn($f) => $f['status'], $round['fixtures']));
+});
+
+test('sportmonks round propagates provider errors', function () {
+    $p = new SportMonksProvider('bad', 'https://api.test', 10, makeTransport(401));
+    try { $p->round('1'); assert_true(false, 'expected ProviderException'); }
+    catch (ProviderException $e) { assert_equals(ProviderException::AUTHENTICATION_ERROR, $e->status); }
+
+    $r = new SportMonksProvider('t', 'https://api.test', 10, makeTransport(429));
+    try { $r->round('1'); assert_true(false, 'expected ProviderException'); }
+    catch (ProviderException $e) { assert_equals(ProviderException::RATE_LIMITED, $e->status); }
+});
+
+test('sportmonks round rejects malformed payloads', function () {
+    $p = new SportMonksProvider('t', 'https://api.test', 10, makeTransport(200, json_encode(['data' => []])));
+    try { $p->round('1'); assert_true(false, 'expected ProviderException'); }
+    catch (ProviderException $e) { assert_equals(ProviderException::DATA_ERROR, $e->status); }
+});
+
+test('sportmonks round retries without odds include when the odds add-on is unavailable', function () {
+    // Degraded (no odds) variant of the round payload.
+    $plain = sportmonksRoundPayload();
+    foreach ($plain['fixtures'] as &$f) { unset($f['odds']); }
+    unset($f);
+    $urls = [];
+    $transport = function (string $url, array $headers) use (&$urls, $plain) {
+        $urls[] = $url;
+        if (str_contains($url, 'fixtures.odds')) {
+            // Include exception 5013: odds add-on not subscribed.
+            return ['status' => 400, 'body' => json_encode(['error' => ['status' => 5013, 'name' => 'Include not available']])];
+        }
+        return ['status' => 200, 'body' => json_encode(['data' => $plain])];
+    };
+    $p = new SportMonksProvider('token', 'https://api.test', 10, $transport);
+    $round = $p->round('396698');
+    assert_equals(2, count($urls), 'one retry without odds');
+    assert_true(str_contains($urls[0], 'fixtures.odds'), 'first request asks for odds');
+    assert_false(str_contains($urls[1], 'fixtures.odds'), 'retry drops the odds include');
+    assert_equals('396698', $round['roundId']);
+    assert_equals(2, count($round['fixtures']), 'fixtures still mapped from the degraded response');
+    assert_equals(0, count($round['odds']), 'degraded round has no odds — none fabricated');
+});
+
+test('sportmonks seasonRounds maps the season schedule', function () {
+    $body = json_encode(['data' => [
+        ['id' => 396698, 'league_id' => 648, 'season_id' => 26763, 'name' => '25', 'finished' => true, 'is_current' => false, 'starting_at' => '2026-08-29', 'ending_at' => '2026-08-31'],
+        ['id' => 396701, 'league_id' => 648, 'season_id' => 26763, 'name' => '26', 'finished' => false, 'is_current' => true, 'starting_at' => '2026-09-05', 'ending_at' => '2026-09-07'],
+    ]]);
+    $p = new SportMonksProvider('t', 'https://api.test', 10, makeTransport(200, $body));
+    $rounds = $p->seasonRounds('26763');
+    assert_equals(2, count($rounds));
+    assert_equals('396698', $rounds[0]['roundId']);
+    assert_equals('25', $rounds[0]['name']);
+    assert_true($rounds[0]['finished']);
+    assert_false($rounds[1]['finished']);
+    assert_true($rounds[1]['isCurrent']);
+    assert_equals('648', $rounds[0]['leagueId']);
+});
+
+test('provider manager falls back to the first provider supporting round()', function () {
+    $manager = new SportsProviderManager();
+    // api-football has no round() — the guard must skip it and fall back.
+    $manager->register(new ApiFootballProvider('k', 'https://api.test', 10, makeTransport(200, '{}')));
+    $manager->register(new SportMonksProvider('t', 'https://api.test', 10, makeTransport(200, json_encode(['data' => sportmonksRoundPayload()]))));
+
+    $attempt = $manager->withFallback('round', function (SportsDataProvider $provider) {
+        if (!method_exists($provider, 'round')) throw new ProviderException('round endpoint not supported', ProviderException::DATA_ERROR);
+        return $provider->round('396698');
+    });
+    assert_true($attempt['ok'], 'round attempt should succeed');
+    assert_equals('sportmonks', $attempt['provider']);
+    assert_equals('396698', $attempt['result']['roundId']);
+    assert_equals(2, count($attempt['result']['fixtures']));
+    assert_equals(6, count($attempt['result']['odds']));
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -478,4 +895,307 @@ test('sportmonks fixture output passes through SportsDataNormalizer', function (
     assert_equals('sportmonks', $normalized['provider']);
     assert_equals('200', $normalized['externalId']);
     assert_equals('Chelsea', $normalized['homeTeam']);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 4. API-FOOTBALL TOP PLAYERS (/players/top* — Players tag)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** api-football /players/top* response (Players tag) — canonical shape. */
+function topPlayersBody(array $league = ['id' => 61, 'name' => 'Ligue 1', 'country' => 'France', 'season' => 2020]): string
+{
+    return json_encode([
+        'get' => 'players/topyellowcards',
+        'parameters' => ['league' => '61', 'season' => '2020'],
+        'errors' => [],
+        'results' => 2,
+        'response' => [
+            [
+                'league' => $league,
+                'player' => [
+                    'id' => 1901, 'name' => "Steven N'Zonzi", 'position' => 'Midfielder',
+                    'nationality' => 'France', 'height' => '183 cm', 'weight' => '77 kg',
+                    'injured' => false, 'photo' => 'https://media.api-sports.io/football/players/1901.png',
+                    'team' => ['id' => 13, 'name' => 'Rennes', 'code' => 'REN'],
+                ],
+                'statistics' => [
+                    ['type' => 'Played', 'value' => 25],
+                    ['type' => 'Goals', 'value' => 2],
+                    ['type' => 'Assists', 'value' => 4],
+                    ['type' => 'Yellow Cards', 'value' => 7],
+                    ['type' => 'Red Cards', 'value' => 0],
+                ],
+            ],
+            [
+                'league' => $league,
+                'player' => [
+                    'id' => 2055, 'name' => 'Hernán Pérez', 'position' => 'Defender',
+                    'nationality' => 'Spain',
+                    'team' => ['id' => 56, 'name' => 'Marseille', 'code' => 'OM'],
+                ],
+                'statistics' => [
+                    ['type' => 'Played', 'value' => 24],
+                    ['type' => 'Yellow Cards', 'value' => 7],
+                ],
+            ],
+        ],
+    ]);
+}
+
+test('api-football topPlayers maps the topyellowcards response', function () {
+    $urls = [];
+    $transport = function (string $url, array $headers) use (&$urls): array {
+        $urls[] = $url;
+        return ['status' => 200, 'body' => topPlayersBody()];
+    };
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, $transport);
+    $top = $p->topPlayers('61', '2020', 'yellow_cards');
+
+    assert_equals('https://api.test/players/topyellowcards?league=61&season=2020', $urls[0], 'topyellowcards URL');
+    assert_equals('61', $top['leagueId']);
+    assert_equals('2020', $top['season']);
+    assert_equals('yellow_cards', $top['type']);
+    assert_equals('Ligue 1', $top['league']);
+    assert_equals(2, count($top['players']));
+
+    $first = $top['players'][0];
+    assert_equals(1, $first['rank'], 'ranked order');
+    assert_equals('1901', $first['playerId']);
+    assert_equals("Steven N'Zonzi", $first['name']);
+    assert_equals('Midfielder', $first['position']);
+    assert_equals('France', $first['nationality']);
+    assert_equals('Rennes', $first['team']);
+    assert_equals('13', $first['teamId']);
+    assert_equals(7, $first['value'], 'headline = yellow cards');
+    assert_equals(7, $first['statistics']['Yellow Cards']);
+    assert_equals(25, $first['statistics']['Played'], 'full profile kept');
+    assert_equals(2, $first['statistics']['Goals']);
+
+    $second = $top['players'][1];
+    assert_equals(2, $second['rank']);
+    assert_equals(7, $second['value']);
+});
+
+test('api-football topPlayers covers all four documented types', function () {
+    $cases = [
+        ['scorers', 'topscorers', 'Goals', 25],
+        ['assists', 'topassists', 'Assists', 9],
+        ['yellow_cards', 'topyellowcards', 'Yellow Cards', 7],
+        ['red_cards', 'topredcards', 'Red Cards', 3],
+    ];
+    foreach ($cases as [$type, $path, $headline, $expected]) {
+        $urls = [];
+        $stats = [['type' => 'Played', 'value' => 20], ['type' => $headline, 'value' => $expected]];
+        $body = json_encode(['response' => [[
+            'league' => ['id' => 39, 'name' => 'Premier League'],
+            'player' => ['id' => 3507, 'name' => 'Test Player', 'team' => ['id' => 50, 'name' => 'City']],
+            'statistics' => $stats,
+        ]]]);
+        $transport = function (string $url, array $headers) use (&$urls, $body): array {
+            $urls[] = $url;
+            return ['status' => 200, 'body' => $body];
+        };
+        $p = new ApiFootballProvider('k', 'https://api.test', 10, $transport);
+        $top = $p->topPlayers('39', '2026', $type);
+        assert_true(str_contains($urls[0], '/players/' . $path), "{$type} hits /players/{$path} (got {$urls[0]})");
+        assert_equals($expected, $top['players'][0]['value'], "{$type} headline value");
+    }
+});
+
+test('api-football topPlayers rejects unsupported types', function () {
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, makeTransport(200, '{}'));
+    assert_throws(
+        ProviderException::class,
+        fn() => $p->topPlayers('61', '2020', 'goals'),
+        'unknown type must not fabricate a path'
+    );
+});
+
+test('api-football topPlayers tolerates nested season-statistics objects', function () {
+    $body = json_encode(['response' => [[
+        'league' => ['id' => 39, 'name' => 'Premier League'],
+        'player' => ['id' => 7, 'name' => 'Nested Player', 'team' => ['id' => 85, 'name' => 'PSG']],
+        'statistics' => [[
+            'played' => ['total' => 30],
+            'goals' => ['total' => 3],
+            'cards' => ['yellow' => 6, 'red' => 0, 'yellowred' => 1],
+            'fouls' => ['drawn' => 10, 'committed' => 20],
+            'penalty' => ['won' => 2, 'scored' => 1, 'missed' => 0, 'saved' => 0],
+        ]],
+    ]]]);
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, makeTransport(200, $body));
+    $top = $p->topPlayers('39', '2026', 'scorers');
+
+    $first = $top['players'][0];
+    assert_equals(3, $first['value'], 'headline from nested goals.total');
+    assert_equals(6, $first['statistics']['Yellow Cards']);
+    assert_equals(1, $first['statistics']['Yellow-Red Cards']);
+    assert_equals(30, $first['statistics']['Played']);
+    assert_equals(20, $first['statistics']['Fouls Committed']);
+    assert_equals(1, $first['statistics']['Penalty Scored']);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 5. API-FOOTBALL PAGINATION (paging.current < paging.total → page=N)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function afFixtureRow(int $id, string $home, string $away): array
+{
+    return [
+        'fixture' => ['id' => $id, 'date' => '2026-09-15T19:00:00+00:00', 'status' => ['short' => 'NS']],
+        'teams' => ['home' => ['id' => 1, 'name' => $home], 'away' => ['id' => 2, 'name' => $away]],
+        'league' => ['id' => 39, 'name' => 'Premier League', 'season' => 2026],
+    ];
+}
+
+function afPageBody(array $rows, int $current, int $total): string
+{
+    return json_encode(['errors' => [], 'results' => count($rows), 'paging' => ['current' => $current, 'total' => $total], 'response' => $rows]);
+}
+
+function afOddsRow(string $bookmaker, float $odd): array
+{
+    return [
+        'fixture' => ['id' => 777],
+        'bookmakers' => [['name' => $bookmaker, 'bets' => [['name' => 'Match Result', 'values' => [['value' => 'Home', 'odd' => $odd]]]]]],
+    ];
+}
+
+test('api-football fixtures follow paging.total to the last page', function () {
+    $urls = [];
+    $pages = [
+        afPageBody([afFixtureRow(1, 'A', 'B'), afFixtureRow(2, 'C', 'D')], 1, 2),
+        afPageBody([afFixtureRow(3, 'E', 'F')], 2, 2),
+    ];
+    $transport = function (string $url, array $headers) use (&$urls, $pages): array {
+        $urls[] = $url;
+        preg_match('/page=(\d+)/', $url, $m);
+        $n = isset($m[1]) ? (int) $m[1] : 1;
+        return ['status' => 200, 'body' => $pages[$n - 1] ?? $pages[count($pages) - 1]];
+    };
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, $transport);
+    $fixtures = $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15']);
+
+    assert_equals(3, count($fixtures), 'all pages combined, none truncated');
+    assert_equals(2, count($urls), 'exactly two page requests');
+    assert_true(str_contains($urls[0], 'page=1'), 'first request is page 1');
+    assert_true(str_contains($urls[1], 'page=2'), 'follows to page 2');
+});
+
+test('api-football odds follow paging (10 rows/page upstream)', function () {
+    $urls = [];
+    $pages = [
+        afPageBody([afOddsRow('BookA', 2.1), afOddsRow('BookB', 2.2)], 1, 2),
+        afPageBody([afOddsRow('BookC', 2.3)], 2, 2),
+    ];
+    $transport = function (string $url, array $headers) use (&$urls, $pages): array {
+        $urls[] = $url;
+        preg_match('/page=(\d+)/', $url, $m);
+        $n = isset($m[1]) ? (int) $m[1] : 1;
+        return ['status' => 200, 'body' => $pages[$n - 1] ?? $pages[count($pages) - 1]];
+    };
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, $transport);
+    $odds = $p->odds('777');
+
+    assert_equals(3, count($odds), 'odds rows from every page kept');
+    assert_equals(['BookA', 'BookB', 'BookC'], array_map(fn($o) => $o['bookmaker'], $odds));
+    assert_equals(2, count($urls), 'second odds page fetched');
+    assert_true(str_contains($urls[0], 'fixture=777'), 'fixture filter preserved');
+});
+
+test('api-football pagination is bounded when paging.total misbehaves', function () {
+    $urls = [];
+    $transport = function (string $url, array $headers) use (&$urls): array {
+        $urls[] = $url;
+        return ['status' => 200, 'body' => afPageBody([afFixtureRow(1, 'A', 'B')], 1, 999)];
+    };
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, $transport);
+    $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15']);
+    assert_equals(40, count($urls), 'hard cap of 40 pages prevents an endless loop');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6. API-FOOTBALL SOFT ERRORS (HTTP 200 + non-empty errors object)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('api-football: missing key must not read as ONLINE (HTTP 200 soft error)', function () {
+    // The real API answers a missing/blank key with HTTP 200 and
+    // errors.token — the old code parsed that as a healthy, keyless ONLINE.
+    $body = json_encode([
+        'get' => '', 'parameters' => [],
+        'errors' => ['token' => 'Missing application key, Check our documentation on how to add your API key in headers.'],
+        'results' => 0, 'paging' => ['current' => 1, 'total' => 1], 'response' => [],
+    ]);
+    $p = new ApiFootballProvider(' ', 'https://v3.football.api-sports.io', 10, makeTransport(200, $body));
+    $health = $p->health();
+    assert_equals('AUTHENTICATION_ERROR', $health['status'], 'token soft error classifies as auth failure');
+    assert_throws(ProviderException::class, fn() => $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15']), 'soft error must not read as zero fixtures');
+});
+
+test('api-football: non-token soft errors classify as data errors', function () {
+    $body = json_encode(['errors' => ['league' => 'The league you are searching for does not exist'], 'response' => []]);
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, makeTransport(200, $body));
+    try {
+        $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15']);
+        throw new Exception('expected a ProviderException for the soft error');
+    } catch (ProviderException $e) {
+        assert_equals(ProviderException::DATA_ERROR, $e->status, 'non-token soft error is a data error');
+        assert_contains('league', $e->getMessage(), 'the API message is surfaced');
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7. THESPORTSDB — searchTeams + idAPIfootball cross-references
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('thesportsdb searchTeams maps the documented response shape', function () {
+    $body = json_encode(['teams' => [
+        ['idTeam' => '133604', 'strTeam' => 'Arsenal', 'strTeamShort' => 'ARS', 'strStadium' => 'Emirates Stadium',
+         'strLeague' => 'English Premier League', 'idLeague' => '4328', 'strLocation' => 'Holloway, London, England',
+         'intFormedYear' => '1892', 'idAPIfootball' => '42', 'idESPN' => '359'],
+        ['idTeam' => '133613', 'strTeam' => 'Manchester City', 'strTeamShort' => 'MCI', 'strStadium' => 'Etihad Stadium',
+         'strLeague' => 'English Premier League', 'idLeague' => '4328', 'intFormedYear' => '1880'],
+    ]]);
+    $p = new TheSportsDbProvider('3', 'https://api.test', 10, makeTransport(200, $body));
+    $teams = $p->searchTeams('Arsenal');
+
+    assert_equals(2, count($teams));
+    assert_equals('133604', $teams[0]['teamId']);
+    assert_equals('Arsenal', $teams[0]['name']);
+    assert_equals('Emirates Stadium', $teams[0]['stadium']);
+    assert_equals('4328', $teams[0]['leagueId']);
+    assert_equals(1892, $teams[0]['formed']);
+    assert_equals('42', $teams[0]['apiFootballId'], 'idAPIfootball cross-reference kept');
+    assert_equals(null, $teams[1]['apiFootballId'], 'missing cross-reference stays null (not fabricated)');
+    $limited = $p->searchTeams('Arsenal', 1);
+    assert_equals(1, count($limited), 'limit honoured');
+});
+
+test('thesportsdb fixtures and results carry the apiFootball cross-reference', function () {
+    $event = ['idEvent' => '1818395', 'idAPIfootball' => '1035037', 'strHomeTeam' => 'Burnley', 'strAwayTeam' => 'Manchester City',
+        'dateEvent' => '2023-08-11', 'strTime' => '19:00:00', 'strStatus' => 'FT', 'strLeague' => 'English Premier League',
+        'idLeague' => '4328', 'strSeason' => '2023-2024', 'idHomeTeam' => '133623', 'idAwayTeam' => '133613',
+        'intHomeScore' => '0', 'intAwayScore' => '3'];
+    $p = new TheSportsDbProvider('3', 'https://api.test', 10, makeTransport(200, json_encode(['events' => [$event]])));
+
+    $fixtures = $p->fixtures(['from' => '2023-08-11', 'to' => '2023-08-11']);
+    assert_equals(1, count($fixtures));
+    assert_equals('1818395', $fixtures[0]['externalId']);
+    assert_equals('1035037', $fixtures[0]['apiFootballId'], 'fixture cross-reference kept');
+
+    $results = $p->results('1818395');
+    assert_equals(1, count($results));
+    assert_equals(0, $results[0]['homeScore']);
+    assert_equals(3, $results[0]['awayScore']);
+    assert_equals('1035037', $results[0]['apiFootballId'], 'result cross-reference kept');
+
+    $bare = ['idEvent' => '1', 'strHomeTeam' => 'A', 'strAwayTeam' => 'B', 'dateEvent' => '2023-08-11', 'strStatus' => 'FT'];
+    $p2 = new TheSportsDbProvider('3', 'https://api.test', 10, makeTransport(200, json_encode(['events' => [$bare]])));
+    $f2 = $p2->fixtures(['from' => '2023-08-11', 'to' => '2023-08-11']);
+    assert_equals(null, $f2[0]['apiFootballId'], 'no cross-reference → null');
+});
+
+test('thesportsdb driver advertises team search in provider-drivers', function () {
+    $api = file_get_contents(FCPATH . 'application/controllers/Api_sports.php');
+    assert_contains("'capabilities' => ['fixtures', 'results', 'leagues', 'teams', 'team_search']", (string) $api, 'capability listed');
 });
