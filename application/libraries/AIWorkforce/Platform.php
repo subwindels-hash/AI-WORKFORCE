@@ -131,12 +131,20 @@ class Platform
             $this->sports->providers,
             $model->audit
         );
+        // Lottery provider selection (first configured wins):
+        //   1. LoteriasAPI (loteriasapi.com) — real EuroMillions results feed
+        //   2. Generic authorized/official feed adapter
+        //   3. Clearly-labeled sandbox simulation (pipeline testing only)
+        //   4. Unavailable — nothing is ever fabricated
+        $loterias = new \AIWorkforce\Lottery\LoteriasApiProvider();
         $officialLottery = new OfficialLotteryProvider();
-        $lotteryProvider = $officialLottery->configured()
-            ? $officialLottery
-            : (getenv('WINDELS_LOTTERY_SANDBOX') === '1'
-                ? new \AIWorkforce\Lottery\SandboxLotteryProvider()
-                : new \AIWorkforce\Lottery\UnavailableLotteryProvider());
+        $lotteryProvider = $loterias->configured()
+            ? $loterias
+            : ($officialLottery->configured()
+                ? $officialLottery
+                : (getenv('WINDELS_LOTTERY_SANDBOX') === '1'
+                    ? new \AIWorkforce\Lottery\SandboxLotteryProvider()
+                    : new \AIWorkforce\Lottery\UnavailableLotteryProvider()));
         $this->lottery = new \AIWorkforce\Lottery\LotteryIntelligence($model->lottery, $model->audit, $lotteryProvider);
         $this->identity = new Identity($model->identity);
         $this->strategies = new StrategyRegistry($model->strategies, $model->audit, $model->journal);

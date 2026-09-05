@@ -219,6 +219,7 @@ $route['api/sports/topplayers'] = 'api_sports/top_players';
 // map the documented forms explicitly or they 404.
 $route['tools/sports-cron'] = 'tools/sports_cron';
 $route['tools/lottery-cron'] = 'tools/lottery_cron';
+$route['tools/lottery-smoke'] = 'tools/lottery_smoke';
 $route['tools/sports-live'] = 'tools/sports_live';
 $route['tools/scheduler'] = 'tools/scheduler';
 $route['cron/run'] = 'cron/run';

@@ -86,7 +86,7 @@ class LotteryIntelligence
                 'mainMax' => $this->rules->mainMax(),
                 'starMax' => $this->rules->starMax(),
             ],
-            'provider' => $health,
+            'provider' => $health + ['id' => $this->provider->id(), 'name' => $this->provider->name()],
             'providerLabel' => (string) ($health['message'] ?? $this->provider->id()),
             'engine' => $enabled ? self::ENGINE_ACTIVE : self::ENGINE_DISABLED,
             'modelVersion' => self::MODEL_VERSION,
@@ -242,6 +242,10 @@ class LotteryIntelligence
                 'main' => $numbers['main'], 'stars' => $numbers['stars'],
                 'jackpot' => $raw['jackpot'] ?? null, 'rollover' => !empty($raw['rollover']),
                 'winners' => $raw['winners'] ?? null, 'source' => (string) $raw['source'],
+                // Provider-specific extras (e.g. LoteriasAPI El Millón code,
+                // next-draw jackpot) travel with the draw without changing the
+                // provider-neutral contract every engine reads.
+                'extra' => is_array($raw['extra'] ?? null) ? $raw['extra'] : null,
             ], JSON_UNESCAPED_SLASHES),
             'created_at' => gmdate('c'),
             'updated_at' => gmdate('c'),

@@ -28,7 +28,7 @@ class Tools extends MY_Controller
         $footballJobs = class_exists(\AIWorkforce\Football\FootballCronService::class)
             ? implode('|', \AIWorkforce\Football\FootballCronService::JOBS)
             : 'fixtures|upcoming|live|results|statistics|predict|settle|performance|cleanup';
-        echo "AI Workforce tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n  php index.php tools marketdata        — market-data connectivity report (add --activate to go live, --probe to fetch real bars)\n  php index.php tools cron              — scheduled operations: portfolio risk scan, broker transitions, proposal expiry\n  php index.php tools scheduler [job]   — unified scheduler: runs every enabled + due job ({$groups})\n  php index.php tools sports-cron [job] — sports scheduled jobs (fixtures|odds|results|quality|ticket|settlement|performance|monitoring|cleanup)\n  php index.php tools football-cron [job] — football refresh jobs ({$footballJobs}); --force bypasses cadence\n  php index.php tools lottery-cron [job] — lottery scheduled jobs (sync|health|statistics|systems|tickets|backtests|cleanup)\n";
+        echo "AI Workforce tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n  php index.php tools marketdata        — market-data connectivity report (add --activate to go live, --probe to fetch real bars)\n  php index.php tools cron              — scheduled operations: portfolio risk scan, broker transitions, proposal expiry\n  php index.php tools scheduler [job]   — unified scheduler: runs every enabled + due job ({$groups})\n  php index.php tools sports-cron [job] — sports scheduled jobs (fixtures|odds|results|quality|ticket|settlement|performance|monitoring|cleanup)\n  php index.php tools football-cron [job] — football refresh jobs ({$footballJobs}); --force bypasses cadence\n  php index.php tools lottery-cron [job] — lottery scheduled jobs (sync|health|statistics|systems|tickets|backtests|cleanup)\n  php index.php tools lottery-smoke     — live check of the configured lottery feed (LoteriasAPI / authorized feed)\n";
     }
 
     public function install()
@@ -172,6 +172,41 @@ class Tools extends MY_Controller
         echo json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), "\n";
         if (empty($report['configured'])) exit(2);
         exit(!empty($report['pass']) ? 0 : 1);
+    }
+
+    /**
+     * Live connectivity smoke test for the configured lottery feed
+     * (LoteriasAPI / authorized official feed).
+     *   php index.php tools lottery-smoke
+     * Exit codes: 0 = live data received, 1 = configured but unreachable,
+     * 2 = no provider configured. Never prints credentials.
+     */
+    public function lottery_smoke()
+    {
+        $provider = $this->platform->lottery->provider;
+        $health = $provider->health();
+        $report = [
+            'provider' => $provider->id(),
+            'name' => $provider->name(),
+            'health' => $health,
+            'draws' => [],
+            'jackpot' => null,
+        ];
+        if (($health['state'] ?? '') === 'ONLINE') {
+            foreach ($provider->draws(null, null, 3) as $draw) {
+                $report['draws'][] = [
+                    'externalId' => $draw['externalId'] ?? null,
+                    'drawDate' => $draw['drawDate'] ?? null,
+                    'main' => $draw['main'] ?? null,
+                    'stars' => $draw['stars'] ?? null,
+                    'source' => $draw['source'] ?? null,
+                ];
+            }
+            $report['jackpot'] = $provider->jackpotInfo();
+        }
+        echo json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), "\n";
+        if (in_array($health['state'] ?? '', ['UNCONFIGURED', 'DISABLED'], true)) exit(2);
+        exit($report['draws'] !== [] ? 0 : 1);
     }
 
     /**
