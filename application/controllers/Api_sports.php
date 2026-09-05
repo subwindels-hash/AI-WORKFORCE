@@ -169,8 +169,19 @@ class Api_sports extends Api_controller
 
     public function providers()
     {
-        if (!$this->requirePermission('sports.view', false)) return;
-        $this->json(['providers' => $this->platform->sports->status()['providers'], 'liveHealth' => $this->platform->sports->providers->health()]);
+        // Vendor identities, key tiers, quota figures, circuit state and failing
+        // endpoints are operator diagnostics — sports.manage, not sports.view.
+        // Read-only users learn whether data is available from /dashboard.
+        if (!$this->requirePermission('sports.manage', false)) return;
+        $status = $this->platform->sports->status();
+        $this->json([
+            'providers' => $status['providers'],
+            'liveHealth' => $status['liveHealth'],
+            // Operational count + engine readiness (READY | BLOCKED | DISABLED_NO_PROVIDER)
+            // and per-provider circuit state — the health-check dashboard contract.
+            'readiness' => $status['readiness'],
+            'predictionEngine' => $status['predictionEngine'],
+        ]);
     }
 
     public function models()
@@ -333,7 +344,15 @@ class Api_sports extends Api_controller
         $body = $this->jsonBody();
         $date = isset($body['date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $body['date']) ? (string) $body['date'] : gmdate('Y-m-d');
         $result = $this->platform->sports->dailyTickets->runDaily($date);
-        $this->json($result, $result['status'] === 'NO_QUALIFIED_TICKET' ? 200 : 200);
+        // DATA_UNAVAILABLE (every provider failed) is a dependency outage:
+        // 503 tells a caller "retry later", while NO_QUALIFIED_TICKET stays a
+        // normal 200 outcome. The body carries the per-provider status codes.
+        if (($result['status'] ?? '') === 'DATA_UNAVAILABLE') {
+            $result['readiness'] = $this->platform->sports->providers->readiness();
+            $this->json($result, 503);
+            return;
+        }
+        $this->json($result, 200);
     }
 
     /** Fits a new calibration version from stored settled predictions. */

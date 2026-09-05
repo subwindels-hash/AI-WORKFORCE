@@ -6,6 +6,10 @@ if (!function_exists('e')) {
 $title = $title ?? 'Create an account';
 $active = 'register';
 $bodyClass = 'auth-page--wide';
+$captcha = is_array($captcha ?? null) ? $captcha : ['enabled' => false, 'provider' => 'off', 'siteKey' => '', 'field' => 'g-recaptcha-response', 'action' => 'register', 'honeypot' => 'website_url', 'misconfigured' => false];
+$old = is_array($old ?? null) ? $old : [];
+$captchaOn = !empty($captcha['enabled']) && empty($captcha['misconfigured']) && ($captcha['siteKey'] ?? '') !== '';
+$captchaV3 = $captchaOn && ($captcha['provider'] ?? '') === 'recaptcha_v3';
 $this->load->view('auth/layout/header', ['title' => $title, 'active' => $active, 'bodyClass' => $bodyClass]);
 ?>
 <main class="auth-shell auth-shell--register">
@@ -21,6 +25,7 @@ $this->load->view('auth/layout/header', ['title' => $title, 'active' => $active,
       </p>
     </header>
 
+    <?php if (!empty($captcha['misconfigured'])): ?><div class="notice err auth-notice" role="alert">Registration is temporarily unavailable: the sign-up verification service is not fully configured. Please try again later or <a href="/contact">contact support</a>.</div><?php endif; ?>
     <?php if (!empty($error)): ?><div class="notice err auth-notice" role="alert"><?= e($error) ?></div><?php endif; ?>
     <?php if (!empty($notice)): ?><div class="notice ok auth-notice" role="status"><?= e($notice) ?></div><?php endif; ?>
 
@@ -30,6 +35,10 @@ $this->load->view('auth/layout/header', ['title' => $title, 'active' => $active,
       <section class="auth-card auth-card--form">
         <form method="post" action="/register/submit" class="auth-form auth-form--sections" id="register-form" autocomplete="on" novalidate>
           <input type="hidden" name="csrf_token" value="<?= e((string) ($csrfToken ?? '')) ?>">
+          <!-- Honeypot: hidden from people (CSS + aria), bots fill it and are rejected server-side. -->
+          <div class="auth-hp" aria-hidden="true" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden">
+            <label>Website<input type="text" name="<?= e((string) $captcha['honeypot']) ?>" tabindex="-1" autocomplete="off" value=""></label>
+          </div>
 
           <!-- Step 1 — Account -->
           <fieldset class="auth-section">
@@ -39,7 +48,7 @@ $this->load->view('auth/layout/header', ['title' => $title, 'active' => $active,
               <label class="auth-field">
                 <span>Username</span>
                 <span class="auth-control">
-                  <input name="username" id="reg-username" required maxlength="20" autocomplete="username" placeholder="carlosjohn" autofocus>
+                  <input name="username" id="reg-username" required maxlength="20" autocomplete="username" placeholder="carlosjohn" autofocus value="<?= e((string) ($old['username'] ?? '')) ?>">
                 </span>
                 <span class="auth-hint">3–20 characters, letters, numbers or underscores, starting with a letter.</span>
               </label>
@@ -47,9 +56,9 @@ $this->load->view('auth/layout/header', ['title' => $title, 'active' => $active,
               <label class="auth-field">
                 <span>Email address</span>
                 <span class="auth-control">
-                  <input type="email" name="email" id="reg-email" required maxlength="190" autocomplete="email" placeholder="you@example.com" inputmode="email">
+                  <input type="email" name="email" id="reg-email" required maxlength="190" autocomplete="email" placeholder="you@example.com" inputmode="email" spellcheck="false" value="<?= e((string) ($old['email'] ?? '')) ?>" aria-describedby="reg-email-hint">
                 </span>
-                <span class="auth-hint">Used for sign-in and account notices.</span>
+                <span class="auth-hint" id="reg-email-hint">Used for sign-in and account notices. Must be a real, permanent address — temporary inboxes are not accepted.</span>
               </label>
             </div>
           </fieldset>
@@ -62,7 +71,7 @@ $this->load->view('auth/layout/header', ['title' => $title, 'active' => $active,
               <label class="auth-field">
                 <span>Phone number</span>
                 <span class="auth-control">
-                  <input type="tel" name="phone" id="reg-phone" required maxlength="40" autocomplete="tel" inputmode="tel" placeholder="+234 800 000 0000">
+                  <input type="tel" name="phone" id="reg-phone" required maxlength="40" autocomplete="tel" inputmode="tel" placeholder="+234 800 000 0000" value="<?= e((string) ($old['phone'] ?? '')) ?>">
                 </span>
                 <span class="auth-hint">Include the country code.</span>
               </label>
@@ -70,7 +79,7 @@ $this->load->view('auth/layout/header', ['title' => $title, 'active' => $active,
               <label class="auth-field">
                 <span>Address</span>
                 <span class="auth-control">
-                  <textarea name="address" id="reg-address" required minlength="5" maxlength="255" rows="2" autocomplete="street-address" placeholder="Street, city, country"></textarea>
+                  <textarea name="address" id="reg-address" required minlength="5" maxlength="255" rows="2" autocomplete="street-address" placeholder="Street, city, country"><?= e((string) ($old['address'] ?? '')) ?></textarea>
                 </span>
                 <span class="auth-hint">At least 5 characters.</span>
               </label>
@@ -117,7 +126,7 @@ $this->load->view('auth/layout/header', ['title' => $title, 'active' => $active,
                   <select name="security_question" id="reg-question" required>
                     <option value="">Choose a question</option>
                     <?php foreach (($securityQuestions ?? []) as $q): ?>
-                      <option value="<?= e($q) ?>"><?= e($q) ?></option>
+                      <option value="<?= e($q) ?>" <?= ($old['security_question'] ?? '') === $q ? 'selected' : '' ?>><?= e($q) ?></option>
                     <?php endforeach; ?>
                   </select>
                 </span>
@@ -141,9 +150,19 @@ $this->load->view('auth/layout/header', ['title' => $title, 'active' => $active,
               <span>I agree to the <a href="/safety">Terms</a> and <a href="/safety">Privacy Policy</a>.</span>
             </label>
 
+            <?php if ($captchaOn && !$captchaV3): ?>
+              <div class="auth-captcha" style="margin:10px 0">
+                <div class="g-recaptcha" data-sitekey="<?= e((string) $captcha['siteKey']) ?>" data-theme="dark" data-callback="windelsCaptchaDone" data-expired-callback="windelsCaptchaExpired"></div>
+                <span class="auth-hint" id="reg-captcha-hint">Tick the box to confirm you are human.</span>
+              </div>
+            <?php elseif ($captchaV3): ?>
+              <input type="hidden" name="<?= e((string) $captcha['field']) ?>" id="reg-captcha-token" value="">
+              <p class="auth-hint" id="reg-captcha-hint">This site is protected by reCAPTCHA and the Google <a href="https://policies.google.com/privacy" rel="noopener" target="_blank">Privacy Policy</a> and <a href="https://policies.google.com/terms" rel="noopener" target="_blank">Terms of Service</a> apply.</p>
+            <?php endif; ?>
+
             <div id="register-inline-error" class="notice err" role="alert" hidden></div>
 
-            <button class="btn primary auth-submit" type="submit" id="register-submit">Create account</button>
+            <button class="btn primary auth-submit" type="submit" id="register-submit" <?= !empty($captcha['misconfigured']) ? 'disabled' : '' ?>>Create account</button>
             <p class="auth-submit-note">Super Admin can read the security question and answer from the dashboard.</p>
           </fieldset>
         </form>
@@ -181,9 +200,18 @@ $this->load->view('auth/layout/header', ['title' => $title, 'active' => $active,
   </div>
 </main>
 
+<?php if ($captchaOn && !$captchaV3): ?>
+<script src="https://www.google.com/recaptcha/api.js" async defer></script>
+<?php elseif ($captchaV3): ?>
+<script src="https://www.google.com/recaptcha/api.js?render=<?= e(rawurlencode((string) $captcha['siteKey'])) ?>" async defer></script>
+<?php endif; ?>
 <script>
+var windelsCaptchaSolved = false;
+function windelsCaptchaDone() { windelsCaptchaSolved = true; var h = document.getElementById('reg-captcha-hint'); if (h) { h.textContent = 'Verified.'; h.className = 'auth-hint is-ok'; } }
+function windelsCaptchaExpired() { windelsCaptchaSolved = false; var h = document.getElementById('reg-captcha-hint'); if (h) { h.textContent = 'Verification expired — tick the box again.'; h.className = 'auth-hint is-warn'; } }
 (function () {
   'use strict';
+  var CAPTCHA = <?= json_encode(['mode' => $captchaV3 ? 'v3' : ($captchaOn ? 'v2' : 'off'), 'siteKey' => $captchaOn ? (string) $captcha['siteKey'] : '', 'action' => (string) $captcha['action']], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?>;
   var form = document.getElementById('register-form');
   var submit = document.getElementById('register-submit');
   var inlineError = document.getElementById('register-inline-error');
@@ -215,6 +243,33 @@ $this->load->view('auth/layout/header', ['title' => $title, 'active' => $active,
   password.addEventListener('input', syncPassword);
   confirmInput.addEventListener('input', syncPassword);
 
+  // Live email validation (syntax + obvious typos + disposable inboxes).
+  // The server is authoritative; this only saves a round trip.
+  var emailInput = document.getElementById('reg-email');
+  var emailHint = document.getElementById('reg-email-hint');
+  var emailDefault = emailHint.textContent;
+  var EMAIL_RE = /^[a-z0-9!#$%&'*+\/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+\/=?^_`{|}~-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}$/i;
+  var DISPOSABLE = <?= json_encode(array_values(\AIWorkforce\SignupProtection::DISPOSABLE_DOMAINS)) ?>;
+  var TYPOS = { 'gmial.com': 'gmail.com', 'gmai.com': 'gmail.com', 'gamil.com': 'gmail.com', 'gmail.co': 'gmail.com', 'gmail.con': 'gmail.com', 'gnail.com': 'gmail.com', 'yaho.com': 'yahoo.com', 'yahoo.co': 'yahoo.com', 'yahoo.con': 'yahoo.com', 'hotmal.com': 'hotmail.com', 'hotmai.com': 'hotmail.com', 'hotmial.com': 'hotmail.com', 'outlok.com': 'outlook.com', 'outloo.com': 'outlook.com', 'iclod.com': 'icloud.com', 'icloud.co': 'icloud.com' };
+  function emailProblem(value) {
+    var v = (value || '').trim().toLowerCase();
+    if (!v) return { msg: 'Enter your email address.', level: 'warn' };
+    if (!EMAIL_RE.test(v) || v.indexOf('..') !== -1) return { msg: 'That does not look like a valid email address (for example name@example.com).', level: 'warn' };
+    var domain = v.split('@')[1];
+    if (TYPOS[domain]) return { msg: 'Did you mean ' + v.split('@')[0] + '@' + TYPOS[domain] + '?', level: 'warn', suggest: v.split('@')[0] + '@' + TYPOS[domain] };
+    var parts = domain.split('.');
+    for (var i = 0; i < parts.length - 1; i++) { if (DISPOSABLE.indexOf(parts.slice(i).join('.')) !== -1) return { msg: 'Temporary or disposable email addresses are not accepted. Please use a permanent address.', level: 'warn', block: true }; }
+    return null;
+  }
+  function syncEmail() {
+    var p = emailProblem(emailInput.value);
+    if (!emailInput.value) { emailHint.textContent = emailDefault; emailHint.className = 'auth-hint'; return; }
+    if (p) { emailHint.textContent = p.msg; emailHint.className = 'auth-hint is-warn'; }
+    else { emailHint.textContent = 'Email address looks good.'; emailHint.className = 'auth-hint is-ok'; }
+  }
+  emailInput.addEventListener('input', syncEmail);
+  emailInput.addEventListener('blur', syncEmail);
+
   function fail(message, focusEl) {
     inlineError.hidden = false;
     inlineError.textContent = message;
@@ -234,7 +289,7 @@ $this->load->view('auth/layout/header', ['title' => $title, 'active' => $active,
     var ok = true;
     var phoneDigits = (phone.value || '').replace(/\D/g, '');
     if (!/^[a-z][a-z0-9_]{2,19}$/i.test(username.value.trim())) ok = fail('Username must be 3–20 characters, start with a letter, and use only letters, numbers or underscores.', username);
-    else if (!email.value.trim()) ok = fail('Enter your email address.', email);
+    else if (emailProblem(email.value)) ok = fail(emailProblem(email.value).msg, email);
     else if (phoneDigits.length < 7 || phoneDigits.length > 15) ok = fail('Enter a valid phone number with country code.', phone);
     else if ((address.value || '').trim().length < 5) ok = fail('Enter your street address.', address);
     else if (password.value.length < 12) ok = fail('Your password must be at least 12 characters.', password);
@@ -242,10 +297,29 @@ $this->load->view('auth/layout/header', ['title' => $title, 'active' => $active,
     else if (!q.value) ok = fail('Choose a security question.', q);
     else if ((answer.value || '').trim().length < 2) ok = fail('Enter an answer of at least 2 characters.', answer);
     else if (!terms.checked) ok = fail('Please accept the Terms and Privacy Policy.', terms);
+    else if (CAPTCHA.mode === 'v2' && !windelsCaptchaSolved && !(window.grecaptcha && grecaptcha.getResponse && grecaptcha.getResponse())) ok = fail('Please tick the "I\'m not a robot" box.', null);
     if (!ok) { event.preventDefault(); return; }
     submit.disabled = true;
     submit.classList.add('is-loading');
     submit.innerHTML = '<span class="auth-spinner"></span> Creating account…';
+    if (CAPTCHA.mode === 'v3') {
+      // Fetch a fresh token at submit time (v3 tokens expire after 2 minutes),
+      // then submit for real. If the script never loaded, submit anyway —
+      // the server answers with a clear "could not verify" message.
+      event.preventDefault();
+      var tokenField = document.getElementById('reg-captcha-token');
+      var go = function () { form.submit(); };
+      if (!(window.grecaptcha && grecaptcha.ready)) { go(); return; }
+      var done = false;
+      var timer = setTimeout(function () { if (!done) { done = true; go(); } }, 6000);
+      grecaptcha.ready(function () {
+        grecaptcha.execute(CAPTCHA.siteKey, { action: CAPTCHA.action }).then(function (token) {
+          if (done) return; done = true; clearTimeout(timer);
+          tokenField.value = token || '';
+          go();
+        }, function () { if (done) return; done = true; clearTimeout(timer); go(); });
+      });
+    }
   });
 })();
 </script>

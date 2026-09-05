@@ -62,6 +62,22 @@ $s = $stats ?? [];
   </div>
 </div>
 
+<?php $su = is_array($signup ?? null) ? $signup : null; if ($su !== null && admin_can('admin.settings.manage')): ?>
+<section class="panel" style="margin-top:16px" id="signup-protection">
+  <h3>Sign-up protection</h3>
+  <div class="body">
+    <div class="stat-grid">
+      <div class="stat"><div class="k">Public registration</div><div class="v"><span class="badge <?= !empty($su['registrationEnabled']) ? 'b-green' : 'b-gray' ?>"><?= !empty($su['registrationEnabled']) ? 'OPEN' : 'CLOSED' ?></span></div></div>
+      <div class="stat"><div class="k">reCAPTCHA</div><div class="v"><span class="badge <?= ($su['captchaState'] ?? 'OFF') === 'ACTIVE' ? 'b-green' : (($su['captchaState'] ?? 'OFF') === 'MISCONFIGURED' ? 'b-red' : 'b-gray') ?>"><?= e((string) ($su['captchaState'] ?? 'OFF')) ?></span></div><div class="trend"><?= e((string) ($su['captchaLabel'] ?? 'Off')) ?></div></div>
+      <div class="stat"><div class="k">Email validation</div><div class="v" style="font-size:13px"><?= ($su['emailMode'] ?? 'mx') === 'mx' ? 'Syntax + MX' : 'Syntax' ?></div><div class="trend"><?= !empty($su['blockDisposable']) ? 'disposable blocked' : 'disposable allowed' ?></div></div>
+      <div class="stat"><div class="k">Domain rules</div><div class="v" style="font-size:13px"><?= (int) ($su['blockedDomains'] ?? 0) ?> blocked · <?= (int) ($su['allowedDomains'] ?? 0) ?> allowed</div></div>
+    </div>
+    <?php if (!empty($su['signupBlocked'])): ?><div class="notice err" style="margin-top:10px"><b>Sign-up is blocked:</b> reCAPTCHA is on but a key is missing. Fix it in System Settings → Sign-up Protection.</div><?php endif; ?>
+  </div>
+  <a class="panel-foot-link" href="/admin/settings#signup">Configure sign-up protection →</a>
+</section>
+<?php endif; ?>
+
 <section class="panel" style="margin-top:16px">
   <h3>🤖 Cloudflare Agent Runtime</h3>
   <div class="body">

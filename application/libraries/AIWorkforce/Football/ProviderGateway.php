@@ -2,6 +2,7 @@
 namespace AIWorkforce\Football;
 
 use AIWorkforce\Sports\Providers\ProviderException;
+use AIWorkforce\Sports\Providers\ProviderHttp;
 use AIWorkforce\Sports\Providers\SportsDataProvider;
 use AIWorkforce\Sports\Providers\SportsProviderManager;
 
@@ -291,9 +292,29 @@ final class ProviderGateway
         $seconds = is_numeric($retryAfter)
             ? max(30, (int) $retryAfter)
             : min(900, 60 * (2 ** min(4, max(0, $attempts - 1))));
+        // The persisted status keeps the vendor's verdict instead of flattening
+        // everything to DEGRADED: a daily quota that is gone stays gone until the
+        // vendor's reset (00:00 UTC for api-football) — no 15-minute retry will
+        // bring it back — and a 400/404/401 is a configuration problem the
+        // operator must fix, so the dashboard has to say so.
+        $status = 'DEGRADED';
+        $until = time() + $seconds;
+        if ($error !== null) {
+            if ($error->status === ProviderException::DAILY_QUOTA_EXHAUSTED) {
+                $status = 'DAILY_QUOTA_EXHAUSTED';
+                $reset = isset($error->details['retryAt']) ? strtotime((string) $error->details['retryAt']) : false;
+                $until = ($reset !== false && $reset > time()) ? $reset : ProviderHttp::nextUtcMidnight();
+            } elseif ($error->status === ProviderException::RATE_LIMITED) {
+                $status = 'RATE_LIMITED';
+            } elseif ($error->isConfigurationError()) {
+                $status = $error->status; // AUTHENTICATION_ERROR | BAD_REQUEST | NOT_FOUND
+            } elseif ($error->status === ProviderException::TIMEOUT || $error->status === ProviderException::OFFLINE) {
+                $status = $error->status;
+            }
+        }
         $patch = [
-            'status' => ($error !== null && $error->status === ProviderException::RATE_LIMITED) ? 'RATE_LIMITED' : 'DEGRADED',
-            'backoff_until' => gmdate('c', time() + $seconds),
+            'status' => $status,
+            'backoff_until' => gmdate('c', $until),
             'last_failure_at' => gmdate('c'),
             'last_error' => mb_substr($message, 0, 500),
         ];

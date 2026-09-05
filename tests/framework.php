@@ -352,6 +352,7 @@ class SportsRepositoryStub implements \AIWorkforce\Persistence\SportsRepository
     public function updateCalibrationStatus(int $id, string $status, ?string $actor = null): void { foreach ($this->calibrations as &$c) if ((int) $c['id'] === $id) { $c['status'] = $status; if ($actor !== null) { $c['approved_by'] = $actor; $c['approved_at'] = gmdate('c'); } } }
     public function startJobRun(array $run): ?array { if (isset($this->jobKeys[$run['executionKey']])) return null; $this->jobKeys[$run['executionKey']] = true; $this->jobRuns[] = $run; return $run; }
     public function finishJobRun(string $id, array $result): void { foreach ($this->jobRuns as &$r) if ($r['id'] === $id) $r = array_merge($r, ['status' => $result['status'], 'result' => $result]); }
+    public function releaseJobRun(string $id): void { foreach ($this->jobRuns as &$r) if ($r['id'] === $id && isset($r['executionKey'])) { unset($this->jobKeys[$r['executionKey']]); $r['executionKey'] .= '#released:' . $id; } }
     public function listJobRuns(?string $jobType = null, int $limit = 50): array { $rows = $jobType === null ? $this->jobRuns : array_values(array_filter($this->jobRuns, fn($r) => ($r['job_type'] ?? '') === $jobType)); return array_slice(array_reverse($rows), 0, $limit); }
     public function saveBacktest(array $b): void { $this->backtests[] = $b; }
     public function findBacktest(string $id): ?array { foreach ($this->backtests as $b) if ($b['id'] === $id) return $b; return null; }

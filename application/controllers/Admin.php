@@ -36,6 +36,10 @@ class Admin extends App_Controller
         $data = $this->base('Admin Dashboard', 'dashboard');
         $data['stats'] = $this->portal->dashboardStats();
         $data['smtp'] = \AIWorkforce\Mailer::configSummary();
+        try {
+            $data['signup'] = \AIWorkforce\SignupProtection::fromPortal($this->portal)->status();
+            $data['signup']['registrationEnabled'] = $this->portal->setting('registration_enabled', '1') === '1';
+        } catch (\Throwable $e) { $data['signup'] = null; }
         // Initialize Cloudflare agent runtime if configured
         $cloudflareRuntime = null;
         try {
@@ -761,6 +765,10 @@ class Admin extends App_Controller
         $data = $this->base('System Settings', 'settings');
         $data['settings'] = $this->portal->settingsByCategory();
         $data['smtp'] = \AIWorkforce\Mailer::configSummary();
+        // Sign-up protection status — never the sealed secret itself.
+        $data['signup'] = \AIWorkforce\SignupProtection::fromSettings($data['settings']['signup'] ?? [])->status();
+        unset($data['settings']['signup']['captcha_secret']);
+        $data['signupWarnings'] = $this->session->flashdata('signupWarnings') ?: [];
         $data['smtpOk'] = $this->session->flashdata('smtpOk');
         $data['smtpError'] = $this->session->flashdata('smtpError');
         $data['session'] = [
@@ -794,9 +802,23 @@ class Admin extends App_Controller
             $values['login_max_attempts'] = (string) max(3, min(20, (int) ($values['login_max_attempts'] ?? 5)));
             $values['login_lockout_seconds'] = (string) max(60, min(86400, (int) ($values['login_lockout_seconds'] ?? 900)));
         }
+        $logged = array_keys($values);
+        if ($category === 'signup') {
+            // The secret is sealed before it touches the database; a blank
+            // field keeps the stored one, the explicit checkbox clears it.
+            $normalized = \AIWorkforce\SignupProtection::normalizeSettings(
+                $values,
+                $this->portal->setting('captcha_secret', ''),
+                (string) $this->input->post('captcha_secret_clear') === '1'
+            );
+            $values = $normalized['values'];
+            if ($normalized['warnings'] !== []) $this->session->set_flashdata('signupWarnings', $normalized['warnings']);
+            $logged = array_values(array_diff(array_keys($values), ['captcha_secret']));
+            if ((string) $this->input->post('captcha_secret') !== '' || (string) $this->input->post('captcha_secret_clear') === '1') $logged[] = 'captcha_secret:rotated';
+        }
         try {
-            $this->portal->saveSettings($values, $category, (int) $actor['id'], $category === 'announcement' ? 2000 : 500);
-            $this->portal->log($actor, 'SETTINGS_CHANGED', 'ok', ['type' => 'settings', 'id' => $category, 'label' => $category], array_keys($values), $this->ip());
+            $this->portal->saveSettings($values, $category, (int) $actor['id'], ($category === 'announcement' || $category === 'signup') ? 2000 : 500);
+            $this->portal->log($actor, 'SETTINGS_CHANGED', 'ok', ['type' => 'settings', 'id' => $category, 'label' => $category], $logged, $this->ip());
             $this->flash('notice', '✓ Changes saved successfully');
         } catch (Throwable $e) {
             log_message('error', 'admin settings_save failed: ' . $e->getMessage());

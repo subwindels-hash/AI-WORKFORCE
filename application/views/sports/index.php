@@ -12,10 +12,40 @@ foreach (array_merge($today['upcoming'] ?? [], $today['live'] ?? []) as $m) {
     $selByName[(int) ($m['id'] ?? 0)] = ($m['home_team'] ?? '?') . ' vs ' . ($m['away_team'] ?? '?');
 }
 $disabled = ($sys['ticketEngine'] ?? '') === 'DISABLED_NO_PROVIDER';
+// Provider readiness: how many feeds can serve data right now, and whether
+// the prediction engine is READY (≥1) or BLOCKED (0). Computed server-side
+// from live health + circuit-breaker state; never guessed here.
+$readiness = is_array($sys['readiness'] ?? null) ? $sys['readiness'] : ['operational' => 0, 'total' => 0, 'engine' => $disabled ? 'DISABLED_NO_PROVIDER' : 'UNKNOWN', 'providers' => []];
+$statusDot = static function (string $st): string {
+    return match ($st) {
+        'ONLINE' => 'up',
+        'DEGRADED', 'RATE_LIMITED', 'TIMEOUT' => 'synth',
+        default => 'down',
+    };
+};
+$statusLabel = static function (string $st): string {
+    return match ($st) {
+        'DAILY_QUOTA_EXHAUSTED' => 'Daily quota exhausted',
+        'RATE_LIMITED' => 'Rate limited',
+        'AUTHENTICATION_ERROR' => 'Auth failed',
+        'BAD_REQUEST' => 'HTTP 400 (bad request)',
+        'NOT_FOUND' => 'HTTP 404 (not found)',
+        'TIMEOUT' => 'Timeout',
+        'OFFLINE' => 'Offline',
+        'DATA_ERROR' => 'Data error',
+        'DEGRADED' => 'Degraded',
+        'ONLINE' => 'Online',
+        default => $st,
+    };
+};
 // Capabilities of the signed-in identity (controller reads them fresh from the
 // database). Without them the console shows a disabled control plus the reason,
 // instead of a button that is refused after the click.
 $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
+// Provider identities, vendor health, circuit state and quota figures are
+// operator diagnostics (sports.manage). A read-only user sees only whether
+// data is available — never which vendor, key tier or endpoint is behind it.
+$operator = !empty($caps['sync']);
 ?>
 <div class="page-head">
   <div>
@@ -53,6 +83,15 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
 <?php endif; ?>
 <?php if ($disabled): ?>
   <div class="notice warnbox"><b>No sports data provider connected.</b> Live fixtures and predictions are unavailable until a verified data source is configured — nothing is fabricated in the meantime.</div>
+<?php elseif (($readiness['engine'] ?? '') === 'BLOCKED'): ?>
+  <?php if ($operator): ?>
+  <div class="notice err"><b>Prediction engine BLOCKED — 0/<?= (int) ($readiness['total'] ?? 0) ?> sports data providers operational.</b>
+    Every configured feed is currently failing (see <i>Data feed</i>). Tickets cannot be generated until at least one provider recovers; an empty day in this state is a <b>data outage</b>, not "no qualified games".
+    <?php foreach (($readiness['providers'] ?? []) as $pid => $pr): ?><br><span class="mono" style="font-size:11px"><?= e((string) $pid) ?> → <?= e((string) ($pr['status'] ?? 'UNKNOWN')) ?><?php if (!empty($pr['retryAt'])): ?> (retry after <?= e(substr((string) $pr['retryAt'], 0, 16)) ?>Z)<?php endif; ?></span><?php endforeach; ?>
+  </div>
+  <?php else: ?>
+  <div class="notice err"><b>Sports data temporarily unavailable.</b> Tickets cannot be generated until the data feed recovers — an empty day in this state is a data outage, not "no qualified games".</div>
+  <?php endif; ?>
 <?php endif; ?>
 
 <div class="grid cols-main">
@@ -126,7 +165,14 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
         <div class="stat-grid">
           <div class="stat"><div class="k">Mode</div><div class="v"><?= e((string) ($sys['mode'] ?? 'SANDBOX')) ?></div></div>
           <div class="stat"><div class="k">Ticket engine</div><div class="v" style="font-size:12px"><?= e((string) ($sys['ticketEngine'] ?? '—')) ?></div></div>
+          <?php if ($operator): ?>
+          <div class="stat"><div class="k">Operational providers</div><div class="v"><?= (int) ($readiness['operational'] ?? 0) ?>/<?= (int) ($readiness['total'] ?? 0) ?></div></div>
+          <?php else: ?>
+          <div class="stat"><div class="k">Sports data</div><div class="v" style="font-size:12px"><span class="dot <?= ($readiness['engine'] ?? '') === 'READY' ? 'up' : 'down' ?>"></span> <?= ($readiness['engine'] ?? '') === 'READY' ? 'Available' : 'Unavailable' ?></div></div>
+          <?php endif; ?>
+          <div class="stat"><div class="k">Prediction engine</div><div class="v" style="font-size:12px"><span class="dot <?= ($readiness['engine'] ?? '') === 'READY' ? 'up' : 'down' ?>"></span> <?= e((string) ($readiness['engine'] ?? '—')) ?></div></div>
         </div>
+        <?php if ($operator): ?>
         <table class="tbl" style="margin-top:12px">
           <thead><tr><th>Feed</th><th>Health</th><th class="num">Reliability</th></tr></thead>
           <tbody>
@@ -136,13 +182,14 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
               <?php foreach (array_values($sys['providers']) as $i => $p): $st = (string) ($p['derivedStatus'] ?? 'UNKNOWN'); ?>
                 <tr>
                   <td style="font-weight:700">Feed <?= (int) $i + 1 ?></td>
-                  <td><span class="dot <?= $st === 'ONLINE' ? 'up' : ($st === 'DEGRADED' ? 'synth' : 'down') ?>"></span> <?= e($st) ?></td>
+                  <td><span class="dot <?= $statusDot($st) ?>"></span> <?= e($statusLabel($st)) ?></td>
                   <td class="num"><?= ($p['reliability'] ?? null) !== null ? e(number_format((float) $p['reliability'], 2)) : '—' ?></td>
                 </tr>
               <?php endforeach; ?>
             <?php endif; ?>
           </tbody>
         </table>
+        <?php endif; ?>
         <?php if (!empty($sys['lastSyncs'])): ?>
           <table class="tbl" style="margin-top:12px">
             <thead><tr><th>Job</th><th>Status</th></tr></thead>
@@ -159,6 +206,7 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
       </div>
     </div>
 
+    <?php if ($operator): ?>
     <div class="panel">
       <h3>Data feed</h3>
       <div class="body" style="padding-top:12px">
@@ -166,13 +214,15 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
         <?php if (empty($configuredIds)): ?>
           <p class="dim"><b>No providers registered.</b> Add a provider key (API-Football, TheSportsDB or SportMonks) via Admin → API or the <span class="mono">WINDELS_*_KEY</span> variables in <span class="mono">.env</span>, then press <b>Sync now</b> above.</p>
         <?php else: ?>
+          <p class="dim" style="font-size:11px;margin:0 0 8px">Operational providers: <b><?= (int) ($readiness['operational'] ?? 0) ?>/<?= (int) ($readiness['total'] ?? 0) ?></b> · Prediction engine: <b><?= e((string) ($readiness['engine'] ?? '—')) ?></b></p>
           <table class="tbl">
-            <thead><tr><th>Provider</th><th>Health</th></tr></thead>
+            <thead><tr><th>Provider</th><th>Health</th><th>Circuit</th></tr></thead>
             <tbody>
-              <?php foreach ($configuredIds as $pid): $h = is_array($live[$pid] ?? null) ? $live[$pid] : []; $st = (string) ($h['status'] ?? 'UNKNOWN'); ?>
+              <?php foreach ($configuredIds as $pid): $h = is_array($live[$pid] ?? null) ? $live[$pid] : []; $st = (string) ($h['status'] ?? 'UNKNOWN'); $c = is_array($h['circuit'] ?? null) ? $h['circuit'] : []; ?>
                 <tr>
-                  <td class="mono" style="font-weight:700"><?= e((string) $pid) ?></td>
-                  <td><span class="dot <?= $st === 'ONLINE' ? 'up' : 'down' ?>"></span> <?= e($st) ?><?php if (!empty($h['detail'])): ?> <span class="dim" style="font-size:10px"><?= e(mb_substr((string) $h['detail'], 0, 120)) ?></span><?php endif; ?></td>
+                  <td class="mono" style="font-weight:700"><?= e((string) $pid) ?><?php if (isset($h['rateLimitRemaining']) || isset($h['requestsToday'])): ?><br><span class="dim" style="font-size:10px;font-weight:400">quota <?= isset($h['requestsToday']) ? e((string) $h['requestsToday']) . '/' . e((string) ($h['limitDaily'] ?? '?')) . ' used' : e((string) $h['rateLimitRemaining']) . ' left' ?></span><?php endif; ?></td>
+                  <td><span class="dot <?= $statusDot($st) ?>"></span> <?= e($statusLabel($st)) ?><?php if (!empty($h['detail'])): ?> <span class="dim" style="font-size:10px"><?= e(mb_substr((string) $h['detail'], 0, 140)) ?></span><?php endif; ?><?php if (!empty($h['endpoint']) && in_array($st, ['BAD_REQUEST', 'NOT_FOUND'], true)): ?><br><span class="mono dim" style="font-size:10px"><?= e(mb_substr((string) $h['endpoint'], 0, 120)) ?></span><?php endif; ?></td>
+                  <td style="font-size:11px"><?php $cs = (string) ($c['state'] ?? 'CLOSED'); ?><span class="badge <?= $cs === 'OPEN' ? 'b-red' : ($cs === 'HALF_OPEN' ? 'b-gray' : 'b-green') ?>"><?= e($cs) ?></span><?php if ($cs === 'OPEN' && !empty($c['retryAt'])): ?><br><span class="dim" style="font-size:10px">retry <?= e(substr((string) $c['retryAt'], 11, 5)) ?>Z</span><?php endif; ?></td>
                 </tr>
               <?php endforeach; ?>
             </tbody>
@@ -197,6 +247,7 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
         <?php endif; ?>
       </div>
     </div>
+    <?php endif; ?>
 
     <div class="panel">
       <h3>Today's ticket</h3>
@@ -216,7 +267,26 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
             <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">🎯 Odds Prediction Ticket</button>
           <?php endif; ?>
         </div>
-        <?php if ($daily === null || $ticket === null): ?>
+        <?php if ($daily !== null && (string) ($daily['status'] ?? '') === 'DATA_UNAVAILABLE'): ?>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+            <span class="badge b-red">NO TICKET — DATA_UNAVAILABLE</span>
+          </div>
+          <?php if ($operator): ?>
+          <p class="dim" style="margin:0 0 8px"><b>All configured sports-data providers failed</b> for this run — this is a data outage, not a day without qualifying games. <?= e((string) ($daily['message'] ?? '')) ?></p>
+          <?php $ledger = is_array($daily['rejection_summary'] ?? null) ? $daily['rejection_summary'] : []; ?>
+          <table class="tbl">
+            <thead><tr><th>Provider</th><th>Status</th></tr></thead>
+            <tbody>
+              <?php foreach ($ledger as $k => $v): if (!str_starts_with((string) $k, 'PROVIDER:')) continue; ?>
+                <tr><td class="mono"><?= e(substr((string) $k, 9)) ?></td><td><span class="dot down"></span> <?= e($statusLabel((string) $v)) ?></td></tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+          <p class="dim" style="font-size:11px;margin-top:8px">Matches evaluated: <?= (int) ($daily['candidates_evaluated'] ?? 0) ?> · Predictions generated: <?= (int) ($daily['predictions_recorded'] ?? 0) ?>. The run stays retryable: once a provider recovers, Sync and generate again.</p>
+          <?php else: ?>
+          <p class="dim" style="margin:0 0 8px"><b>Sports data was unavailable</b> for this run — this is a data outage, not a day without qualifying games. No ticket is fabricated; one will be built once the data feed recovers.</p>
+          <?php endif; ?>
+        <?php elseif ($daily === null || $ticket === null): ?>
           <p class="dim"><?= $daily !== null ? e((string) ($daily['message'] ?? 'No ticket today.')) : 'No daily run recorded for today yet. Select Odds Prediction Ticket to build one from stored fixtures & odds.' ?></p>
         <?php else: ?>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
@@ -322,7 +392,7 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
       e.preventDefault();
       var dateInput = document.getElementById('api-generate-date');
       var date = dateInput ? dateInput.value : new Date().toISOString().slice(0,10);
-      var csrf = document.querySelector('meta[name="csrf-token"]')?.content || document.querySelector('input[name="csrf_token"]')?.value || '';
+      var csrf = document.querySelector('meta[name="csrf-token"]')?.content || document.querySelector('input[name=csrf_token]')?.value || '';
       apiBtn.disabled = true;
       var orig = apiBtn.textContent;
       apiBtn.textContent = '⏳ Generating...';
