@@ -100,3 +100,37 @@ test('sports round sync fails when the provider is not ONLINE', function () {
     assert_contains('provider is not ONLINE', implode('; ', $result['errors']));
     assert_equals(0, $p->roundCalls, 'no round fetch for an offline provider');
 });
+
+test('sports fixture sync enables the provider row after a completed pull', function () {
+    [$sync, $repo] = fx_sports_sync();
+    $p = fx_sports_provider([['externalId' => 'x', 'homeTeam' => 'H', 'awayTeam' => 'A', 'competition' => 'L', 'kickoff' => '2026-09-01T12:00:00Z']]);
+    $result = $sync->syncFixtures($p, [], 'key-enable-1');
+    assert_equals('COMPLETED', $result['status']);
+    $enabled = $repo->listProviders(true);
+    assert_equals(1, count($enabled), 'provider enabled after a proven pull');
+    assert_equals('test-sports', $enabled[0]['provider_code']);
+});
+
+test('sports fixture sync leaves the provider disabled when the pull fails', function () {
+    [$sync, $repo] = fx_sports_sync();
+    $p = fx_sports_provider([], 'OFFLINE');
+    $result = $sync->syncFixtures($p, [], 'key-enable-2');
+    assert_equals('FAILED', $result['status']);
+    assert_equals(0, count($repo->listProviders(true)), 'failed provider stays disabled');
+});
+
+test('sports sync runs are listed newest-first with decoded errors', function () {
+    [$sync, $repo] = fx_sports_sync();
+    $ok = fx_sports_provider([['externalId' => 'x', 'homeTeam' => 'H', 'awayTeam' => 'A', 'competition' => 'L', 'kickoff' => '2026-09-01T12:00:00Z']]);
+    $sync->syncFixtures($ok, [], 'key-list-1');
+    $bad = fx_sports_provider([], 'OFFLINE');
+    $sync->syncFixtures($bad, [], 'key-list-2');
+    $runs = $repo->listSyncRuns(null, 10);
+    assert_equals(2, count($runs));
+    assert_equals('FAILED', $runs[0]['status'], 'newest run first');
+    assert_equals('FIXTURES', $runs[0]['job_type']);
+    assert_true(is_array($runs[0]['errors']) && count($runs[0]['errors']) > 0, 'errors decoded to a list');
+    assert_equals('COMPLETED', $runs[1]['status']);
+    assert_equals(2, count($repo->listSyncRuns('FIXTURES', 10)));
+    assert_equals(0, count($repo->listSyncRuns('ODDS', 10)));
+});

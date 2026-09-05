@@ -309,11 +309,14 @@ class SportsIntelligence
         $calibrations = $this->repository->listCalibrations(null, 'APPROVED', 10);
         $lastSyncs = array_slice($this->repository->listJobRuns(null, 30), 0, 8);
         $qualityRows = array_map(fn($m) => ['match' => $m, 'quality' => $this->repository->latestQuality((int) $m['id'])], array_merge($upcoming, $live));
+        $recentSyncs = [];
+        try { $recentSyncs = $this->repository->listSyncRuns(null, 8); } catch (\Throwable $e) { $recentSyncs = []; }
         return [
             'systemStatus' => [
                 'enabled' => $status['enabled'], 'mode' => $status['mode'], 'isDemoData' => $status['isDemoData'],
                 'providers' => $status['providers'], 'liveHealth' => $status['liveHealth'],
-                'lastSyncs' => $lastSyncs, 'ticketEngine' => $status['ticketEngine'],
+                'providersConfigured' => $status['providersConfigured'], 'configuredIds' => array_keys($this->providers->all()),
+                'lastSyncs' => $lastSyncs, 'recentSyncs' => $recentSyncs, 'ticketEngine' => $status['ticketEngine'],
             ],
             'todayIntelligence' => [
                 'date' => $today,

@@ -16,12 +16,23 @@ class SportsSyncService
         $this->formResolver = $formResolver ?? new FormResolver();
     }
 
+    /**
+     * A provider that just COMPLETED a sync proved it is reachable — mark it
+     * enabled so enabled-only consumers (dashboard widgets, provider lists)
+     * reflect reality. New provider rows boot disabled; operators can still
+     * switch a flaky feed off. Never breaks a completed sync.
+     */
+    private function markProviderReachable(int $sourceId): void
+    {
+        try { $this->repo->setProviderEnabled($sourceId, true); } catch (\Throwable $e) { /* enabling must never break a completed sync */ }
+    }
+
     public function syncResults(SportsDataProvider $provider, string $fixtureExternalId, string $executionKey): array
     {
         $source=$this->repo->ensureProvider($provider->id(),$provider->id()); $run=['id'=>Backtester::uuid(),'providerId'=>(int)$source['id'],'jobType'=>'RESULTS','executionKey'=>$executionKey];
         if($this->repo->startSync($run)===null) return ['status'=>'DUPLICATE_SKIPPED','executionKey'=>$executionKey]; $processed=0;$errors=[];
         try { $health=$provider->health(); if(($health['status']??'')!=='ONLINE') throw new \RuntimeException('provider is not ONLINE'); $match=$this->repo->findMatch((int)$source['id'],$fixtureExternalId); if(!$match) throw new \RuntimeException('fixture is not synchronized for this provider'); foreach($provider->results($fixtureExternalId) as $raw){$processed++; try{$this->repo->saveResult((int)$match['id'],(int)$source['id'],SportsResultNormalizer::normalize($raw,$provider->id()));}catch(\Throwable $e){$errors[]=$e->getMessage();}} $result=['status'=>'COMPLETED','processed'=>$processed,'created'=>$processed-count($errors),'updated'=>0,'errors'=>$errors]; } catch(\Throwable $e){$result=['status'=>'FAILED','processed'=>$processed,'created'=>0,'updated'=>0,'errors'=>[$e->getMessage()]];}
-        $this->repo->finishSync($run['id'],$result); $this->audit->emit($result['status']==='COMPLETED'?'SPORTS_RESULT_SYNC_COMPLETED':'SPORTS_RESULT_SYNC_FAILED','Sports result sync '.strtolower($result['status']),['provider'=>$provider->id(),'result'=>$result]); return array_merge(['runId'=>$run['id']],$result);
+        $this->repo->finishSync($run['id'],$result); if($result['status']==='COMPLETED')$this->markProviderReachable((int)$source['id']); $this->audit->emit($result['status']==='COMPLETED'?'SPORTS_RESULT_SYNC_COMPLETED':'SPORTS_RESULT_SYNC_FAILED','Sports result sync '.strtolower($result['status']),['provider'=>$provider->id(),'result'=>$result]); return array_merge(['runId'=>$run['id']],$result);
     }
 
     public function syncOdds(SportsDataProvider $provider, string $fixtureExternalId, string $executionKey): array
@@ -44,6 +55,7 @@ class SportsSyncService
             $result = ['status' => 'COMPLETED', 'processed' => $processed, 'created' => $processed - $invalid, 'updated' => 0, 'errors' => $errors];
         } catch (\Throwable $e) { $result = ['status' => 'FAILED', 'processed' => $processed, 'created' => 0, 'updated' => 0, 'errors' => [mb_substr($e->getMessage(), 0, 200)]]; }
         $this->repo->finishSync($run['id'], $result);
+        if ($result['status'] === 'COMPLETED') $this->markProviderReachable((int) $source['id']);
         $this->audit->emit($result['status'] === 'COMPLETED' ? 'SPORTS_ODDS_SYNC_COMPLETED' : 'SPORTS_ODDS_SYNC_FAILED', 'Sports odds sync ' . strtolower($result['status']), ['provider' => $provider->id(), 'fixture' => $fixtureExternalId, 'runId' => $run['id'], 'result' => $result]);
         return array_merge(['runId' => $run['id']], $result);
     }
@@ -109,6 +121,7 @@ class SportsSyncService
             $result = ['status' => 'FAILED', 'processed' => $processed, 'created' => 0, 'updated' => 0, 'errors' => [mb_substr($e->getMessage(), 0, 200)]];
         }
         $this->repo->finishSync($run['id'], $result);
+        if ($result['status'] === 'COMPLETED') $this->markProviderReachable((int) $source['id']);
         $this->audit->emit($result['status'] === 'COMPLETED' ? 'SPORTS_ROUND_SYNC_COMPLETED' : 'SPORTS_ROUND_SYNC_FAILED', 'Sports round sync ' . strtolower($result['status']) . ' for round ' . $roundExternalId, ['provider' => $provider->id(), 'round' => $roundExternalId, 'runId' => $run['id'], 'result' => $result]);
         return array_merge(['runId' => $run['id']], $result);
     }
@@ -142,6 +155,7 @@ class SportsSyncService
             $result = ['status' => 'FAILED', 'processed' => $processed, 'created' => $created, 'updated' => $updated, 'errors' => [mb_substr($e->getMessage(), 0, 200)]];
         }
         $this->repo->finishSync($run['id'], $result);
+        if ($result['status'] === 'COMPLETED') $this->markProviderReachable((int) $source['id']);
         $this->audit->emit($result['status'] === 'COMPLETED' ? 'SPORTS_FIXTURE_SYNC_COMPLETED' : 'SPORTS_FIXTURE_SYNC_FAILED', 'Sports fixture sync ' . strtolower($result['status']), ['provider' => $provider->id(), 'runId' => $run['id'], 'result' => $result]);
         return array_merge(['runId' => $run['id']], $result);
     }

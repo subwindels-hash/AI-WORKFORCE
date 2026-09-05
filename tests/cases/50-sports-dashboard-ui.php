@@ -50,11 +50,13 @@ test('sports UI: console routes and controller are wired', function () {
     $routes = file_get_contents(FCPATH . 'application/config/routes.php');
     assert_contains('$route[\'sports\'] = \'sports\';', $routes);
     assert_contains('$route[\'sports/tickets\'] = \'sports/tickets\';', $routes);
+    assert_contains('$route[\'sports/sync\'] = \'sports/sync\';', $routes);
     assert_contains('$route[\'sports/(:any)/decide\'] = \'sports/decide/$1\';', $routes);
     assert_contains('$route[\'sports/(:any)/settle\'] = \'sports/settle/$1\';', $routes);
     $controller = file_get_contents(FCPATH . 'application/controllers/Sports.php');
-    foreach (['public function index()', 'public function tickets()', 'public function decide(string $id)', 'public function settle(string $id)'] as $m) assert_contains($m, $controller);
+    foreach (['public function index()', 'public function tickets()', 'public function sync()', 'public function decide(string $id)', 'public function settle(string $id)'] as $m) assert_contains($m, $controller);
     // mutations must enforce the sports RBAC matrix
+    assert_contains("requireSportsPermission('sports.manage'", $controller);
     assert_contains("requireSportsPermission('sports.approve'", $controller);
     assert_contains("requireSportsPermission('sports.settle'", $controller);
 });
@@ -74,6 +76,9 @@ test('sports UI: dashboard renders the honest DISABLED_NO_PROVIDER state', funct
     assert_contains('Sports Intelligence — daily ticket engine', $html);
     assert_contains('DISABLED_NO_PROVIDER', $html);
     assert_contains('No providers registered', $html);
+    assert_contains('Data feed', $html);
+    assert_contains('/sports/sync', $html, 'console offers a one-click sync');
+    assert_contains('Sync now', $html);
     assert_contains('</html>', $html);
 });
 

@@ -169,6 +169,8 @@ interface SportsRepository
     /** Starts once per idempotency key, or returns null if already processed. */
     public function startSync(array $run): ?array;
     public function finishSync(string $id, array $result): void;
+    /** @return array<int,array<string,mixed>> newest first; errors decoded to a list */
+    public function listSyncRuns(?string $jobType = null, int $limit = 50): array;
     public function ensureModelVersion(array $model): int;
     public function savePrediction(array $prediction): void;
     public function saveTicket(array $ticket): void;

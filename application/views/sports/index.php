@@ -17,6 +17,10 @@ $disabled = ($sys['ticketEngine'] ?? '') === 'DISABLED_NO_PROVIDER';
   <div>
     <h2>Sports Intelligence — daily ticket engine</h2>
     <p>Daily ticket research from stored fixtures, odds and settled results. With no sports data connected the module stays off and fabricates nothing.</p>
+    <form method="post" action="/sports/sync" style="margin-top:10px" onsubmit="return confirm('Pull fresh fixtures, odds and results from the configured providers now?')">
+      <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+      <button class="btn primary small">Sync now (sports.manage)</button>
+    </form>
   </div>
 </div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
@@ -154,6 +158,45 @@ $disabled = ($sys['ticketEngine'] ?? '') === 'DISABLED_NO_PROVIDER';
               <?php endforeach; ?>
             </tbody>
           </table>
+        <?php endif; ?>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Data feed</h3>
+      <div class="body" style="padding-top:12px">
+        <?php $configuredIds = $sys['configuredIds'] ?? []; $live = $sys['liveHealth'] ?? []; ?>
+        <?php if (empty($configuredIds)): ?>
+          <p class="dim"><b>No providers registered.</b> Add a provider key (API-Football, TheSportsDB or SportMonks) via Admin → API or the <span class="mono">WINDELS_*_KEY</span> variables in <span class="mono">.env</span>, then press <b>Sync now</b> above.</p>
+        <?php else: ?>
+          <table class="tbl">
+            <thead><tr><th>Provider</th><th>Health</th></tr></thead>
+            <tbody>
+              <?php foreach ($configuredIds as $pid): $h = is_array($live[$pid] ?? null) ? $live[$pid] : []; $st = (string) ($h['status'] ?? 'UNKNOWN'); ?>
+                <tr>
+                  <td class="mono" style="font-weight:700"><?= e((string) $pid) ?></td>
+                  <td><span class="dot <?= $st === 'ONLINE' ? 'up' : 'down' ?>"></span> <?= e($st) ?><?php if (!empty($h['detail'])): ?> <span class="dim" style="font-size:10px"><?= e(mb_substr((string) $h['detail'], 0, 120)) ?></span><?php endif; ?></td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        <?php endif; ?>
+        <?php $recent = $sys['recentSyncs'] ?? []; ?>
+        <?php if (!empty($recent)): ?>
+          <table class="tbl" style="margin-top:12px">
+            <thead><tr><th>Sync</th><th>Status</th><th class="num">New</th></tr></thead>
+            <tbody>
+              <?php foreach ($recent as $s): $errs = is_array($s['errors'] ?? null) ? $s['errors'] : []; ?>
+                <tr>
+                  <td class="mono dim"><?= e((string) ($s['job_type'] ?? '?')) ?><br><span style="font-size:10px"><?= e(substr((string) ($s['started_at'] ?? ''), 0, 16)) ?></span></td>
+                  <td><span class="badge b-gray"><?= e((string) ($s['status'] ?? 'RUNNING')) ?></span><?php if (!empty($errs[0])): ?><br><span class="dim" style="font-size:10px"><?= e(mb_substr((string) $errs[0], 0, 140)) ?></span><?php endif; ?></td>
+                  <td class="num mono"><?= (int) ($s['records_created'] ?? 0) ?></td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        <?php elseif (!empty($configuredIds)): ?>
+          <p class="dim" style="margin-top:10px">No sync runs recorded yet — press <b>Sync now</b> to pull the first fixtures.</p>
         <?php endif; ?>
       </div>
     </div>

@@ -79,6 +79,10 @@ $route['admin/admins/create'] = 'admin/create_admin';
 $route['admin/admins/(:num)'] = 'admin/update_admin/$1';
 $route['admin/logs'] = 'admin/logs';
 $route['admin/security'] = 'admin/security';
+$route['admin/cron'] = 'admin/cron';
+$route['admin/cron/save'] = 'admin/cron_save';
+$route['admin/cron/run/(:any)'] = 'admin/cron_run/$1';
+$route['admin/cron/secret'] = 'admin/cron_secret';
 
 // ---- Admin Inbox (contact messages + email templates) ----
 $route['admin/inbox'] = 'admin/inbox';
@@ -151,6 +155,7 @@ $route['paper/(:num)/positions/(:num)/close'] = 'paper/close/$1/$2';
 $route['paper/(:num)/deployments/(:num)/toggle'] = 'paper/toggle/$1/$2';
 $route['sports'] = 'sports';
 $route['sports/tickets'] = 'sports/tickets';
+$route['sports/sync'] = 'sports/sync';
 $route['sports/(:any)/decide'] = 'sports/decide/$1';
 $route['sports/(:any)/settle'] = 'sports/settle/$1';
 $route['lottery'] = 'lottery';
@@ -213,6 +218,8 @@ $route['api/sports/topplayers'] = 'api_sports/top_players';
 $route['tools/sports-cron'] = 'tools/sports_cron';
 $route['tools/lottery-cron'] = 'tools/lottery_cron';
 $route['tools/sports-live'] = 'tools/sports_live';
+$route['tools/scheduler'] = 'tools/scheduler';
+$route['cron/run'] = 'cron/run';
 $route['api/sports/models'] = 'api_sports/models';
 $route['api/sports/models/performance'] = 'api_sports/model_performance';
 $route['api/sports/calibrations'] = 'api_sports/calibrations';
