@@ -214,8 +214,10 @@ test('loteriasapi: meta.hasNext drives paging and long windows are split at 365 
     $long = $split->draws('2024-01-01', '2025-06-30', 10);
     assert_equals(2, count($long));
     assert_equals(2, count($splitCalls), 'the vendor caps a range call at 365 days — the window is chunked');
-    assert_contains('from=2024-01-01', $splitCalls[0]['url']);
-    assert_contains('from=2024-12-31', $splitCalls[1]['url']);
+    // Windows are walked NEWEST first: the plan-visible history is at the new
+    // end, and a small plan must not pay for windows it cannot read.
+    assert_contains('from=2024-12-31', $splitCalls[0]['url'], 'newest window queried first');
+    assert_contains('from=2024-01-01', $splitCalls[1]['url']);
 });
 
 test('loteriasapi: falls back to /latest when the range endpoint returns nothing', function () {
@@ -233,6 +235,192 @@ test('loteriasapi: falls back to /latest when the range endpoint returns nothing
     assert_contains('/range', $calls[0]['url']);
     assert_contains('page=1', $calls[1]['url']);
     assert_contains('/latest', $calls[2]['url']);
+});
+
+test('loteriasapi: a plan-capped page size is retried at the plan floor, not failed', function () {
+    // Every plan caps results per request (Free 5 … Enterprise 200) and the
+    // vendor enforces parameter limits with HTTP 400 — an oversized `limit`
+    // used to kill every history call, degrading the sync to a single draw.
+    [$provider, $calls] = fx_loterias_provider(function (string $url) {
+        if (str_contains($url, '/latest')) return fx_loterias_json(fx_loterias_live_envelope(fx_loterias_live_payload()));
+        if (str_contains($url, 'limit=100')) {
+            return fx_loterias_json(['success' => false, 'error' => [
+                'code' => 'VALIDATION_ERROR', 'message' => "El parametro 'limit' es invalido",
+                'details' => ['field' => 'limit', 'value' => '100'], 'statusCode' => 400]], 400);
+        }
+        return fx_loterias_json(['success' => true, 'data' => [
+            fx_loterias_live_payload('2026-04-10', '2026029'),
+            fx_loterias_live_payload('2026-04-07', '2026028'),
+        ], 'meta' => ['hasNext' => false, 'limit' => 5]]);
+    });
+    $draws = $provider->draws('2026-01-01', '2026-04-30', 100);
+    assert_equals(2, count($draws), 'the rejected page size is retried at the documented Free-tier floor');
+    assert_contains('limit=100', $calls[0]['url'], 'the first page asks for the full size');
+    assert_contains('limit=5', $calls[1]['url'], 'the retry asks for 5 per request');
+    assert_equals(2, count($calls), 'no further doomed requests once the plan size is learned');
+});
+
+test('loteriasapi: a silently capped page size is adopted for the next page', function () {
+    $pageOne = [];
+    for ($i = 1; $i <= 5; $i++) {
+        $pageOne[] = fx_loterias_live_payload('2026-04-' . str_pad((string) $i, 2, '0', STR_PAD_LEFT), '20260' . $i);
+    }
+    [$provider, $calls] = fx_loterias_provider(function (string $url) use ($pageOne) {
+        if (str_contains($url, 'page=2')) {
+            return fx_loterias_json(['success' => true, 'data' => [fx_loterias_live_payload('2026-03-31', '2026090')],
+                'meta' => ['hasNext' => false, 'limit' => 5]]);
+        }
+        if (str_contains($url, '/latest')) return fx_loterias_json(fx_loterias_live_envelope(fx_loterias_live_payload()));
+        return fx_loterias_json(['success' => true, 'data' => $pageOne, 'meta' => ['hasNext' => true, 'limit' => 5]]);
+    });
+    $draws = $provider->draws('2026-03-01', '2026-04-30', 100);
+    assert_equals(6, count($draws), 'both pages are collected');
+    assert_contains('limit=100', $calls[0]['url']);
+    assert_contains('limit=5', $calls[1]['url'], 'the served page size (meta.limit=5) is adopted for page 2');
+});
+
+test('loteriasapi: the implicit backfill walks newest-first and stops when a window adds nothing', function () {
+    // A 7-day-history plan (Free) serves the newest window only — the sync
+    // must cost two requests, not one per year of archive the plan cannot read.
+    $today = gmdate('Y-m-d');
+    [$provider, $calls] = fx_loterias_provider(function (string $url) use ($today) {
+        if (str_contains($url, '/latest')) return fx_loterias_json(fx_loterias_live_envelope(fx_loterias_live_payload()));
+        if (str_contains($url, 'to=' . $today)) {
+            return fx_loterias_json(['success' => true, 'data' => [
+                fx_loterias_live_payload('2026-09-04', '2026233'),
+                fx_loterias_live_payload('2026-09-01', '2026232'),
+            ], 'meta' => ['hasNext' => false]]);
+        }
+        // Older windows: inside the request cap but beyond the plan's history depth.
+        return fx_loterias_json(['success' => true, 'data' => [], 'meta' => ['hasNext' => false]]);
+    });
+    $draws = $provider->draws(null, null, 5000);
+    assert_equals(2, count($draws), 'the plan-visible draws are still imported');
+    assert_equals(2, count($calls), 'newest window, one empty older window ends the walk — no /latest needed');
+    assert_contains('to=' . $today, $calls[0]['url'], 'the newest window is queried first');
+});
+
+test('loteriasapi: an unfinished /latest placeholder is never offered as history', function () {
+    // On draw day the feed answers the NEXT draw as an unfinished placeholder
+    // (no numbers yet). Offering it as history produced the operator-facing
+    // "0 imported, 0 unchanged, 1 rejected" with nothing stored.
+    $pending = fx_loterias_live_payload('2026-09-08', '2026234');
+    $pending['status'] = 'PENDING';
+    unset($pending['combination'], $pending['resultData']);
+    [$provider] = fx_loterias_provider(function (string $url) use ($pending) {
+        if (str_contains($url, '/latest')) return fx_loterias_json(fx_loterias_live_envelope($pending));
+        return fx_loterias_json(['success' => true, 'data' => [], 'meta' => ['hasNext' => false]]);
+    });
+    assert_equals([], $provider->draws(null, null, 5), 'a pending draw is no history — and no rejected draw either');
+
+    // health() still explains the feed state honestly.
+    $health = $provider->health();
+    assert_equals('ONLINE', $health['state']);
+    assert_contains('pending', strtolower((string) $health['message']), 'the unfinished status is named');
+});
+
+test('loteriasapi: the reported incident — capped plan + pending latest — syncs real draws', function () {
+    // Reproduces the operator report verbatim: every paged call asked for
+    // limit=100, the plan answered HTTP 400, and the only surviving source
+    // (/latest) served an unfinished draw → "Sync complete: 0 imported,
+    // 0 unchanged, 1 rejected; 0 verified draws stored."
+    $pending = fx_loterias_live_payload('2026-09-08', '2026234');
+    $pending['status'] = 'PENDING';
+    unset($pending['combination'], $pending['resultData']);
+    $today = gmdate('Y-m-d');
+    [$provider] = fx_loterias_provider(function (string $url) use ($pending, $today) {
+        if (str_contains($url, '/latest')) return fx_loterias_json(fx_loterias_live_envelope($pending));
+        if (str_contains($url, 'limit=100')) {
+            return fx_loterias_json(['success' => false, 'error' => [
+                'code' => 'VALIDATION_ERROR', 'message' => "El parametro 'limit' es invalido",
+                'details' => ['field' => 'limit', 'value' => '100'], 'statusCode' => 400]], 400);
+        }
+        if (str_contains($url, 'to=' . $today)) {
+            return fx_loterias_json(['success' => true, 'data' => [
+                fx_loterias_live_payload('2026-09-04', '2026233'),
+                fx_loterias_live_payload('2026-09-01', '2026232'),
+            ], 'meta' => ['hasNext' => false, 'limit' => 5]]);
+        }
+        return fx_loterias_json(['success' => true, 'data' => [], 'meta' => ['hasNext' => false]]);
+    });
+    $repo = new LotteryRepositoryStub();
+    $intel = new LotteryIntelligence($repo, fx_loterias_audit(), $provider);
+    $sync = $intel->sync(LotteryIntelligence::FULL_HISTORY_LIMIT);
+    assert_equals('OK', $sync['status']);
+    assert_equals(2, $sync['imported'], 'the plan-visible draws are stored');
+    assert_equals(0, $sync['failed'], 'nothing is rejected — the placeholder never reaches the validator');
+    assert_equals(2, $sync['verifiedDraws']);
+    assert_contains('2 imported', $intel->syncNotice($sync));
+});
+
+test('loteriasapi: unfinished rows inside a range page are skipped, finished ones are not', function () {
+    $pending = fx_loterias_live_payload('2026-09-08', '2026234');
+    $pending['status'] = 'PENDING';
+    [$provider] = fx_loterias_provider(function (string $url) use ($pending) {
+        if (str_contains($url, '/latest')) return fx_loterias_json(fx_loterias_live_envelope(fx_loterias_live_payload()));
+        return fx_loterias_json(['success' => true, 'data' => [
+            $pending,
+            fx_loterias_live_payload('2026-09-04', '2026233'),
+        ], 'meta' => ['hasNext' => false]]);
+    });
+    $draws = $provider->draws('2026-08-01', '2026-09-30', 10);
+    assert_equals(1, count($draws), 'only the finished draw is offered');
+    assert_equals('2026-09-04', $draws[0]['drawDate']);
+});
+
+test('loteriasapi: the current documented /latest payload maps and survives validation', function () {
+    // Payload verbatim from https://loteriasapi.com/docs/getting-started:
+    // no drawId, string prize categories ("1a"), formattedPrize only, and a
+    // jackpot formatted with an "EUR" suffix instead of ",00 €".
+    $docs = [
+        'game' => ['slug' => 'euromillones', 'name' => 'Euromillones'],
+        'drawDate' => '2026-02-21',
+        'dayOfWeek' => 'viernes',
+        'status' => 'COMPLETED',
+        'combination' => [7, 12, 29, 33, 45],
+        'resultData' => ['estrellas' => [3, 9]],
+        'jackpotFormatted' => '130.000.000 EUR',
+        'prizes' => [
+            ['category' => '1a', 'winners' => 0, 'formattedPrize' => '130.000.000 EUR'],
+            ['category' => '2a', 'winners' => 3, 'formattedPrize' => '1.250.000 EUR'],
+        ],
+    ];
+    [$provider] = fx_loterias_provider(function (string $url) use ($docs) {
+        if (str_contains($url, '/latest')) return fx_loterias_json(fx_loterias_live_envelope($docs));
+        return fx_loterias_json(['success' => true, 'data' => [], 'meta' => ['hasNext' => false]]);
+    });
+    $draws = $provider->draws(null, null, 5);
+    assert_equals(1, count($draws));
+    assert_equals('EUROMILLONES-2026-02-21', $draws[0]['externalId'], 'the date-keyed fallback id covers the missing drawId');
+    assert_equals([7, 12, 29, 33, 45], $draws[0]['main']);
+    assert_equals([3, 9], $draws[0]['stars']);
+    assert_equals('130000000.00', $draws[0]['jackpot'], '"130.000.000 EUR" parses without a decimal part');
+    assert_true($draws[0]['rollover'], 'string category "1a" with 0 winners is the top tier');
+    assert_equals('0', $draws[0]['winners']);
+
+    // And the full pipeline stores it.
+    $repo = new LotteryRepositoryStub();
+    $intel = new LotteryIntelligence($repo, fx_loterias_audit(), $provider);
+    $sync = $intel->sync(10);
+    assert_equals(1, $sync['imported']);
+    assert_equals(0, $sync['failed']);
+    assert_equals(1, $intel->verifiedDrawCount());
+});
+
+test('loteriasapi: defensive mapping — resultData as a JSON string and extraNumbers keys', function () {
+    $provider = new LoteriasApiProvider(null, 'k', null, true, fn() => fx_loterias_json([]));
+    $asString = $provider->normalizeDraw([
+        'drawDate' => '2026-04-10', 'drawId' => '2026029', 'status' => 'COMPLETED',
+        'combination' => [7, 12, 29, 33, 45],
+        'resultData' => '{"estrellas":[3,9]}',
+    ]);
+    assert_equals([3, 9], $asString['stars'], 'a JSON-string resultData still yields the stars');
+
+    $extraNumbers = $provider->normalizeDraw([
+        'drawDate' => '2026-04-07', 'status' => 'COMPLETED',
+        'combination' => [1, 2, 3, 4, 5], 'winningExtraNumbers' => [6, 7],
+    ]);
+    assert_equals([6, 7], $extraNumbers['stars'], 'the "extra numbers" vocabulary is mapped too');
 });
 
 test('loteriasapi: single draws are fetched by date or resolved by vendor draw id', function () {
@@ -371,6 +559,13 @@ test('loteriasapi: malformed vendor numbers are rejected, not stored as official
     assert_equals(0, $intel->drawCount());
     $types = array_column($audit->events, 'type');
     assert_true(in_array('LOTTERY_DRAW_VALIDATION_FAILED', $types, true), 'rejection is audited');
+
+    // The operator notice carries the first rejection reason — never a bare
+    // "1 rejected" the operator has to decode through the audit log.
+    $notice = $intel->syncNotice($sync);
+    assert_contains('1 rejected', $notice);
+    assert_contains('draw 2026030', $notice);
+    assert_contains('line must contain 5 main numbers', $notice, 'the validator reason rides along');
 });
 
 test('loteriasapi is registered in API Management with a working connectivity test', function () {
@@ -802,6 +997,7 @@ test('loteriasapi: a database failure during import is reported, not hidden', fu
     assert_equals(0, $sync['imported']);
     assert_contains('DATA UNAVAILABLE', $sync['message']);
     assert_contains('connection lost', $sync['message'], 'the underlying database error is surfaced');
+    assert_contains('connection lost', $intel->syncNotice($sync), 'the operator notice surfaces it too');
     assert_equals(0, $intel->verifiedDrawCount());
     assert_true(in_array('LOTTERY_SYNC_FAILED', array_column($audit->events, 'type'), true), 'the persistence failure is audited');
 });
@@ -815,6 +1011,7 @@ test('loteriasapi: Admin → API exposes a manual Sync Now route for the lottery
     assert_contains("'lottery'", $c, 'sync is scoped to the lottery service');
     assert_contains('$this->platform->lottery->sync(', $c, 'the action delegates to the live sync engine');
     assert_contains('FULL_HISTORY_LIMIT', $c, 'manual sync backfills the whole archive');
+    assert_contains('syncNotice(', $c, 'the flash surfaces the first rejection/failure reason');
 
     $view = file_get_contents(FCPATH . 'application/views/admin/api/form.php');
     assert_contains('Sync Now', $view, 'the manual sync button is rendered');

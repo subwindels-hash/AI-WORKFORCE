@@ -16,7 +16,7 @@ Lottery Intelligence pipeline.
 | API Management driver `loteriasapi` + connectivity test | `application/libraries/AIWorkforce/ApiProviders.php` |
 | Live CLI smoke test | `php index.php tools lottery-smoke` (`Tools::lottery_smoke`) |
 | Dashboard + admin deep-link | `application/views/lottery/index.php` |
-| Tests (17) | `tests/cases/109-lottery-loteriasapi-provider.php` |
+| Tests (39) | `tests/cases/109-lottery-loteriasapi-provider.php` |
 
 The adapter implements the same `LotteryProvider` interface every other lottery
 source uses, so statistics, combination generation, the system builder,
@@ -42,7 +42,7 @@ Base URL: `https://api.loteriasapi.com/api/v1` · Auth header: `X-API-Key: <key>
 | Purpose | Endpoint | Adapter method |
 |---|---|---|
 | Latest result | `GET /results/{game}/latest` | `health()`, `jackpotInfo()`, `draws()` fallback |
-| Historical range | `GET /results/{game}/range?from=&to=&page=&limit=` | `draws($from, $to, $limit)` (paged via `meta.hasNext`, chunked at 365 days) |
+| Historical range | `GET /results/{game}/range?from=&to=&page=&limit=` | `draws($from, $to, $limit)` (paged via `meta.hasNext`, chunked at 365 days, windows walked newest-first) |
 | Draw by date | `GET /results/{game}/date/{yyyy-mm-dd}` | `drawById('2026-04-10')` |
 | Draw by vendor id | resolved through a windowed `/range` query | `drawById('2026029')` / `drawById('2026/029')` |
 
@@ -133,7 +133,7 @@ php index.php tools lottery-cron sync
 php index.php tools scheduler lottery
 
 # 4. Automated tests
-php index.php tools tests            # includes tests/cases/109-lottery-loteriasapi-provider.php (24 tests)
+php index.php tools tests            # includes tests/cases/109-lottery-loteriasapi-provider.php (39 tests)
 ```
 
 `lottery-smoke` output on a working key:
@@ -177,8 +177,8 @@ LoteriasAPI driver can be chosen directly.
 |---|---|---|
 | 401 / 403 (or a 200 `success:false` `UNAUTHORIZED` body) | `OFFLINE` (test: `Invalid API key`) | authentication rejected |
 | 404 | `OFFLINE` | base URL must be `https://api.loteriasapi.com/api/v1` (the `/api` prefix is required) |
-| 400 | `OFFLINE` | game code or date range rejected (a `/range` query covers max 365 days) |
-| 429 | `OFFLINE` | rate limited — free plan allows 1,000 requests/month |
+| 400 | `OFFLINE` | the vendor's own message is quoted (which parameter failed) — game code, plan-capped page size (auto-retried at the plan floor) or date range > 365 days |
+| 429 | `OFFLINE` | rate limited — the plan request quota is exhausted |
 | no response | `OFFLINE` | network/SSL/firewall — allow outbound HTTPS to `api.loteriasapi.com` |
 | non-JSON 200 | `OFFLINE` | invalid JSON payload |
 
@@ -194,14 +194,21 @@ still advertise "1,000 requests/month free", which the plans page contradicts):
 | Pro (29,90 €/mo) | 20,000 / month | 50 | 1 year |
 | Business (59,90 €/mo) | 50,000 / month | 75 | 50 years |
 
-Two consequences the adapter already handles, but operators should know:
+Two consequences the adapter handles explicitly (verified against the plans
+page checked 2026-09-05):
 
-- **Page size is plan-capped.** The adapter asks for 100 rows per `/range` page
-  and follows `meta.hasNext`, so a plan that returns 5 or 10 rows per request
-  still fills the requested history — it just costs more requests.
-- **History depth is plan-capped.** On the free tier a `/range` query older than
-  ~7 days returns nothing, so a deep backfill needs a paid plan; the adapter
-  reports that as "no draws", never as invented ones.
+- **Page size is plan-capped — and the vendor enforces it with HTTP 400, not
+  silent truncation.** The adapter asks for 100 rows per page; when the plan
+  rejects that (`VALIDATION_ERROR` naming `limit`), the page is retried once
+  at the documented Free-tier floor (5), and the size the plan actually
+  served (`meta.limit`) is adopted for every later page. A small plan still
+  fills the history it is allowed to read instead of every history call
+  failing and the sync degrading to a single `/latest` draw.
+- **History depth is plan-capped.** The backfill walks `/range` windows
+  **newest-first** and stops at the first window that adds nothing, so a
+  7-day-history key costs two requests — not one request per year of archive
+  the plan is not allowed to read. A deep backfill needs a paid plan; the
+  adapter reports what it could read, never invented draws.
 
 The daily `sync` cron job needs only a handful of calls per draw day
 (EuroMillions draws Tuesday and Friday).
@@ -215,7 +222,8 @@ The daily `sync` cron job needs only a handful of calls per draw day
 `/range` endpoint still builds a real history instead of a single draw:
 
 ```
-1. GET /results/{game}/range?from=&to=&page=&limit=   (365-day windows, paged)
+1. GET /results/{game}/range?from=&to=&page=&limit=   (365-day windows, NEWEST
+   first, paged; an oversized `limit` is retried at the plan floor)
 2. GET /results/{game}?page=&limit=&sort=&order=      (paged history listing)
 3. GET /results/{game}/latest                         (single draw, last resort)
 ```
@@ -224,6 +232,14 @@ Every returned draw is de-duplicated by `externalId|drawDate`, validated by
 `LotteryResultValidator` (5 mains + 2 stars in range, valid date, source and
 source timestamp present) and only then stored as `VERIFIED`. Re-importing the
 same draw is a no-op; a stored VERIFIED draw is never silently overwritten.
+
+A draw the feed has not finished (status `PENDING`/`SCHEDULED`, or a `/latest`
+answer without numbers — the feed publishes the next draw as a placeholder on
+draw day) is **never offered as history**: it would only produce a validation
+rejection, not a stored draw. When a draw *is* rejected, the Admin flash and
+`sync()` result carry the first validator reason through
+`LotteryIntelligence::syncNotice()` — an operator never has to decode a bare
+"1 rejected" through the audit log.
 
 Each stored row records: draw date, the 5 main numbers, the 2 Lucky Stars, the
 jackpot, the full prize breakdown (`payload.prizes`: category, label, winners,
@@ -272,3 +288,26 @@ no lottery data exists. The health failure is recorded, audited as
 dashboard renders a red **DATA UNAVAILABLE** badge together with the last
 successful sync. An unconfigured feed still reads as `NO_DATA` (nothing was
 ever connected).
+
+### Troubleshooting: `Sync complete: 0 imported, 0 unchanged, 1 rejected`
+
+This exact report means the sync degraded all the way to the `/latest`
+fallback and the single draw it served was not a playable, finished line.
+Both halves are fixed in the adapter:
+
+1. **Every history call failed** — the adapter asked for `limit=100` per page
+   while the plan caps results per request (Free 5, Basic 10, Pro 50…) and
+   the vendor answers an oversized `limit` with HTTP 400
+   `VALIDATION_ERROR`. Page sizes are now retried at the plan floor and
+   learned from `meta.limit`, so `/range` and the listing work on every plan.
+2. **The one surviving draw was unfinished** — on draw day `/latest` can
+   answer the *next* draw as a `PENDING` placeholder with no numbers, which
+   the validator correctly refused. An unfinished draw is now skipped before
+   validation (health names it: *"latest draw 2026-09-08 (pending)"*), and any
+   genuine rejection carries its reason into the Admin flash.
+
+If a sync still stores nothing on a Free key, the plan's 7-day history window
+is the remaining limit: the newest draws import, deeper history needs a paid
+plan (see the table above), and the flash/audit now say exactly that instead
+of a bare count.
+

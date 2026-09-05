@@ -394,6 +394,44 @@ class LotteryIntelligence
     }
 
     /**
+     * One-line operator notice for a sync() result: the counts plus, whenever
+     * anything was rejected or the feed failed, the first underlying reason.
+     * An operator must never be left to decode a bare "1 rejected" — the
+     * actionable cause (validator error, provider message) rides along.
+     *
+     * @param array<string,mixed> $result
+     */
+    public function syncNotice(array $result): string
+    {
+        $notice = 'Sync complete: ' . (int) ($result['imported'] ?? 0) . ' imported, '
+            . (int) ($result['unchanged'] ?? 0) . ' unchanged, ' . (int) ($result['failed'] ?? 0) . ' rejected; '
+            . (int) ($result['verifiedDraws'] ?? 0) . ' verified draws stored.';
+        $reason = null;
+        foreach ((array) ($result['errors'] ?? []) as $entry) {
+            if (is_array($entry) && is_array($entry['errors'] ?? null)) {
+                $pool = $entry['errors'];
+                $label = isset($entry['externalId']) ? 'draw ' . $entry['externalId'] . ': ' : '';
+            } elseif (is_array($entry) && count($entry) >= 2 && is_string($entry[0] ?? null) && is_array($entry[1] ?? null)) {
+                $pool = $entry[1];
+                $label = $entry[0] . ': ';
+            } else {
+                continue;
+            }
+            foreach ($pool as $error) {
+                if (is_string($error) && trim($error) !== '') {
+                    $reason = $label . trim($error);
+                    break 2;
+                }
+            }
+        }
+        if ($reason === null && is_string($result['message'] ?? null) && trim($result['message']) !== '') {
+            $reason = trim((string) $result['message']);
+        }
+        if ($reason !== null) $notice .= ' First issue: ' . mb_substr($reason, 0, 200);
+        return $notice;
+    }
+
+    /**
      * Import raw provider draws with full validation (spec §5/§6/§28):
      *  - invalid draws are NEVER stored; they are marked DATA_VALIDATION_FAILED and audited
      *  - re-import of identical data is a no-op (idempotent)
