@@ -312,3 +312,23 @@ test('scheduled lottery sync ingests LoteriasAPI draws and is idempotent per day
     assert_true(is_array($health));
     assert_false(str_contains(json_encode($repo->health), 'live-key-secret-123'), 'health history never stores the key');
 });
+
+test('loteriasapi adapter obeys the module honesty rules and leaks no credential path', function () {
+    $src = strtolower(file_get_contents(FCPATH . 'application/libraries/AIWorkforce/Lottery/LoteriasApiProvider.php'));
+    foreach (['guarantee', 'win chance', 'win probability', 'winning numbers', 'certain win',
+              'secret formula', 'sure win', 'jackpot prediction', '90% chance',
+              'ai knows the next draw', 'predict'] as $banned) {
+        assert_false(str_contains($src, $banned), 'banned wording: ' . $banned);
+    }
+    // No committed credentials and no plaintext endpoints.
+    assert_false((bool) preg_match('#http://#', $src), 'no plaintext HTTP endpoints');
+    assert_false((bool) preg_match("#api_key\s*=\s*['\"][a-z0-9]{8,}#", $src), 'no committed API key');
+
+    // The key is read from managed config or the environment only.
+    assert_true(str_contains($src, 'windels_lottery_loteriasapi_key'), 'environment credential path documented');
+    assert_true(str_contains($src, "apiproviders::resolve('lottery')"), 'managed credentials resolved centrally');
+
+    // A managed row belonging to a different driver must not be adopted.
+    assert_contains("!== 'loteriasapi'", file_get_contents(FCPATH . 'application/libraries/AIWorkforce/Lottery/LoteriasApiProvider.php'));
+    assert_contains("!== 'official_lottery'", file_get_contents(FCPATH . 'application/libraries/AIWorkforce/Lottery/OfficialLotteryProvider.php'));
+});

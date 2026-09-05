@@ -16,7 +16,7 @@ Lottery Intelligence pipeline.
 | API Management driver `loteriasapi` + connectivity test | `application/libraries/AIWorkforce/ApiProviders.php` |
 | Live CLI smoke test | `php index.php tools lottery-smoke` (`Tools::lottery_smoke`) |
 | Dashboard + admin deep-link | `application/views/lottery/index.php` |
-| Tests (13) | `tests/cases/109-lottery-loteriasapi-provider.php` |
+| Tests (14) | `tests/cases/109-lottery-loteriasapi-provider.php` |
 
 The adapter implements the same `LotteryProvider` interface every other lottery
 source uses, so statistics, combination generation, the system builder,
@@ -109,7 +109,7 @@ php index.php tools lottery-cron sync
 php index.php tools scheduler lottery
 
 # 4. Automated tests
-php index.php tools tests            # includes tests/cases/109-lottery-loteriasapi-provider.php
+php index.php tools tests            # includes tests/cases/109-lottery-loteriasapi-provider.php (14 tests)
 ```
 
 `lottery-smoke` output on a working key:
