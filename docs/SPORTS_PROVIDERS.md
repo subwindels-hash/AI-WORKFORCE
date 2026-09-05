@@ -64,6 +64,19 @@ daily request quota (`?cache=0` bypasses).
 
 TheSportsDB uses the numeric key as part of the URL path (`/api/v1/json/{key}/...`). The adapter uses the soccer events-by-day endpoint and maps `idEvent`, `strHomeTeam`, `strAwayTeam`, `strLeague`, and `dateEvent`.
 
+`searchTeams(name)` wraps `searchteams.php` (the endpoint from the
+official API examples) and returns the internal team shape including the
+vendor's `idAPIfootball` cross-reference. All TheSportsDB events also carry
+`idAPIfootball`; the mappers surface it as `apiFootballId` on fixtures and
+results so the same match/team can be matched across api-football and
+TheSportsDB.
+
+**Free tier (key "3") limits, verified live:** list endpoints are capped —
+`all_leagues.php` returns 5 leagues, `eventsday.php` a partial day, and
+`eventsseason.php` a partial season. The adapter never fabricates the
+missing rows; treat free-tier syncs as a sample of the day. v2 (livescore,
+full seasons) requires a premium key.
+
 ## SportMonks notes
 
 SportMonks uses the token query parameter and the Football API v3 endpoints. Fixtures use participants, scores, and league includes, and are mapped using participant location (`home`/`away`). Ensure the token has access to the leagues and includes used by the deployment.

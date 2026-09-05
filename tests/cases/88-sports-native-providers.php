@@ -1031,3 +1031,59 @@ test('api-football: non-token soft errors classify as data errors', function () 
         assert_contains('league', $e->getMessage(), 'the API message is surfaced');
     }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7. THESPORTSDB — searchTeams + idAPIfootball cross-references
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('thesportsdb searchTeams maps the documented response shape', function () {
+    $body = json_encode(['teams' => [
+        ['idTeam' => '133604', 'strTeam' => 'Arsenal', 'strTeamShort' => 'ARS', 'strStadium' => 'Emirates Stadium',
+         'strLeague' => 'English Premier League', 'idLeague' => '4328', 'strLocation' => 'Holloway, London, England',
+         'intFormedYear' => '1892', 'idAPIfootball' => '42', 'idESPN' => '359'],
+        ['idTeam' => '133613', 'strTeam' => 'Manchester City', 'strTeamShort' => 'MCI', 'strStadium' => 'Etihad Stadium',
+         'strLeague' => 'English Premier League', 'idLeague' => '4328', 'intFormedYear' => '1880'],
+    ]]);
+    $p = new TheSportsDbProvider('3', 'https://api.test', 10, makeTransport(200, $body));
+    $teams = $p->searchTeams('Arsenal');
+
+    assert_equals(2, count($teams));
+    assert_equals('133604', $teams[0]['teamId']);
+    assert_equals('Arsenal', $teams[0]['name']);
+    assert_equals('Emirates Stadium', $teams[0]['stadium']);
+    assert_equals('4328', $teams[0]['leagueId']);
+    assert_equals(1892, $teams[0]['formed']);
+    assert_equals('42', $teams[0]['apiFootballId'], 'idAPIfootball cross-reference kept');
+    assert_equals(null, $teams[1]['apiFootballId'], 'missing cross-reference stays null (not fabricated)');
+    $limited = $p->searchTeams('Arsenal', 1);
+    assert_equals(1, count($limited), 'limit honoured');
+});
+
+test('thesportsdb fixtures and results carry the apiFootball cross-reference', function () {
+    $event = ['idEvent' => '1818395', 'idAPIfootball' => '1035037', 'strHomeTeam' => 'Burnley', 'strAwayTeam' => 'Manchester City',
+        'dateEvent' => '2023-08-11', 'strTime' => '19:00:00', 'strStatus' => 'FT', 'strLeague' => 'English Premier League',
+        'idLeague' => '4328', 'strSeason' => '2023-2024', 'idHomeTeam' => '133623', 'idAwayTeam' => '133613',
+        'intHomeScore' => '0', 'intAwayScore' => '3'];
+    $p = new TheSportsDbProvider('3', 'https://api.test', 10, makeTransport(200, json_encode(['events' => [$event]])));
+
+    $fixtures = $p->fixtures(['from' => '2023-08-11', 'to' => '2023-08-11']);
+    assert_equals(1, count($fixtures));
+    assert_equals('1818395', $fixtures[0]['externalId']);
+    assert_equals('1035037', $fixtures[0]['apiFootballId'], 'fixture cross-reference kept');
+
+    $results = $p->results('1818395');
+    assert_equals(1, count($results));
+    assert_equals(0, $results[0]['homeScore']);
+    assert_equals(3, $results[0]['awayScore']);
+    assert_equals('1035037', $results[0]['apiFootballId'], 'result cross-reference kept');
+
+    $bare = ['idEvent' => '1', 'strHomeTeam' => 'A', 'strAwayTeam' => 'B', 'dateEvent' => '2023-08-11', 'strStatus' => 'FT'];
+    $p2 = new TheSportsDbProvider('3', 'https://api.test', 10, makeTransport(200, json_encode(['events' => [$bare]])));
+    $f2 = $p2->fixtures(['from' => '2023-08-11', 'to' => '2023-08-11']);
+    assert_equals(null, $f2[0]['apiFootballId'], 'no cross-reference → null');
+});
+
+test('thesportsdb driver advertises team search in provider-drivers', function () {
+    $api = file_get_contents(FCPATH . 'application/controllers/Api_sports.php');
+    assert_contains("'capabilities' => ['fixtures', 'results', 'leagues', 'teams', 'team_search']", (string) $api, 'capability listed');
+});

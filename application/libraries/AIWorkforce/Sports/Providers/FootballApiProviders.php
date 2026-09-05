@@ -774,7 +774,47 @@ class TheSportsDbProvider implements SportsDataProvider
             'country' => $team['strCountry'] ?? '',
             'formed' => $team['intFormedYear'] ?? null,
             'badge' => $team['strBadge'] ?? null,
+            'apiFootballId' => self::refId($team['idAPIfootball'] ?? null),
         ];
+    }
+
+    /**
+     * Search teams by name (searchteams.php — the endpoint shown in the
+     * TheSportsDB docs API examples). Returns the internal team shape,
+     * including the idAPIfootball cross-reference when the vendor has it.
+     */
+    public function searchTeams(string $name, int $limit = 10): array
+    {
+        $resp = $this->doRequest('/searchteams.php?t=' . rawurlencode($name));
+        $json = $this->decodeJson($resp);
+        $teams = $json['teams'] ?? [];
+        $out = [];
+        foreach ((is_array($teams) ? $teams : []) as $t) {
+            if (!is_array($t) || empty($t['strTeam'])) continue;
+            $out[] = [
+                'teamId' => (string) ($t['idTeam'] ?? ''),
+                'name' => (string) $t['strTeam'],
+                'shortName' => $t['strTeamShort'] ?? null,
+                'stadium' => $t['strStadium'] ?? null,
+                'league' => $t['strLeague'] ?? null,
+                'leagueId' => (string) ($t['idLeague'] ?? ''),
+                'country' => $t['strCountry'] ?? null,
+                'location' => $t['strLocation'] ?? null,
+                'formed' => isset($t['intFormedYear']) ? (int) $t['intFormedYear'] : null,
+                'badge' => $t['strBadge'] ?? null,
+                'apiFootballId' => self::refId($t['idAPIfootball'] ?? null),
+            ];
+            if (count($out) >= max(1, $limit)) break;
+        }
+        return $out;
+    }
+
+    /** Cross-reference ids are null/'' when the vendor has no mapping. */
+    private static function refId(mixed $v): ?string
+    {
+        if ($v === null) return null;
+        $s = trim((string) $v);
+        return $s === '' ? null : $s;
     }
 
     private function doRequest(string $path): array
@@ -804,13 +844,16 @@ class TheSportsDbProvider implements SportsDataProvider
                 'kickoff' => $kickoff,
                 'status' => $status,
                 'sport' => 'football',
-                'venue' => $r['strVenue'] ?? null,
-                'homeTeamId' => (string) ($r['idHomeTeam'] ?? ''),
-                'awayTeamId' => (string) ($r['idAwayTeam'] ?? ''),
-                'homeTeamLogo' => null,
-                'awayTeamLogo' => null,
-                'sourceTimestamp' => gmdate('c'),
-            ];
+            'venue' => $r['strVenue'] ?? null,
+            'homeTeamId' => (string) ($r['idHomeTeam'] ?? ''),
+            'awayTeamId' => (string) ($r['idAwayTeam'] ?? ''),
+            'homeTeamLogo' => null,
+            'awayTeamLogo' => null,
+            // TheSportsDB cross-references api-football fixture ids — keep it
+            // so the same match can be matched across providers.
+            'apiFootballId' => self::refId($r['idAPIfootball'] ?? null),
+            'sourceTimestamp' => gmdate('c'),
+        ];
         }
         return $out;
     }
@@ -823,6 +866,7 @@ class TheSportsDbProvider implements SportsDataProvider
             $out[] = [
                 'externalId' => (string) ($r['idEvent'] ?? ''),
                 'status' => $status,
+                'apiFootballId' => self::refId($r['idAPIfootball'] ?? null),
                 'homeScore' => isset($r['intHomeScore']) && $r['intHomeScore'] !== '' ? (int) $r['intHomeScore'] : null,
                 'awayScore' => isset($r['intAwayScore']) && $r['intAwayScore'] !== '' ? (int) $r['intAwayScore'] : null,
                 'halfTimeHome' => isset($r['intHomeHalfScore']) && $r['intHomeHalfScore'] !== '' ? (int) $r['intHomeHalfScore'] : null,

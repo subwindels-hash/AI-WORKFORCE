@@ -522,9 +522,9 @@ class Api_sports extends Api_controller
             ],
             'thesportsdb' => [
                 'label' => 'TheSportsDB (thesportsdb.com)',
-                'docs' => 'https://www.thesportsdb.com/api',
-                'capabilities' => ['fixtures', 'results', 'leagues', 'teams'],
-                'notes' => 'No odds endpoint on any tier',
+                'docs' => 'https://www.thesportsdb.com/docs_api_examples',
+                'capabilities' => ['fixtures', 'results', 'leagues', 'teams', 'team_search'],
+                'notes' => 'No odds endpoint on any tier. Free key "3" caps list endpoints (e.g. 5 leagues, partial day/season); v2 livescore requires premium. Events carry an idAPIfootball cross-reference, surfaced as apiFootballId.',
                 'envKey' => 'WINDELS_THESPORTSDB_KEY',
                 'configured' => $this->platform->sports->providers->provider('thesportsdb') !== null,
             ],
