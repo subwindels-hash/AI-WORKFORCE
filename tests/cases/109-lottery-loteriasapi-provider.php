@@ -783,6 +783,13 @@ test('lottery dashboard names the product feed, never the upstream vendor', func
     assert_equals('loteriasapi.com (SELAE)', $provider->normalizeDraw(fx_loterias_live_payload())['source'],
         'renaming the display label never rewrites the source attribution');
     assert_equals('loteriasapi', $status['provider']['id'], 'the provider id stays the vendor key');
+
+    // A registry row created under the old label follows the current one, so
+    // GET /api/lottery/providers never serves a stale vendor name.
+    $stub = new LotteryRepositoryStub();
+    $stub->ensureProvider('loteriasapi', 'LoteriasAPI (loteriasapi.com) — EuroMillions results');
+    assert_equals('Windels API — EuroMillions results', $stub->ensureProvider('loteriasapi', $provider->name())['display_name'],
+        'the stored display name follows the code label');
 });
 
 test('scheduled lottery sync ingests LoteriasAPI draws and is idempotent per day', function () {

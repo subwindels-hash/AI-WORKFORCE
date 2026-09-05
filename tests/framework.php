@@ -460,7 +460,17 @@ class LotteryRepositoryStub implements \AIWorkforce\Persistence\LotteryRepositor
     public function saveRules(array $r): int { $row = array_merge(['id' => ++$this->autoId, 'created_at' => gmdate('c')], $r); $this->rules[] = $row; return (int) $row['id']; }
     public function ensureProvider(string $code, string $name): array
     {
-        foreach ($this->providers as $p) if ($p['provider_code'] === $code) return $p;
+        // Mirrors the database repository: the display name lives in code, so
+        // a row registered under an older label follows the current one.
+        foreach ($this->providers as $i => $p) {
+            if ($p['provider_code'] === $code) {
+                if (($p['display_name'] ?? null) !== $name) {
+                    $this->providers[$i]['display_name'] = $name;
+                    $this->providers[$i]['updated_at'] = gmdate('c');
+                }
+                return $this->providers[$i];
+            }
+        }
         $row = ['id' => ++$this->autoId, 'provider_code' => $code, 'display_name' => $name, 'enabled' => 0, 'synthetic' => str_contains($code, 'sandbox') ? 1 : 0, 'created_at' => gmdate('c'), 'updated_at' => gmdate('c')];
         $this->providers[] = $row;
         return $row;
