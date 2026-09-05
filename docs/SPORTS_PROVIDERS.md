@@ -122,6 +122,16 @@ comes from the `participant` include and W/D/L/goals from the `details`
 include (standing-detail type ids: 129 played, 130 won, 131 draw,
 132 lost, 133 goals for, 134 conceded).
 
+### Odds
+
+`SportMonksProvider::odds($fixtureId)` calls
+`GET /odds/pre-match/fixtures/{id}?include=market;bookmaker` (standard
+odds feed — requires the odds add-on; failures degrade to an empty
+array). The v2-era standalone path `/odds/fixtures/{id}` **does not
+exist** in v3 (verified live: "The requested endpoint does not exist").
+Round-embedded odds come from the same feed via the `fixtures.odds`
+include on `GET /rounds/{id}`.
+
 ### Lineups
 
 `SportMonksProvider::lineups($fixtureId)` calls

@@ -403,6 +403,25 @@ test('sportmonks lineups use the fixture endpoint with the lineups include', fun
     assert_equals(false, $rows[1]['starter'], 'type_id 12 = substitute');
 });
 
+test('sportmonks odds use the v3 pre-match feed path', function () {
+    $url = '';
+    $body = json_encode(['data' => [
+        ['fixture_id' => 100, 'value' => 1.85, 'label' => 'Home',
+         'market' => ['name' => 'Match Winner'], 'bookmaker' => ['name' => 'Bet365']],
+    ]]);
+    $transport = function (string $u, array $h) use (&$url, $body) {
+        $url = $u;
+        return ['status' => 200, 'body' => $body];
+    };
+    $p = new SportMonksProvider('t', 'https://api.test', 10, $transport);
+    $odds = $p->odds('100');
+    assert_true(str_starts_with($url, 'https://api.test/odds/pre-match/fixtures/100?'), 'v3 pre-match odds live under /odds/pre-match/fixtures/{id} (the v2-era /odds/fixtures/{id} does not exist)');
+    assert_true(str_contains($url, 'include=market%3Bbookmaker'), 'only the documented includes are requested');
+    assert_false(str_contains($url, 'selection'), 'the undocumented selection include would raise an include exception');
+    assert_equals('MATCH_RESULT', $odds[0]['market'], 'base-row label maps without the selection object');
+    assert_equals('HOME', $odds[0]['selection']);
+});
+
 test('sportmonks maps live status codes correctly', function () {
     $body = json_encode(['data' => [
         ['id' => 1, 'starting_at' => '2026-09-15T19:00:00Z', 'status' => 7,

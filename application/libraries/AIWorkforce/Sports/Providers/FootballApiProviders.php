@@ -1101,8 +1101,17 @@ class SportMonksProvider implements SportsDataProvider
     {
         // SportMonks odds require the optional "odds" add-on subscription.
         // Attempt the endpoint and return empty if it fails.
+        // Canonical v3 path (verified live, 2026-09): the standalone v2-era
+        // path /odds/fixtures/{id} does NOT exist ("The requested endpoint
+        // does not exist") — pre-match odds live under
+        // GET /odds/pre-match/fixtures/{id} with includes market;bookmaker.
+        // The base odd row already carries label/original_label, so no
+        // undocumented `selection` include is requested (unknown includes
+        // raise an include exception and would fail the whole request).
         try {
-            $resp = $this->doRequest('/odds/fixtures/' . rawurlencode($fixtureExternalId) . '?include=bookmaker;market;selection');
+            $resp = $this->doRequest('/odds/pre-match/fixtures/' . rawurlencode($fixtureExternalId) . '?' . http_build_query([
+                'include' => 'market;bookmaker',
+            ]));
             $rows = $this->extractList($this->decodeJson($resp));
             return $this->mapOdds($rows);
         } catch (ProviderException $e) {
