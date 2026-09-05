@@ -68,6 +68,7 @@ $route['admin/api/create'] = 'admin/api_create';
 $route['admin/api/save'] = 'admin/api_save';
 $route['admin/api/(:num)/save'] = 'admin/api_save/$1';
 $route['admin/api/(:num)/test'] = 'admin/api_test/$1';
+$route['admin/api/(:num)/sync'] = 'admin/api_sync/$1';
 $route['admin/api/(:num)/enable'] = 'admin/api_enable/$1';
 $route['admin/api/(:num)/disable'] = 'admin/api_disable/$1';
 $route['admin/api/(:num)/primary'] = 'admin/api_primary/$1';

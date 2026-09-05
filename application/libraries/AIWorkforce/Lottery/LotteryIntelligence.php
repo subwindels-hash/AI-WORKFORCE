@@ -28,6 +28,13 @@ class LotteryIntelligence
     /** The live feed is not serving, but verified historical draws ARE stored. */
     public const STATUS_STORED_DATA = 'STORED DATA';
     public const VERIFIED = 'VERIFIED';
+    /**
+     * Full-history backfill ceiling (spec §3). EuroMillions has drawn ~2,300
+     * times since its 2004 launch; a first-run sync asks for enough history to
+     * cover the whole archive. The provider (and the vendor's request quota)
+     * still bound what actually comes back.
+     */
+    public const FULL_HISTORY_LIMIT = 5000;
 
     public readonly LotteryStatisticsEngine $statistics;
     public readonly CombinationAnalyzer $analyzer;
@@ -68,8 +75,7 @@ class LotteryIntelligence
     {
         $health = $this->provider->health();
         $enabled = $health['state'] === 'ONLINE';
-        $last = $this->repo->listDraws(['lotteryCode' => self::LOTTERY], 1);
-        $lastDraw = $last !== [] ? $this->presentDraw($last[0]) : null;
+        $lastDraw = $this->latestVerifiedDraw();
         $jackpot = $lastDraw['jackpot'] ?? null;
         // Where the displayed amount came from — the dashboard must be able to
         // prove the jackpot is feed data, never a hardcoded figure.
@@ -187,6 +193,23 @@ class LotteryIntelligence
             'lotteryCode' => self::LOTTERY,
             'verificationStatus' => self::VERIFIED,
         ], 100000));
+    }
+
+    /**
+     * The newest VERIFIED draw in the historical database (spec §12). The
+     * "Last Verified Draw" section and every consumer that needs a single
+     * "latest result" read this accessor, so they can never surface an
+     * unverified or fabricated row. Returns null when nothing verified is
+     * stored — the UI then says so honestly instead of inventing a draw.
+     * @return array<string,mixed>|null presented draw row, newest first
+     */
+    public function latestVerifiedDraw(): ?array
+    {
+        $draws = $this->repo->listDraws([
+            'lotteryCode' => self::LOTTERY,
+            'verificationStatus' => self::VERIFIED,
+        ], 1);
+        return $draws !== [] ? $this->presentDraw($draws[0]) : null;
     }
 
     /**
@@ -310,10 +333,22 @@ class LotteryIntelligence
             $raw = [];
             $error = mb_substr($e->getMessage(), 0, 300);
         }
-        $summary = $this->importDraws($raw);
+        try {
+            $summary = $this->importDraws($raw);
+        } catch (\Throwable $e) {
+            // A database write failure must not be reported as a clean sync:
+            // surface it as a failed sync carrying the underlying error so the
+            // operator can see exactly why nothing was persisted.
+            $summary = ['imported' => 0, 'unchanged' => 0, 'corrected' => 0, 'failed' => 0, 'conflicts' => 0,
+                'errors' => [['database', [mb_substr($e->getMessage(), 0, 300)]]]];
+            if ($error === null) $error = 'database error: ' . mb_substr($e->getMessage(), 0, 300);
+            $this->audit->emit('LOTTERY_SYNC_FAILED', 'Lottery sync failed while storing draws: ' . $e->getMessage(), [
+                'provider' => $this->provider->id(), 'phase' => 'persist',
+            ], 'system');
+        }
         $respMs = (int) round((microtime(true) - $t0) * 1000);
         $pid = $this->providerRowId();
-        $ok = count($raw) > 0;
+        $ok = count($raw) > 0 && $error === null;
         // The newest date in the batch, whichever order the feed used.
         $lastDraw = null;
         foreach ($raw as $d) {
@@ -321,16 +356,20 @@ class LotteryIntelligence
             if ($date !== '' && ($lastDraw === null || $date > $lastDraw)) $lastDraw = $date;
         }
         if ($pid !== null) {
-            $this->repo->saveHealth($pid, [
-                'status' => $ok ? 'ONLINE' : ($error !== null ? 'OFFLINE' : 'DEGRADED'),
-                'response_ms' => $respMs,
-                'records_received' => count($raw),
-                'invalid_records' => (int) $summary['failed'],
-                'last_success_at' => $ok ? gmdate('c') : null,
-                'last_failure_at' => $ok ? null : gmdate('c'),
-                'last_draw_retrieved' => $lastDraw,
-                'synthetic' => !empty($health['synthetic']) ? 1 : 0,
-            ]);
+            try {
+                $this->repo->saveHealth($pid, [
+                    'status' => $ok ? 'ONLINE' : ($error !== null ? 'OFFLINE' : 'DEGRADED'),
+                    'response_ms' => $respMs,
+                    'records_received' => count($raw),
+                    'invalid_records' => (int) $summary['failed'],
+                    'last_success_at' => $ok ? gmdate('c') : null,
+                    'last_failure_at' => $ok ? null : gmdate('c'),
+                    'last_draw_retrieved' => $lastDraw,
+                    'synthetic' => !empty($health['synthetic']) ? 1 : 0,
+                ]);
+            } catch (\Throwable $e) {
+                log_message('error', 'lottery sync could not record provider health: ' . $e->getMessage());
+            }
         }
         $verified = $this->verifiedDrawCount();
         if ($ok) {
