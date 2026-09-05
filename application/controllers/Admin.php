@@ -21,6 +21,15 @@ class Admin extends App_Controller
     public function index()
     {
         $user = $this->requireAdmin(); if (!$user) return;
+        // Best-effort auto-run: an admin visit fires due cron jobs in the background.
+        try {
+            $cronStore = new \AIWorkforce\Cron\PlatformSettingsCronStore($this->AIWorkforce_model->db);
+            \AIWorkforce\Cron\CronAutoRun::maybeTrigger(
+                new \AIWorkforce\Cron\CronScheduler($cronStore),
+                $cronStore,
+                $this->cronRunUrl(\AIWorkforce\Cron\CronSecrets::ensure($cronStore))
+            );
+        } catch (\Throwable $e) { /* auto-run must never break the dashboard */ }
         if (!$this->platform->identity->can($user, 'admin.analytics.view') && !$this->isSuperAdmin($user)) {
             // Support admins still see the overview with the numbers they can access.
         }
@@ -778,12 +787,15 @@ class Admin extends App_Controller
         if ($category === 'ai' || $category === 'accounts') {
             foreach ($values as $k => $v) $values[$k] = $v === '1' ? '1' : '0';
         }
+        if ($category === 'announcement') {
+            $values['announcement_enabled'] = ($values['announcement_enabled'] ?? '') === '1' ? '1' : '0';
+        }
         if ($category === 'security') {
             $values['login_max_attempts'] = (string) max(3, min(20, (int) ($values['login_max_attempts'] ?? 5)));
             $values['login_lockout_seconds'] = (string) max(60, min(86400, (int) ($values['login_lockout_seconds'] ?? 900)));
         }
         try {
-            $this->portal->saveSettings($values, $category, (int) $actor['id']);
+            $this->portal->saveSettings($values, $category, (int) $actor['id'], $category === 'announcement' ? 2000 : 500);
             $this->portal->log($actor, 'SETTINGS_CHANGED', 'ok', ['type' => 'settings', 'id' => $category, 'label' => $category], array_keys($values), $this->ip());
             $this->flash('notice', '✓ Changes saved successfully');
         } catch (Throwable $e) {
@@ -905,6 +917,103 @@ class Admin extends App_Controller
             'regenerate' => (bool) $this->config->item('sess_regenerate_destroy'),
         ];
         $this->render('admin/security', $data);
+    }
+
+    public function cron()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        $store = new \AIWorkforce\Cron\PlatformSettingsCronStore($this->AIWorkforce_model->db);
+        $scheduler = new \AIWorkforce\Cron\CronScheduler($store);
+        $data = $this->base('Cron Jobs', 'cron');
+        $data['jobs'] = $scheduler->status();
+        $data['autoRun'] = $store->get('cron.auto_run') === '1';
+        $data['lastTrigger'] = $store->get('cron.last_trigger');
+        $data['secret'] = \AIWorkforce\Cron\CronSecrets::ensure($store);
+        $data['runUrl'] = $this->cronRunUrl($data['secret']);
+        $data['cliCommand'] = 'php ' . FCPATH . 'index.php tools scheduler';
+        $data['recent'] = $this->recentCronEvents();
+        $this->render('admin/cron', $data);
+    }
+
+    public function cron_save()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/cron'); return; }
+        $store = new \AIWorkforce\Cron\PlatformSettingsCronStore($this->AIWorkforce_model->db);
+        $scheduler = new \AIWorkforce\Cron\CronScheduler($store);
+        $store->set('cron.auto_run', $this->input->post('auto_run') === '1' ? '1' : '0');
+        foreach (array_keys(\AIWorkforce\Cron\CronScheduler::JOBS) as $id) {
+            $scheduler->setEnabled($id, $this->input->post('enabled_' . $id) === '1');
+        }
+        $this->portal->log($actor, 'CRON_SETTINGS_CHANGED', 'ok', ['type' => 'cron', 'id' => 'schedule', 'label' => 'Cron schedule'], [], $this->ip());
+        $this->flash('notice', 'Cron schedule saved.');
+        redirect('/admin/cron');
+    }
+
+    public function cron_run($job = '')
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/cron'); return; }
+        $job = (string) $job;
+        $runners = \AIWorkforce\Cron\CronRunner::runners($this);
+        if (!isset($runners[$job])) { $this->flash('error', 'Unknown cron job.'); redirect('/admin/cron'); return; }
+        @set_time_limit(600);
+        $store = new \AIWorkforce\Cron\PlatformSettingsCronStore($this->AIWorkforce_model->db);
+        $scheduler = new \AIWorkforce\Cron\CronScheduler($store);
+        try {
+            $result = $scheduler->runJob($job, $runners[$job]);
+        } catch (\Throwable $e) {
+            $this->flash('error', 'Run failed: ' . mb_substr($e->getMessage(), 0, 200));
+            redirect('/admin/cron'); return;
+        }
+        $this->portal->log($actor, 'CRON_RUN_MANUAL', ($result['status'] ?? '') === 'FAILED' ? 'error' : 'ok', ['type' => 'cron', 'id' => $job, 'label' => $job], ['status' => $result['status'] ?? '?'], $this->ip());
+        if (empty($result['ran'])) {
+            $this->flash('error', 'Job ' . $job . ' did not run: ' . ($result['reason'] ?? ($result['status'] ?? 'skipped')) . '.');
+        } else {
+            $this->flash('notice', 'Job ' . $job . ' finished: ' . ($result['status'] ?? '?') . ' in ' . number_format((int) ($result['durationMs'] ?? 0) / 1000, 1) . 's.');
+        }
+        redirect('/admin/cron');
+    }
+
+    public function cron_secret()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/cron'); return; }
+        $store = new \AIWorkforce\Cron\PlatformSettingsCronStore($this->AIWorkforce_model->db);
+        \AIWorkforce\Cron\CronSecrets::regenerate($store);
+        $this->portal->log($actor, 'CRON_SECRET_REGENERATED', 'ok', ['type' => 'cron', 'id' => 'secret', 'label' => 'Cron URL secret'], [], $this->ip());
+        $this->flash('notice', 'New cron URL secret generated — update your hosting cron command with the new URL below.');
+        redirect('/admin/cron');
+    }
+
+    /** Secret cron URL, with a Host-header fallback when base_url is empty. */
+    private function cronRunUrl(string $secret): string
+    {
+        $base = rtrim((string) $this->config->item('base_url'), '/');
+        if ($base === '') {
+            $https = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+            $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
+            $base = ($https ? 'https://' : 'http://') . $host;
+        }
+        return $base . '/cron/run?key=' . $secret;
+    }
+
+    /** Latest cron-related audit events for the dashboard's activity panel. */
+    private function recentCronEvents(): array
+    {
+        try {
+            $rows = $this->AIWorkforce_model->audit->recent(120);
+        } catch (\Throwable $e) {
+            return [];
+        }
+        $out = [];
+        foreach ($rows as $row) {
+            $type = (string) ($row['type'] ?? '');
+            if (!preg_match('/CRON|JOB_FAILED|CLEANUP|SETTLEMENT_SWEEP|QUALITY_RECALC|MONITORING$/', $type)) continue;
+            $out[] = ['at' => (string) ($row['at'] ?? ''), 'type' => $type, 'summary' => (string) ($row['summary'] ?? '')];
+            if (count($out) >= 15) break;
+        }
+        return $out;
     }
 
     public function api()
@@ -1156,6 +1265,116 @@ class Admin extends App_Controller
         $this->flash('notice', $active ? 'Account activated.' : 'Account suspended. The user can no longer sign in.');
         redirect('/admin/users/' . $id);
     }
+
+    private function canImpersonate(array $actor, array $target): bool
+    {
+        if ((int) $actor['id'] === (int) $target['id']) return false;
+        if (empty($target['active'])) return false;
+        if (!$this->platform->identity->can($actor, 'admin.users.impersonate')) return false;
+        if ($this->isSuperAdmin($actor)) return true;
+        return !$this->portal->isAdminAccount($target);
+    }
+
+    private function roleAllowed(array $actor, string $roleCode): bool
+    {
+        foreach ($this->portal->assignableRoles($actor) as $role) {
+            if ($role['code'] === $roleCode) return true;
+        }
+        return false;
+    }
+
+    private function findPublicUser(int $id, bool $includeRecovery = false): ?array
+    {
+        $user = $this->AIWorkforce_model->identity->findUserById($id);
+        if (!$user) return null;
+        $user = $this->portal->publicUser($user, $includeRecovery);
+        $user['permissions'] = $this->AIWorkforce_model->identity->permissionsForUser($id);
+        $user['roles'] = $this->AIWorkforce_model->identity->rolesForUser($id);
+        return $user;
+    }
+
+    private function handleAvatarUpload(int $userId, array $member): void
+    {
+        if (empty($_FILES['avatar']) || (int) ($_FILES['avatar']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) return;
+        $tmp = (string) $_FILES['avatar']['tmp_name'];
+        $size = (int) $_FILES['avatar']['size'];
+        if ($size <= 0 || $size > 2 * 1024 * 1024) return;
+        $info = @getimagesize($tmp);
+        if ($info === false) return;
+        $allowed = [IMAGETYPE_PNG => 'png', IMAGETYPE_JPEG => 'jpg', IMAGETYPE_GIF => 'gif', IMAGETYPE_WEBP => 'webp'];
+        $ext = $allowed[$info[2]] ?? null;
+        if ($ext === null) return;
+        $uploadDir = FCPATH . 'assets/uploads/avatars';
+        if (!is_dir($uploadDir)) @mkdir($uploadDir, 0775, true);
+        if (!is_dir($uploadDir) || !is_writable($uploadDir)) return;
+        $filename = 'u' . $userId . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+        if (!@move_uploaded_file($tmp, $uploadDir . '/' . $filename)) return;
+        $path = '/assets/uploads/avatars/' . $filename;
+        $this->AIWorkforce_model->identity->updateUser($userId, ['profile_image' => $path]);
+        $previous = (string) ($member['profile_image'] ?? '');
+        if ($previous !== '' && str_starts_with($previous, '/assets/uploads/avatars/')) {
+            $old = FCPATH . ltrim($previous, '/');
+            if ($old !== $uploadDir . '/' . $filename && is_file($old)) @unlink($old);
+        }
+    }
+
+    private function validUsername(string $username): bool
+    {
+        return (bool) preg_match('/^[a-z][a-z0-9_]{2,19}$/', $username);
+    }
+
+    private function randomPassword(): string
+    {
+        $alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+        $out = '';
+        for ($i = 0; $i < 16; $i++) $out .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+        return $out;
+    }
+
+    private function validCsrf(): bool
+    {
+        $sent = (string) $this->input->post('csrf_token');
+        $known = (string) $this->session->userdata('csrf_token');
+        return $sent !== '' && $known !== '' && hash_equals($known, $sent);
+    }
+
+    private function ip(): string
+    {
+        return (string) $this->input->ip_address();
+    }
+
+    private function base(string $title, string $active): array
+    {
+        $state = $this->platform->state();
+        $identity = $this->adminActor() ?: $this->currentUser();
+        return [
+            'title' => $title,
+            'active' => $active,
+            'adminUser' => $identity,
+            'adminPerms' => $identity['permissions'] ?? [],
+            'isSuperAdmin' => $this->isSuperAdmin($identity),
+            'status' => ['tradingMode' => $state['tradingMode'], 'killSwitch' => $state['killSwitch'], 'providers' => $this->platform->providers->getAllHealth()],
+            'csrfToken' => (string) $this->session->userdata('csrf_token'),
+            'notice' => $this->session->flashdata('notice'),
+            'error' => $this->session->flashdata('error'),
+            'tempPassword' => $this->session->flashdata('temp_password'),
+            'productName' => $this->portal->setting('product_name', 'WINDELS AI WORKFORCE'),
+        ];
+    }
+
+    private function render(string $view, array $data): void
+    {
+        $this->load->view('admin/layout/header', $data);
+        $this->load->view($view, $data);
+        $this->load->view('admin/layout/footer');
+    }
+
+    private function flash(string $key, string $msg): void
+    {
+        $this->session->set_flashdata($key, $msg);
+    }
+}
+}
 
     private function canImpersonate(array $actor, array $target): bool
     {

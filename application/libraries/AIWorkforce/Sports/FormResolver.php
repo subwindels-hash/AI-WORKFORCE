@@ -24,6 +24,17 @@ use AIWorkforce\Sports\Providers\SportMonksProvider;
 class FormResolver
 {
     /**
+     * @param int $maxTeamLookups per-enrich() budget of team-statistics API
+     *        calls. A 14-day worldwide fixture pull can hold hundreds of
+     *        unique teams; uncapped enrichment burns the whole daily quota
+     *        (api-football free = 100 req/day) before odds/results sync.
+     *        Fixtures past the budget keep no recentForm context and the
+     *        pipeline handles them honestly (no prediction, explicit
+     *        rejection) instead of failing the sync.
+     */
+    public function __construct(private int $maxTeamLookups = 30) {}
+
+    /**
      * Enrich a list of fixtures with recentForm context using provider APIs.
      *
      * @param SportsDataProvider $provider The provider that originally supplied the fixtures
@@ -39,6 +50,7 @@ class FormResolver
 
         // Build a cache of team stats we've already fetched to minimize API calls
         $teamStatsCache = [];
+        $lookups = 0;
 
         foreach ($fixtures as &$fixture) {
             $homeTeamId = $fixture['homeTeamId'] ?? null;
@@ -51,8 +63,8 @@ class FormResolver
             // Skip if no team IDs or league to fetch from
             if (!$homeTeamId || !$awayTeamId) continue;
 
-            $homeForm = $this->fetchTeamForm($provider, $homeTeamId, $leagueId, $season, $teamStatsCache, 'home');
-            $awayForm = $this->fetchTeamForm($provider, $awayTeamId, $leagueId, $teamStatsCache, 'away');
+            $homeForm = $this->fetchTeamForm($provider, $homeTeamId, $leagueId, $season, $teamStatsCache, $lookups);
+            $awayForm = $this->fetchTeamForm($provider, $awayTeamId, $leagueId, $season, $teamStatsCache, $lookups);
 
             if ($homeForm !== null && $awayForm !== null) {
                 $fixture['context'] = array_merge($fixture['context'] ?? [], [
@@ -77,15 +89,19 @@ class FormResolver
      *
      * @return array{goalsPerMatch: float, concededPerMatch: float}|null
      */
-    private function fetchTeamForm(SportsDataProvider $provider, string $teamId, ?string $leagueId, ?string $season, array &$cache, string $side): ?array
+    private function fetchTeamForm(SportsDataProvider $provider, string $teamId, ?string $leagueId, ?string $season, array &$cache, int &$lookups): ?array
     {
         if ($teamId === '' || $teamId === '0') return null;
 
         $cacheKey = $teamId . ':' . ($leagueId ?? '') . ':' . ($season ?? '');
         if (isset($cache[$cacheKey])) return $cache[$cacheKey];
+        // Quota budget: cache hits are free, live lookups stop at the cap so a
+        // big fixture pull cannot burn the daily quota before odds/results sync.
+        if ($lookups >= $this->maxTeamLookups) return null;
 
         try {
             if ($provider instanceof ApiFootballProvider && $leagueId && $season) {
+                $lookups++;
                 $stats = $provider->teamStatistics($teamId, $leagueId, $season);
                 $played = (int) ($stats['played'] ?? 0);
                 if ($played < 1) return null;
@@ -101,6 +117,7 @@ class FormResolver
 
             if ($provider instanceof SportMonksProvider && $leagueId) {
                 // Use standings as a proxy for team form
+                $lookups++;
                 $standings = $provider->standings($leagueId, $season ?? '');
                 foreach ($standings as $entry) {
                     if ((string) ($entry['teamId'] ?? '') === $teamId) {

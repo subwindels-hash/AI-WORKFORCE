@@ -258,8 +258,15 @@ class SportsRepositoryStub implements \AIWorkforce\Persistence\SportsRepository
     public function findResult(int $matchId, int $providerId): ?array { foreach ($this->results as $r) if ((int) $r['match_id'] === $matchId && (int) $r['provider_id'] === $providerId) return $r; return null; }
     public function findResultByMatch(int $matchId): ?array { $rows = array_values(array_filter($this->results, fn($r) => (int) $r['match_id'] === $matchId)); if (!$rows) return null; usort($rows, fn($a, $b) => ($b['verified'] ?? 0) <=> ($a['verified'] ?? 0)); return $rows[0]; }
     public function verifyResult(int $id): void { foreach ($this->results as &$r) if ((int) $r['id'] === $id) { $r['verified'] = 1; $r['verified_at'] = gmdate('c'); } }
-    public function startSync(array $run): ?array { if (isset($this->syncKeys[$run['executionKey']])) return null; $this->syncKeys[$run['executionKey']] = true; $this->syncRuns[] = $run; return $run; }
-    public function finishSync(string $id, array $result): void { foreach ($this->syncRuns as &$r) if ($r['id'] === $id) $r = array_merge($r, ['status' => $result['status'], 'result' => $result]); }
+    public function startSync(array $run): ?array { if (isset($this->syncKeys[$run['executionKey']])) return null; $this->syncKeys[$run['executionKey']] = true; $this->syncRuns[] = array_merge($run, ['status' => 'RUNNING', 'started_at' => gmdate('c')]); return $run; }
+    public function finishSync(string $id, array $result): void { foreach ($this->syncRuns as &$r) if ($r['id'] === $id) $r = array_merge($r, ['status' => $result['status'], 'ended_at' => gmdate('c'), 'records_processed' => $result['processed'] ?? 0, 'records_created' => $result['created'] ?? 0, 'records_updated' => $result['updated'] ?? 0, 'errors' => $result['errors'] ?? [], 'result' => $result]); }
+    public function listSyncRuns(?string $jobType = null, int $limit = 50): array
+    {
+        $rows = $jobType === null ? $this->syncRuns : array_values(array_filter($this->syncRuns, fn($r) => ($r['jobType'] ?? $r['job_type'] ?? '') === $jobType));
+        $rows = array_reverse($rows);
+        $map = fn($r) => array_merge($r, ['job_type' => $r['job_type'] ?? $r['jobType'] ?? '', 'provider_id' => $r['provider_id'] ?? $r['providerId'] ?? null, 'execution_key' => $r['execution_key'] ?? $r['executionKey'] ?? '', 'errors' => $r['errors'] ?? $r['result']['errors'] ?? []]);
+        return array_slice(array_map($map, $rows), 0, max(1, $limit));
+    }
     public function ensureModelVersion(array $m): int
     {
         foreach ($this->modelVersions as $v) if ($v['model_name'] === $m['modelName'] && $v['model_version'] === $m['modelVersion']) return (int) $v['id'];

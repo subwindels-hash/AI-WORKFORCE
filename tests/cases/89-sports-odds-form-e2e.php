@@ -352,3 +352,53 @@ test('sportmonks complete odds flow: normalized → pipeline-compatible', functi
     assert_equals('OVER_1_5', $normalized['selection']);
     assert_equals(1.50, $normalized['decimalOdds']);
 });
+
+function fx_form_stats_transport(&$calls): callable
+{
+    return function () use (&$calls) {
+        $calls++;
+        return ['status' => 200, 'body' => json_encode(['errors' => [], 'response' => [
+            'fixtures' => ['played' => ['total' => 10]],
+            'goals' => ['for' => ['total' => ['total' => 20]], 'against' => ['total' => ['total' => 10]]],
+        ]])];
+    };
+}
+
+test('FormResolver enriches the away side without argument errors', function () {
+    // Regression: the away-side call once passed ($teamStatsCache, 'away') in
+    // the ($season, $cache, $side) slots — a TypeError that failed the whole
+    // fixtures sync for api-football/sportmonks, leaving zero stored fixtures.
+    $calls = 0;
+    $p = new \AIWorkforce\Sports\Providers\ApiFootballProvider('k', 'https://v3.football.api-sports.io', 10, fx_form_stats_transport($calls));
+    $resolver = new FormResolver();
+    $enriched = $resolver->enrich($p, [
+        ['homeTeamId' => 'h1', 'awayTeamId' => 'a1', 'leagueId' => '39', 'season' => '2024'],
+    ]);
+    $form = $enriched[0]['context']['recentForm'] ?? null;
+    assert_true(is_array($form), 'recentForm attached');
+    assert_equals(2.0, $form['homeGoalsPerMatch']);
+    assert_equals(2.0, $form['awayGoalsPerMatch']);
+    assert_equals(1.0, $form['homeConcededPerMatch']);
+    assert_equals(1.0, $form['awayConcededPerMatch']);
+    assert_equals(2, $calls, 'one lookup per side');
+});
+
+test('FormResolver caps team-statistics lookups to protect the daily quota', function () {
+    $calls = 0;
+    $p = new \AIWorkforce\Sports\Providers\ApiFootballProvider('k', 'https://v3.football.api-sports.io', 10, fx_form_stats_transport($calls));
+    $fixtures = [];
+    for ($i = 1; $i <= 10; $i++) {
+        $fixtures[] = ['homeTeamId' => 'h' . $i, 'awayTeamId' => 'a' . $i, 'leagueId' => '39', 'season' => '2024'];
+    }
+    $resolver = new FormResolver(4);
+    $enriched = $resolver->enrich($p, $fixtures);
+    assert_equals(4, $calls, 'only 4 live lookups for 20 unique teams');
+    $withForm = array_values(array_filter($enriched, fn($f) => !empty($f['context']['recentForm'])));
+    assert_equals(2, count($withForm), 'first 2 fixtures fully enriched, rest honestly unenriched');
+    // The default budget keeps ordinary pulls fully enriched.
+    $calls = 0;
+    $resolver = new FormResolver();
+    $enriched = $resolver->enrich($p, array_slice($fixtures, 0, 2));
+    assert_equals(4, $calls);
+    assert_true(!empty($enriched[0]['context']['recentForm']) && !empty($enriched[1]['context']['recentForm']));
+});

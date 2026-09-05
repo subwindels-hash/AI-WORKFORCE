@@ -6,7 +6,6 @@ use AIWorkforce\Persistence\AuditRepository;
 use AIWorkforce\Persistence\SportsRepository;
 use AIWorkforce\Sports\Providers\ApiFootballProvider;
 use AIWorkforce\Sports\Providers\HttpSportsProvider;
-use AIWorkforce\Sports\Providers\FootballApiProvider;
 use AIWorkforce\Sports\Providers\ProviderException;
 use AIWorkforce\Sports\Providers\SandboxSportsProvider;
 use AIWorkforce\Sports\Providers\SportMonksProvider;
@@ -123,7 +122,19 @@ class SportsIntelligence
             $key = getenv($keyName);
             if (is_string($key) && $key !== '') {
                 $base = (string)(getenv('WINDELS_'.strtoupper(str_replace('-', '_', $id)).'_BASE_URL') ?: $defaultBase);
-                $this->providers->register(new FootballApiProvider($id, $base, $key, $kind, (int)(getenv('WINDELS_SPORTS_HTTP_TIMEOUT') ?: 10)));
+                $timeout = (int)(getenv('WINDELS_SPORTS_HTTP_TIMEOUT') ?: 10);
+                // Register the native adapter directly (not the legacy
+                // FootballApiProvider wrapper): capability checks
+                // (method_exists/instanceof for round sync, team statistics,
+                // standings, top players) must see the real class, otherwise
+                // env-configured providers silently lose form enrichment,
+                // round sync and the smoke-test layers.
+                $native = match ($kind) {
+                    'api-football' => new ApiFootballProvider($key, $base, $timeout),
+                    'thesportsdb' => new TheSportsDbProvider($key, $base, $timeout),
+                    'sportmonks' => new SportMonksProvider($key, $base, $timeout),
+                };
+                $this->providers->register($native);
             }
         }
         // Also discover native providers from the central ApiProviders store
@@ -309,11 +320,14 @@ class SportsIntelligence
         $calibrations = $this->repository->listCalibrations(null, 'APPROVED', 10);
         $lastSyncs = array_slice($this->repository->listJobRuns(null, 30), 0, 8);
         $qualityRows = array_map(fn($m) => ['match' => $m, 'quality' => $this->repository->latestQuality((int) $m['id'])], array_merge($upcoming, $live));
+        $recentSyncs = [];
+        try { $recentSyncs = $this->repository->listSyncRuns(null, 8); } catch (\Throwable $e) { $recentSyncs = []; }
         return [
             'systemStatus' => [
                 'enabled' => $status['enabled'], 'mode' => $status['mode'], 'isDemoData' => $status['isDemoData'],
                 'providers' => $status['providers'], 'liveHealth' => $status['liveHealth'],
-                'lastSyncs' => $lastSyncs, 'ticketEngine' => $status['ticketEngine'],
+                'providersConfigured' => $status['providersConfigured'], 'configuredIds' => array_keys($this->providers->all()),
+                'lastSyncs' => $lastSyncs, 'recentSyncs' => $recentSyncs, 'ticketEngine' => $status['ticketEngine'],
             ],
             'todayIntelligence' => [
                 'date' => $today,

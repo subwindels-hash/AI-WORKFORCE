@@ -634,10 +634,14 @@ class Auth extends MY_Controller
 
     private function renderPage(string $title, string $active, array $data = []): void
     {
-        $state = $this->platform->state();
+        $state = ['tradingMode' => 'ANALYSIS_ONLY', 'killSwitch' => ['active' => true]];
+        try { $state = $this->platform->state(); } catch (Throwable $e) { log_message('error', 'account state failed: ' . $e->getMessage()); }
         $data = array_merge($data, [
             'title' => $title, 'active' => $active,
-            'status' => ['tradingMode' => $state['tradingMode'], 'killSwitch' => $state['killSwitch'], 'providers' => $this->platform->providers->getAllHealth()],
+            // No live provider health probes here: the layout header never
+            // renders them and each probe is a blocking outbound HTTP call.
+            // Live health stays available via /api/market-data/* endpoints.
+            'status' => ['tradingMode' => $state['tradingMode'], 'killSwitch' => $state['killSwitch'], 'providers' => []],
             'notice' => $this->consumeFlash('notice'), 'error' => $this->consumeFlash('error'),
         ]);
         $this->load->view('layout/header', $data); $this->load->view('auth/account', $data); $this->load->view('layout/footer');

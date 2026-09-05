@@ -66,6 +66,114 @@ class Sports extends App_Controller
     }
 
     /**
+     * Pull fresh data from the configured sports providers (sports.manage).
+     * Browser-accessible equivalent of the cron sweep for operators without
+     * CLI/cron access: fixtures for today+tomorrow, a bounded odds/results
+     * refresh, quality recalc and the daily ticket run. Bounded so a first
+     * pull cannot exhaust a free-tier daily quota or PHP's time limit.
+     */
+    public function sync()
+    {
+        if ($this->input->method(true) !== 'POST') { redirect('/sports'); return; }
+        if (!$this->requireSportsPermission('sports.manage', 'sync')) return;
+        @set_time_limit(180);
+        $sports = $this->platform->sports;
+        $date = gmdate('Y-m-d');
+        $tomorrow = gmdate('Y-m-d', strtotime($date . ' +1 day'));
+        $providers = $sports->providers->all();
+        if (!$providers) {
+            $this->flash('error', 'No sports provider is registered. Add a provider key (API-Football, TheSportsDB or SportMonks) via Admin → API or the WINDELS_*_KEY variables in .env, then sync again.');
+            redirect('/sports');
+            return;
+        }
+        $stamp = gmdate('YmdHis');
+        $fixtures = 0; $created = 0; $errors = [];
+        foreach ($providers as $provider) {
+            try {
+                $r = $sports->sync->syncFixtures($provider, ['from' => $date, 'to' => $tomorrow], 'web-sync:fixtures:' . $date . ':' . $provider->id() . ':' . $stamp);
+            } catch (Throwable $e) {
+                $r = ['status' => 'FAILED', 'errors' => [mb_substr($e->getMessage(), 0, 200)]];
+            }
+            $fixtures += (int) ($r['processed'] ?? 0);
+            $created += (int) ($r['created'] ?? 0);
+            foreach (array_slice((array) ($r['errors'] ?? []), 0, 3) as $err) $errors[] = $provider->id() . ': ' . mb_substr((string) $err, 0, 160);
+        }
+        $oddsDone = $this->syncWebOdds($sports, $date, $stamp, $errors);
+        $resultsDone = $this->syncWebResults($sports, $date, $stamp, $errors);
+        $ticketStatus = null;
+        try {
+            $cron = new \AIWorkforce\Sports\SportsCronService($this->AIWorkforce_model->sports, $this->AIWorkforce_model->audit, $sports);
+            $cron->run('quality', $date);
+            $ticket = $cron->run('ticket', $date);
+            $ticketStatus = (string) ($ticket['status'] ?? '');
+        } catch (Throwable $e) {
+            $errors[] = 'ticket: ' . mb_substr($e->getMessage(), 0, 160);
+        }
+        if ($fixtures > 0 || $created > 0 || $oddsDone > 0 || $resultsDone > 0) {
+            $msg = sprintf('Sync complete: %d fixture(s) pulled (%d new), odds refreshed for %d, results checked for %d.', $fixtures, $created, $oddsDone, $resultsDone);
+            if ($ticketStatus !== null && $ticketStatus !== '') $msg .= ' Ticket engine: ' . $ticketStatus . '.';
+            if ($errors) $msg .= ' ' . count($errors) . ' warning(s) — see Data feed below.';
+            $this->flash('notice', $msg);
+        } else {
+            $first = $errors ? ' First error: ' . mb_substr((string) $errors[0], 0, 200) : ' The providers returned no fixtures for ' . $date . '–' . $tomorrow . '.';
+            $this->flash('error', 'Sync pulled nothing.' . $first);
+        }
+        redirect('/sports');
+    }
+
+    /** Refresh odds for today's scheduled matches, bounded for web use. */
+    private function syncWebOdds(\AIWorkforce\Sports\SportsIntelligence $sports, string $date, string $stamp, array &$errors): int
+    {
+        $done = 0;
+        $end = gmdate('Y-m-d', strtotime($date . ' +1 day')) . 'T00:00:00+00:00';
+        $matches = $this->AIWorkforce_model->sports->listMatches(['from' => $date . 'T00:00:00+00:00', 'to' => $end, 'status' => 'SCHEDULED'], 40);
+        $sources = $this->AIWorkforce_model->sports->listProviders();
+        foreach ($matches as $match) {
+            $provider = $this->webProviderById($sports, $sources, (int) $match['provider_id']);
+            if ($provider === null) continue;
+            try {
+                $r = $sports->sync->syncOdds($provider, (string) $match['external_id'], 'web-sync:odds:' . (int) $match['id'] . ':' . $date . ':' . $stamp);
+                if (($r['status'] ?? '') === 'COMPLETED') $done++;
+                elseif (!empty($r['errors'][0]) && count($errors) < 6) $errors[] = $provider->id() . ' odds: ' . mb_substr((string) $r['errors'][0], 0, 160);
+            } catch (Throwable $e) {
+                if (count($errors) < 6) $errors[] = $provider->id() . ' odds: ' . mb_substr((string) $e->getMessage(), 0, 160);
+            }
+        }
+        return $done;
+    }
+
+    /** Check results for recent matches that have none stored, bounded for web use. */
+    private function syncWebResults(\AIWorkforce\Sports\SportsIntelligence $sports, string $date, string $stamp, array &$errors): int
+    {
+        $done = 0;
+        $since = gmdate('Y-m-d', strtotime($date . ' -2 days')) . 'T00:00:00+00:00';
+        $matches = $this->AIWorkforce_model->sports->listMatches(['from' => $since, 'to' => $date . 'T23:59:59+00:00'], 200);
+        $sources = $this->AIWorkforce_model->sports->listProviders();
+        $checked = 0;
+        foreach ($matches as $match) {
+            if ($checked >= 40) break;
+            if ($this->AIWorkforce_model->sports->findResultByMatch((int) $match['id']) !== null) continue;
+            $provider = $this->webProviderById($sports, $sources, (int) $match['provider_id']);
+            if ($provider === null) continue;
+            $checked++;
+            try {
+                $r = $sports->sync->syncResults($provider, (string) $match['external_id'], 'web-sync:results:' . (int) $match['id'] . ':' . $date . ':' . $stamp);
+                if (($r['status'] ?? '') === 'COMPLETED') $done++;
+                elseif (!empty($r['errors'][0]) && count($errors) < 6) $errors[] = $provider->id() . ' results: ' . mb_substr((string) $r['errors'][0], 0, 160);
+            } catch (Throwable $e) {
+                if (count($errors) < 6) $errors[] = $provider->id() . ' results: ' . mb_substr((string) $e->getMessage(), 0, 160);
+            }
+        }
+        return $done;
+    }
+
+    private function webProviderById(\AIWorkforce\Sports\SportsIntelligence $sports, array $sources, int $id): ?\AIWorkforce\Sports\Providers\SportsDataProvider
+    {
+        foreach ($sources as $p) if ((int) $p['id'] === $id) return $sports->providers->provider((string) $p['provider_code']);
+        return null;
+    }
+
+    /**
      * Enforce the sports RBAC matrix + production guards for console
      * mutations (PRG flow). Plan step 6 (production review): form POSTs
      * self-guard with the session CSRF token issued at sign-in — the same

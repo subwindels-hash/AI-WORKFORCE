@@ -25,12 +25,35 @@ class LiveCrashProvider extends AbstractCrashGameProvider
     private float $fetchedAt = 0;
     private int $ttlSeconds = 8;
     private bool $diskCache;
+    /**
+     * Cache-only mode: refresh() serves the disk cache and never touches the
+     * network. Used by aggregate pages (e.g. /dashboard) that must render in
+     * milliseconds even when the live crash endpoints are unreachable — a full
+     * endpoint sweep costs up to 5 × 8s of blocking I/O and can push the page
+     * past PHP's max_execution_time. Dedicated pages (/multiplier/live, …)
+     * stay live. Never fabricates data: without a cache the provider reports
+     * NO_DATA exactly as if every endpoint had failed.
+     */
+    private bool $offline = false;
 
     public function __construct(array $config = [], ?callable $transport = null)
     {
         parent::__construct($config);
         $this->diskCache = empty($config['disable_cache']) && ($transport === null || !empty($config['cachePath']));
         $this->transport = $transport ?? [$this, 'defaultTransport'];
+        if (!empty($config['offline'])) {
+            $this->offline = true;
+            $this->diskCache = empty($config['disable_cache']);
+        }
+    }
+
+    /** Enable/disable cache-only mode (no outbound HTTP when enabled). */
+    public function setOffline(bool $offline): void
+    {
+        $this->offline = $offline;
+        if ($offline && empty($this->config['disable_cache'])) {
+            $this->diskCache = true;
+        }
     }
 
     public function code(): string
@@ -206,6 +229,18 @@ class LiveCrashProvider extends AbstractCrashGameProvider
         }
         $this->fetchedAt = microtime(true);
         $this->lastError = null;
+
+        // Cache-only mode: skip every outbound endpoint and serve the disk
+        // cache (or NO_DATA). Aggregate pages must never block on live feeds.
+        if ($this->offline) {
+            if ($this->loadCache()) {
+                return;
+            }
+            $this->lastError = 'live feed skipped (cache-only mode) — no cached rounds available';
+            $this->sourceUrl = null;
+            $this->live = null;
+            return;
+        }
 
         foreach ($this->endpoints() as $endpoint) {
             try {

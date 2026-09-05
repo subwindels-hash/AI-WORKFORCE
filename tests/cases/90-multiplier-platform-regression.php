@@ -138,3 +138,51 @@ test('live provider reuses persisted real rounds when the feed is down', functio
     assert_equals(2.2, $hist[0]['multiplier']);
     @unlink($cache);
 });
+
+test('live provider offline mode serves the disk cache without touching the network', function () {
+    $cache = sys_get_temp_dir() . '/windels_crash_offline_' . bin2hex(random_bytes(4)) . '.json';
+    $ok = static function () {
+        return json_encode(['games' => [
+            ['id' => 11, 'bust' => 2.2, 'createdAt' => '2026-01-01T00:00:00Z'],
+            ['id' => 12, 'bust' => 1.5, 'createdAt' => '2026-01-01T00:00:10Z'],
+        ]]);
+    };
+    $seed = new LiveCrashProvider(['cachePath' => $cache], $ok);
+    assert_equals(2, count($seed->history(20)));
+
+    $calls = 0;
+    $exploding = static function () use (&$calls) {
+        $calls++;
+        throw new RuntimeException('network used in offline mode');
+    };
+    // Constructor flag …
+    $offline = new LiveCrashProvider(['cachePath' => $cache, 'offline' => true], $exploding);
+    $hist = $offline->history(20);
+    assert_equals(2, count($hist), 'cached rounds served offline');
+    assert_equals(2.2, $hist[0]['multiplier']);
+    // … and the runtime setter used by the dashboard widget.
+    $setter = new LiveCrashProvider(['cachePath' => $cache], $exploding);
+    $setter->setOffline(true);
+    assert_equals(2, count($setter->history(20)), 'setOffline(true) serves cache');
+    assert_equals(0, $calls, 'no outbound HTTP in offline mode');
+    @unlink($cache);
+});
+
+test('live provider offline mode without a cache reports NO_DATA instead of hanging', function () {
+    $cache = sys_get_temp_dir() . '/windels_crash_offline_empty_' . bin2hex(random_bytes(4)) . '.json';
+    @unlink($cache);
+    $exploding = static function () {
+        throw new RuntimeException('network used in offline mode');
+    };
+    $provider = new LiveCrashProvider(['cachePath' => $cache, 'offline' => true], $exploding);
+    assert_equals([], $provider->history(20), 'empty history, no fabricated rounds');
+    assert_true($provider->latestRound() === null, 'no latest round');
+    assert_true($provider->currentMultiplier() === null, 'no live multiplier');
+    assert_true($provider->isInRound() === false, 'not in round');
+    $health = $provider->health();
+    assert_equals('DOWN', $health['status'] ?? null);
+    $engine = new AIWorkforce\MultiplierIntelligence\MultiplierIntelligenceEngine($provider);
+    $signal = $engine->generateSignal();
+    assert_equals('NO_DATA', $signal['status'] ?? null);
+    @unlink($cache);
+});

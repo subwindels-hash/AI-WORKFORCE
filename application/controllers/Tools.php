@@ -18,7 +18,7 @@ class Tools extends MY_Controller
 
     public function index()
     {
-        echo "AI Workforce tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n  php index.php tools marketdata        — market-data connectivity report (add --activate to go live, --probe to fetch real bars)\n  php index.php tools cron              — scheduled operations: portfolio risk scan, broker transitions, proposal expiry\n  php index.php tools sports-cron [job] — sports scheduled jobs (fixtures|odds|results|quality|ticket|settlement|performance|monitoring|cleanup)\n  php index.php tools lottery-cron [job] — lottery scheduled jobs (sync|health|statistics|systems|tickets|backtests|cleanup)\n";
+        echo "AI Workforce tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n  php index.php tools marketdata        — market-data connectivity report (add --activate to go live, --probe to fetch real bars)\n  php index.php tools cron              — scheduled operations: portfolio risk scan, broker transitions, proposal expiry\n  php index.php tools scheduler [job]   — unified scheduler: runs every enabled + due job (ops|sports|lottery)\n  php index.php tools sports-cron [job] — sports scheduled jobs (fixtures|odds|results|quality|ticket|settlement|performance|monitoring|cleanup)\n  php index.php tools lottery-cron [job] — lottery scheduled jobs (sync|health|statistics|systems|tickets|backtests|cleanup)\n";
     }
 
     public function install()
@@ -68,20 +68,30 @@ class Tools extends MY_Controller
      */
     public function cron()
     {
-        $scan = $this->platform->monitor->scan();
-        $expired = $this->platform->execution->expireStaleProposals();
-        $summary = [
-            'ranAt' => gmdate('c'),
-            'accountsScanned' => $scan['accountsScanned'] ?? 0,
-            'riskAlerts' => count($scan['alerts'] ?? []),
-            'proposalsExpired' => count($expired),
-            'expiredIds' => $expired,
-        ];
-        $this->AIWorkforce_model->audit->emit('CRON_RUN', sprintf(
-            'Scheduled operations: %d account(s) scanned, %d risk alert(s) active, %d proposal(s) expired',
-            $summary['accountsScanned'], $summary['riskAlerts'], $summary['proposalsExpired']
-        ), $summary, 'system');
+        $summary = \AIWorkforce\Cron\CronRunner::ops($this);
         echo json_encode($summary, JSON_UNESCAPED_SLASHES), "\n";
+    }
+
+    /**
+     * Unified scheduler — run every minute from system cron; only enabled +
+     * due jobs execute (per-job locks prevent overlaps):
+     *   * * * * * php /path/to/index.php tools scheduler >> /var/log/ai_workforce-cron.log 2>&1
+     * Optional single job: php index.php tools scheduler sports
+     */
+    public function scheduler()
+    {
+        $store = new \AIWorkforce\Cron\PlatformSettingsCronStore($this->AIWorkforce_model->db);
+        $scheduler = new \AIWorkforce\Cron\CronScheduler($store);
+        $runners = \AIWorkforce\Cron\CronRunner::runners($this);
+        $only = trim((string) ($_SERVER['argv'][3] ?? ''));
+        if ($only !== '' && !isset($runners[$only])) {
+            fwrite(STDERR, 'unknown job. Valid: ' . implode(', ', array_keys($runners)) . "\n");
+            exit(1);
+        }
+        $result = $only !== ''
+            ? [$only => $scheduler->runJob($only, $runners[$only])]
+            : $scheduler->runDue(fn(string $id) => $runners[$id] ?? null);
+        echo json_encode($result, JSON_UNESCAPED_SLASHES), "\n";
     }
 
     /**
