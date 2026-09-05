@@ -433,19 +433,37 @@ class ApiFootballProvider implements SportsDataProvider
             foreach (($league['standings'] ?? []) as $tierRows) {
                 foreach ($tierRows as $entry) {
                     $team = $entry['team'] ?? [];
+                    $all = is_array($entry['all'] ?? null) ? $entry['all'] : [];
+                    $home = is_array($entry['home'] ?? null) ? $entry['home'] : [];
+                    $away = is_array($entry['away'] ?? null) ? $entry['away'] : [];
                     $out[] = [
                         'leagueId' => $leagueId,
                         'season' => $season,
                         'rank' => (int) ($entry['rank'] ?? 0),
                         'team' => $team['name'] ?? '',
                         'teamId' => (string) ($team['id'] ?? ''),
-                        'played' => (int) ($entry['all']['played'] ?? 0),
-                        'wins' => (int) ($entry['all']['win'] ?? 0),
-                        'draws' => (int) ($entry['all']['draw'] ?? 0),
-                        'losses' => (int) ($entry['all']['lose'] ?? 0),
-                        'goalsFor' => (int) ($entry['all']['goals']['for'] ?? 0),
-                        'goalsAgainst' => (int) ($entry['all']['goals']['against'] ?? 0),
+                        'played' => (int) ($all['played'] ?? 0),
+                        'wins' => (int) ($all['win'] ?? 0),
+                        'draws' => (int) ($all['draw'] ?? 0),
+                        'losses' => (int) ($all['lose'] ?? 0),
+                        'goalsFor' => (int) ($all['goals']['for'] ?? 0),
+                        'goalsAgainst' => (int) ($all['goals']['against'] ?? 0),
                         'points' => (int) ($entry['points'] ?? 0),
+                        // Venue splits — the football model needs home vs away
+                        // rates, and the same response already carries them.
+                        'homePlayed' => isset($home['played']) ? (int) $home['played'] : null,
+                        'homeWins' => isset($home['win']) ? (int) $home['win'] : null,
+                        'homeDraws' => isset($home['draw']) ? (int) $home['draw'] : null,
+                        'homeLosses' => isset($home['lose']) ? (int) $home['lose'] : null,
+                        'homeGoalsFor' => isset($home['goals']['for']) ? (int) $home['goals']['for'] : null,
+                        'homeGoalsAgainst' => isset($home['goals']['against']) ? (int) $home['goals']['against'] : null,
+                        'awayPlayed' => isset($away['played']) ? (int) $away['played'] : null,
+                        'awayWins' => isset($away['win']) ? (int) $away['win'] : null,
+                        'awayDraws' => isset($away['draw']) ? (int) $away['draw'] : null,
+                        'awayLosses' => isset($away['lose']) ? (int) $away['lose'] : null,
+                        'awayGoalsFor' => isset($away['goals']['for']) ? (int) $away['goals']['for'] : null,
+                        'awayGoalsAgainst' => isset($away['goals']['against']) ? (int) $away['goals']['against'] : null,
+                        'group' => (string) ($league['name'] ?? ''),
                     ];
                 }
             }
@@ -467,8 +485,33 @@ class ApiFootballProvider implements SportsDataProvider
         $out['winsAway'] = (int) ($fixtures['wins']['away'] ?? 0);
         $out['goalsForTotal'] = (int) ($goals['for']['total']['total'] ?? 0);
         $out['goalsAgainstTotal'] = (int) ($goals['against']['total']['total'] ?? 0);
-        $out['goalsForAverage'] = round(($goals['for']['average']['home'] ?? 0 + $goals['for']['average']['away'] ?? 0) / 2, 2);
-        $out['goalsAgainstAverage'] = round(($goals['against']['average']['home'] ?? 0 + $goals['against']['average']['away'] ?? 0) / 2, 2);
+        // NOTE: `??` binds looser than `+`, so the previous inline average of
+        // home/away goals silently read only one side of the response. Each
+        // side is now fetched through num(), then combined explicitly.
+        $avg = static function (array $branch, string $side): ?float {
+            $value = $branch['average'][$side] ?? null;
+            return is_numeric($value) ? (float) $value : null;
+        };
+        $forAverage = [$avg($goals['for'] ?? [], 'home'), $avg($goals['for'] ?? [], 'away')];
+        $againstAverage = [$avg($goals['against'] ?? [], 'home'), $avg($goals['against'] ?? [], 'away')];
+        $mean = static function (array $values): ?float {
+            $kept = array_values(array_filter($values, static fn($v) => $v !== null));
+            return $kept === [] ? null : round(array_sum($kept) / count($kept), 3);
+        };
+        $out['goalsForAverage'] = $mean($forAverage);
+        $out['goalsAgainstAverage'] = $mean($againstAverage);
+        // Venue detail the football model uses directly (rate per match at home
+        // / away), kept null when the provider did not answer that field.
+        $out['goalsForHomeAverage'] = $forAverage[0];
+        $out['goalsForAwayAverage'] = $forAverage[1];
+        $out['goalsAgainstHomeAverage'] = $againstAverage[0];
+        $out['goalsAgainstAwayAverage'] = $againstAverage[1];
+        $out['playedHome'] = isset($fixtures['played']['home']) ? (int) $fixtures['played']['home'] : null;
+        $out['playedAway'] = isset($fixtures['played']['away']) ? (int) $fixtures['played']['away'] : null;
+        $out['drawsHome'] = isset($fixtures['draws']['home']) ? (int) $fixtures['draws']['home'] : null;
+        $out['drawsAway'] = isset($fixtures['draws']['away']) ? (int) $fixtures['draws']['away'] : null;
+        $out['losesHome'] = isset($fixtures['loses']['home']) ? (int) $fixtures['loses']['home'] : null;
+        $out['losesAway'] = isset($fixtures['loses']['away']) ? (int) $fixtures['loses']['away'] : null;
         return $out;
     }
 
@@ -735,10 +778,106 @@ class ApiFootballProvider implements SportsDataProvider
                 'awayTeamId' => (string) ($teams['away']['id'] ?? ''),
                 'homeTeamLogo' => $teams['home']['logo'] ?? null,
                 'awayTeamLogo' => $teams['away']['logo'] ?? null,
+                'country' => $league['country']['name'] ?? null,
+                // Match-state detail, present only when the provider sent it.
+                // Absent scores stay absent: the reader shows DATA_UNAVAILABLE
+                // instead of defaulting a match to 0-0.
+                'statusShort' => $fixture['status']['short'] ?? null,
+                'statusLong' => $fixture['status']['long'] ?? null,
+                'minute' => self::intOrNull($fixture['status']['elapsed'] ?? null),
+                'extraMinute' => self::intOrNull($fixture['status']['extra'] ?? null),
+                'homeScore' => self::intOrNull($r['goals']['home'] ?? null),
+                'awayScore' => self::intOrNull($r['goals']['away'] ?? null),
+                'halfTimeHome' => self::intOrNull($r['score']['halftime']['home'] ?? null),
+                'halfTimeAway' => self::intOrNull($r['score']['halftime']['away'] ?? null),
                 'sourceTimestamp' => gmdate('c'),
             ];
         }
         return $out;
+    }
+
+    /** Numeric field or null — never a silent 0 for "the API did not say". */
+    private static function intOrNull(mixed $value): ?int
+    {
+        if ($value === null || $value === '' || !is_numeric($value)) return null;
+        return (int) $value;
+    }
+
+    /**
+     * Live fixtures only (GET /fixtures?live=all) — the provider's documented
+     * live endpoint, so a sweep does not re-pull the whole day to learn that a
+     * score changed. Rows carry the current score and minute.
+     */
+    public function liveFixtures(): array
+    {
+        return $this->mapFixtures($this->extractList($this->decodeJson($this->doRequest('/fixtures?live=all'))));
+    }
+
+    /** Single fixture detail (status, minute, scores, venue, referee). */
+    public function fixture(string $fixtureExternalId): array
+    {
+        $rows = $this->extractList($this->decodeJson($this->doRequest('/fixtures?id=' . rawurlencode($fixtureExternalId))));
+        $mapped = $this->mapFixtures($rows);
+        return $mapped[0] ?? [];
+    }
+
+    /**
+     * Head-to-head meetings between two teams (GET /fixtures?h2h=home-away).
+     * Optional `league` + `last` narrow the sample; only completed matches with
+     * a score are returned, so the caller never has to filter out gaps.
+     *
+     * @return array<int,array<string,mixed>> past fixtures (newest first)
+     */
+    public function headToHead(string $homeTeamId, string $awayTeamId, int $last = 10, ?string $leagueId = null): array
+    {
+        if ($homeTeamId === '' || $awayTeamId === '') return [];
+        $path = '/fixtures?h2h=' . rawurlencode($homeTeamId . '-' . $awayTeamId) . '&last=' . max(1, min(20, $last));
+        if ($leagueId !== null && $leagueId !== '') $path .= '&league=' . rawurlencode($leagueId);
+        $rows = $this->extractList($this->decodeJson($this->doRequest($path)));
+        $out = [];
+        foreach ($this->mapFixtures($rows) as $row) {
+            if (($row['status'] ?? '') !== 'FINISHED') continue;
+            if ($row['homeScore'] === null || $row['awayScore'] === null) continue;
+            $out[] = $row;
+        }
+        usort($out, static fn(array $a, array $b) => strcmp((string) ($b['kickoff'] ?? ''), (string) ($a['kickoff'] ?? '')));
+        return $out;
+    }
+
+    /**
+     * Per-fixture team statistics (GET /fixtures/statistics?fixture=ID) — the
+     * only place red cards, shots and possession come from for an in-play
+     * board. Flattened to {teamId => {label => value}}; an empty array means
+     * the provider has no statistics for this fixture yet.
+     */
+    public function fixtureStatistics(string $fixtureExternalId): array
+    {
+        $rows = $this->extractList($this->decodeJson($this->doRequest('/fixtures/statistics?fixture=' . rawurlencode($fixtureExternalId))));
+        $out = [];
+        foreach ($rows as $row) {
+            $teamId = (string) ($row['team']['id'] ?? '');
+            if ($teamId === '') continue;
+            $label = trim((string) ($row['type'] ?? ''));
+            if ($label === '') continue;
+            $value = $row['value'];
+            if (!is_numeric($value)) continue;
+            $out[$teamId][$label] = (int) (float) $value;
+            $out[$teamId]['_teamName'] = (string) ($row['team']['name'] ?? '');
+        }
+        return $out;
+    }
+
+    /**
+     * A team's recent league fixtures with scores
+     * (GET /fixtures?team=ID&last=N&next=0) — the source of the form column.
+     */
+    public function recentTeamFixtures(string $teamId, int $last = 10, ?string $leagueId = null): array
+    {
+        if ($teamId === '') return [];
+        $path = '/fixtures?team=' . rawurlencode($teamId) . '&last=' . max(1, min(20, $last));
+        if ($leagueId !== null && $leagueId !== '') $path .= '&league=' . rawurlencode($leagueId);
+        $rows = $this->mapFixtures($this->extractList($this->decodeJson($this->doRequest($path))));
+        return array_values(array_filter($rows, static fn(array $r) => ($r['status'] ?? '') === 'FINISHED' && $r['homeScore'] !== null && $r['awayScore'] !== null));
     }
 
     private function mapOdds(array $rows): array
@@ -1012,6 +1151,14 @@ class TheSportsDbProvider implements SportsDataProvider
             'awayTeamId' => (string) ($r['idAwayTeam'] ?? ''),
             'homeTeamLogo' => null,
             'awayTeamLogo' => null,
+            // Match-state detail from the same response — TheSportsDB carries
+            // scores and card counts on events; missing ones stay null.
+            'statusShort' => self::blankToNull($r['strStatus'] ?? null),
+            'minute' => self::intOrNull($r['intElapsed'] ?? null),
+            'homeScore' => self::intOrNull($r['intHomeScore'] ?? null),
+            'awayScore' => self::intOrNull($r['intAwayScore'] ?? null),
+            'homeRedCards' => self::intOrNull($r['intHomeRedCards'] ?? null),
+            'awayRedCards' => self::intOrNull($r['intAwayRedCards'] ?? null),
             // TheSportsDB cross-references api-football fixture ids — keep it
             // so the same match can be matched across providers.
             'apiFootballId' => self::refId($r['idAPIfootball'] ?? null),
@@ -1019,6 +1166,35 @@ class TheSportsDbProvider implements SportsDataProvider
         ];
         }
         return $out;
+    }
+
+    private static function blankToNull(mixed $value): ?string
+    {
+        $string = trim((string) ($value ?? ''));
+        return $string === '' ? null : $string;
+    }
+
+    private static function intOrNull(mixed $value): ?int
+    {
+        if ($value === null || $value === '' || !is_numeric($value)) return null;
+        return (int) $value;
+    }
+
+    /** Live matches (GET /livescore.php) — score + minute as the provider gives them. */
+    public function liveFixtures(): array
+    {
+        $resp = $this->doRequest('/livescore.php?d=' . gmdate('Y-m-d') . '&s=Soccer');
+        $events = $this->decodeJson($resp)['events'] ?? [];
+        return $this->mapFixtures(is_array($events) ? $events : []);
+    }
+
+    /** One fixture by id (GET /lookupevent.php) — status, score, cards. */
+    public function fixture(string $fixtureExternalId): array
+    {
+        $json = $this->decodeJson($this->doRequest('/lookupevent.php?id=' . rawurlencode($fixtureExternalId)));
+        $event = $json['event'] ?? $json['events'] ?? null;
+        if (!$event) return [];
+        return $this->mapFixtures(isset($event[0]) && is_array($event[0]) ? $event : [$event])[0] ?? [];
     }
 
     private function mapResults(array $rows): array
@@ -1433,10 +1609,81 @@ class SportMonksProvider implements SportsDataProvider
                 'awayTeamId' => $this->participantId($r, 'away'),
                 'homeTeamLogo' => $this->participantLogo($r, 'home'),
                 'awayTeamLogo' => $this->participantLogo($r, 'away'),
+                'country' => $r['league']['country']['name'] ?? ($r['country'] ?? null),
+                'statusShort' => is_array($r['status'] ?? null) ? ($r['status']['short'] ?? null) : ($r['status'] ?? null),
+                'statusLong' => is_array($r['status'] ?? null) ? ($r['status']['long'] ?? null) : null,
+                // SportMonks keeps live scores under scores.{side}.current and
+                // finished scores under .score; the elapsed minute comes from
+                // the `state` include when the caller asked for it.
+                'homeScore' => self::scoreOf($r, 'home'),
+                'awayScore' => self::scoreOf($r, 'away'),
+                'minute' => self::minuteOf($r),
                 'round' => $r['round']['name'] ?? null,
                 'roundId' => isset($r['round_id']) && $r['round_id'] !== null ? (string) $r['round_id'] : '',
                 'sourceTimestamp' => gmdate('c'),
             ];
+        }
+        return $out;
+    }
+
+    /** Finished score when present, otherwise the live score; null when neither exists. */
+    private static function scoreOf(array $r, string $side): ?int
+    {
+        $score = $r['scores'][$side]['score'] ?? null;
+        if (!is_numeric($score)) $score = $r['scores'][$side]['current'] ?? null;
+        return is_numeric($score) ? (int) $score : null;
+    }
+
+    /** Latest reported minute from SportMonks' `state` include (null when absent). */
+    private static function minuteOf(array $r): ?int
+    {
+        $minute = null;
+        foreach ((array) ($r['state'] ?? []) as $event) {
+            if (!is_array($event) || !isset($event['minute']) || !is_numeric($event['minute'])) continue;
+            $value = (int) $event['minute'];
+            if ($value > ($minute ?? 0)) $minute = $value;
+        }
+        return $minute;
+    }
+
+    /** Live fixtures for a day (GET /fixtures/live/{date}) with current scores. */
+    public function liveFixtures(): array
+    {
+        $resp = $this->doRequest('/fixtures/live/' . gmdate('Y-m-d') . '?include=state');
+        return $this->mapFixtures($this->extractList($this->decodeJson($resp)));
+    }
+
+    /** Head-to-head meetings (GET /fixtures/headtohead/{league} filtered by both teams). */
+    public function headToHead(string $homeTeamId, string $awayTeamId, int $last = 10, ?string $leagueId = null): array
+    {
+        if ($homeTeamId === '' || $awayTeamId === '' || $leagueId === null || $leagueId === '') return [];
+        $path = '/fixtures/headtohead/' . rawurlencode($leagueId) . '?' . http_build_query([
+            'filters' => 'h2h:' . $homeTeamId . ',' . $awayTeamId,
+            'page' => 1,
+        ]);
+        $rows = $this->mapFixtures($this->extractList($this->decodeJson($this->doRequest($path))));
+        $finished = array_values(array_filter($rows, static fn(array $r) => ($r['status'] ?? '') === 'FINISHED' && $r['homeScore'] !== null && $r['awayScore'] !== null));
+        usort($finished, static fn(array $a, array $b) => strcmp((string) ($b['kickoff'] ?? ''), (string) ($a['kickoff'] ?? '')));
+        return array_slice($finished, 0, max(1, min(20, $last)));
+    }
+
+    /** Per-fixture statistics (GET /fixtures/{id}?include=stats) — red cards live here. */
+    public function fixtureStatistics(string $fixtureExternalId): array
+    {
+        $resp = $this->doRequest('/fixtures/' . rawurlencode($fixtureExternalId) . '?include=stats');
+        $data = $this->decodeJson($resp)['data'] ?? [];
+        $stats = is_array($data['stats'] ?? null) ? $data['stats'] : [];
+        $out = [];
+        // SportMonks stat type ids: 9 = Yellow Cards, 10 = Red Cards,
+        // 11 = Yellow-Red Cards, 1 = Goals, 4 = Shots on Goal, 20 = Possession.
+        $labels = [1 => 'Goals', 4 => 'Shots on Goal', 5 => 'Shots off Goal', 9 => 'Yellow Cards', 10 => 'Red Cards', 11 => 'Yellow-Red Cards', 20 => 'Ball Possession', 13 => 'Corner Kicks', 15 => 'Offsides', 14 => 'Fouls'];
+        foreach ($stats as $stat) {
+            $teamId = (string) ($stat['team_id'] ?? '');
+            $type = (int) ($stat['type_id'] ?? 0);
+            if ($teamId === '' || !isset($labels[$type])) continue;
+            $value = $stat['value'];
+            if (!is_numeric($value)) continue;
+            $out[$teamId][$labels[$type]] = (float) $value;
         }
         return $out;
     }

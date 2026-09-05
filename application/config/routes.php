@@ -238,6 +238,45 @@ $route['api/sports/ticket-engine/run'] = 'api_sports/run_ticket_engine';
 $route['api/sports/risk'] = 'api_sports/risk_monitor';
 $route['api/sports/correlation'] = 'api_sports/correlation_monitor';
 
+// Football Intelligence — console (§10/§11/§16)
+$route['football'] = 'football';
+$route['football/match/(:num)'] = 'football/match/$1';
+$route['football/live'] = 'football/live';
+$route['football/models'] = 'football/models';
+$route['football/sync'] = 'football/sync';
+$route['football/predict'] = 'football/predict';
+$route['football/settle'] = 'football/settle';
+$route['football/calibrate'] = 'football/calibrate';
+$route['football/models/(:num)/decide'] = 'football/decide/$1';
+// Football Intelligence API (§17). Read paths take sports.view; model
+// approve/activate are admin-only and sit under /api/admin/football.
+$route['api/football/status'] = 'api_football/status';
+$route['api/football/provider/status'] = 'api_football/provider_status';
+$route['api/football/dashboard'] = 'api_football/dashboard';
+$route['api/football/fixtures'] = 'api_football/fixtures';
+$route['api/football/fixtures/today'] = 'api_football/fixtures_today';
+$route['api/football/fixtures/tomorrow'] = 'api_football/fixtures_tomorrow';
+$route['api/football/fixtures/live'] = 'api_football/fixtures_live';
+$route['api/football/matches/(:num)'] = 'api_football/show_match/$1';
+$route['api/football/matches/(:num)/analysis'] = 'api_football/analysis/$1';
+$route['api/football/matches/(:num)/prediction'] = 'api_football/prediction/$1';
+$route['api/football/predictions/today'] = 'api_football/predictions_today';
+$route['api/football/predictions/history'] = 'api_football/predictions_history';
+$route['api/football/performance'] = 'api_football/performance';
+$route['api/football/models'] = 'api_football/models';
+$route['api/football/models/active'] = 'api_football/models_active';
+$route['api/football/calibrations'] = 'api_football/calibrations';
+$route['api/football/sync'] = 'api_football/sync';
+$route['api/football/sync/live'] = 'api_football/sync_live';
+$route['api/football/settle'] = 'api_football/settle';
+$route['api/football/calibrate'] = 'api_football/calibrate';
+$route['api/football/jobs/(:any)/run'] = 'api_football/run_job/$1';
+$route['api/admin/football/models/(:num)/approve'] = 'api_football/approve_model/$1';
+$route['api/admin/football/models/(:num)/activate'] = 'api_football/activate_model/$1';
+// CLI commands are documented with dashes, but translate_uri_dashes is off —
+// map the documented form explicitly or it 404s.
+$route['tools/football-cron'] = 'tools/football_cron';
+
 // WINDELS Lottery Intelligence (EuroMillions first; provider-neutral)
 $route['api/lottery/status'] = 'api_lottery/status';
 $route['api/lottery/dashboard'] = 'api_lottery/dashboard';

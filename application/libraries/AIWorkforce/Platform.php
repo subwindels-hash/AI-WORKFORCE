@@ -42,6 +42,7 @@ class Platform
     public readonly UserBrokerConnections $userBrokers;
     public readonly ExecutionSupervisor $execution;
     public readonly \AIWorkforce\Sports\SportsIntelligence $sports;
+    public readonly \AIWorkforce\Football\FootballIntelligence $football;
     public readonly \AIWorkforce\Lottery\LotteryIntelligence $lottery;
     public readonly Identity $identity;
     public readonly RiskEngine $risk;
@@ -121,6 +122,14 @@ class Platform
             $model->audit,
             $this->notifications,
             $model->db
+        );
+        // Football Intelligence shares the sports provider registry (one
+        // credential layer, one health history) and its own repository, model
+        // registry and settlement ledger.
+        $this->football = new \AIWorkforce\Football\FootballIntelligence(
+            $model->football,
+            $this->sports->providers,
+            $model->audit
         );
         $officialLottery = new OfficialLotteryProvider();
         $lotteryProvider = $officialLottery->configured()

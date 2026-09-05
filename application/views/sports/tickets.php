@@ -15,23 +15,7 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 
 <div class="stack">
-  <div class="panel">
-    <h3>Performance (all stored settlements)</h3>
-    <div class="body" style="padding-top:12px">
-      <?php if (!empty($perf['demoBanner'])): ?><div class="notice warnbox"><?= e((string) $perf['demoBanner']) ?></div><?php endif; ?>
-      <div class="stat-grid">
-        <div class="stat"><div class="k">Tickets</div><div class="v"><?= (int) ($perf['totalTickets'] ?? 0) ?></div></div>
-        <div class="stat"><div class="k">Settled</div><div class="v"><?= (int) ($perf['settledTickets'] ?? 0) ?></div></div>
-        <div class="stat"><div class="k">Won / lost</div><div class="v"><span class="up"><?= (int) ($perf['won'] ?? 0) ?></span> / <span class="down"><?= (int) ($perf['lost'] ?? 0) ?></span></div></div>
-        <div class="stat"><div class="k">Win rate</div><div class="v"><?= ($perf['winRate'] ?? null) !== null ? e(number_format((float) $perf['winRate'] * 100, 1)) . '%' : '—' ?></div></div>
-        <div class="stat"><div class="k">ROI</div><div class="v <?= ($perf['roi'] ?? null) !== null && (float) $perf['roi'] >= 0 ? 'up' : 'down' ?>"><?= ($perf['roi'] ?? null) !== null ? e(number_format((float) $perf['roi'] * 100, 1)) . '%' : '—' ?></div></div>
-        <div class="stat"><div class="k">Profit / loss</div><div class="v <?= ($perf['profitLoss'] ?? null) !== null && (float) $perf['profitLoss'] >= 0 ? 'up' : 'down' ?>"><?= ($perf['profitLoss'] ?? null) !== null ? e(number_format((float) $perf['profitLoss'], 2)) : '—' ?></div></div>
-        <div class="stat"><div class="k">Model accuracy</div><div class="v"><?= ($perf['modelAccuracy'] ?? null) !== null ? e(number_format((float) $perf['modelAccuracy'] * 100, 1)) . '%' : '—' ?></div></div>
-        <div class="stat"><div class="k">Avg EV / selection</div><div class="v mono"><?= ($perf['expectedValue'] ?? null) !== null ? e(number_format((float) $perf['expectedValue'], 3)) : '—' ?></div></div>
-      </div>
-    </div>
-  </div>
-
+    <p class="dim" style="margin:0 0 12px;font-size:12px">Ticket P/L is below; prediction accuracy, Brier, ECE and the 30-day settlement window are reported once, on <a href="/football">Football Intelligence</a>.<?php if (!empty($perf['demoBanner'])): ?> <b><?= e((string) $perf['demoBanner']) ?></b><?php endif; ?></p>
   <div class="panel">
     <h3>Tickets</h3>
     <div class="body scroll" style="padding-top:12px">
