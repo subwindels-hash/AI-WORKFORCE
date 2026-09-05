@@ -66,6 +66,7 @@ $kickoffLabel = static fn(?string $iso): string => $iso === null || $iso === '' 
       <a class="btn small" href="/football?date=<?= e((string) ($date ?? gmdate('Y-m-d'))) ?>&refresh=1">Re-analyze stored data</a>
       <a class="btn small" href="/football/live">Live view</a>
       <a class="btn small" href="/football/models">Models &amp; calibration</a>
+      <a class="btn small" href="/sports" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700">🎯 GENERATE (odds <b>prediction</b> ticket) →</a>
     </div>
   </div>
 </div>

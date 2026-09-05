@@ -80,6 +80,70 @@ class Sports extends App_Controller
     }
 
     /**
+     * Generate an odds prediction ticket from stored fixtures/odds (sports.manage).
+     * Browser-accessible equivalent of POST /api/sports/ticket-engine/run for
+     * operators without CLI/cron access. Runs only the DailyTicketService pipeline
+     * (no external provider calls) — it evaluates stored matches, applies
+     * calibration/value/confidence/risk/correlation gates and optimizes a ticket.
+     * Idempotent per (date, config version): duplicate execution keys are skipped.
+     */
+    public function generate_ticket()
+    {
+        if ($this->input->method(true) !== 'POST') { redirect('/sports'); return; }
+        if (!$this->requireSportsPermission('sports.manage', 'generate ticket')) return;
+        @set_time_limit(180);
+        $date = trim((string) $this->input->post('date'));
+        if ($date === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) $date = gmdate('Y-m-d');
+        $sports = $this->platform->sports;
+        if (!$sports->providers->configured()) {
+            $this->flash('error', 'No sports provider is registered. Add a provider key (API-Football, TheSportsDB or SportMonks) via Admin → API or the WINDELS_*_KEY variables in .env, then sync data first.');
+            redirect('/sports');
+            return;
+        }
+        try {
+            $result = $sports->dailyTickets->runDaily($date);
+        } catch (Throwable $e) {
+            $this->flash('error', 'Ticket generation failed: ' . mb_substr($e->getMessage(), 0, 300));
+            redirect('/sports');
+            return;
+        }
+        $status = (string) ($result['status'] ?? 'UNKNOWN');
+        $ticketId = $result['ticketId'] ?? null;
+        $evaluated = (int) ($result['evaluated'] ?? 0);
+        $recorded = (int) ($result['predictionsRecorded'] ?? $result['predictions_recorded'] ?? 0);
+        $rejections = (int) ($result['rejections'] ?? 0);
+        $message = (string) ($result['message'] ?? '');
+
+        if ($status === 'DUPLICATE_SKIPPED') {
+            $this->flash('notice', sprintf('Ticket generation skipped (already run for %s — idempotent). %s', $date, $message));
+            redirect('/sports/tickets');
+            return;
+        }
+        if ($ticketId) {
+            $msg = sprintf('GENERATED odds prediction ticket %s for %s — status %s, %d evaluated, %d predictions, %d rejections. %s',
+                $ticketId, $date, $status, $evaluated, $recorded, $rejections, $message);
+            $this->flash('notice', $msg);
+            redirect('/sports/tickets');
+            return;
+        }
+        // No ticket qualified — still a valid outcome (spec §3)
+        $summary = '';
+        if (!empty($result['rejectionSummary']) && is_array($result['rejectionSummary'])) {
+            $parts = [];
+            foreach ($result['rejectionSummary'] as $k => $v) $parts[] = $k . ':' . $v;
+            if ($parts) $summary = ' Rejections: ' . implode(', ', array_slice($parts, 0, 8)) . '.';
+        }
+        $msg = sprintf('No qualified odds prediction ticket for %s — %s (%d evaluated, %d predictions, %d rejections).%s',
+            $date, $status . ($message !== '' ? ': ' . $message : ''), $evaluated, $recorded, $rejections, $summary);
+        if ($status === 'NO_QUALIFIED_TICKET') {
+            $this->flash('notice', $msg);
+        } else {
+            $this->flash('error', $msg);
+        }
+        redirect('/sports');
+    }
+
+    /**
      * Pull fresh data from the configured sports providers (sports.manage).
      * Browser-accessible equivalent of the cron sweep for operators without
      * CLI/cron access: fixtures for today+tomorrow, a bounded odds/results

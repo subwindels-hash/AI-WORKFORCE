@@ -172,23 +172,48 @@
 
 .ai_workforce-chat-form {
   display: flex;
-  gap: 8px;
-  padding: 10px 12px;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
   border-top: 1px solid #1e2738;
   flex: none;
+  background: #0a0f1a;
 }
-.ai_workforce-chat-form input {
+/* Typing session — STAND ALONE above controls */
+.ai_workforce-chat-input,
+.ai_workforce-chat-form input.ai_workforce-chat-input,
+.ai_workforce-chat-form input[name="message"] {
+  width: 100%;
   min-width: 0;
-  flex: 1;
+  flex: none;
+  display: block;
   border: 1px solid #2a3548;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #0f1623;
   color: #fff;
-  padding: 9px 11px;
+  padding: 12px 14px;
   font: inherit;
-  font-size: 13px;
+  font-size: 13.5px;
+  line-height: 1.4;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.2);
 }
-.ai_workforce-chat-form input:focus { outline: none; border-color: #2f6bff; box-shadow: 0 0 0 3px #2f6bff22; }
+.ai_workforce-chat-input:focus,
+.ai_workforce-chat-form input.ai_workforce-chat-input:focus,
+.ai_workforce-chat-form input[name="message"]:focus { outline: none; border-color: #2f6bff; box-shadow: 0 0 0 3px #2f6bff22, inset 0 1px 2px rgba(0,0,0,0.2); }
+/* Controls row BELOW typing session — Speak, Stop, Send */
+.ai_workforce-chat-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.ai_workforce-chat-voice-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
 .ai_workforce-chat-listen {
   display: inline-block;
   margin-left: 8px;
@@ -202,6 +227,35 @@
   padding: 0;
 }
 .ai_workforce-chat-listen:hover { color: #fff; }
+
+/* Standalone typing session wrapper — clearly above controls */
+.ai_workforce-chat-typing-session {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 2px 2px;
+  background: transparent;
+}
+.ai_workforce-chat-typing-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #7a869d;
+  padding-left: 2px;
+}
+/* Controls row is visually separate BELOW typing session */
+.ai_workforce-chat-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px dashed #1e2738;
+  margin-top: 2px;
+}
+
 .ai_workforce-chat-voice-status {
   margin: 0;
   padding: 0 14px 6px;
@@ -222,6 +276,14 @@
   padding: 0 10px !important;
 }
 .ai_workforce-chat-mic-stop:disabled { opacity: .45; cursor: not-allowed; }
+.ai_workforce-chat-controls button,
+.ai_workforce-chat-voice-controls button {
+  min-height: 36px;
+}
+.ai_workforce-chat-send {
+  margin-left: auto;
+  min-width: 64px;
+}
 .ai_workforce-chat-form button {
   border: 0;
   border-radius: 10px;
@@ -233,6 +295,7 @@
   cursor: pointer;
   flex: none;
   transition: background .15s ease;
+  min-height: 36px;
 }
 .ai_workforce-chat-form button:hover { background: #1f5ae0; }
 .ai_workforce-chat-form button:disabled { opacity: .5; cursor: wait; }
