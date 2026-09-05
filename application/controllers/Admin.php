@@ -1138,8 +1138,9 @@ class Admin extends App_Controller
             'service' => $row['service'], 'imported' => $imported, 'unchanged' => $unchanged,
             'failed' => $failed, 'verifiedDraws' => $verified, 'status' => $result['status'] ?? null,
         ], $this->ip());
-        $detail = 'Sync complete: ' . $imported . ' imported, ' . $unchanged . ' unchanged, '
-            . $failed . ' rejected; ' . $verified . ' verified draws stored.';
+        // The flash carries the first rejection / failure reason so an operator
+        // never has to dig through the audit log to learn why "1 rejected".
+        $detail = $this->platform->lottery->syncNotice($result);
         $this->flash($failed === 0 ? 'notice' : 'error', $detail);
         redirect('/admin/api/' . (int) $id);
     }

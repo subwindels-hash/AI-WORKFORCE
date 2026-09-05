@@ -35,6 +35,19 @@ namespace AIWorkforce\Lottery;
  * marks a draw VERIFIED on its own: LotteryIntelligence still validates
  * counts, ranges, dates, source and timestamps before anything is stored.
  *
+ * Plan reality (https://loteriasapi.com/planes): every plan caps the number
+ * of results per request (Free 5 … Enterprise 200) and the history depth the
+ * key may read (Free 7 days … unlimited). The vendor enforces parameter
+ * limits with HTTP 400, so this adapter (a) retries a rejected page size once
+ * at the documented Free-tier floor, (b) adopts the page size the plan
+ * actually served (meta.limit) for later pages, and (c) walks history
+ * windows NEWEST-first, stopping at the first window that adds nothing — a
+ * 7-day-history key then costs two requests, not one per year of archive it
+ * is not allowed to read. A `/latest` answer that is an unfinished draw
+ * (status PENDING — the feed publishes the next draw before its numbers
+ * exist) is not offered as history; it would only produce a validation
+ * rejection, not a stored draw.
+ *
  * Credentials come from API Management (service `lottery`, driver
  * `loteriasapi`) or from the environment — never from committed code:
  *   WINDELS_LOTTERY_LOTERIASAPI_KEY      (required)
@@ -57,6 +70,17 @@ final class LoteriasApiProvider implements LotteryProvider
     /** Page size asked for; the vendor may cap it lower per plan. */
     private const PAGE_SIZE = 100;
     /**
+     * Page-size floor every plan serves (planes: Free = max 5 results per
+     * request). An oversized `limit` the plan rejects with HTTP 400 is
+     * retried once at this size instead of failing the whole history sync.
+     */
+    private const MIN_PAGE_SIZE = 5;
+    /**
+     * Draw statuses that mean the draw has not happened (or was cancelled):
+     * such rows carry no numbers yet and are never offered as history.
+     */
+    private const UNFINISHED_STATUSES = ['PENDING', 'SCHEDULED', 'PROGRAMADO', 'PROCESSING', 'IN_PROGRESS', 'CANCELLED', 'CANCELED'];
+    /**
      * health() and jackpotInfo() both need the latest draw — one status render
      * should cost one request, not two, on plans with a small quota.
      */
@@ -66,6 +90,8 @@ final class LoteriasApiProvider implements LotteryProvider
     private ?array $latestMemo = null;
     private int $latestMemoAt = 0;
     private ?string $latestEnvelopeTs = null;
+    /** Page size the plan actually serves, learned from meta.limit or a 400 retry. */
+    private ?int $pageSizeHint = null;
 
     private string $baseUrl;
     private string $game;
@@ -172,9 +198,12 @@ final class LoteriasApiProvider implements LotteryProvider
         }
         try {
             $draw = $this->normalizeDraw($this->latest());
+            $latestStatus = strtoupper(trim((string) ($draw['extra']['status'] ?? '')));
             return [
                 'state' => 'ONLINE', 'licensed' => true, 'synthetic' => false,
-                'message' => 'LoteriasAPI reachable' . ($draw['drawDate'] !== '' ? ' — latest draw ' . $draw['drawDate'] : ''),
+                'message' => 'LoteriasAPI reachable'
+                    . ($draw['drawDate'] !== '' ? ' — latest draw ' . $draw['drawDate'] : '')
+                    . ($latestStatus !== '' && $latestStatus !== 'COMPLETED' ? ' (' . strtolower($latestStatus) . ')' : ''),
                 'source' => $this->source,
                 'licenseConfigured' => true,
                 'game' => $this->game,
@@ -222,13 +251,32 @@ final class LoteriasApiProvider implements LotteryProvider
         }
 
         $rows = [];
-        foreach ($this->windows($queryFrom, $queryTo) as $window) {
+        $seenRaw = [];
+        // Newest window first: the history a plan is allowed to read is always
+        // at the newest end, and the first window that adds nothing means the
+        // archive (or the plan's history depth) is exhausted — walking older
+        // windows can only burn request quota that small plans don't have.
+        foreach (array_reverse($this->windows($queryFrom, $queryTo)) as $window) {
             try {
-                $rows = array_merge($rows, $this->rangeRows($window[0], $window[1], max(1, $limit - count($rows))));
+                $batch = $this->rangeRows($window[0], $window[1], max(1, $limit - count($rows)));
             } catch (\Throwable $e) {
-                // Keep whatever earlier windows returned; health() reports why
+                // Keep whatever newer windows returned; health() reports why
                 // the rest is missing rather than inventing draws.
                 break;
+            }
+            $added = 0;
+            foreach ($batch as $row) {
+                $key = $this->rawKey($row);
+                if (isset($seenRaw[$key])) continue;
+                $seenRaw[$key] = true;
+                $rows[] = $row;
+                $added++;
+            }
+            if ($added === 0) {
+                // An implicit backfill stops as soon as a window serves
+                // nothing new; an explicit caller window is answered in full.
+                if ($explicitFrom === null) break;
+                continue;
             }
             if (count($rows) >= $limit) break;
         }
@@ -246,8 +294,11 @@ final class LoteriasApiProvider implements LotteryProvider
         if ($rows === []) {
             try {
                 $single = $this->latest();
-                $rows = ($single !== [] && (isset($single['combination']) || isset($single['numbers'])
-                    || isset($single['drawDate']) || isset($single['draw_date']))) ? [$single] : [];
+                // The last resort may only serve a draw that actually carries
+                // a finished line: on draw day /latest answers the next draw
+                // as an unfinished placeholder (no numbers yet), which is not
+                // history — offering it would only yield a rejected draw.
+                $rows = ($single !== [] && $this->playableLatest($single)) ? [$single] : [];
                 $fromLatest = $rows !== [];
             } catch (\Throwable $e) {
                 // No data is preferable to fabricated data; health() reports why.
@@ -262,6 +313,10 @@ final class LoteriasApiProvider implements LotteryProvider
             // the vendor's own stamp for that single draw.
             $draw = $this->normalizeDraw($row, $fromLatest ? $this->latestEnvelopeTs : null);
             if ($draw['drawDate'] === '') continue;
+            // A draw the feed has not finished (or cancelled) has no result
+            // yet — it is not history and must not reach the validator.
+            $status = (string) ($draw['extra']['status'] ?? '');
+            if ($status !== '' && !$this->statusIsFinished($status)) continue;
             // Only an explicit caller window is enforced locally; otherwise the
             // upstream range filter is authoritative.
             if ($explicitFrom !== null && $draw['drawDate'] < $explicitFrom) continue;
@@ -353,17 +408,22 @@ final class LoteriasApiProvider implements LotteryProvider
     {
         $rows = [];
         for ($page = 1; $page <= self::MAX_PAGES && count($rows) < $limit; $page++) {
-            $payload = $this->get($this->endpoint('/results/' . rawurlencode($this->game) . '/range', [
-                'from' => $from,
-                'to' => $to,
-                'page' => $page,
-                'limit' => min(self::PAGE_SIZE, max(1, $limit - count($rows))),
-            ]));
+            $payload = $this->pagedGet(
+                fn (int $page, int $size): string => $this->endpoint('/results/' . rawurlencode($this->game) . '/range', [
+                    'from' => $from,
+                    'to' => $to,
+                    'page' => $page,
+                    'limit' => $size,
+                ]),
+                $page,
+                min($this->pageSizeHint ?? self::PAGE_SIZE, max(1, $limit - count($rows))),
+            );
             $batch = $this->rows($payload);
             if ($batch === []) break;
             foreach ($batch as $row) $rows[] = $row;
             $meta = is_array($payload['meta'] ?? null) ? $payload['meta'] : [];
             if (empty($meta['hasNext'])) break;
+            $this->learnPageSize($meta);
         }
         return $rows;
     }
@@ -378,19 +438,69 @@ final class LoteriasApiProvider implements LotteryProvider
     {
         $rows = [];
         for ($page = 1; $page <= self::MAX_PAGES && count($rows) < $limit; $page++) {
-            $payload = $this->get($this->endpoint('/results/' . rawurlencode($this->game), [
-                'page' => $page,
-                'limit' => min(self::PAGE_SIZE, max(1, $limit - count($rows))),
-                'sort' => 'drawDate',
-                'order' => 'desc',
-            ]));
+            $payload = $this->pagedGet(
+                fn (int $page, int $size): string => $this->endpoint('/results/' . rawurlencode($this->game), [
+                    'page' => $page,
+                    'limit' => $size,
+                    'sort' => 'drawDate',
+                    'order' => 'desc',
+                ]),
+                $page,
+                min($this->pageSizeHint ?? self::PAGE_SIZE, max(1, $limit - count($rows))),
+            );
             $batch = $this->rows($payload);
             if ($batch === []) break;
             foreach ($batch as $row) $rows[] = $row;
             $meta = is_array($payload['meta'] ?? null) ? $payload['meta'] : [];
             if (empty($meta['hasNext'])) break;
+            $this->learnPageSize($meta);
         }
         return $rows;
+    }
+
+    /**
+     * One page of a paged query, tolerating a plan-capped page size: every
+     * plan caps results per request (Free 5 … Enterprise 200) and the vendor
+     * enforces parameter limits with HTTP 400, so an oversized `limit` is
+     * retried once at the documented floor instead of failing the sync.
+     *
+     * @param callable(int,int):string $urlFor
+     * @return array<string,mixed>
+     */
+    private function pagedGet(callable $urlFor, int $page, int $size): array
+    {
+        try {
+            return $this->get($urlFor($page, $size));
+        } catch (\RuntimeException $e) {
+            if ($size > self::MIN_PAGE_SIZE && str_contains($e->getMessage(), 'HTTP 400')) {
+                $this->pageSizeHint = self::MIN_PAGE_SIZE;
+                return $this->get($urlFor($page, self::MIN_PAGE_SIZE));
+            }
+            throw $e;
+        }
+    }
+
+    /** Adopt the page size the plan actually served when it caps silently. */
+    private function learnPageSize(array $meta): void
+    {
+        $served = (int) ($meta['limit'] ?? 0);
+        if ($served > 0 && ($this->pageSizeHint === null || $this->pageSizeHint > $served)) {
+            $this->pageSizeHint = max(self::MIN_PAGE_SIZE, $served);
+        }
+    }
+
+    /** A status that means the draw happened and its numbers are final. */
+    private function statusIsFinished(string $status): bool
+    {
+        return !in_array(strtoupper(trim($status)), self::UNFINISHED_STATUSES, true);
+    }
+
+    /** Identity of a raw vendor row, used to keep windowed pages overlap-free. */
+    private function rawKey(array $row): string
+    {
+        $id = (string) ($row['drawId'] ?? ($row['draw_id'] ?? ($row['id'] ?? '')));
+        $date = (string) ($row['drawDate'] ?? ($row['draw_date'] ?? ($row['date'] ?? ($row['fecha'] ?? ''))));
+        return ($id !== '' ? $id : $date) . '|' . $date;
     }
 
     /**
@@ -462,10 +572,10 @@ final class LoteriasApiProvider implements LotteryProvider
      */
     public function normalizeDraw(array $row, ?string $envelopeTimestamp = null): array
     {
-        $resultData = is_array($row['resultData'] ?? null) ? $row['resultData'] : [];
+        $resultData = $this->resultDataOf($row);
         $meta = is_array($row['meta'] ?? null) ? $row['meta'] : [];
-        $main = $this->firstList([$row['combination'] ?? null, $row['numbers'] ?? null, $row['main'] ?? null, $row['combinacion'] ?? null]);
-        $stars = $this->firstList([$row['stars'] ?? null, $row['luckyStars'] ?? null, $row['estrellas'] ?? null, $resultData['estrellas'] ?? null]);
+        $main = $this->mainOf($row);
+        $stars = $this->starsOf($row);
 
         $drawDate = (string) ($row['drawDate'] ?? ($row['draw_date'] ?? ($row['date'] ?? ($row['fecha'] ?? ''))));
         $drawId = (string) ($row['drawId'] ?? ($row['draw_id'] ?? ($row['id'] ?? '')));
@@ -570,6 +680,57 @@ final class LoteriasApiProvider implements LotteryProvider
     }
 
     /**
+     * The draw's extra numbers (Lucky Stars for EuroMilliones). Besides the
+     * documented keys, the vendor's newer endpoints speak of "extra numbers",
+     * and some gateways deliver resultData as a JSON string — both are mapped
+     * so a vocabulary change degrades gracefully instead of losing the stars.
+     * @return list<mixed>|null
+     */
+    private function starsOf(array $row): ?array
+    {
+        $resultData = $this->resultDataOf($row);
+        return $this->firstList([
+            $row['stars'] ?? null, $row['luckyStars'] ?? null, $row['estrellas'] ?? null,
+            $row['winningExtraNumbers'] ?? null, $row['extraNumbers'] ?? null,
+            $resultData['estrellas'] ?? null, $resultData['stars'] ?? null,
+            $resultData['extraNumbers'] ?? null, $resultData['winningExtraNumbers'] ?? null,
+        ]);
+    }
+
+    /** @return list<mixed>|null */
+    private function mainOf(array $row): ?array
+    {
+        return $this->firstList([
+            $row['combination'] ?? null, $row['numbers'] ?? null, $row['main'] ?? null,
+            $row['combinacion'] ?? null, $row['winningCombination'] ?? null,
+        ]);
+    }
+
+    /** resultData as a map; some gateways deliver it as a JSON string. @return array<string,mixed> */
+    private function resultDataOf(array $row): array
+    {
+        $resultData = $row['resultData'] ?? null;
+        if (is_array($resultData)) return $resultData;
+        if (is_string($resultData) && trim($resultData) !== '') {
+            $decoded = json_decode($resultData, true);
+            if (is_array($decoded)) return $decoded;
+        }
+        return [];
+    }
+
+    /**
+     * May the /latest fallback offer this row as (single-draw) history? Only
+     * when the draw is finished AND both number groups are present — on draw
+     * day the endpoint answers the next draw as a placeholder with no numbers.
+     */
+    private function playableLatest(array $row): bool
+    {
+        $status = strtoupper(trim((string) ($row['status'] ?? '')));
+        if ($status !== '' && !$this->statusIsFinished($status)) return false;
+        return $this->mainOf($row) !== null && $this->starsOf($row) !== null;
+    }
+
+    /**
      * Vendor amounts. Integer values from `jackpot` / `prizeAmount` are cents
      * (documented vendor behaviour: "13000000000" = 130.000.000,00 €); a value
      * carrying a decimal point is already euros.
@@ -650,7 +811,21 @@ final class LoteriasApiProvider implements LotteryProvider
         if ($status === 401 || $status === 403) throw new \RuntimeException('authentication rejected (HTTP ' . $status . ')');
         if ($status === 429) throw new \RuntimeException('rate limited (HTTP 429) — the plan request quota is exhausted (limits: https://loteriasapi.com/planes)');
         if ($status === 404) throw new \RuntimeException('not found (HTTP 404) — the base URL must be https://api.loteriasapi.com/api/v1');
-        if ($status === 400) throw new \RuntimeException('request rejected (HTTP 400) — check the game code and the date range (max 365 days)');
+        if ($status === 400) {
+            // Name the vendor's own reason (which parameter failed) when it
+            // says so — the plans page caps results per request and the game
+            // code / date range are the other usual suspects.
+            $detail = '';
+            $errorBody = json_decode($body, true);
+            if (is_array($errorBody)) {
+                $error = is_array($errorBody['error'] ?? null) ? $errorBody['error'] : [];
+                $message = trim((string) ($error['message'] ?? ''));
+                $field = is_array($error['details'] ?? null) ? trim((string) ($error['details']['field'] ?? '')) : '';
+                if ($message !== '') $detail = ': ' . $message . ($field !== '' ? ' (' . $field . ')' : '');
+            }
+            throw new \RuntimeException('request rejected (HTTP 400)' . $detail
+                . ' — check the game code, the page size (plan-capped: https://loteriasapi.com/planes) and the date range (max 365 days)');
+        }
         if ($status === 0) throw new \RuntimeException('no HTTP response (network/SSL/firewall)');
         if ($status < 200 || $status >= 300) throw new \RuntimeException('upstream error (HTTP ' . $status . ')');
         $decoded = json_decode($body, true);
