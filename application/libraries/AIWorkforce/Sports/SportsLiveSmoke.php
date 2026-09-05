@@ -62,9 +62,18 @@ class SportsLiveSmoke
 
             // 2. fixtures for the day — the sync pipeline's input
             $fixtures = [];
+            if (method_exists($provider, 'resetPaginationNotes')) {
+                try { $provider->resetPaginationNotes(); } catch (\Throwable $e) { /* diagnostics only */ }
+            }
             try {
                 $fixtures = $provider->fixtures(['from' => $day, 'to' => $day]);
                 $steps['fixtures'] = ['ok' => true, 'count' => count($fixtures)];
+                // A pull that could not follow every page is still a pull —
+                // report what was left unread rather than passing as complete.
+                if (method_exists($provider, 'paginationNotes')) {
+                    $notes = $provider->paginationNotes();
+                    if (!empty($notes)) $steps['fixtures']['paginationNotes'] = $notes;
+                }
             } catch (\Throwable $e) {
                 $steps['fixtures'] = ['ok' => false, 'error' => $e->getMessage()];
             }
