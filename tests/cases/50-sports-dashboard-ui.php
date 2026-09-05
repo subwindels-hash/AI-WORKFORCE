@@ -163,3 +163,42 @@ test('sports UI: a read-only identity is told why, instead of being handed a ref
     assert_contains('needs sports.approve', $tickets);
     assert_contains('needs sports.settle', $tickets);
 });
+
+test('sports UI: provider identities and diagnostics are hidden from read-only users', function () {
+    $repo = new SportsRepositoryStub();
+    $ticketId = fx_ui_today($repo);
+    $intel = new SportsIntelligence($repo, fx_ui_audit());
+    $dash = $intel->dashboard();
+    // Simulate the operator-side readiness/health payload a real provider set produces.
+    $dash['systemStatus']['ticketEngine'] = 'BLOCKED';
+    $dash['systemStatus']['configuredIds'] = ['api-football', 'sportmonks'];
+    $dash['systemStatus']['liveHealth'] = [
+        'api-football' => ['status' => 'DAILY_QUOTA_EXHAUSTED', 'detail' => 'daily quota used (100/100 on the Free plan)', 'requestsToday' => 100, 'limitDaily' => 100, 'circuit' => ['state' => 'OPEN', 'retryAt' => '2026-09-06T00:00:00+00:00']],
+        'sportmonks' => ['status' => 'NOT_FOUND', 'detail' => 'endpoint not found (HTTP 404)', 'endpoint' => 'https://api.sportmonks.com/v3/football/fixtures/date/2026-09-05?api_token=[redacted]', 'circuit' => ['state' => 'OPEN']],
+    ];
+    $dash['systemStatus']['readiness'] = ['operational' => 0, 'total' => 2, 'engine' => 'BLOCKED', 'providers' => [
+        'api-football' => ['status' => 'DAILY_QUOTA_EXHAUSTED', 'circuit' => 'OPEN', 'retryAt' => '2026-09-06T00:00:00+00:00'],
+        'sportmonks' => ['status' => 'NOT_FOUND', 'circuit' => 'OPEN', 'retryAt' => null],
+    ]];
+    $dash['ticketEngine']['today'] = ['status' => 'DATA_UNAVAILABLE', 'message' => 'all configured sports-data providers failed — fixtures: all 2 provider(s) failed — api-football DAILY_QUOTA_EXHAUSTED, sportmonks NOT_FOUND', 'rejection_summary' => ['PROVIDER:api-football' => 'DAILY_QUOTA_EXHAUSTED', 'PROVIDER:sportmonks' => 'NOT_FOUND'], 'candidates_evaluated' => 0, 'predictions_recorded' => 0];
+
+    $user = fx_render_sports('index', ['dashboard' => $dash, 'caps' => fx_sports_caps_none()]);
+    foreach (['api-football', 'sportmonks', 'Data feed', 'Operational providers', 'DAILY_QUOTA_EXHAUSTED', 'NOT_FOUND', 'HTTP 404', 'quota', 'Circuit', 'Feed 1', 'sportmonks.com', 'providers failed'] as $leak) {
+        assert_not_contains($leak, $user, "read-only page must not expose '{$leak}'");
+    }
+    // ...but the user still learns, honestly, that data is unavailable and the engine is blocked.
+    assert_contains('Sports data temporarily unavailable', $user);
+    assert_contains('BLOCKED', $user);
+    assert_contains('NO TICKET — DATA_UNAVAILABLE', $user);
+    assert_contains('Sports data was unavailable', $user);
+
+    // The operator (sports.manage) keeps the full diagnostic view.
+    $op = fx_render_sports('index', ['dashboard' => $dash, 'caps' => fx_sports_caps_all()]);
+    foreach (['api-football', 'sportmonks', 'Data feed', 'Operational providers', 'Daily quota exhausted', 'HTTP 404 (not found)', '100/100 used', 'Circuit', 'OPEN'] as $diag) {
+        assert_contains($diag, $op, "operator page must show '{$diag}'");
+    }
+
+    // And the JSON provider endpoint requires the same operator permission.
+    $api = file_get_contents(FCPATH . 'application/controllers/Api_sports.php');
+    assert_true((bool) preg_match("/function providers\(\)\s*\{[^}]*requirePermission\('sports\.manage'/s", (string) $api), 'GET providers is gated by sports.manage');
+});

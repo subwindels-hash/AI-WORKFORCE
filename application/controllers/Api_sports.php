@@ -169,7 +169,10 @@ class Api_sports extends Api_controller
 
     public function providers()
     {
-        if (!$this->requirePermission('sports.view', false)) return;
+        // Vendor identities, key tiers, quota figures, circuit state and failing
+        // endpoints are operator diagnostics — sports.manage, not sports.view.
+        // Read-only users learn whether data is available from /dashboard.
+        if (!$this->requirePermission('sports.manage', false)) return;
         $status = $this->platform->sports->status();
         $this->json([
             'providers' => $status['providers'],

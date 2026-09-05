@@ -42,6 +42,10 @@ $statusLabel = static function (string $st): string {
 // database). Without them the console shows a disabled control plus the reason,
 // instead of a button that is refused after the click.
 $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
+// Provider identities, vendor health, circuit state and quota figures are
+// operator diagnostics (sports.manage). A read-only user sees only whether
+// data is available — never which vendor, key tier or endpoint is behind it.
+$operator = !empty($caps['sync']);
 ?>
 <div class="page-head">
   <div>
@@ -80,10 +84,14 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
 <?php if ($disabled): ?>
   <div class="notice warnbox"><b>No sports data provider connected.</b> Live fixtures and predictions are unavailable until a verified data source is configured — nothing is fabricated in the meantime.</div>
 <?php elseif (($readiness['engine'] ?? '') === 'BLOCKED'): ?>
+  <?php if ($operator): ?>
   <div class="notice err"><b>Prediction engine BLOCKED — 0/<?= (int) ($readiness['total'] ?? 0) ?> sports data providers operational.</b>
     Every configured feed is currently failing (see <i>Data feed</i>). Tickets cannot be generated until at least one provider recovers; an empty day in this state is a <b>data outage</b>, not "no qualified games".
     <?php foreach (($readiness['providers'] ?? []) as $pid => $pr): ?><br><span class="mono" style="font-size:11px"><?= e((string) $pid) ?> → <?= e((string) ($pr['status'] ?? 'UNKNOWN')) ?><?php if (!empty($pr['retryAt'])): ?> (retry after <?= e(substr((string) $pr['retryAt'], 0, 16)) ?>Z)<?php endif; ?></span><?php endforeach; ?>
   </div>
+  <?php else: ?>
+  <div class="notice err"><b>Sports data temporarily unavailable.</b> Tickets cannot be generated until the data feed recovers — an empty day in this state is a data outage, not "no qualified games".</div>
+  <?php endif; ?>
 <?php endif; ?>
 
 <div class="grid cols-main">
@@ -157,9 +165,14 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
         <div class="stat-grid">
           <div class="stat"><div class="k">Mode</div><div class="v"><?= e((string) ($sys['mode'] ?? 'SANDBOX')) ?></div></div>
           <div class="stat"><div class="k">Ticket engine</div><div class="v" style="font-size:12px"><?= e((string) ($sys['ticketEngine'] ?? '—')) ?></div></div>
+          <?php if ($operator): ?>
           <div class="stat"><div class="k">Operational providers</div><div class="v"><?= (int) ($readiness['operational'] ?? 0) ?>/<?= (int) ($readiness['total'] ?? 0) ?></div></div>
+          <?php else: ?>
+          <div class="stat"><div class="k">Sports data</div><div class="v" style="font-size:12px"><span class="dot <?= ($readiness['engine'] ?? '') === 'READY' ? 'up' : 'down' ?>"></span> <?= ($readiness['engine'] ?? '') === 'READY' ? 'Available' : 'Unavailable' ?></div></div>
+          <?php endif; ?>
           <div class="stat"><div class="k">Prediction engine</div><div class="v" style="font-size:12px"><span class="dot <?= ($readiness['engine'] ?? '') === 'READY' ? 'up' : 'down' ?>"></span> <?= e((string) ($readiness['engine'] ?? '—')) ?></div></div>
         </div>
+        <?php if ($operator): ?>
         <table class="tbl" style="margin-top:12px">
           <thead><tr><th>Feed</th><th>Health</th><th class="num">Reliability</th></tr></thead>
           <tbody>
@@ -176,6 +189,7 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
             <?php endif; ?>
           </tbody>
         </table>
+        <?php endif; ?>
         <?php if (!empty($sys['lastSyncs'])): ?>
           <table class="tbl" style="margin-top:12px">
             <thead><tr><th>Job</th><th>Status</th></tr></thead>
@@ -192,6 +206,7 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
       </div>
     </div>
 
+    <?php if ($operator): ?>
     <div class="panel">
       <h3>Data feed</h3>
       <div class="body" style="padding-top:12px">
@@ -232,6 +247,7 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
         <?php endif; ?>
       </div>
     </div>
+    <?php endif; ?>
 
     <div class="panel">
       <h3>Today's ticket</h3>
@@ -255,6 +271,7 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
             <span class="badge b-red">NO TICKET — DATA_UNAVAILABLE</span>
           </div>
+          <?php if ($operator): ?>
           <p class="dim" style="margin:0 0 8px"><b>All configured sports-data providers failed</b> for this run — this is a data outage, not a day without qualifying games. <?= e((string) ($daily['message'] ?? '')) ?></p>
           <?php $ledger = is_array($daily['rejection_summary'] ?? null) ? $daily['rejection_summary'] : []; ?>
           <table class="tbl">
@@ -266,6 +283,9 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
             </tbody>
           </table>
           <p class="dim" style="font-size:11px;margin-top:8px">Matches evaluated: <?= (int) ($daily['candidates_evaluated'] ?? 0) ?> · Predictions generated: <?= (int) ($daily['predictions_recorded'] ?? 0) ?>. The run stays retryable: once a provider recovers, Sync and generate again.</p>
+          <?php else: ?>
+          <p class="dim" style="margin:0 0 8px"><b>Sports data was unavailable</b> for this run — this is a data outage, not a day without qualifying games. No ticket is fabricated; one will be built once the data feed recovers.</p>
+          <?php endif; ?>
         <?php elseif ($daily === null || $ticket === null): ?>
           <p class="dim"><?= $daily !== null ? e((string) ($daily['message'] ?? 'No ticket today.')) : 'No daily run recorded for today yet. Select Odds Prediction Ticket to build one from stored fixtures & odds.' ?></p>
         <?php else: ?>
