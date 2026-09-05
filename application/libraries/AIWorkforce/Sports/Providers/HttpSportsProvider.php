@@ -28,6 +28,8 @@ class HttpSportsProvider implements SportsDataProvider
     private ?string $lastSuccess = null;
     private int $requests = 0;
     private int $failures = 0;
+    /** @var array<string,mixed>|null */
+    private ?array $lastError = null;
 
     public function __construct(
         private string $id,
@@ -68,12 +70,19 @@ class HttpSportsProvider implements SportsDataProvider
             ];
         } catch (ProviderException $e) {
             $this->lastFailure = gmdate('c');
-            return [
+            $h = [
                 'status' => $e->status, 'responseMs' => $this->lastResponseMs,
                 'reliability' => $this->reliability(), 'lastSuccessAt' => $this->lastSuccess,
                 'lastFailureAt' => $this->lastFailure, 'errorRate' => $this->errorRate(),
                 'detail' => $e->getMessage(),
             ];
+            if (isset($e->details['endpoint'])) $h['endpoint'] = $e->details['endpoint'];
+            if (isset($e->details['httpStatus'])) $h['httpStatus'] = $e->details['httpStatus'];
+            if (isset($e->details['retryAt'])) $h['retryAt'] = $e->details['retryAt'];
+            if ($e->status === ProviderException::NOT_FOUND) {
+                $h['detail'] .= sprintf(' — configured base URL %s does not serve the documented /health, /fixtures contract', ProviderHttp::redactUrl($this->baseUrl));
+            }
+            return $h;
         }
     }
 
@@ -105,17 +114,29 @@ class HttpSportsProvider implements SportsDataProvider
             $resp = ($this->transport)($url, ['Authorization: Bearer ' . $this->token, 'Accept: application/json']);
         } catch (\Throwable $e) {
             $this->failures++;
-            throw new ProviderException('provider transport failure: ' . $e->getMessage(), ProviderException::OFFLINE, $e);
+            throw new ProviderException('provider transport failure: ' . ProviderHttp::redact($e->getMessage()), ProviderException::OFFLINE, $e, ProviderHttp::diagnostic($url, 'GET', 0, '') + ['provider' => $this->id]);
         }
         $this->lastResponseMs = (int) round((microtime(true) - $t0) * 1000);
-        $status = (int) ($resp['status'] ?? 0);
-        if ($status === 0) { $this->failures++; throw new ProviderException('no HTTP response (timeout/unreachable)', ProviderException::OFFLINE); }
-        if ($status === 401 || $status === 403) { $this->failures++; throw new ProviderException('authentication rejected (HTTP ' . $status . ')', ProviderException::AUTHENTICATION_ERROR); }
-        if ($status === 429) { $this->failures++; throw new ProviderException('rate limited (HTTP 429)', ProviderException::RATE_LIMITED); }
-        if ($status >= 500) { $this->failures++; throw new ProviderException('provider server error (HTTP ' . $status . ')', ProviderException::DATA_ERROR); }
-        if ($status >= 400) { $this->failures++; throw new ProviderException('provider client error (HTTP ' . $status . ')', ProviderException::DATA_ERROR); }
+        if (!isset($resp['error']) && (int) ($resp['status'] ?? 0) === 0 && $this->lastResponseMs >= $this->timeoutSeconds * 1000) {
+            $resp['error'] = 'timed out after ' . $this->timeoutSeconds . 's';
+        }
+        // Shared classification: 400 → BAD_REQUEST, 404 → NOT_FOUND (a wrong
+        // base URL/path — configuration, not an outage), 429 → RATE_LIMITED or
+        // DAILY_QUOTA_EXHAUSTED, 401/403 → AUTHENTICATION_ERROR, 0 → OFFLINE/TIMEOUT.
+        $failure = ProviderHttp::classify(is_array($resp) ? $resp : [], $url, 'GET');
+        if ($failure !== null) {
+            $this->failures++;
+            $this->lastError = ['status' => $failure->status, 'message' => $failure->getMessage()] + $failure->details;
+            throw $failure->withDetails(['provider' => $this->id]);
+        }
         $this->lastSuccess = gmdate('c');
         return $resp;
+    }
+
+    /** Last classified failure (redacted) — endpoint, HTTP status, body snippet; never the token. */
+    public function lastError(): ?array
+    {
+        return $this->lastError;
     }
 
     /** @return array<int,array<string,mixed>> */

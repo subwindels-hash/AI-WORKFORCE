@@ -129,6 +129,12 @@ interface SportsRepository
     /** Starts once per idempotency key, or returns null if already processed. */
     public function startJobRun(array $run): ?array;
     public function finishJobRun(string $id, array $result): void;
+    /**
+     * Release a finished run's idempotency key (keeps the row for the audit
+     * trail, suffixes the key) so the same job may run again — used when a
+     * run could not do its work because every data provider failed.
+     */
+    public function releaseJobRun(string $id): void;
     /** @return array<int,array<string,mixed>> */
     public function listJobRuns(?string $jobType = null, int $limit = 50): array;
 

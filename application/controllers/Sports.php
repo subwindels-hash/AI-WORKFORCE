@@ -126,6 +126,15 @@ class Sports extends App_Controller
             redirect('/sports/tickets');
             return;
         }
+        if ($status === 'DATA_UNAVAILABLE') {
+            // Every provider failed: a data outage, reported as such — never as "no qualified games".
+            $ledger = [];
+            foreach ((array) ($result['providerStatuses'] ?? []) as $pid => $st) $ledger[] = $pid . ': ' . $st;
+            $this->flash('error', sprintf('NO TICKET for %s — STATUS: DATA_UNAVAILABLE. All configured sports-data providers failed (%s). Matches evaluated: 0, predictions generated: 0. Fix or wait for the providers (see Data feed), then run again — the day stays retryable.',
+                $date, $ledger ? implode('; ', $ledger) : 'no detail'));
+            redirect('/sports');
+            return;
+        }
         // No ticket qualified — still a valid outcome (spec §3)
         $summary = '';
         if (!empty($result['rejectionSummary']) && is_array($result['rejectionSummary'])) {

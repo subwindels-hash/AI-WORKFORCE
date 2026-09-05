@@ -154,7 +154,7 @@ test('daily ticket E2E: no provider configured → DISABLED_NO_PROVIDER, nothing
     assert_equals(0, count($repo->tickets));
 });
 
-test('daily ticket E2E: provider failure is graceful and reported', function () {
+test('daily ticket E2E: provider failure is DATA_UNAVAILABLE, never "no qualified games"', function () {
     $repo = new SportsRepositoryStub();
     $audit = fx_daily_audit();
     $providers = new SportsProviderManager();
@@ -167,10 +167,78 @@ test('daily ticket E2E: provider failure is graceful and reported', function () 
     };
     $providers->register($broken);
     $service = new DailyTicketService($repo, $audit, $providers, new ConfigurationService($repo, $audit), new DataQualityEngine(), new PredictionPipeline(), new TicketOptimizer(), new TicketGovernance($repo, $audit), new DecisionRecorder($repo, $audit));
-    $run = $service->runDaily(gmdate('Y-m-d'));
-    assert_equals('NO_QUALIFIED_TICKET', $run['status']);
-    assert_contains('provider failure', $run['message']);
+    $date = gmdate('Y-m-d');
+    $run = $service->runDaily($date);
+    assert_equals('DATA_UNAVAILABLE', $run['status'], 'a provider outage is not a prediction outcome');
+    assert_equals('DATA_UNAVAILABLE', $run['dataState']);
+    assert_contains('all configured sports-data providers failed', $run['message']);
+    assert_equals(['broken' => 'OFFLINE'], $run['providerStatuses'], 'per-provider status codes are returned');
+    assert_equals(0, $run['evaluated']);
     assert_equals(0, count($repo->tickets));
+    // stored row carries the same verdict + the provider ledger
+    $daily = $repo->findDailyTicket($date);
+    assert_equals('DATA_UNAVAILABLE', $daily['status']);
+    assert_equals('OFFLINE', $daily['rejection_summary']['PROVIDER:broken'] ?? null);
+    // audited as BLOCKED, not as a normal run
+    $blocked = array_values(array_filter($audit->events, fn($e) => $e['type'] === 'SPORTS_DAILY_TICKET_BLOCKED'));
+    assert_equals(1, count($blocked));
+    // the execution key is released: once a provider recovers the SAME day
+    // can be re-run instead of being DUPLICATE_SKIPPED until tomorrow.
+    $again = $service->runDaily($date);
+    assert_not_equals('DUPLICATE_SKIPPED', $again['status'], 'a blocked day must stay retryable');
+});
+
+test('daily ticket E2E: a quota-dead primary falls through to a healthy fallback (independent providers)', function () {
+    $repo = new SportsRepositoryStub();
+    $audit = fx_daily_audit();
+    $providers = new SportsProviderManager();
+    $quota = new class implements SportsDataProvider {
+        public int $healthCalls = 0;
+        public int $dataCalls = 0;
+        public function id(): string { return 'api-football'; }
+        public function health(): array { $this->healthCalls++; return ['status' => 'ONLINE']; }
+        public function fixtures(array $q): array { $this->dataCalls++; throw new \AIWorkforce\Sports\Providers\ProviderException('You have reached the request limit for the day', \AIWorkforce\Sports\Providers\ProviderException::DAILY_QUOTA_EXHAUSTED); }
+        public function odds(string $e): array { $this->dataCalls++; return []; }
+        public function results(string $e): array { $this->dataCalls++; return []; }
+    };
+    $providers->register($quota);
+    $providers->register(fx_daily_provider([
+        'f0' => [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.55, 'observedAt' => gmdate('c')]],
+        'f1' => [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.75, 'observedAt' => gmdate('c')]],
+        'f2' => [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.9, 'observedAt' => gmdate('c')]],
+        'f3' => [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 2.1, 'observedAt' => gmdate('c')]],
+        'f4' => [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 2.3, 'observedAt' => gmdate('c')]],
+    ]));
+    $config = new ConfigurationService($repo, $audit);
+    $pipeline = new PredictionPipeline(new MatchIntelligenceEngine(new OddsFreshnessEngine()), new FeatureEngineeringEngine(), new PredictionEngine(), new ValueEngine(), new RiskEngine(), new CorrelationEngine(), new ConfidenceEngine());
+    $service = new DailyTicketService($repo, $audit, $providers, $config, new DataQualityEngine(), $pipeline, new TicketOptimizer(new CorrelationEngine()), new TicketGovernance($repo, $audit, new CorrelationEngine()), new DecisionRecorder($repo, $audit));
+    fx_approve_calibration($repo);
+    $date = gmdate('Y-m-d', strtotime('+1 day'));
+    $run = $service->runDaily($date);
+    assert_equals('PENDING_USER_APPROVAL', $run['status'], 'fallback provider served the day');
+    assert_equals('daily-test', $run['provider']);
+    assert_equals('OK', $run['dataState']);
+    assert_equals(5, $run['evaluated']);
+    // the quota-dead provider was called exactly once and its circuit is now OPEN until the reset
+    $circuit = $providers->breaker()->state('api-football');
+    assert_equals('OPEN', $circuit['state']);
+    assert_equals('DAILY_QUOTA_EXHAUSTED', $circuit['reason']);
+    assert_true($circuit['retryAt'] !== null && strtotime($circuit['retryAt']) > time(), 'circuit opens until the vendor quota reset');
+    // subsequent calls do NOT touch the dead provider again — not even a health probe
+    $h = $quota->healthCalls; $d = $quota->dataCalls;
+    assert_equals(1, $d, 'the quota-dead provider was asked for data exactly once');
+    $out = $providers->withFallback('odds', fn($p) => $p->odds('f0'));
+    assert_true($out['ok']);
+    assert_equals('daily-test', $out['provider']);
+    assert_equals($h, $quota->healthCalls, 'no health probe while the circuit is OPEN');
+    assert_equals($d, $quota->dataCalls, 'no data request while the circuit is OPEN');
+    assert_contains('circuit open', $out['failures']['api-football']);
+    // and the dashboard readiness reflects 1/2 operational → READY
+    $ready = $providers->readiness();
+    assert_equals(1, $ready['operational']);
+    assert_equals(2, $ready['total']);
+    assert_equals('READY', $ready['engine']);
+    assert_equals('DAILY_QUOTA_EXHAUSTED', $ready['providers']['api-football']['status']);
 });
 
 /**

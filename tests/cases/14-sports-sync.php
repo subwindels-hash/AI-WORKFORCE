@@ -97,7 +97,8 @@ test('sports round sync fails when the provider is not ONLINE', function () {
     $p = fx_sports_round_provider(fx_sports_round(), 'OFFLINE');
     $result = $sync->syncRound($p, 'r1', 'round-key-4');
     assert_equals('FAILED', $result['status']);
-    assert_contains('provider is not ONLINE', implode('; ', $result['errors']));
+    // The error names the CLASSIFIED status, not a generic "not ONLINE".
+    assert_contains('OFFLINE', implode('; ', $result['errors']));
     assert_equals(0, $p->roundCalls, 'no round fetch for an offline provider');
 });
 

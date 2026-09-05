@@ -254,6 +254,14 @@ class AIWorkforce_model extends CI_Model
                 $this->db->insert('sports_job_runs', ['id' => $run['id'], 'job_type' => $run['jobType'], 'status' => 'RUNNING', 'started_at' => gmdate('c'), 'execution_key' => $run['executionKey'], 'provider' => $run['provider'] ?? null]); return $run;
             }
             public function finishJobRun(string $id, array $result): void { $this->db->where('id', $id)->update('sports_job_runs', ['status' => $result['status'], 'ended_at' => gmdate('c'), 'records_processed' => $result['processed'] ?? 0, 'records_created' => $result['created'] ?? 0, 'records_updated' => $result['updated'] ?? 0, 'errors' => json_encode($result['errors'] ?? [])]); }
+            public function releaseJobRun(string $id): void {
+                $row = $this->db->get_where('sports_job_runs', ['id' => $id], 1)->row_array();
+                if (!$row) return;
+                $key = (string) ($row['execution_key'] ?? '');
+                if ($key === '' || str_contains($key, '#released:')) return;
+                // execution_key is VARCHAR(160) UNIQUE — keep the suffix short and unique per run id.
+                $this->db->where('id', $id)->update('sports_job_runs', ['execution_key' => mb_substr($key, 0, 120) . '#released:' . substr($id, 0, 36)]);
+            }
             public function listJobRuns(?string $jobType = null, int $limit = 50): array { if ($jobType !== null) $this->db->where('job_type', $jobType); $rows = $this->db->order_by('started_at', 'DESC')->limit(min(500, max(1, $limit)))->get('sports_job_runs')->result_array(); foreach ($rows as &$row) $row['errors'] = json_decode((string) ($row['errors'] ?: '[]'), true); return $rows; }
             public function saveBacktest(array $b): void { $this->db->insert('sports_backtests', $b); }
             public function findBacktest(string $id): ?array { $row = $this->db->get_where('sports_backtests', ['id' => $id], 1)->row_array(); if ($row) { $row['params'] = json_decode((string) $row['params'], true); $row['report'] = json_decode((string) $row['report'], true); } return $row ?: null; }

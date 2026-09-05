@@ -157,7 +157,7 @@ final class ApiProviders
                 'label' => 'TheSportsDB (thesportsdb.com)',
                 'fields' => [
                     $f('base_url', 'Base URL', false, false, 'Defaults to https://www.thesportsdb.com/api/v1/json'),
-                    $f('api_key', 'API Key (tier key)', true, true, 'Free tier = "3"; get a paid key at https://www.thesportsdb.com'),
+                    $f('api_key', 'API Key (tier key)', true, true, 'Free tier = "123" (the legacy "3" key is retired and now answers HTTP 400); get a paid key at https://www.thesportsdb.com'),
                     $f('timeout', 'Timeout (seconds)', false, false),
                 ],
             ],
@@ -765,7 +765,7 @@ final class ApiProviders
                 'frankfurter' => self::testGet(($base !== '' ? $base : 'https://api.frankfurter.dev') . '/v1/latest?base=EUR&symbols=USD'),
                 'http_sports' => self::testGet(($base !== '' ? $base : '') . '/health', $secrets['token'] ?? $secrets['api_key'] ?? ''),
                 'api_football' => self::testApiFootball(($base !== '' ? $base : 'https://v3.football.api-sports.io'), $secrets['api_key'] ?? ''),
-                'thesportsdb' => self::testTheSportsDb(($base !== '' ? $base : 'https://www.thesportsdb.com/api/v1/json'), $secrets['api_key'] ?? '3'),
+                'thesportsdb' => self::testTheSportsDb(($base !== '' ? $base : 'https://www.thesportsdb.com/api/v1/json'), $secrets['api_key'] ?? '123'),
                 'sportmonks' => self::testSportMonks(($base !== '' ? $base : 'https://api.sportmonks.com/v3/football'), $secrets['api_key'] ?? ''),
                 'official_lottery' => self::testGet((string) ($extra['health_url'] ?? ($base . '/health')), $secrets['token'] ?? $secrets['api_key'] ?? ''),
                 'libretranslate' => self::testGet(($base !== '' ? $base : '') . '/languages'),
@@ -1004,26 +1004,35 @@ final class ApiProviders
 
     private static function testTheSportsDb(string $baseUrl, string $key): array
     {
-        $url = rtrim($baseUrl !== '' ? $baseUrl : 'https://www.thesportsdb.com/api/v1/json', '/') . '/' . rawurlencode($key) . '/all_sports.php';
+        // Same canonicalisation the runtime adapter applies: the legacy free key
+        // "3" became "123" and a base URL that already carries the key (or the
+        // premium-only v2 root) would otherwise 400 on every request.
+        $key = \AIWorkforce\Sports\Providers\TheSportsDbProvider::normalizeKey($key);
+        $baseUrl = \AIWorkforce\Sports\Providers\TheSportsDbProvider::normalizeBaseUrl($baseUrl);
+        $url = rtrim($baseUrl, '/') . '/' . rawurlencode($key) . '/all_sports.php';
         $resp = self::http($url, ['Accept: application/json']);
         $status = (int) ($resp['status'] ?? 0);
         $decoded = json_decode($resp['body'] ?? '', true);
         if ($status >= 200 && $status < 400) {
             if (!empty($decoded['sports'])) {
-                $tier = $key === '3' ? 'Free tier' : 'Premium tier';
+                $tier = $key === \AIWorkforce\Sports\Providers\TheSportsDbProvider::FREE_KEY ? 'Free tier' : 'Premium tier';
                 return ['ok' => true, 'message' => 'Connected to TheSportsDB (' . $tier . ')'];
             }
             if (isset($decoded['error'])) return ['ok' => false, 'message' => 'Invalid API key or tier'];
             return ['ok' => true, 'message' => 'Connected to TheSportsDB'];
         }
         if ($status === 401 || $status === 403) return ['ok' => false, 'message' => 'Invalid API key'];
-        return ['ok' => false, 'message' => 'Connection failed'];
+        if ($status === 400) return ['ok' => false, 'message' => 'TheSportsDB rejected the request (HTTP 400) — the key is not a valid tier key (free tier is "123") or the base URL is wrong'];
+        if ($status === 404) return ['ok' => false, 'message' => 'TheSportsDB endpoint not found (HTTP 404) — base URL must be https://www.thesportsdb.com/api/v1/json'];
+        if ($status === 429) return ['ok' => false, 'message' => 'Rate limited (free tier allows 30 requests/minute) — try again later'];
+        return ['ok' => false, 'message' => 'Connection failed' . ($status > 0 ? ' (HTTP ' . $status . ')' : ' (no HTTP response)')];
     }
 
     private static function testSportMonks(string $baseUrl, string $key): array
     {
         if ($key === '') return ['ok' => false, 'message' => 'An API token is required. Register at https://my.sportmonks.com/'];
-        $url = rtrim($baseUrl !== '' ? $baseUrl : 'https://api.sportmonks.com/v3/football', '/') . '/leagues?api_token=' . rawurlencode($key);
+        $baseUrl = \AIWorkforce\Sports\Providers\SportMonksProvider::normalizeBaseUrl($baseUrl);
+        $url = rtrim($baseUrl, '/') . '/leagues?api_token=' . rawurlencode($key);
         $resp = self::http($url, ['Accept: application/json']);
         $status = (int) ($resp['status'] ?? 0);
         $decoded = json_decode($resp['body'] ?? '', true);
@@ -1032,6 +1041,7 @@ final class ApiProviders
             return ['ok' => true, 'message' => 'Connected to SportMonks (' . $count . ' leagues available)'];
         }
         if ($status === 401 || $status === 403) return ['ok' => false, 'message' => 'Invalid API token'];
+        if ($status === 404) return ['ok' => false, 'message' => 'SportMonks endpoint not found (HTTP 404) — base URL must be https://api.sportmonks.com/v3/football (v2 hosts and the marketing site 404 on every call)'];
         if ($status === 429) return ['ok' => false, 'message' => 'Rate limited — try again later'];
         return ['ok' => false, 'message' => 'Connection failed'];
     }

@@ -19,6 +19,12 @@ use AIWorkforce\Sports\Providers\SportsProviderManager;
  * never creates duplicate tickets. When nothing qualifies the engine stores
  * NO_QUALIFIED_TICKET with the exact rejection summary — an expected,
  * first-class outcome (spec §3).
+ *
+ * A provider outage is NOT that outcome. When every configured data provider
+ * fails (quota exhausted, 400/404 misconfiguration, offline) the run stores
+ * DATA_UNAVAILABLE with the per-provider status codes, and the run's execution
+ * key is released so the next sweep can retry once a provider recovers — a
+ * blocked engine must never masquerade as "no qualified games today".
  */
 class DailyTicketService
 {
@@ -57,21 +63,36 @@ class DailyTicketService
         $rejectionSummary = [];
         $provider = null;
         $modelVersionId = null;
+        $providerFailures = [];   // providerId → "STATUS: detail" (redacted)
+        $providerStatuses = [];   // providerId → STATUS
+        $dataState = 'OK';        // OK | DATA_UNAVAILABLE | NO_PROVIDER | DISABLED
 
         try {
             if (!(bool) $config['module_enabled']) {
                 $message = 'Sports Intelligence module is disabled';
+                $dataState = 'DISABLED';
             } elseif (!(bool) $config['ticket_engine_enabled']) {
                 $message = 'AI Ticket Engine is disabled';
+                $dataState = 'DISABLED';
             } elseif (!in_array($config['engine_mode'], ['AI_TICKET_GENERATION', 'USER_APPROVAL_REQUIRED', 'AUTOMATED_EXECUTION'], true)) {
                 $message = 'engine mode ' . $config['engine_mode'] . ' does not generate tickets';
+                $dataState = 'DISABLED';
             } elseif (!$this->providers->configured()) {
                 $message = 'no sports provider configured (DISABLED_NO_PROVIDER) — nothing is fabricated';
+                $dataState = 'NO_PROVIDER';
             } else {
                 $attempt = $this->providers->withFallback('fixtures', fn($p) => $p->fixtures(['from' => $date, 'to' => $date]));
                 if (!$attempt['ok']) {
-                    $message = 'provider failure: ' . json_encode($attempt['failures']);
-                    $errors[] = $message;
+                    // Every provider failed. This is a DATA outage, not a
+                    // prediction outcome: report it as such, keep the
+                    // per-provider status codes, and do not claim "no
+                    // qualified games" for a day nobody could look at.
+                    $status = 'DATA_UNAVAILABLE';
+                    $dataState = 'DATA_UNAVAILABLE';
+                    $providerFailures = $attempt['failures'];
+                    $providerStatuses = $attempt['failureStatuses'] ?? [];
+                    $message = 'all configured sports-data providers failed — ' . ($attempt['summary'] ?: SportsProviderManager::summarize('fixtures', $providerStatuses));
+                    $errors[] = 'provider failure: ' . json_encode($attempt['failures']);
                 } else {
                     $provider = $attempt['provider'];
                     $providerId = (int) $this->repo->ensureProvider($provider, $provider)['id'];
@@ -179,20 +200,40 @@ class DailyTicketService
             $errors[] = $message;
         }
 
+        // The rejection summary doubles as the provider-failure ledger on a
+        // DATA_UNAVAILABLE day: PROVIDER:<id> → status, so the stored row, the
+        // dashboard and the API all show WHICH feed failed and WHY.
+        $storedSummary = $rejectionSummary;
+        if ($dataState === 'DATA_UNAVAILABLE') {
+            foreach ($providerStatuses as $pid => $st) $storedSummary['PROVIDER:' . $pid] = $st;
+        }
         $this->repo->saveDailyTicket([
             'date' => $date, 'ticket_id' => $ticketId, 'status' => $status,
             'configuration_version' => (int) $config['version'],
             'candidates_evaluated' => $evaluated, 'predictions_recorded' => $recorded,
-            'rejections' => $rejections, 'rejection_summary' => json_encode($rejectionSummary),
+            'rejections' => $rejections, 'rejection_summary' => json_encode($storedSummary),
             'message' => mb_substr($message, 0, 500), 'provider' => $provider, 'run_id' => $run['id'],
             'created_at' => gmdate('c'), 'updated_at' => gmdate('c'),
         ]);
-        $this->repo->finishJobRun($run['id'], ['status' => 'COMPLETED', 'processed' => $evaluated, 'created' => $recorded, 'updated' => 0, 'errors' => $errors]);
-        $this->audit->emit('SPORTS_DAILY_TICKET_RUN', 'Daily ticket run ' . $date . ' → ' . $status, [
-            'date' => $date, 'status' => $status, 'ticketId' => $ticketId, 'evaluated' => $evaluated,
-            'rejections' => $rejections, 'rejectionSummary' => $rejectionSummary, 'message' => $message, 'provider' => $provider, 'errors' => $errors,
+        // A data outage is a FAILED run, and its execution key must not block
+        // the retry: the next sweep (after the quota reset / config fix) gets
+        // a fresh idempotency slot instead of DUPLICATE_SKIPPED all day.
+        $runStatus = $dataState === 'DATA_UNAVAILABLE' ? 'FAILED' : 'COMPLETED';
+        $this->repo->finishJobRun($run['id'], ['status' => $runStatus, 'processed' => $evaluated, 'created' => $recorded, 'updated' => 0, 'errors' => $errors]);
+        if ($dataState === 'DATA_UNAVAILABLE' && method_exists($this->repo, 'releaseJobRun')) {
+            try { $this->repo->releaseJobRun($run['id']); } catch (\Throwable $e) { /* best effort */ }
+        }
+        $this->audit->emit($dataState === 'DATA_UNAVAILABLE' ? 'SPORTS_DAILY_TICKET_BLOCKED' : 'SPORTS_DAILY_TICKET_RUN', 'Daily ticket run ' . $date . ' → ' . $status, [
+            'date' => $date, 'status' => $status, 'dataState' => $dataState, 'ticketId' => $ticketId, 'evaluated' => $evaluated,
+            'rejections' => $rejections, 'rejectionSummary' => $rejectionSummary, 'message' => $message, 'provider' => $provider,
+            'providerFailures' => $providerFailures, 'providerStatuses' => $providerStatuses, 'errors' => $errors,
         ]);
-        return ['status' => $status, 'ticketId' => $ticketId, 'date' => $date, 'message' => $message, 'evaluated' => $evaluated, 'predictionsRecorded' => $recorded, 'rejections' => $rejections, 'rejectionSummary' => $rejectionSummary, 'provider' => $provider, 'runId' => $run['id'], 'errors' => $errors];
+        return [
+            'status' => $status, 'dataState' => $dataState, 'ticketId' => $ticketId, 'date' => $date, 'message' => $message,
+            'evaluated' => $evaluated, 'predictionsRecorded' => $recorded, 'rejections' => $rejections, 'rejectionSummary' => $rejectionSummary,
+            'provider' => $provider, 'providerFailures' => $providerFailures, 'providerStatuses' => $providerStatuses,
+            'runId' => $run['id'], 'errors' => $errors,
+        ];
     }
 
     /**

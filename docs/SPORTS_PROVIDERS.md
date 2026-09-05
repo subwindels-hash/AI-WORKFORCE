@@ -12,14 +12,14 @@ WINDELS_SPORTS_HTTP_TIMEOUT=10
 WINDELS_API_FOOTBALL_KEY=...
 WINDELS_API_FOOTBALL_BASE_URL=https://v3.football.api-sports.io
 
-WINDELS_THESPORTSDB_KEY=3
+WINDELS_THESPORTSDB_KEY=123
 WINDELS_THESPORTSDB_BASE_URL=https://www.thesportsdb.com/api/v1/json
 
 WINDELS_SPORTMONKS_TOKEN=...
 WINDELS_SPORTMONKS_BASE_URL=https://api.sportmonks.com/v3/football
 ```
 
-A provider is registered only when its credential exists. Multiple configured providers are retained in registration order and the provider manager falls back to the next provider after authentication, rate-limit, network, or upstream data failures. Provider status is available through `GET /api_sports/providers` and the Sports Intelligence status endpoint.
+A provider is registered only when its credential exists. Multiple configured providers are retained in registration order and the provider manager falls back to the next provider after authentication, rate-limit, quota, network, or upstream data failures. Provider status is available through `GET /api_sports/providers` and the Sports Intelligence status endpoint; both carry a `readiness` block (`operational`, `total`, `engine`) — see *Provider health, circuit breaker and DATA_UNAVAILABLE* below.
 
 ## Capabilities
 
@@ -84,7 +84,15 @@ vendor's `idAPIfootball` cross-reference. All TheSportsDB events also carry
 results so the same match/team can be matched across api-football and
 TheSportsDB.
 
-**Free tier (key "3") limits, verified live:** list endpoints are capped —
+**Free key:** the documented free/test key is `123`. The old key `3` was
+retired and the v1 endpoints now answer **HTTP 400** for it — that is what
+produced `thesportsdb: HTTP 400` in the daily-ticket log. The adapter
+normalises `1`/`2`/`3` (and an empty key) to `123`, and normalises a base URL that already
+contains the key segment (`.../api/v1/json/3`) or points at the premium-only
+v2 root back to `https://www.thesportsdb.com/api/v1/json`. Free tier is
+limited to 30 requests/minute (HTTP 429 → `RATE_LIMITED`).
+
+**Free tier limits, verified live:** list endpoints are capped —
 `all_leagues.php` returns 5 leagues, `eventsday.php` a partial day, and
 `eventsseason.php` a partial season. The adapter never fabricates the
 missing rows; treat free-tier syncs as a sample of the day. v2 (livescore,
@@ -213,6 +221,92 @@ round-capable provider is synced once via `syncRound(..., ['results' => false])`
 (one provider request per matchday, results skipped so verified results are
 never re-written), and matches without a `round_id` — or on providers
 without the round endpoint — keep the legacy per-fixture `syncOdds` call.
+
+## Provider health, circuit breaker and DATA_UNAVAILABLE
+
+### Why
+
+On 2026-09-05 the daily ticket run reported `NO_QUALIFIED_TICKET` with
+`0 matches evaluated`. Nothing was wrong with the prediction engine — every
+data feed had failed: API-Football answered `You have reached the request
+limit for the day` (and was still being re-called for `odds` / `fixtures`),
+TheSportsDB returned HTTP 400 (retired free key `3`), SportMonks and the
+generic HTTP provider returned HTTP 404 (wrong base URL). The engine treated
+"no data" as "no qualified games". The provider layer now distinguishes the two.
+
+### Provider states
+
+Every adapter classifies each response through `ProviderHttp::classify()`:
+
+| State | Trigger | Circuit behaviour |
+|---|---|---|
+| `ONLINE` (HEALTHY) | 2xx and usable body | closed |
+| `DEGRADED` | partial data / 5xx | counts towards the 3-failure threshold |
+| `RATE_LIMITED` | HTTP 429 per-minute throttle, api-football `errors.rateLimit` | opens for `Retry-After` (default 60 s) |
+| `DAILY_QUOTA_EXHAUSTED` | api-football `errors.requests` ("request limit for the day"), `x-ratelimit-requests-remaining: 0`, `/status` `requests.current >= limit_day`, or a 429 whose body says the day is used up | **opens immediately until the next 00:00 UTC** — no retries before the vendor reset |
+| `AUTHENTICATION_ERROR` (AUTH_FAILED) | HTTP 401/403, api-football `errors.token` | opens for 5 min (configuration error) |
+| `BAD_REQUEST` | HTTP 400/422, api-football parameter errors | opens for 5 min (configuration error) |
+| `NOT_FOUND` | HTTP 404/410 | opens for 5 min (configuration error) |
+| `TIMEOUT` | cURL errno 28 | counts towards threshold |
+| `OFFLINE` | no HTTP response (DNS/TLS/connect) | counts towards threshold |
+
+`ProviderCircuitBreaker` (`Sports/Providers/ProviderCircuitBreaker.php`):
+3 generic failures → `OPEN` for 10 minutes → `HALF_OPEN` (one probe) →
+`CLOSED` on success / `OPEN` again on failure. Terminal states (quota, rate
+limit, configuration) open the circuit at once with the state-specific
+cooldown above. Circuits are re-hydrated from `sports_provider_health` at
+startup, so a cron tick at 09:00 still knows the quota died at 08:40.
+
+`SportsProviderManager::withFallback()` skips an `OPEN` provider **without
+any network call** (not even `health()`), probes `health()` before the first
+data call otherwise, feeds a non-`ONLINE` self-report to the breaker, and —
+when every provider fails — returns
+`{ok:false, failureStatuses:{id:STATE}, summary:"fixtures: all 4 provider(s) failed — api-football DAILY_QUOTA_EXHAUSTED, thesportsdb BAD_REQUEST, sportmonks NOT_FOUND, http-provider NOT_FOUND"}`.
+
+### Diagnostics
+
+Every `ProviderException` carries `details` with `method`, `endpoint`
+(credential redacted), `query` (secret parameters replaced by `[redacted]`),
+`httpStatus` and a 240-character `bodySnippet`. `ProviderHttp::redact()` also
+strips bearer tokens, `x-apisports-key` values, TheSportsDB path keys and
+32+-character opaque tokens from any free text before it reaches a log, the
+audit trail, a flash message or the API. API keys are never logged.
+
+### API-Football quota monitoring
+
+`ApiFootballProvider::health()` calls `GET /status` (free — it does not count
+against the quota) and reads `response.requests.current/limit_day` and the
+`x-ratelimit-requests-remaining` / `x-ratelimit-requests-limit` headers. It
+reports `rateLimitRemaining`, `limitDaily`, the plan, and returns
+`DAILY_QUOTA_EXHAUSTED` with `retryAt` = next 00:00 UTC when nothing is left,
+so the manager never spends a paid request to discover an empty quota. The
+same headers are checked on every data response.
+
+### DATA_UNAVAILABLE
+
+When the fixtures pull fails on all providers the daily ticket engine no
+longer evaluates zero matches and reports `NO_QUALIFIED_TICKET`. Instead:
+
+* `DailyTicketService::runDaily()` returns
+  `status: DATA_UNAVAILABLE`, `dataState`, `providerStatuses`,
+  `rejection_summary["PROVIDER:<id>"]`, `retryable: true`, and releases the
+  job run so the next tick can try again.
+* `SportsCronService::jobTicket()` checks `readiness()` first; with
+  `operational == 0` it emits the `SPORTS_DAILY_TICKET_BLOCKED` audit event
+  and returns `DATA_UNAVAILABLE` without touching the engine.
+* `POST /api_sports/run_ticket_engine` answers **HTTP 503** with
+  `status: DATA_UNAVAILABLE`, `providerStatuses` and `readiness`.
+* The dashboard shows `NO TICKET for <date> — STATUS: DATA_UNAVAILABLE` with
+  the per-provider reasons, never "no qualified games".
+
+### Dashboard
+
+`GET /api_sports/providers` and the Sports Intelligence page expose
+`readiness = {operational, total, engine: READY|BLOCKED|DISABLED_NO_PROVIDER, providers:{id:{status, detail, circuit, retryAt}}}`.
+The page header reads **Operational providers: N/4 · Prediction Engine:
+READY/BLOCKED**, the data-feed table has a *Circuit* column (state, reason,
+retry time, quota usage) and a red banner lists every non-operational
+provider with its state and `retryAt`.
 
 ## Live smoke test
 

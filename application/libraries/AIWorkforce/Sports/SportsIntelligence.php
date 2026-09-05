@@ -91,20 +91,79 @@ class SportsIntelligence
         $this->backtester = new SportsBacktester($repository, $audit, $this->pipeline, $this->quality, $this->modelPerformance);
 
         $this->registerProviders();
+        $this->hydrateCircuits();
+        $this->sync->setCircuitBreaker($this->providers->breaker());
         $this->providers->setHealthObserver(function (object $provider, string $operation, ?\Throwable $error, array $payload) use ($repository, $audit) {
             try {
                 $source = $repository->ensureProvider($provider->id(), $provider->id());
-                $health = $provider->health();
+                // A skipped provider (circuit OPEN) is recorded WITHOUT calling
+                // it — probing a quota-dead feed on every observation is the
+                // exact hammering the breaker exists to stop.
+                if (isset($payload['skipped']) && isset($payload['circuit'])) {
+                    $repository->saveHealth((int) $source['id'], [
+                        'status' => (string) $payload['skipped'],
+                        'lastFailureAt' => $payload['circuit']['lastFailureAt'] ?? null,
+                        'lastSuccessAt' => $payload['circuit']['lastSuccessAt'] ?? null,
+                        'missingFields' => ['circuit' => $payload['circuit']['state'] ?? 'OPEN', 'retryAt' => $payload['circuit']['retryAt'] ?? null, 'skipped' => $operation],
+                    ]);
+                    return;
+                }
+                $health = $error instanceof ProviderException && isset($payload['skipped'])
+                    ? ['status' => $error->status, 'detail' => $error->getMessage()]   // health() was just called by the manager; do not call it twice
+                    : $provider->health();
                 if ($error instanceof ProviderException) $health['status'] = $error->status;
                 $health['lastFailureAt'] = $error !== null ? gmdate('c') : ($health['lastFailureAt'] ?? null);
                 $health['lastSuccessAt'] = $error === null ? gmdate('c') : ($health['lastSuccessAt'] ?? null);
                 $health['lastOddsSyncAt'] = $operation === 'odds' && $error === null ? gmdate('c') : ($health['lastOddsSyncAt'] ?? null);
                 $health['lastFixtureSyncAt'] = $operation === 'fixtures' && $error === null ? gmdate('c') : ($health['lastFixtureSyncAt'] ?? null);
                 $health['lastResultSyncAt'] = $operation === 'results' && $error === null ? gmdate('c') : ($health['lastResultSyncAt'] ?? null);
+                if ($error instanceof ProviderException) {
+                    // Structured, secret-free diagnostic: endpoint / method /
+                    // query / HTTP status / body snippet — what an operator
+                    // needs to fix a 400 or 404 without reading raw logs.
+                    $d = $error->details;
+                    $health['missingFields'] = array_filter([
+                        'operation' => $operation,
+                        'endpoint' => $d['endpoint'] ?? null,
+                        'method' => $d['method'] ?? null,
+                        'query' => $d['query'] ?? null,
+                        'httpStatus' => $d['httpStatus'] ?? null,
+                        'bodySnippet' => $d['bodySnippet'] ?? null,
+                        'retryAt' => $d['retryAt'] ?? null,
+                        'message' => mb_substr($error->getMessage(), 0, 300),
+                    ], fn($v) => $v !== null && $v !== '' && $v !== []);
+                }
                 $repository->saveHealth((int) $source['id'], $health);
-                if ($error !== null) $audit->emit('SPORTS_PROVIDER_FAILURE', "Provider {$provider->id()} failed ({$error->status}) on {$operation}", ['provider' => $provider->id(), 'operation' => $operation, 'status' => $error->status, 'message' => mb_substr($error->getMessage(), 0, 300)]);
+                if ($error !== null) {
+                    $status = $error instanceof ProviderException ? $error->status : 'DATA_ERROR';
+                    $audit->emit('SPORTS_PROVIDER_FAILURE', "Provider {$provider->id()} failed ({$status}) on {$operation}", [
+                        'provider' => $provider->id(), 'operation' => $operation, 'status' => $status,
+                        'message' => mb_substr($error->getMessage(), 0, 300),
+                        'diagnostic' => $error instanceof ProviderException ? array_intersect_key($error->details, array_flip(['endpoint', 'method', 'query', 'httpStatus', 'bodySnippet', 'retryAt', 'errorField'])) : [],
+                    ]);
+                }
             } catch (\Throwable $e) { /* health recording must never break the pipeline */ }
         });
+    }
+
+    /**
+     * Re-open circuits from the persisted health history so a new PHP
+     * process (cron at 09:05, a page view at 09:06) remembers that
+     * api-football's quota died at 08:40 and does not spend the morning
+     * re-discovering it one request at a time.
+     */
+    private function hydrateCircuits(): void
+    {
+        try {
+            $latest = [];
+            foreach ($this->repository->listProviders() as $source) {
+                $code = (string) ($source['provider_code'] ?? '');
+                if ($code === '' || $this->providers->provider($code) === null) continue;
+                $row = $this->repository->latestHealth((int) $source['id']);
+                if ($row !== null) $latest[$code] = $row;
+            }
+            if ($latest !== []) $this->providers->breaker()->hydrate($latest);
+        } catch (\Throwable $e) { /* a missing table on first boot must not break the module */ }
     }
 
     /** Register providers from environment configuration only — no secrets in code. */
@@ -280,6 +339,13 @@ class SportsIntelligence
                 'detail' => $health['detail'],
             ];
         }
+        $readiness = $this->providers->readiness();
+        $liveHealth = $this->providers->health();
+        $message = match (true) {
+            !$this->providers->configured() => 'This feature is temporarily unavailable. Please try again later.',
+            $readiness['operational'] === 0 => 'All configured sports-data providers are unavailable — the prediction engine is BLOCKED until at least one recovers.',
+            default => sprintf('%d/%d sports data provider(s) operational', $readiness['operational'], $readiness['total']),
+        };
         return [
             'module' => 'WINDELS Sports Intelligence',
             'enabled' => getenv('WINDELS_SPORTS_ENABLED') === '1',
@@ -287,10 +353,14 @@ class SportsIntelligence
             'isDemoData' => $this->mode() === 'SANDBOX',
             'providersConfigured' => $this->providers->configured(),
             'providers' => array_values($providers),
-            'liveHealth' => $this->providers->health(),
+            'liveHealth' => $liveHealth,
+            // Operational count + engine readiness: READY when ≥1 provider can
+            // serve fixtures, BLOCKED when 0/N can (quota, 400, 404, offline).
+            'readiness' => $readiness,
             'ticketEngine' => $this->providers->configured() ? $this->configuration->active()['engine_mode'] : 'DISABLED_NO_PROVIDER',
+            'predictionEngine' => $readiness['engine'],
             'configuration' => $this->configuration->active(),
-            'message' => $this->providers->configured() ? 'sports data providers available' : 'This feature is temporarily unavailable. Please try again later.',
+            'message' => $message,
         ];
     }
 
@@ -328,6 +398,7 @@ class SportsIntelligence
                 'providers' => $status['providers'], 'liveHealth' => $status['liveHealth'],
                 'providersConfigured' => $status['providersConfigured'], 'configuredIds' => array_keys($this->providers->all()),
                 'lastSyncs' => $lastSyncs, 'recentSyncs' => $recentSyncs, 'ticketEngine' => $status['ticketEngine'],
+                'readiness' => $status['readiness'], 'predictionEngine' => $status['predictionEngine'],
             ],
             'todayIntelligence' => [
                 'date' => $today,

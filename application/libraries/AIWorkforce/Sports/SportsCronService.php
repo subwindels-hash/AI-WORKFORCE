@@ -4,6 +4,7 @@ namespace AIWorkforce\Sports;
 use AIWorkforce\Backtest\Backtester;
 use AIWorkforce\Persistence\AuditRepository;
 use AIWorkforce\Persistence\SportsRepository;
+use AIWorkforce\Sports\Providers\SportsProviderManager;
 
 /**
  * Idempotent scheduled jobs (spec §31).
@@ -177,8 +178,18 @@ class SportsCronService
 
     private function jobTicket(string $date): array
     {
+        // Skip the run outright when 0/N providers are operational: it would
+        // only re-prove the outage (and, for a quota-dead feed, spend nothing
+        // thanks to the breaker — but a 404/400 feed would still be probed).
+        $readiness = $this->sports->providers->readiness();
+        if ($readiness['total'] > 0 && $readiness['operational'] === 0) {
+            $ledger = [];
+            foreach ($readiness['providers'] as $pid => $pr) $ledger[$pid] = $pr['status'];
+            $this->audit->emit('SPORTS_DAILY_TICKET_BLOCKED', 'Daily ticket run ' . $date . ' skipped: 0/' . $readiness['total'] . ' providers operational', ['date' => $date, 'providerStatuses' => $ledger]);
+            return ['status' => 'DATA_UNAVAILABLE', 'ticketId' => null, 'message' => 'prediction engine BLOCKED — 0/' . $readiness['total'] . ' sports data providers operational', 'providerStatuses' => $ledger, 'errors' => [SportsProviderManager::summarize('fixtures', $ledger)]];
+        }
         $result = $this->sports->dailyTickets->runDaily($date);
-        return ['status' => $result['status'], 'ticketId' => $result['ticketId'], 'message' => $result['message'], 'errors' => $result['errors']];
+        return ['status' => $result['status'], 'ticketId' => $result['ticketId'], 'message' => $result['message'], 'providerStatuses' => $result['providerStatuses'] ?? [], 'errors' => $result['errors']];
     }
 
     private function jobSettlement(string $date): array

@@ -30,6 +30,11 @@ trait HttpTransport
     private int $failures = 0;
     private ?string $lastSuccess = null;
     private ?string $lastFailure = null;
+    private ?string $lastUrl = null;
+    /** @var array<string,mixed>|null last classified failure (redacted) */
+    private ?array $lastError = null;
+    private ?int $dailyRemaining = null;
+    private ?int $dailyLimit = null;
     /**
      * Non-fatal pagination degradations observed by the last call — e.g. an
      * endpoint that advertised more pages but refused the `page` parameter.
@@ -51,6 +56,7 @@ trait HttpTransport
             if (function_exists('curl_init')) {
                 $ch = curl_init($url);
                 if ($ch !== false) {
+                    $respHeaders = [];
                     curl_setopt_array($ch, [
                         CURLOPT_RETURNTRANSFER => true,
                         CURLOPT_FOLLOWLOCATION => true,
@@ -62,20 +68,30 @@ trait HttpTransport
                         CURLOPT_SSL_VERIFYPEER => true,
                         CURLOPT_SSL_VERIFYHOST => 2,
                         CURLOPT_ENCODING => '',
+                        // Response headers carry the vendor's quota counters
+                        // (api-football: x-ratelimit-requests-remaining).
+                        CURLOPT_HEADERFUNCTION => function ($ch, string $line) use (&$respHeaders): int {
+                            $pos = strpos($line, ':');
+                            if ($pos !== false) $respHeaders[strtolower(trim(substr($line, 0, $pos)))] = trim(substr($line, $pos + 1));
+                            return strlen($line);
+                        },
                     ]);
                     $body = curl_exec($ch);
                     $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                    $errno = (int) curl_errno($ch);
+                    $error = (string) curl_error($ch);
                     curl_close($ch);
                     if ($body !== false) {
-                        return ['status' => $status, 'body' => (string) $body];
+                        return ['status' => $status, 'body' => (string) $body, 'headers' => $respHeaders];
                     }
                     if ($status > 0) {
-                        return ['status' => $status, 'body' => ''];
+                        return ['status' => $status, 'body' => '', 'headers' => $respHeaders];
                     }
+                    return ['status' => 0, 'body' => '', 'headers' => [], 'errno' => $errno, 'error' => $error];
                 }
             }
             if (!ini_get('allow_url_fopen')) {
-                return ['status' => 0, 'body' => ''];
+                return ['status' => 0, 'body' => '', 'error' => 'no HTTP client available (curl missing, allow_url_fopen off)'];
             }
             $ctx = stream_context_create([
                 'http' => [
@@ -86,12 +102,20 @@ trait HttpTransport
                 ],
                 'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
             ]);
+            $t0 = microtime(true);
             $body = @file_get_contents($url, false, $ctx);
             $status = 0;
-            if (isset($http_response_header[0]) && preg_match('#HTTP/\S+\s+(\d+)#', $http_response_header[0], $m)) {
-                $status = (int) $m[1];
+            $respHeaders = [];
+            if (isset($http_response_header) && is_array($http_response_header)) {
+                foreach ($http_response_header as $line) {
+                    if (preg_match('#^HTTP/\S+\s+(\d+)#', $line, $m)) { $status = (int) $m[1]; continue; }
+                    $pos = strpos($line, ':');
+                    if ($pos !== false) $respHeaders[strtolower(trim(substr($line, 0, $pos)))] = trim(substr($line, $pos + 1));
+                }
             }
-            return ['status' => $status, 'body' => is_string($body) ? $body : ''];
+            $out = ['status' => $status, 'body' => is_string($body) ? $body : '', 'headers' => $respHeaders];
+            if ($status === 0 && (microtime(true) - $t0) >= $timeout) $out['error'] = 'timed out after ' . $timeout . 's';
+            return $out;
         };
     }
 
@@ -104,17 +128,71 @@ trait HttpTransport
         } catch (\Throwable $e) {
             $this->failures++;
             $this->lastFailure = gmdate('c');
-            throw new ProviderException('provider transport failure: ' . $e->getMessage(), ProviderException::OFFLINE, $e);
+            throw new ProviderException('provider transport failure: ' . ProviderHttp::redact($e->getMessage()), ProviderException::OFFLINE, $e, ProviderHttp::diagnostic($url, 'GET', 0, ''));
         }
         $this->lastResponseMs = (int) round((microtime(true) - $t0) * 1000);
-        $s = (int) ($resp['status'] ?? 0);
-        if ($s === 0) { $this->failures++; $this->lastFailure = gmdate('c'); throw new ProviderException('no HTTP response (timeout/unreachable)', ProviderException::OFFLINE); }
-        if ($s === 401 || $s === 403) { $this->failures++; $this->lastFailure = gmdate('c'); throw new ProviderException('authentication rejected (HTTP ' . $s . ')', ProviderException::AUTHENTICATION_ERROR); }
-        if ($s === 429) { $this->failures++; $this->lastFailure = gmdate('c'); throw new ProviderException('rate limited (HTTP 429)', ProviderException::RATE_LIMITED); }
-        if ($s >= 500) { $this->failures++; $this->lastFailure = gmdate('c'); throw new ProviderException('provider server error (HTTP ' . $s . ')', ProviderException::DATA_ERROR); }
-        if ($s >= 400) { $this->failures++; $this->lastFailure = gmdate('c'); throw new ProviderException('provider client error (HTTP ' . $s . ')', ProviderException::DATA_ERROR); }
+        $this->lastUrl = ProviderHttp::redactUrl($url);
+        $respHeaders = is_array($resp['headers'] ?? null) ? $resp['headers'] : [];
+        $this->noteRateLimitHeaders($respHeaders);
+        if (!isset($resp['error']) && (int) ($resp['status'] ?? 0) === 0 && $this->lastResponseMs >= $this->timeoutSeconds() * 1000) {
+            $resp['error'] = 'timed out after ' . $this->timeoutSeconds() . 's';
+        }
+        $failure = ProviderHttp::classify(is_array($resp) ? $resp : [], $url, 'GET');
+        if ($failure !== null) {
+            $this->failures++;
+            $this->lastFailure = gmdate('c');
+            $this->lastError = ['status' => $failure->status, 'message' => $failure->getMessage()] + $failure->details;
+            throw $failure->withDetails(['provider' => $this->id()]);
+        }
         $this->lastSuccess = gmdate('c');
         return $resp;
+    }
+
+    /** Remember the vendor's quota counters when it sends them. */
+    private function noteRateLimitHeaders(array $headers): void
+    {
+        $h = [];
+        foreach ($headers as $k => $v) $h[strtolower((string) $k)] = is_array($v) ? (string) end($v) : (string) $v;
+        if (isset($h['x-ratelimit-requests-remaining']) && is_numeric($h['x-ratelimit-requests-remaining'])) $this->dailyRemaining = (int) $h['x-ratelimit-requests-remaining'];
+        if (isset($h['x-ratelimit-requests-limit']) && is_numeric($h['x-ratelimit-requests-limit'])) $this->dailyLimit = (int) $h['x-ratelimit-requests-limit'];
+    }
+
+    /** Last classified failure (redacted), for diagnostics — never the credential. */
+    public function lastError(): ?array
+    {
+        return $this->lastError;
+    }
+
+    private function timeoutSeconds(): int
+    {
+        return property_exists($this, 'timeout') ? (int) $this->timeout : 10;
+    }
+
+    /** Health fields shared by every adapter (quota counters, last error, timings). */
+    private function baseHealth(): array
+    {
+        $h = [
+            'reliability' => $this->reliability(),
+            'errorRate' => $this->errorRate(),
+            'responseMs' => $this->lastResponseMs,
+            'lastSuccessAt' => $this->lastSuccess,
+            'lastFailureAt' => $this->lastFailure,
+        ];
+        if ($this->dailyRemaining !== null) $h['rateLimitRemaining'] = $this->dailyRemaining;
+        if ($this->dailyLimit !== null) $h['limitDaily'] = $this->dailyLimit;
+        if ($this->lastError !== null) $h['lastError'] = $this->lastError;
+        return $h;
+    }
+
+    /** Health payload for a classified failure. */
+    private function failedHealth(ProviderException $e): array
+    {
+        $h = $this->baseHealth() + ['status' => $e->status, 'detail' => $e->getMessage()];
+        $h['lastFailureAt'] = $this->lastFailure ?? gmdate('c');
+        if (isset($e->details['retryAt'])) $h['retryAt'] = $e->details['retryAt'];
+        if (isset($e->details['endpoint'])) $h['endpoint'] = $e->details['endpoint'];
+        if (isset($e->details['httpStatus'])) $h['httpStatus'] = $e->details['httpStatus'];
+        return $h;
     }
 
     /**
@@ -148,19 +226,21 @@ trait HttpTransport
             $field = key($errors);      // api-football keys soft errors by the offending parameter
             $first = current($errors);
             $msg = is_string($first) ? $first : json_encode($decoded['errors']);
-            $status = array_key_exists('token', $errors)
-                ? ProviderException::AUTHENTICATION_ERROR
-                : ProviderException::DATA_ERROR;
+            // api-football: errors.token → bad key; errors.requests → "You have
+            // reached the request limit for the day." (HTTP 200!). The latter
+            // must open the circuit until 00:00 UTC, not read as a data error.
+            $status = ProviderHttp::classifySoftError(is_string($field) ? $field : '', (string) $msg);
+            $extra = $status === ProviderException::DAILY_QUOTA_EXHAUSTED ? ['retryAt' => gmdate('c', ProviderHttp::nextUtcMidnight())] : [];
             $hint = '';
             if (str_contains(strtolower((string) $msg), 'from field')) {
                 $hint = ' — api-football from/to requires league+season or team+season (e.g. &league=39&season=2026). '
                     . 'For all fixtures in a date range omit league/season (per-day date mode is used) or pass &date=YYYY-MM-DD for a single day.';
             }
             throw new ProviderException(
-                'provider error: ' . mb_substr((string) $msg, 0, 200) . $hint,
+                'provider error: ' . ProviderHttp::redact(mb_substr((string) $msg, 0, 200)) . $hint,
                 $status,
                 null,
-                is_string($field) && $field !== '' ? ['errorField' => $field] : [],
+                (is_string($field) && $field !== '' ? ['errorField' => $field] : []) + $extra + ($this->lastUrl !== null ? ['endpoint' => $this->lastUrl] : []),
             );
         }
         return $decoded;
@@ -283,6 +363,9 @@ class ApiFootballProvider implements SportsDataProvider
     public function health(): array
     {
         try {
+            // /status does not count against the daily quota and returns the
+            // plan's counters — the authoritative place to detect exhaustion
+            // BEFORE spending a paid request on fixtures.
             $resp = $this->doRequest('/status');
             $json = $this->decodeJson($resp);
             $rateInfo = $json['response'] ?? [];
@@ -293,30 +376,34 @@ class ApiFootballProvider implements SportsDataProvider
             $limit = is_array($requests)
                 ? ($requests['limit_day'] ?? null)
                 : ($rateInfo['limit_day'] ?? null);
-            $health = [
+            $plan = is_array($rateInfo['subscription'] ?? null) ? ($rateInfo['subscription']['plan'] ?? null) : null;
+            $active = is_array($rateInfo['subscription'] ?? null) ? ($rateInfo['subscription']['active'] ?? null) : null;
+            $health = $this->baseHealth() + [
                 'status' => 'ONLINE',
-                'reliability' => $this->reliability(),
-                'errorRate' => $this->errorRate(),
-                'responseMs' => $this->lastResponseMs,
-                'lastSuccessAt' => $this->lastSuccess,
-                'lastFailureAt' => $this->lastFailure,
                 'requestsToday' => $used,
                 'limitDaily' => $limit,
+                'plan' => $plan,
             ];
+            if (is_numeric($used) && is_numeric($limit) && (int) $limit > 0) {
+                $health['rateLimitRemaining'] = max(0, (int) $limit - (int) $used);
+                if ((int) $used >= (int) $limit) {
+                    $health['status'] = ProviderException::DAILY_QUOTA_EXHAUSTED;
+                    $health['detail'] = sprintf('daily quota used (%d/%d on the %s plan); resets 00:00 UTC', (int) $used, (int) $limit, (string) ($plan ?? 'current'));
+                    $health['retryAt'] = gmdate('c', ProviderHttp::nextUtcMidnight());
+                    return $health;
+                }
+            }
+            if ($active === false) {
+                $health['status'] = ProviderException::AUTHENTICATION_ERROR;
+                $health['detail'] = 'api-football subscription is not active';
+                return $health;
+            }
             // A truncated pull still passes as ONLINE; the truncation is
             // reported alongside it so it cannot hide behind a green status.
             if ($this->paginationNotes !== []) $health['paginationNotes'] = $this->paginationNotes;
             return $health;
         } catch (ProviderException $e) {
-            return [
-                'status' => $e->status,
-                'reliability' => $this->reliability(),
-                'errorRate' => $this->errorRate(),
-                'responseMs' => $this->lastResponseMs,
-                'lastFailureAt' => $this->lastFailure ?? gmdate('c'),
-                'lastSuccessAt' => $this->lastSuccess,
-                'detail' => $e->getMessage(),
-            ];
+            return $this->failedHealth($e);
         }
     }
 
@@ -949,13 +1036,49 @@ class TheSportsDbProvider implements SportsDataProvider
 {
     use HttpTransport;
 
+    /**
+     * TheSportsDB's public free key. The v1 docs publish "123"; the historic
+     * "1"/"2"/"3" test keys are legacy aliases the vendor has been retiring and
+     * a request built with one now commonly comes back HTTP 400. Any legacy
+     * free key is normalised onto the documented one; a real premium key
+     * (longer than 3 chars) is used untouched.
+     */
+    public const FREE_KEY = '123';
+    public const LEGACY_FREE_KEYS = ['1', '2', '3', '123', ''];
+
     public function __construct(
-        private string $apiKey = '3',
+        private string $apiKey = self::FREE_KEY,
         private string $baseUrl = 'https://www.thesportsdb.com/api/v1/json',
         private int $timeout = 10,
         ?callable $transport = null,
     ) {
+        $this->apiKey = self::normalizeKey($this->apiKey);
+        $this->baseUrl = self::normalizeBaseUrl($this->baseUrl);
         $this->initTransport($timeout, $transport);
+    }
+
+    public static function normalizeKey(string $key): string
+    {
+        $key = trim($key);
+        return in_array($key, self::LEGACY_FREE_KEYS, true) ? self::FREE_KEY : $key;
+    }
+
+    /**
+     * The v1 JSON base must be `https://www.thesportsdb.com/api/v1/json` — a
+     * saved URL that already contains the key segment, the v2 base (header
+     * auth, premium-only, different paths) or the marketing site would make
+     * every request a 400/404.
+     */
+    public static function normalizeBaseUrl(string $baseUrl): string
+    {
+        $b = rtrim(trim($baseUrl), '/');
+        if ($b === '') return 'https://www.thesportsdb.com/api/v1/json';
+        if (!preg_match('#^https?://#i', $b)) $b = 'https://' . ltrim($b, '/');
+        $host = strtolower((string) (parse_url($b, PHP_URL_HOST) ?? ''));
+        if (!str_contains($host, 'thesportsdb.com')) return $b; // custom proxy — leave alone
+        $b = preg_replace('#/api/v1/json/[^/]+$#i', '/api/v1/json', $b) ?? $b; // strip an embedded key
+        if (!preg_match('#/api/v1/json$#i', $b)) return 'https://www.thesportsdb.com/api/v1/json';
+        return $b;
     }
 
     public function id(): string { return 'thesportsdb'; }
@@ -963,27 +1086,20 @@ class TheSportsDbProvider implements SportsDataProvider
     public function health(): array
     {
         try {
-            $resp = $this->doRequest('/eventsday.php?d=' . gmdate('Y-m-d') . '&s=Soccer');
-            $this->decodeJson($resp);
-            return [
+            // all_sports.php is the cheapest documented v1 call and is valid on
+            // every tier — eventsday for "today" is a real fixture pull and on
+            // the free tier is capped, so it made a bad health probe.
+            $resp = $this->doRequest('/all_sports.php');
+            $json = $this->decodeJson($resp);
+            if (isset($json['error']) || (array_key_exists('sports', $json) && $json['sports'] === null)) {
+                throw new ProviderException('TheSportsDB rejected the API key' . (isset($json['error']) ? ': ' . ProviderHttp::redact((string) $json['error']) : ''), ProviderException::AUTHENTICATION_ERROR, null, ['endpoint' => $this->lastUrl]);
+            }
+            return $this->baseHealth() + [
                 'status' => 'ONLINE',
-                'reliability' => $this->reliability(),
-                'errorRate' => $this->errorRate(),
-                'responseMs' => $this->lastResponseMs,
-                'lastSuccessAt' => $this->lastSuccess,
-                'lastFailureAt' => $this->lastFailure,
-                'tier' => $this->apiKey === '3' ? 'free' : 'premium',
+                'tier' => $this->apiKey === self::FREE_KEY ? 'free' : 'premium',
             ];
         } catch (ProviderException $e) {
-            return [
-                'status' => $e->status,
-                'reliability' => $this->reliability(),
-                'errorRate' => $this->errorRate(),
-                'responseMs' => $this->lastResponseMs,
-                'lastFailureAt' => $this->lastFailure ?? gmdate('c'),
-                'lastSuccessAt' => $this->lastSuccess,
-                'detail' => $e->getMessage(),
-            ];
+            return $this->failedHealth($e);
         }
     }
 
@@ -991,20 +1107,36 @@ class TheSportsDbProvider implements SportsDataProvider
     {
         $from = (string) ($query['from'] ?? gmdate('Y-m-d'));
         $to = (string) ($query['to'] ?? $from);
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $from) !== 1 || preg_match('/^\d{4}-\d{2}-\d{2}$/', $to) !== 1) {
+            throw new ProviderException('fixtures: from/to must be YYYY-MM-DD dates', ProviderException::BAD_REQUEST);
+        }
         $all = [];
         $day = $from;
         $guard = 0;
+        $daysTried = 0;
+        $daysFailed = 0;
+        $lastError = null;
         while ($day <= $to && $guard++ < 62) {
+            $daysTried++;
             try {
+                // Documented v1 schedule call: eventsday.php?d=YYYY-MM-DD&s=Soccer
                 $resp = $this->doRequest('/eventsday.php?d=' . rawurlencode($day) . '&s=Soccer');
                 $json = $this->decodeJson($resp);
                 $events = $json['events'] ?? [];
                 if (is_array($events)) $all = array_merge($all, $events);
             } catch (ProviderException $e) {
-                // single-day failure: skip and continue
+                $daysFailed++;
+                $lastError = $e;
+                // A throttle or a configuration error will fail every remaining
+                // day the same way — stop instead of multiplying the damage.
+                if ($e->isThrottled() || $e->isConfigurationError()) throw $e;
             }
             $day = gmdate('Y-m-d', strtotime($day . ' +1 day'));
         }
+        // Every day failed → this is a provider failure, not "no fixtures".
+        // Swallowing it here is exactly how an HTTP 400 used to surface as
+        // "0 matches evaluated" downstream.
+        if ($daysTried > 0 && $daysFailed === $daysTried && $lastError !== null) throw $lastError;
         return $this->mapFixtures($all);
     }
 
@@ -1248,7 +1380,29 @@ class SportMonksProvider implements SportsDataProvider
         private int $timeout = 10,
         ?callable $transport = null,
     ) {
+        $this->baseUrl = self::normalizeBaseUrl($this->baseUrl);
         $this->initTransport($timeout, $transport);
+    }
+
+    /**
+     * Every v3 football path lives under `https://api.sportmonks.com/v3/football`.
+     * The three configuration mistakes that produce HTTP 404 on every call:
+     * the v2 host (`soccer.sportmonks.com/api/v2.0`), the API root without the
+     * `/football` sport segment, and the marketing site (`www.sportmonks.com`).
+     * All are canonicalised here; a non-sportmonks host (proxy) is left alone.
+     */
+    public static function normalizeBaseUrl(string $baseUrl): string
+    {
+        $b = rtrim(trim($baseUrl), '/');
+        if ($b === '') return 'https://api.sportmonks.com/v3/football';
+        if (!preg_match('#^https?://#i', $b)) $b = 'https://' . ltrim($b, '/');
+        $host = strtolower((string) (parse_url($b, PHP_URL_HOST) ?? ''));
+        if (!str_contains($host, 'sportmonks.com')) return $b;
+        $path = strtolower((string) (parse_url($b, PHP_URL_PATH) ?? ''));
+        if ($host === 'api.sportmonks.com' && preg_match('#^/v3/football$#', $path)) return $b;
+        if ($host === 'api.sportmonks.com' && $path === '/v3') return $b . '/football';
+        if ($host === 'api.sportmonks.com' && preg_match('#^/v3/(core|odds)#', $path)) return $b; // other v3 products are legitimate
+        return 'https://api.sportmonks.com/v3/football';
     }
 
     public function id(): string { return 'sportmonks'; }
@@ -1256,26 +1410,31 @@ class SportMonksProvider implements SportsDataProvider
     public function health(): array
     {
         try {
-            $resp = $this->doRequest('/leagues');
+            // /leagues is the smallest authenticated v3 call. It also returns
+            // the subscription + rate_limit envelope, which tells us how many
+            // requests remain in the current hour and which plan is active.
+            $resp = $this->doRequest('/leagues?per_page=1');
             $json = $this->decodeJson($resp);
-            return [
-                'status' => 'ONLINE',
-                'reliability' => $this->reliability(),
-                'errorRate' => $this->errorRate(),
-                'responseMs' => $this->lastResponseMs,
-                'lastSuccessAt' => $this->lastSuccess,
-                'lastFailureAt' => $this->lastFailure,
-            ];
+            $health = $this->baseHealth() + ['status' => 'ONLINE'];
+            $rl = is_array($json['rate_limit'] ?? null) ? $json['rate_limit'] : [];
+            if (isset($rl['remaining']) && is_numeric($rl['remaining'])) {
+                $health['rateLimitRemaining'] = (int) $rl['remaining'];
+                if (isset($rl['resets_in_seconds']) && is_numeric($rl['resets_in_seconds'])) $health['rateLimitResetsInSeconds'] = (int) $rl['resets_in_seconds'];
+                if ((int) $rl['remaining'] <= 0) {
+                    $health['status'] = ProviderException::RATE_LIMITED;
+                    $health['detail'] = 'SportMonks hourly request allowance used; resets in ' . (int) ($rl['resets_in_seconds'] ?? 3600) . 's';
+                    $health['retryAt'] = gmdate('c', time() + (int) ($rl['resets_in_seconds'] ?? 3600));
+                    return $health;
+                }
+            }
+            $subs = is_array($json['subscription'] ?? null) ? $json['subscription'] : [];
+            $plans = [];
+            foreach ($subs as $sub) foreach ((array) ($sub['plans'] ?? []) as $plan) if (!empty($plan['plan'])) $plans[] = (string) $plan['plan'];
+            if ($plans !== []) $health['plan'] = implode(', ', array_unique($plans));
+            $health['leaguesVisible'] = is_array($json['data'] ?? null) ? count($json['data']) : null;
+            return $health;
         } catch (ProviderException $e) {
-            return [
-                'status' => $e->status,
-                'reliability' => $this->reliability(),
-                'errorRate' => $this->errorRate(),
-                'responseMs' => $this->lastResponseMs,
-                'lastFailureAt' => $this->lastFailure ?? gmdate('c'),
-                'lastSuccessAt' => $this->lastSuccess,
-                'detail' => $e->getMessage(),
-            ];
+            return $this->failedHealth($e);
         }
     }
 
@@ -1372,11 +1531,12 @@ class SportMonksProvider implements SportsDataProvider
         try {
             $resp = $this->doRequest($this->roundPath($roundExternalId, $fullIncludes));
         } catch (ProviderException $e) {
-            if ($e->status !== ProviderException::DATA_ERROR) throw $e;
             // The odds include may not be on this subscription (include
-            // exception 5013) — retry once without odds so the round is
-            // still usable for fixtures + results. Mirrors the odds()
-            // add-on fallback.
+            // exception 5013 → HTTP 400 BAD_REQUEST) — retry once without
+            // odds so the round is still usable for fixtures + results.
+            // Throttling, auth, 404 and transport failures are NOT retried:
+            // they would fail identically and only burn quota.
+            if (!in_array($e->status, [ProviderException::DATA_ERROR, ProviderException::BAD_REQUEST], true)) throw $e;
             $resp = $this->doRequest($this->roundPath($roundExternalId, $plainIncludes));
         }
         $json = $this->decodeJson($resp);
@@ -1454,7 +1614,11 @@ class SportMonksProvider implements SportsDataProvider
             $rows = $this->extractList($this->decodeJson($resp));
             return $this->mapOdds($rows);
         } catch (ProviderException $e) {
-            // Odds add-on not subscribed — graceful fallback
+            // Throttling / quota / transport failures must reach the circuit
+            // breaker — swallowing them here would hide a dead provider
+            // behind "no odds". Only plan-related refusals (add-on not
+            // subscribed → 400/403, no odds resource → 404) degrade to [].
+            if ($e->isThrottled() || in_array($e->status, [ProviderException::OFFLINE, ProviderException::TIMEOUT], true)) throw $e;
             return [];
         }
     }
