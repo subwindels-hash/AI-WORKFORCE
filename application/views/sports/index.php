@@ -31,15 +31,15 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
           <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
           <input type="date" name="date" value="<?= e((string) ($today['date'] ?? gmdate('Y-m-d'))) ?>" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px" title="Ticket date (UTC)">
           <button class="btn small" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700;letter-spacing:0.02em">
-            🎯 GENERATE (odds <b>prediction</b> ticket)
+            🎯 Odds Prediction Ticket
           </button>
         </form>
       </div>
-      <p class="dim" style="font-size:11px;margin-top:6px">Sync pulls fixtures/odds from providers. <b>GENERATE</b> builds the ticket from stored data — no external call, idempotent per day/config version.</p>
+      <p class="dim" style="font-size:11px;margin-top:6px">Sync pulls fixtures/odds from providers. <b>Odds Prediction Ticket</b> builds the ticket from stored data — no external call, idempotent per day/config version.</p>
     <?php else: ?>
       <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="btn small" disabled title="Requires the sports.manage permission">Sync now (needs sports.manage)</button>
-        <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">🎯 GENERATE (odds <b>prediction</b> ticket) — needs sports.manage</button>
+        <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">🎯 Odds Prediction Ticket — needs sports.manage</button>
       </div>
       <p class="dim" style="font-size:11px;margin-top:6px">Your account is read-only here (sports.view). Ask an administrator to assign the <b>Sports administrator</b> role — the console picks the new permission up on your next page load, no sign-out needed.</p>
     <?php endif; ?>
@@ -208,16 +208,16 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
               <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
               <input type="hidden" name="date" value="<?= e((string) ($today['date'] ?? gmdate('Y-m-d'))) ?>">
               <button class="btn small" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700">
-                🎯 GENERATE (odds <b>prediction</b> ticket)
+                🎯 Odds Prediction Ticket
               </button>
             </form>
             <span class="dim" style="font-size:11px">from stored fixtures & odds — no external call</span>
           <?php else: ?>
-            <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">🎯 GENERATE (odds <b>prediction</b> ticket)</button>
+            <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">🎯 Odds Prediction Ticket</button>
           <?php endif; ?>
         </div>
         <?php if ($daily === null || $ticket === null): ?>
-          <p class="dim"><?= $daily !== null ? e((string) ($daily['message'] ?? 'No ticket today.')) : 'No daily run recorded for today yet. Press GENERATE to build one from stored fixtures & odds.' ?></p>
+          <p class="dim"><?= $daily !== null ? e((string) ($daily['message'] ?? 'No ticket today.')) : 'No daily run recorded for today yet. Select Odds Prediction Ticket to build one from stored fixtures & odds.' ?></p>
         <?php else: ?>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
             <span class="badge <?= (string) ($daily['status'] ?? '') === 'PENDING_USER_APPROVAL' ? 'b-violet' : 'b-green' ?>"><?= e((string) ($daily['status'] ?? '')) ?></span>
