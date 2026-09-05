@@ -9,6 +9,21 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
   <div>
     <h2>Sports tickets</h2>
     <p>Generated tickets, approval state and stored settlements. Approve, reject and settle stay permission-gated. This deployment has no external bookmaker.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px">
+      <?php if (!empty($caps['sync'])): ?>
+        <form method="post" action="/sports/generate-ticket" style="display:flex;gap:6px;align-items:center" onsubmit="return confirm('Generate odds prediction ticket for today from stored fixtures & odds?')">
+          <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+          <input type="date" name="date" value="<?= e(gmdate('Y-m-d')) ?>" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px" title="Ticket date (UTC)">
+          <button class="btn small" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700;letter-spacing:0.02em">
+            🎯 GENERATE (odds <b>prediction</b> ticket)
+          </button>
+        </form>
+        <a class="btn small" href="/sports">Sports Intelligence →</a>
+      <?php else: ?>
+        <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">🎯 GENERATE (odds <b>prediction</b> ticket) — needs sports.manage</button>
+        <a class="btn small" href="/sports">Sports Intelligence →</a>
+      <?php endif; ?>
+    </div>
   </div>
 </div>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
@@ -19,8 +34,18 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
   <div class="panel">
     <h3>Tickets</h3>
     <div class="body scroll" style="padding-top:12px">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        <?php if (!empty($caps['sync'])): ?>
+          <form method="post" action="/sports/generate-ticket" style="display:flex;gap:6px;align-items:center" onsubmit="return confirm('Generate odds prediction ticket now?')">
+            <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+            <input type="hidden" name="date" value="<?= e(gmdate('Y-m-d')) ?>">
+            <button class="btn small primary" style="font-weight:700">🎯 GENERATE (odds <b>prediction</b> ticket)</button>
+          </form>
+          <span class="dim" style="font-size:11px">Builds from stored fixtures & odds — no external call, idempotent</span>
+        <?php endif; ?>
+      </div>
       <?php if (empty($tickets)): ?>
-        <p class="dim">No tickets generated yet.</p>
+        <p class="dim">No tickets generated yet. Press <b>GENERATE (odds prediction ticket)</b> to build one from stored data.</p>
       <?php else: ?>
         <table class="tbl">
           <thead><tr><th>Ticket</th><th>Created (UTC)</th><th class="num">Odds</th><th class="num">Sel.</th><th class="num">Conf.</th><th>Risk</th><th>Approval</th><th>Settlement</th><th class="num">P/L</th><th></th></tr></thead>
@@ -93,3 +118,64 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
     </div>
   </div>
 </div>
+
+
+<script id="generate-ticket-btn-js">
+(function(){
+  // Enhance GENERATE buttons: show generating state, prevent double-click
+  document.querySelectorAll('form[action$="/generate-ticket"], form[action$="/sports/generate-ticket"]').forEach(function(form){
+    form.addEventListener('submit', function(){
+      var btn = form.querySelector('button');
+      if(!btn) return;
+      if(btn.dataset.generating === '1') return;
+      btn.dataset.generating = '1';
+      btn.dataset.originalText = btn.innerHTML;
+      btn.innerHTML = '⏳ Generating odds prediction ticket...';
+      btn.disabled = true;
+      // allow form to submit, but re-enable after 10s if still on page (e.g. validation fail)
+      setTimeout(function(){
+        if(btn.dataset.generating === '1'){
+          btn.innerHTML = btn.dataset.originalText;
+          btn.disabled = false;
+          delete btn.dataset.generating;
+        }
+      }, 10000);
+    });
+  });
+  // Also offer API-driven generation for operators who prefer no page reload
+  // (uses the same RBAC — requires sports.manage + CSRF header)
+  var apiBtn = document.getElementById('api-generate-ticket');
+  if(apiBtn){
+    apiBtn.addEventListener('click', async function(e){
+      e.preventDefault();
+      var dateInput = document.getElementById('api-generate-date');
+      var date = dateInput ? dateInput.value : new Date().toISOString().slice(0,10);
+      var csrf = document.querySelector('meta[name="csrf-token"]')?.content || document.querySelector('input[name="csrf_token"]')?.value || '';
+      apiBtn.disabled = true;
+      var orig = apiBtn.textContent;
+      apiBtn.textContent = '⏳ Generating...';
+      try{
+        var res = await fetch('/api/sports/ticket-engine/run', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json','X-CSRF-Token': csrf},
+          body: JSON.stringify({date: date})
+        });
+        var data = await res.json();
+        if(res.ok){
+          alert('Ticket engine: ' + (data.status||'') + (data.ticketId ? ' — ticket ' + data.ticketId : '') + '\n' + (data.message||''));
+          location.href = '/sports/tickets';
+        } else {
+          alert('Generate failed: ' + (data.message||data.error||res.status));
+          apiBtn.disabled = false;
+          apiBtn.textContent = orig;
+        }
+      }catch(err){
+        alert('Generate failed: ' + err.message);
+        apiBtn.disabled = false;
+        apiBtn.textContent = orig;
+      }
+    });
+  }
+})();
+</script>
+
