@@ -67,7 +67,7 @@ class FootballRepositoryDatabase implements FootballRepository
                 'lastFailureAt' => 'last_failure_at',
                 'lastError' => 'last_error',
                 'demoMode' => 'demo_mode',
-                'default' => $key,
+                default => $key,
             };
             $data[$column] = match (true) {
                 $key === 'capabilities' => json_encode((array) $value),
