@@ -346,7 +346,9 @@ class Trading extends App_Controller
         $s = $this->platform->state();
         return ['title' => $title, 'active' => 'trading', 'status' => ['tradingMode' => $s['tradingMode'], 'killSwitch' => $s['killSwitch'], 'providers' => $this->platform->providers->getAllHealth()], 'notice' => $this->session->flashdata('notice'), 'error' => $this->session->flashdata('error')];
     }
-    private function jsonBody(): ?array { $raw = file_get_contents('php://input'); if (!$raw) return null; $d = json_decode($raw, true); return is_array($d) ? $d : null; }
-    private function json(array $data, int $code = 200): void { http_response_code($code); header('Content-Type: application/json'); echo json_encode($data, JSON_UNESCAPED_SLASHES); }
-    private function jsonError(string $msg, int $code = 400): void { $this->json(['ok' => false, 'error' => $msg], $code); }
+    // JSON response helpers json() / jsonError() / jsonBody() are inherited
+    // from MY_Controller. They must NOT be redeclared here as private: doing
+    // so narrows the parent's protected visibility and is a fatal compile
+    // error ("Access level must be protected or weaker") that returns HTTP
+    // 500 for every route on this controller — including GET /app/trading.
 }

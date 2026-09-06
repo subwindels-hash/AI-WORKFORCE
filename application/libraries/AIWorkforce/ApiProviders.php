@@ -852,18 +852,36 @@ final class ApiProviders
 
     private static function testApollo(string $key): array
     {
+        $key = trim($key);
         if ($key === '') return ['ok' => false, 'message' => 'An API key is required.'];
-        // Apollo uses POST with the api_key in the JSON body for /v1/auth/health,
-        // but a cheap /mixed_people/search with per_page=0 is the canonical ping
-        // that returns 200 for valid keys and 401 for bad/missing keys.
-        $resp = self::http('https://api.apollo.io/api/v1/mixed_people/search', [
-            'Content-Type: application/json',
+        // Canonical key check per https://docs.apollo.io/docs/test-api-key:
+        //   GET https://api.apollo.io/api/v1/auth/health  with header x-api-key.
+        // The API key MUST be in the x-api-key header — Apollo rejects the old
+        // api_key-in-body auth. auth/health is free (no credits) and answers:
+        //   200 {"healthy":true,"is_logged_in":true} | 401 invalid key.
+        // We honour a custom base (proxy/sandbox) the same way the runtime adapter does.
+        $base = rtrim((string) (getenv('APOLLO_IO_API_BASE') ?: getenv('APOLLO_API_BASE') ?: 'https://api.apollo.io'), '/');
+        $resp = self::http($base . '/api/v1/auth/health', [
             'Accept: application/json',
-        ], json_encode(['api_key' => $key, 'page' => 1, 'per_page' => 1, 'q_keywords' => 'test']));
+            'Content-Type: application/json',
+            'Cache-Control: no-cache',
+            'x-api-key: ' . $key,
+        ]);
         $status = (int) ($resp['status'] ?? 0);
-        if ($status >= 200 && $status < 400) return ['ok' => true, 'message' => 'Connected'];
-        if ($status === 401 || $status === 403) return ['ok' => false, 'message' => 'Invalid API key'];
-        return ['ok' => false, 'message' => 'Connection failed'];
+        $body = (string) ($resp['body'] ?? '');
+        $decoded = json_decode($body, true);
+        $decoded = is_array($decoded) ? $decoded : [];
+        if ($status >= 200 && $status < 300) {
+            // A 200 that explicitly reports not logged in still means a bad key.
+            if (array_key_exists('is_logged_in', $decoded) && $decoded['is_logged_in'] === false) {
+                return ['ok' => false, 'message' => 'Invalid API key'];
+            }
+            return ['ok' => true, 'message' => 'Connected to Apollo.io'];
+        }
+        if ($status === 401 || $status === 403) return ['ok' => false, 'message' => 'Invalid API key or plan without API access'];
+        if ($status === 429) return ['ok' => false, 'message' => 'Rate limited — try again later'];
+        if ($status === 0) return ['ok' => false, 'message' => 'Could not reach Apollo.io (network/SSL/firewall). Check outbound HTTPS to api.apollo.io'];
+        return ['ok' => false, 'message' => 'Connection failed (HTTP ' . $status . ')'];
     }
 
     private static function testCloudflare(array $row, array $secrets): array
