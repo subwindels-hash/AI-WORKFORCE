@@ -10,7 +10,7 @@ require_once APPPATH . 'core/App_Controller.php';
  * JSON API exposes (no data fabrication in either path). Read pages are open
  * like the rest of the console; mutation actions enforce the sports RBAC
  * matrix (sports.approve / sports.settle) from the signed-in identity — the
- * same permission checks the API enforces, and the ticket stays audited with
+ * same permission checks the API enforces, and the match odds record stays audited with
  * the acting user.
  */
 class Sports extends App_Controller
@@ -24,7 +24,7 @@ class Sports extends App_Controller
 
     public function tickets()
     {
-        $data = $this->base('Sports Tickets', 'sports');
+        $data = $this->base('Match Odds Records', 'sports');
         $data['tickets'] = $this->platform->model->sports->listTickets([], 100);
         $data['dailyRuns'] = $this->platform->model->sports->listDailyTickets(30);
         $data['performance'] = $this->platform->sports->performanceReport([]);
@@ -45,52 +45,52 @@ class Sports extends App_Controller
         return ['sync' => $can('sports.manage'), 'approve' => $can('sports.approve'), 'settle' => $can('sports.settle')];
     }
 
-    /** Approve / reject a PENDING_USER_APPROVAL ticket (sports.approve). */
+    /** Approve / reject a PENDING_USER_APPROVAL match odds record (sports.approve). */
     public function decide(string $id)
     {
         if (!$this->requireSportsPermission('sports.approve', 'approve/reject')) return;
         if ($this->killSwitchActive()) {
-            $this->flash('error', 'Refused: platform kill switch is ACTIVE — release it before approving sports tickets (settlement remains available).');
-            redirect('/sports/tickets');
+            $this->flash('error', 'Refused: platform kill switch is ACTIVE — release it before approving match odds records (settlement remains available).');
+            redirect('/sports/match-odds-records');
             return;
         }
         $approve = $this->input->post('approve') === '1';
         $reason = trim((string) $this->input->post('reason'));
         try {
             $this->platform->sports->governance->decide($id, $approve, $this->actor(), $reason);
-            $this->flash('notice', 'Ticket ' . ($approve ? 'approved' : 'rejected') . ' and audited — no external execution exists in this deployment.');
+            $this->flash('notice', 'Match odds record ' . ($approve ? 'approved' : 'rejected') . ' and audited — no external execution exists in this deployment.');
         } catch (Throwable $e) {
             $this->flash('error', $e->getMessage());
         }
-        redirect('/sports/tickets');
+        redirect('/sports/match-odds-records');
     }
 
-    /** Settle a ticket from stored verified results (sports.settle). */
+    /** Settle a match odds record from stored verified results (sports.settle). */
     public function settle(string $id)
     {
         if (!$this->requireSportsPermission('sports.settle', 'settle')) return;
         try {
             $out = $this->platform->sports->settlement->settlePending($id);
-            $this->flash('notice', sprintf('Ticket settlement: %s (effective odds %s, P/L %s)',
+            $this->flash('notice', sprintf('Match odds record settlement: %s (effective odds %s, P/L %s)',
                 $out['status'] ?? 'PENDING', $out['effectiveOdds'] ?? 'n/a', $out['pnl'] ?? 'n/a'));
         } catch (Throwable $e) {
             $this->flash('error', $e->getMessage());
         }
-        redirect('/sports/tickets');
+        redirect('/sports/match-odds-records');
     }
 
     /**
-     * Generate an odds prediction ticket from stored fixtures/odds (sports.manage).
+     * Generate a match odds record from stored fixtures/odds (sports.manage).
      * Browser-accessible equivalent of POST /api/sports/ticket-engine/run for
      * operators without CLI/cron access. Runs only the DailyTicketService pipeline
      * (no external provider calls) — it evaluates stored matches, applies
-     * calibration/value/confidence/risk/correlation gates and optimizes a ticket.
+     * calibration/value/confidence/risk/correlation gates and optimizes a match odds record.
      * Idempotent per (date, config version): duplicate execution keys are skipped.
      */
     public function generate_ticket()
     {
         if ($this->input->method(true) !== 'POST') { redirect('/sports'); return; }
-        if (!$this->requireSportsPermission('sports.manage', 'generate ticket')) return;
+        if (!$this->requireSportsPermission('sports.manage', 'generate match odds record')) return;
         @set_time_limit(180);
         $date = trim((string) $this->input->post('date'));
         if ($date === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) $date = gmdate('Y-m-d');
@@ -103,7 +103,7 @@ class Sports extends App_Controller
         try {
             $result = $sports->dailyTickets->runDaily($date);
         } catch (Throwable $e) {
-            $this->flash('error', 'Ticket generation failed: ' . mb_substr($e->getMessage(), 0, 300));
+            $this->flash('error', 'Match odds record generation failed: ' . mb_substr($e->getMessage(), 0, 300));
             redirect('/sports');
             return;
         }
@@ -115,34 +115,34 @@ class Sports extends App_Controller
         $message = (string) ($result['message'] ?? '');
 
         if ($status === 'DUPLICATE_SKIPPED') {
-            $this->flash('notice', sprintf('Ticket generation skipped (already run for %s — idempotent). %s', $date, $message));
-            redirect('/sports/tickets');
+            $this->flash('notice', sprintf('Match odds record generation skipped (already run for %s — idempotent). %s', $date, $message));
+            redirect('/sports/match-odds-records');
             return;
         }
         if ($ticketId) {
-            $msg = sprintf('GENERATED odds prediction ticket %s for %s — status %s, %d evaluated, %d predictions, %d rejections. %s',
+            $msg = sprintf('GENERATED match odds record %s for %s — status %s, %d evaluated, %d predictions, %d rejections. %s',
                 $ticketId, $date, $status, $evaluated, $recorded, $rejections, $message);
             $this->flash('notice', $msg);
-            redirect('/sports/tickets');
+            redirect('/sports/match-odds-records');
             return;
         }
         if ($status === 'DATA_UNAVAILABLE') {
             // Every provider failed: a data outage, reported as such — never as "no qualified games".
             $ledger = [];
             foreach ((array) ($result['providerStatuses'] ?? []) as $pid => $st) $ledger[] = $pid . ': ' . $st;
-            $this->flash('error', sprintf('NO TICKET for %s — STATUS: DATA_UNAVAILABLE. All configured sports-data providers failed (%s). Matches evaluated: 0, predictions generated: 0. Fix or wait for the providers (see Data feed), then run again — the day stays retryable.',
+            $this->flash('error', sprintf('NO RECORD for %s — STATUS: DATA_UNAVAILABLE. All configured sports-data providers failed (%s). Matches evaluated: 0, predictions generated: 0. Fix or wait for the providers (see Data feed), then run again — the day stays retryable.',
                 $date, $ledger ? implode('; ', $ledger) : 'no detail'));
             redirect('/sports');
             return;
         }
-        // No ticket qualified — still a valid outcome (spec §3)
+        // No record qualified — still a valid outcome (spec §3)
         $summary = '';
         if (!empty($result['rejectionSummary']) && is_array($result['rejectionSummary'])) {
             $parts = [];
             foreach ($result['rejectionSummary'] as $k => $v) $parts[] = $k . ':' . $v;
             if ($parts) $summary = ' Rejections: ' . implode(', ', array_slice($parts, 0, 8)) . '.';
         }
-        $msg = sprintf('No qualified odds prediction ticket for %s — %s (%d evaluated, %d predictions, %d rejections).%s',
+        $msg = sprintf('No qualified match odds record for %s — %s (%d evaluated, %d predictions, %d rejections).%s',
             $date, $status . ($message !== '' ? ': ' . $message : ''), $evaluated, $recorded, $rejections, $summary);
         if ($status === 'NO_QUALIFIED_TICKET') {
             $this->flash('notice', $msg);
@@ -156,7 +156,7 @@ class Sports extends App_Controller
      * Pull fresh data from the configured sports providers (sports.manage).
      * Browser-accessible equivalent of the cron sweep for operators without
      * CLI/cron access: fixtures for today+tomorrow, a bounded odds/results
-     * refresh, quality recalc and the daily ticket run. Bounded so a first
+     * refresh, quality recalc and the daily match odds record run. Bounded so a first
      * pull cannot exhaust a free-tier daily quota or PHP's time limit.
      */
     public function sync()
@@ -194,11 +194,11 @@ class Sports extends App_Controller
             $ticket = $cron->run('ticket', $date);
             $ticketStatus = (string) ($ticket['status'] ?? '');
         } catch (Throwable $e) {
-            $errors[] = 'ticket: ' . mb_substr($e->getMessage(), 0, 160);
+            $errors[] = 'record: ' . mb_substr($e->getMessage(), 0, 160);
         }
         if ($fixtures > 0 || $created > 0 || $oddsDone > 0 || $resultsDone > 0) {
             $msg = sprintf('Sync complete: %d fixture(s) pulled (%d new), odds refreshed for %d, results checked for %d.', $fixtures, $created, $oddsDone, $resultsDone);
-            if ($ticketStatus !== null && $ticketStatus !== '') $msg .= ' Ticket engine: ' . $ticketStatus . '.';
+            if ($ticketStatus !== null && $ticketStatus !== '') $msg .= ' Match odds record engine: ' . $ticketStatus . '.';
             if ($errors) $msg .= ' ' . count($errors) . ' warning(s) — see Data feed below.';
             $this->flash('notice', $msg);
         } else {

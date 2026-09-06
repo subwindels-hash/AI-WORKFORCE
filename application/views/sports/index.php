@@ -49,27 +49,27 @@ $operator = !empty($caps['sync']);
 ?>
 <div class="page-head">
   <div>
-    <h2>Sports Intelligence — daily ticket engine</h2>
-    <p>Daily ticket research from stored fixtures, odds and settled results. Football fixtures, predictions, settlement history and model calibration are reported once, on the Football Intelligence console.</p>
+    <h2>Sports Intelligence — match odds record engine</h2>
+    <p>Daily match odds records from stored fixtures and provider odds. Each record captures the match, market, selection, offered odds, model probability, expected value, confidence, risk and settlement state — no bookmaker bet is placed.</p>
     <?php if (!empty($caps['sync'])): ?>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px">
         <form method="post" action="/sports/sync" onsubmit="return confirm('Pull fresh fixtures, odds and results from the configured providers now?')">
           <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
           <button class="btn primary small">Sync now</button>
         </form>
-        <form method="post" action="/sports/generate-ticket" style="display:flex;gap:6px;align-items:center" onsubmit="return confirm('Generate odds prediction ticket for the selected date from stored fixtures & odds? This runs the AI ticket engine (value, confidence, risk, correlation) and creates a ticket awaiting approval.')">
+        <form method="post" action="/sports/generate-ticket" style="display:flex;gap:6px;align-items:center" onsubmit="return confirm('Generate match odds record for the selected date from stored fixtures & odds? This runs the AI match odds record engine (value, probability, confidence, risk, correlation) and creates a reviewable record.')">
           <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
-          <input type="date" name="date" value="<?= e((string) ($today['date'] ?? gmdate('Y-m-d'))) ?>" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px" title="Ticket date (UTC)">
+          <input type="date" name="date" value="<?= e((string) ($today['date'] ?? gmdate('Y-m-d'))) ?>" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px" title="Record date (UTC)">
           <button class="btn small" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700;letter-spacing:0.02em">
-            🎯 Odds Prediction Ticket
+            Match Odds Record
           </button>
         </form>
       </div>
-      <p class="dim" style="font-size:11px;margin-top:6px">Sync pulls fixtures/odds from providers. <b>Odds Prediction Ticket</b> builds the ticket from stored data — no external call, idempotent per day/config version.</p>
+      <p class="dim" style="font-size:11px;margin-top:6px">Sync pulls fixtures/odds from providers. <b>Match Odds Record</b> records qualified match odds from stored data — no external call, idempotent per day/config version.</p>
     <?php else: ?>
       <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="btn small" disabled title="Requires the sports.manage permission">Sync now (needs sports.manage)</button>
-        <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">🎯 Odds Prediction Ticket — needs sports.manage</button>
+        <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">Match Odds Record — needs sports.manage</button>
       </div>
       <p class="dim" style="font-size:11px;margin-top:6px">Your account is read-only here (sports.view). Ask an administrator to assign the <b>Sports administrator</b> role — the console picks the new permission up on your next page load, no sign-out needed.</p>
     <?php endif; ?>
@@ -86,11 +86,11 @@ $operator = !empty($caps['sync']);
 <?php elseif (($readiness['engine'] ?? '') === 'BLOCKED'): ?>
   <?php if ($operator): ?>
   <div class="notice err"><b>Prediction engine BLOCKED — 0/<?= (int) ($readiness['total'] ?? 0) ?> sports data providers operational.</b>
-    Every configured feed is currently failing (see <i>Data feed</i>). Tickets cannot be generated until at least one provider recovers; an empty day in this state is a <b>data outage</b>, not "no qualified games".
+    Every configured feed is currently failing (see <i>Data feed</i>). Match odds records cannot be generated until at least one provider recovers; an empty day in this state is a <b>data outage</b>, not "no qualified games".
     <?php foreach (($readiness['providers'] ?? []) as $pid => $pr): ?><br><span class="mono" style="font-size:11px"><?= e((string) $pid) ?> → <?= e((string) ($pr['status'] ?? 'UNKNOWN')) ?><?php if (!empty($pr['retryAt'])): ?> (retry after <?= e(substr((string) $pr['retryAt'], 0, 16)) ?>Z)<?php endif; ?></span><?php endforeach; ?>
   </div>
   <?php else: ?>
-  <div class="notice err"><b>Sports data temporarily unavailable.</b> Tickets cannot be generated until the data feed recovers — an empty day in this state is a data outage, not "no qualified games".</div>
+  <div class="notice err"><b>Sports data temporarily unavailable.</b> Match odds records cannot be generated until the data feed recovers — an empty day in this state is a data outage, not "no qualified games".</div>
   <?php endif; ?>
 <?php endif; ?>
 
@@ -168,11 +168,11 @@ $operator = !empty($caps['sync']);
     </div>
 
     <div class="panel">
-      <h3>30-day ticket performance (stored settlements only)</h3>
+      <h3>30-day match odds record performance (stored settlements only)</h3>
       <div class="body" style="padding-top:12px">
         <?php if (!empty($perf['demoBanner'])): ?><div class="notice warnbox"><?= e((string) $perf['demoBanner']) ?></div><?php endif; ?>
         <div class="stat-grid">
-          <div class="stat"><div class="k">Settled tickets</div><div class="v"><?= (int) ($perf['settledTickets'] ?? 0) ?></div></div>
+          <div class="stat"><div class="k">Settled records</div><div class="v"><?= (int) ($perf['settledTickets'] ?? 0) ?></div></div>
           <div class="stat"><div class="k">Win rate</div><div class="v"><?= ($perf['winRate'] ?? null) !== null ? e(number_format((float) $perf['winRate'] * 100, 1)) . '%' : '—' ?></div></div>
           <div class="stat"><div class="k">ROI</div><div class="v <?= ($perf['roi'] ?? null) !== null && (float) $perf['roi'] >= 0 ? 'up' : 'down' ?>"><?= ($perf['roi'] ?? null) !== null ? e(number_format((float) $perf['roi'] * 100, 1)) . '%' : '—' ?></div></div>
           <div class="stat"><div class="k">Profit / loss</div><div class="v <?= ($perf['profitLoss'] ?? null) !== null && (float) $perf['profitLoss'] >= 0 ? 'up' : 'down' ?>"><?= ($perf['profitLoss'] ?? null) !== null ? e(number_format((float) $perf['profitLoss'], 2)) : '—' ?></div></div>
@@ -180,7 +180,7 @@ $operator = !empty($caps['sync']);
           <div class="stat"><div class="k">Avg odds</div><div class="v"><?= ($perf['averageOdds'] ?? null) !== null ? e(number_format((float) $perf['averageOdds'], 2)) : '—' ?></div></div>
         </div>
         <?php if (empty($perf['dataAvailable'])): ?>
-          <p class="dim" style="margin-top:12px">No settled tickets or selections yet — metrics are intentionally unavailable rather than invented.</p>
+          <p class="dim" style="margin-top:12px">No settled records or selections yet — metrics are intentionally unavailable rather than invented.</p>
         <?php endif; ?>
         <p class="dim" style="margin-top:10px;font-size:11px">Prediction accuracy, Brier, ECE and model/calibration state are reported once, on <a href="/football">Football Intelligence</a> and <a href="/football/models">Models &amp; calibration</a>.</p>
       </div>
@@ -194,7 +194,7 @@ $operator = !empty($caps['sync']);
       <div class="body" style="padding-top:12px">
         <div class="stat-grid">
           <div class="stat"><div class="k">Mode</div><div class="v"><?= e((string) ($sys['mode'] ?? 'SANDBOX')) ?></div></div>
-          <div class="stat"><div class="k">Ticket engine</div><div class="v" style="font-size:12px"><?= e((string) ($sys['ticketEngine'] ?? '—')) ?></div></div>
+          <div class="stat"><div class="k">Match odds record engine</div><div class="v" style="font-size:12px"><?= e((string) ($sys['ticketEngine'] ?? '—')) ?></div></div>
           <?php if ($operator): ?>
           <div class="stat"><div class="k">Operational providers</div><div class="v"><?= (int) ($readiness['operational'] ?? 0) ?>/<?= (int) ($readiness['total'] ?? 0) ?></div></div>
           <?php else: ?>
@@ -280,26 +280,26 @@ $operator = !empty($caps['sync']);
     <?php endif; ?>
 
     <div class="panel">
-      <h3>Today's ticket</h3>
+      <h3>Today's match odds record</h3>
       <div class="body" style="padding-top:12px">
         <?php $daily = $engine['today'] ?? null; ?>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
           <?php if (!empty($caps['sync'])): ?>
-            <form method="post" action="/sports/generate-ticket" style="display:flex;gap:6px;align-items:center" onsubmit="return confirm('Generate odds prediction ticket for today from stored data?')">
+            <form method="post" action="/sports/generate-ticket" style="display:flex;gap:6px;align-items:center" onsubmit="return confirm('Generate match odds record for today from stored data?')">
               <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
               <input type="hidden" name="date" value="<?= e((string) ($today['date'] ?? gmdate('Y-m-d'))) ?>">
               <button class="btn small" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700">
-                🎯 Odds Prediction Ticket
+                Match Odds Record
               </button>
             </form>
             <span class="dim" style="font-size:11px">from stored fixtures & odds — no external call</span>
           <?php else: ?>
-            <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">🎯 Odds Prediction Ticket</button>
+            <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">Match Odds Record</button>
           <?php endif; ?>
         </div>
         <?php if ($daily !== null && (string) ($daily['status'] ?? '') === 'DATA_UNAVAILABLE'): ?>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-            <span class="badge b-red">NO TICKET — DATA_UNAVAILABLE</span>
+            <span class="badge b-red">NO RECORD — DATA_UNAVAILABLE</span>
           </div>
           <?php if ($operator): ?>
           <p class="dim" style="margin:0 0 8px"><b>All configured sports-data providers failed</b> for this run — this is a data outage, not a day without qualifying games. <?= e((string) ($daily['message'] ?? '')) ?></p>
@@ -314,10 +314,10 @@ $operator = !empty($caps['sync']);
           </table>
           <p class="dim" style="font-size:11px;margin-top:8px">Matches evaluated: <?= (int) ($daily['candidates_evaluated'] ?? 0) ?> · Predictions generated: <?= (int) ($daily['predictions_recorded'] ?? 0) ?>. The run stays retryable: once a provider recovers, Sync and generate again.</p>
           <?php else: ?>
-          <p class="dim" style="margin:0 0 8px"><b>Sports data was unavailable</b> for this run — this is a data outage, not a day without qualifying games. No ticket is fabricated; one will be built once the data feed recovers.</p>
+          <p class="dim" style="margin:0 0 8px"><b>Sports data was unavailable</b> for this run — this is a data outage, not a day without qualifying games. No match odds record is fabricated; one will be built once the data feed recovers.</p>
           <?php endif; ?>
         <?php elseif ($daily === null || $ticket === null): ?>
-          <p class="dim"><?= $daily !== null ? e((string) ($daily['message'] ?? 'No ticket today.')) : 'No daily run recorded for today yet. Select Odds Prediction Ticket to build one from stored fixtures & odds.' ?></p>
+          <p class="dim"><?= $daily !== null ? e((string) ($daily['message'] ?? 'No match odds record today.')) : 'No daily run recorded for today yet. Select Match Odds Record to record qualified odds from stored fixtures & odds.' ?></p>
         <?php else: ?>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
             <span class="badge <?= (string) ($daily['status'] ?? '') === 'PENDING_USER_APPROVAL' ? 'b-violet' : 'b-green' ?>"><?= e((string) ($daily['status'] ?? '')) ?></span>
@@ -327,7 +327,7 @@ $operator = !empty($caps['sync']);
             <div class="stat"><div class="k">Total odds</div><div class="v"><?= e(number_format((float) ($ticket['total_odds'] ?? 0), 2)) ?></div></div>
             <div class="stat"><div class="k">Selections</div><div class="v"><?= (int) ($ticket['selection_count'] ?? 0) ?></div></div>
             <div class="stat"><div class="k">Confidence</div><div class="v"><?= ($ticket['confidence'] ?? null) !== null ? e(number_format((float) $ticket['confidence'], 0)) . '%' : '—' ?></div></div>
-            <div class="stat"><div class="k">Stake</div><div class="v"><?= ($ticket['stake'] ?? null) !== null ? e(number_format((float) $ticket['stake'], 2)) : '—' ?></div></div>
+            <div class="stat"><div class="k">Stake / unit</div><div class="v"><?= ($ticket['stake'] ?? null) !== null ? e(number_format((float) $ticket['stake'], 2)) : '—' ?></div></div>
           </div>
           <?php if (!empty($engine['ticketSelections'])): ?>
             <table class="tbl" style="margin-top:12px">
@@ -356,7 +356,7 @@ $operator = !empty($caps['sync']);
                   <input type="hidden" name="approve" value="1">
                   <button class="btn primary small">Approve (sports.approve)</button>
                 </form>
-                <form method="post" action="/sports/<?= e((string) $ticket['id']) ?>/decide" onsubmit="return confirm('Reject this ticket?')">
+                <form method="post" action="/sports/<?= e((string) $ticket['id']) ?>/decide" onsubmit="return confirm('Reject this record?')">
                   <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
                   <input type="hidden" name="approve" value="0">
                   <button class="btn danger small">Reject</button>
@@ -366,7 +366,7 @@ $operator = !empty($caps['sync']);
             <?php else: ?>
               <div style="margin-top:12px">
                 <button class="btn small" disabled title="Requires the sports.approve permission">Approve / reject (needs sports.approve)</button>
-                <p class="dim" style="font-size:10px;margin-top:6px">Your account cannot approve tickets — ask an administrator for the <b>sports.approve</b> permission (Sports administrator role).</p>
+                <p class="dim" style="font-size:10px;margin-top:6px">Your account cannot approve records — ask an administrator for the <b>sports.approve</b> permission (Sports administrator role).</p>
               </div>
             <?php endif; ?>
           <?php endif; ?>
@@ -387,7 +387,7 @@ $operator = !empty($caps['sync']);
       </div>
     </div>
 
-    <p style="font-size:11px"><a class="btn small" href="/sports/tickets">Ticket console &amp; history →</a></p>
+    <p style="font-size:11px"><a class="btn small" href="/sports/match-odds-records">Match odds records &amp; history →</a></p>
   </div>
 </div>
 
@@ -402,7 +402,7 @@ $operator = !empty($caps['sync']);
       if(btn.dataset.generating === '1') return;
       btn.dataset.generating = '1';
       btn.dataset.originalText = btn.innerHTML;
-      btn.innerHTML = '⏳ Generating odds prediction ticket...';
+      btn.innerHTML = '⏳ Generating match odds record...';
       btn.disabled = true;
       // allow form to submit, but re-enable after 10s if still on page (e.g. validation fail)
       setTimeout(function(){
@@ -434,8 +434,8 @@ $operator = !empty($caps['sync']);
         });
         var data = await res.json();
         if(res.ok){
-          alert('Ticket engine: ' + (data.status||'') + (data.ticketId ? ' — ticket ' + data.ticketId : '') + '\n' + (data.message||''));
-          location.href = '/sports/tickets';
+          alert('Match odds record engine: ' + (data.status||'') + (data.ticketId ? '  — record ' + data.ticketId : '') + '\n' + (data.message||''));
+          location.href = '/sports/match-odds-records';
         } else {
           alert('Generate failed: ' + (data.message||data.error||res.status));
           apiBtn.disabled = false;

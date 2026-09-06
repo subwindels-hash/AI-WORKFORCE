@@ -185,7 +185,7 @@ class DailyTicketService
                             if (($rec['status'] ?? '') !== 'NO_QUALIFIED_TICKET') {
                                 $status = $rec['status'] === 'APPROVED_NOT_EXECUTED' ? 'APPROVED' : 'PENDING_USER_APPROVAL';
                                 $ticketId = $rec['ticketId'];
-                                $message = $status === 'APPROVED' ? 'ticket generated and auto-approved (AUTOMATED_EXECUTION); no external execution' : 'ticket generated; awaiting user approval';
+                                $message = $status === 'APPROVED' ? 'ticket generated and auto-approved (AUTOMATED_EXECUTION); no external execution' : 'match odds record generated; awaiting user approval';
                             }
                         } else {
                             $message = $optimized['reason'] ?? 'no compliant combination';

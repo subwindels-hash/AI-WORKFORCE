@@ -189,7 +189,7 @@ $attempt = $providers->withFallback('round', function ($p) use ($roundId) {
 });
 ```
 
-The daily ticket engine uses this path: when the serving provider exposes
+The match odds record engine uses this path: when the serving provider exposes
 `round()` and the fetched fixtures carry a `roundId`, `DailyTicketService`
 bulk-fetches each matchday's odds with one `round()` call per round
 (`fetchRoundOdds`) and only falls back to the per-fixture `odds()` call for
@@ -337,7 +337,7 @@ same headers are checked on every data response.
 
 ### DATA_UNAVAILABLE
 
-When the fixtures pull fails on all providers the daily ticket engine no
+When the fixtures pull fails on all providers the match odds record engine no
 longer evaluates zero matches and reports `NO_QUALIFIED_TICKET`. Instead:
 
 * `DailyTicketService::runDaily()` returns
@@ -349,7 +349,7 @@ longer evaluates zero matches and reports `NO_QUALIFIED_TICKET`. Instead:
   and returns `DATA_UNAVAILABLE` without touching the engine.
 * `POST /api_sports/run_ticket_engine` answers **HTTP 503** with
   `status: DATA_UNAVAILABLE`, `providerStatuses` and `readiness`.
-* The dashboard shows `NO TICKET for <date> — STATUS: DATA_UNAVAILABLE` with
+* The dashboard shows `NO RECORD for <date> — STATUS: DATA_UNAVAILABLE` with
   the per-provider reasons, never "no qualified games".
 
 ### Dashboard
