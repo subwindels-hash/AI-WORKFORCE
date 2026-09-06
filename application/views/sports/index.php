@@ -101,7 +101,7 @@ $operator = !empty($caps['sync']);
       <div class="body" style="padding-top:12px">
         <div class="stat-grid">
           <div class="stat"><div class="k">Scheduled</div><div class="v"><?= (int) ($today['upcomingCount'] ?? 0) ?></div></div>
-          <div class="stat"><div class="k">Live</div><div class="v"><?= count($today['live'] ?? []) ?></div></div>
+          <div class="stat"><div class="k">Live</div><div class="v" id="live-count-stat"><?= count($today['live'] ?? []) ?></div></div>
           <div class="stat"><div class="k">Qualified predictions</div><div class="v up"><?= (int) ($today['qualifiedPredictions'] ?? 0) ?></div></div>
           <div class="stat"><div class="k">Rejected predictions</div><div class="v down"><?= (int) ($today['rejectedPredictions'] ?? 0) ?></div></div>
           <div class="stat"><div class="k">Avg confidence</div><div class="v"><?= ($today['averageConfidence'] ?? null) !== null ? e(number_format((float) $today['averageConfidence'], 1)) . '%' : '—' ?></div></div>
@@ -134,6 +134,36 @@ $operator = !empty($caps['sync']);
         <?php else: ?>
           <p class="dim" style="margin-top:12px">No scheduled fixtures stored for today.</p>
         <?php endif; ?>
+      </div>
+    </div>
+
+    <div class="panel" id="live-scores-panel">
+      <h3>Live scores — auto-updating</h3>
+      <div class="body" style="padding-top:12px">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <span class="dot synth" id="live-poll-dot" title="Auto-refresh status"></span>
+          <span class="dim" style="font-size:11px" id="live-poll-note">Auto-refresh on — the goal score updates here automatically, immediately after the provider reports it.</span>
+          <button class="btn small" type="button" id="live-refresh-toggle">Pause</button>
+        </div>
+        <div id="live-goal-flash" style="display:none;background:var(--violet,#6d28d9);color:#fff;border-radius:8px;padding:8px 12px;font-weight:700;margin-bottom:10px"></div>
+        <table class="tbl">
+          <thead><tr><th style="width:70px">Minute</th><th>Match</th><th>Competition</th><th class="num">Score</th><th style="width:90px">Updated (UTC)</th></tr></thead>
+          <tbody id="live-scores-body">
+            <?php $liveRows = $today['live'] ?? []; ?>
+            <?php if ($liveRows): foreach ($liveRows as $m): $ls = is_array($m['liveState'] ?? null) ? $m['liveState'] : []; $known = isset($ls['homeScore'], $ls['awayScore']); ?>
+              <tr data-match-id="<?= (int) ($m['id'] ?? 0) ?>">
+                <td class="mono dim"><?= isset($ls['minute']) ? e((string) (int) $ls['minute']) . "'" : '—' ?></td>
+                <td style="font-weight:700"><?= e(($m['home_team'] ?? '?') . ' vs ' . ($m['away_team'] ?? '?')) ?><?php if (!empty($m['simulated'])): ?> <span class="badge b-gray">sim</span><?php endif; ?></td>
+                <td class="dim"><?= e((string) ($m['competition'] ?? '')) ?></td>
+                <td class="num mono live-score-cell" style="font-weight:700;font-size:14px"><?= $known ? e((int) $ls['homeScore'] . ' – ' . (int) $ls['awayScore']) : '—' ?></td>
+                <td class="mono dim" style="font-size:11px"><?= e(substr((string) ($m['updated_at'] ?? ''), 11, 5)) ?></td>
+              </tr>
+            <?php endforeach; else: ?>
+              <tr><td colspan="5" class="dim" id="live-scores-empty">No live matches right now — the board refreshes automatically while matches are in play.</td></tr>
+            <?php endif; ?>
+          </tbody>
+        </table>
+        <p class="dim" style="font-size:11px;margin-top:8px">Scores come from the provider's live endpoint (one shared, self-gated request — <span class="mono">WINDELS_SPORTS_LIVE_REFRESH_SECONDS</span>, default 60, skipped entirely while nothing is in play). A match the provider gives no score for shows <b>—</b>, never 0-0. Goal events are audited as <span class="mono">SPORTS_GOAL_SCORED</span>.</p>
       </div>
     </div>
 
@@ -418,6 +448,136 @@ $operator = !empty($caps['sync']);
       }
     });
   }
+})();
+</script>
+
+<script id="live-scores-js">
+(function(){
+  // Live scores auto-update: poll the throttled /api/sports/live endpoint.
+  // The server shares ONE provider request per refresh interval across all
+  // viewers, so polling here is cheap between sweeps. New SPORTS_GOAL_SCORED
+  // events flash a GOAL banner and highlight the row.  var body = document.getElementById('live-scores-body');
+  if(!body) return;
+  var dot = document.getElementById('live-poll-dot');
+  var note = document.getElementById('live-poll-note');
+  var toggleBtn = document.getElementById('live-refresh-toggle');
+  var flash = document.getElementById('live-goal-flash');
+  var countStat = document.getElementById('live-count-stat');
+  var since = new Date().toISOString();     // only events after page load flash
+  var seenGoals = {};                        // dedupe by matchId:score:minute
+  var intervalSec = 60;                      // server's provider-poll interval
+  var pollTimer = null;
+  var paused = false;
+
+  function esc(s){
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+
+  function rowHtml(m){
+    var score = m.scoreKnown ? esc(m.homeScore) + ' – ' + esc(m.awayScore) : '—';
+    var minute = (m.minute !== null && m.minute !== undefined) ? esc(m.minute) + "'" : '—';
+    var sim = m.simulated ? ' <span class="badge b-gray">sim</span>' : '';
+    var updated = (m.updatedAt || '').substring(11, 16);
+    return '<tr data-match-id="' + esc(m.id) + '">'
+      + '<td class="mono dim">' + minute + '</td>'
+      + '<td style="font-weight:700">' + esc(m.homeTeam) + ' vs ' + esc(m.awayTeam) + sim + '</td>'
+      + '<td class="dim">' + esc(m.competition) + '</td>'
+      + '<td class="num mono live-score-cell" style="font-weight:700;font-size:14px">' + score + '</td>'
+      + '<td class="mono dim" style="font-size:11px">' + esc(updated) + '</td>'
+      + '</tr>';
+  }
+
+  function render(matches){
+    if(!matches.length){
+      body.innerHTML = '<tr><td colspan="5" class="dim" id="live-scores-empty">No live matches right now — the board refreshes automatically while matches are in play.</td></tr>';
+    } else {
+      body.innerHTML = matches.map(rowHtml).join('');
+    }
+    if(countStat) countStat.textContent = String(matches.length);
+  }
+
+  function goalKey(ev){
+    var score = ev.score || {};
+    return (ev.matchId || 0) + ':' + score.home + '-' + score.away + ':' + (ev.minute === null || ev.minute === undefined ? '' : ev.minute);
+  }
+
+  function flashGoals(events){
+    var fresh = (events || []).filter(function(ev){
+      var key = goalKey(ev);
+      if(seenGoals[key]) return false;
+      seenGoals[key] = true;
+      return true;
+    });
+    if(!fresh.length) return;
+    var lines = fresh.map(function(ev){
+      var score = ev.score || {};
+      return '⚽ GOAL — ' + esc(ev.homeTeam) + ' ' + score.home + '-' + score.away + ' ' + esc(ev.awayTeam)
+        + (ev.minute !== null && ev.minute !== undefined ? " (" + ev.minute + "')" : '') + ' · ' + esc(ev.competition);
+    });
+    flash.innerHTML = lines.join('<br>');
+    flash.style.display = 'block';
+    fresh.forEach(function(ev){
+      var row = body.querySelector('tr[data-match-id="' + ev.matchId + '"]');
+      if(row){
+        row.style.transition = 'background 1.5s ease';
+        row.style.background = 'rgba(109,40,217,0.18)';
+        setTimeout(function(){ row.style.background = ''; }, 6000);
+      }
+    });
+    clearTimeout(flash._t);
+    flash._t = setTimeout(function(){ flash.style.display = 'none'; }, 8000);
+  }
+
+  function setNote(text, cls){
+    if(note) note.textContent = text;
+    if(dot) dot.className = 'dot ' + (cls || 'synth');
+  }
+
+  function schedule(){
+    // Poll a little faster than the provider interval so a fresh sweep is
+    // picked up quickly; the endpoint itself stays storage-only between
+    // sweeps, so this costs no provider request.
+    var ms = Math.max(10, Math.min(15, intervalSec)) * 1000;
+    clearTimeout(pollTimer);
+    pollTimer = setTimeout(poll, ms);
+  }
+
+  function poll(){
+    if(paused || document.hidden){ schedule(); return; }
+    fetch('/api/sports/live?since=' + encodeURIComponent(since), {credentials: 'same-origin'})
+      .then(function(res){ if(!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
+      .then(function(data){
+        if(data.refreshIntervalSeconds) intervalSec = data.refreshIntervalSeconds;
+        if(data.serverTime) since = data.serverTime;
+        render(data.matches || []);
+        flashGoals(data.goalEvents || []);
+        var waited = data.refreshed && data.refreshed.retryInSeconds ? data.refreshed.retryInSeconds : intervalSec;
+        setNote('Auto-refresh on — live board updated' + (data.refreshed && data.refreshed.status === 'THROTTLED' ? ' (next provider sweep in ~' + waited + 's)' : '') + '.', 'up');
+      })
+      .catch(function(err){
+        var forbidden = String(err && err.message || '').indexOf('403') >= 0;
+        setNote(forbidden
+          ? 'Live auto-refresh needs the sports.view permission.'
+          : 'Auto-refresh interrupted — retrying.', 'down');
+      })
+      .then(schedule);
+  }
+
+  if(toggleBtn){
+    toggleBtn.addEventListener('click', function(){
+      paused = !paused;
+      toggleBtn.textContent = paused ? 'Resume' : 'Pause';
+      setNote(paused ? 'Auto-refresh paused — scores resume on Resume.' : 'Auto-refresh on — the goal score updates here automatically.', paused ? 'down' : 'up');
+      if(!paused){ clearTimeout(pollTimer); poll(); }
+    });
+  }
+  document.addEventListener('visibilitychange', function(){
+    if(!document.hidden && !paused){ clearTimeout(pollTimer); poll(); }
+  });
+  setNote('Auto-refresh on — the goal score updates here automatically, immediately after the provider reports it.', 'synth');
+  poll();
 })();
 </script>
 

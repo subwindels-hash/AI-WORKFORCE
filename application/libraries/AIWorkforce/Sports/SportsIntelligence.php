@@ -46,6 +46,7 @@ class SportsIntelligence
     public readonly PersistedResultVerifier $resultVerifier;
     public readonly PerformanceAnalytics $performance;
     public readonly SportsSyncService $sync;
+    public readonly LiveScoreService $liveScores;
     public readonly ConfigurationService $configuration;
     public readonly PredictionPipeline $pipeline;
     public readonly DailyTicketService $dailyTickets;
@@ -82,6 +83,10 @@ class SportsIntelligence
         $this->performance = new PerformanceAnalytics();
         $this->formResolver = new FormResolver();
         $this->sync = new SportsSyncService($repository, $audit, $this->quality, $this->formResolver);
+        // Live goal scores: one throttled refresh (board poll + cron funnel
+        // here) so a goal lands on the console automatically right after the
+        // provider reports it, without per-viewer provider traffic.
+        $this->liveScores = new LiveScoreService($repository, $audit, $this->sync, $this->providers);
         $this->configuration = new ConfigurationService($repository, $audit);
         $this->pipeline = new PredictionPipeline($this->matchIntelligence, $this->features, $this->predictions, $this->value, $this->risk, $this->correlation, $this->confidence);
         $this->dailyTickets = new DailyTicketService($repository, $audit, $this->providers, $this->configuration, $this->quality, $this->pipeline, new TicketOptimizer($this->correlation), $this->governance, $this->decisions, $this->formResolver);
@@ -373,7 +378,15 @@ class SportsIntelligence
         $dayEnd = $today . 'T23:59:59+00:00';
         $dayStart = $today . 'T00:00:00+00:00';
         $upcoming = $this->repository->listMatches(['status' => 'SCHEDULED', 'from' => $dayStart, 'to' => $dayEnd], 50);
-        $live = $this->repository->listMatches(['status' => 'LIVE'], 50);
+        // Live rows carry their last observed minute/score (payload.live) so
+        // the console can render the live board server-side; the browser then
+        // keeps it fresh via /api/sports/live (throttled auto refresh).
+        $live = array_map(static function (array $m): array {
+            $payload = is_array($m['payload'] ?? null) ? $m['payload'] : [];
+            $m['liveState'] = is_array($payload['live'] ?? null) ? $payload['live'] : [];
+            $m['simulated'] = !empty($payload['simulated']);
+            return $m;
+        }, $this->repository->listMatches(['status' => 'LIVE'], 50));
         $todayPredictions = $this->repository->listPredictions(['from' => $dayStart, 'to' => $dayEnd], 500);
         $qualified = array_values(array_filter($todayPredictions, fn($p) => ($p['decision'] ?? '') === 'PREDICTION_READY'));
         $rejected = array_values(array_filter($todayPredictions, fn($p) => ($p['decision'] ?? '') !== 'PREDICTION_READY'));

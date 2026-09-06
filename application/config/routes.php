@@ -215,6 +215,7 @@ $route['api/sports/providers'] = 'api_sports/providers';
 $route['api/sports/providers/(:num)/toggle'] = 'api_sports/toggle_provider/$1';
 $route['api/sports/provider-drivers'] = 'api_sports/provider_drivers';
 $route['api/sports/sync'] = 'api_sports/sync_provider';
+$route['api/sports/live'] = 'api_sports/live';
 $route['api/sports/topplayers'] = 'api_sports/top_players';
 // CLI commands are documented with dashes, but translate_uri_dashes is off —
 // map the documented forms explicitly or they 404.

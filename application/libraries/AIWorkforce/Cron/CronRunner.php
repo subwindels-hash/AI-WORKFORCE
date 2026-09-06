@@ -13,6 +13,7 @@ class CronRunner
         return [
             'ops' => fn() => self::ops($ci),
             'sports' => fn() => self::sports($ci),
+            'sports-live' => fn() => self::sportsLive($ci),
             'football' => fn() => self::football($ci),
             'lottery' => fn() => self::lottery($ci),
         ];
@@ -37,11 +38,22 @@ class CronRunner
         return $summary;
     }
 
-    /** Full sports sweep (fixtures → odds → results → quality → ticket …). */
+    /** Full sports sweep (fixtures → odds → live → results → quality → ticket …). */
     public static function sports(object $ci): array
     {
         $service = new \AIWorkforce\Sports\SportsCronService($ci->AIWorkforce_model->sports, $ci->AIWorkforce_model->audit, $ci->platform->sports);
         return $service->runAll();
+    }
+
+    /**
+     * Live goal-score sweep. Self-gated by LiveScoreService's refresh
+     * interval, so a minute tick is harmless when the interval has not
+     * elapsed: it reports THROTTLED and never touches the provider.
+     */
+    public static function sportsLive(object $ci): array
+    {
+        $service = new \AIWorkforce\Sports\SportsCronService($ci->AIWorkforce_model->sports, $ci->AIWorkforce_model->audit, $ci->platform->sports);
+        return $service->run('live');
     }
 
     /**

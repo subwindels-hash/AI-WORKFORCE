@@ -222,6 +222,59 @@ round-capable provider is synced once via `syncRound(..., ['results' => false])`
 never re-written), and matches without a `round_id` — or on providers
 without the round endpoint — keep the legacy per-fixture `syncOdds` call.
 
+## Live scores — auto-updating goal scores
+
+When a goal is scored, the Sports Intelligence live board updates itself: no
+page reload, no manual "Sync now". The chain is:
+
+1. **Sweep** — `SportsSyncService::syncLive($provider, $key)` calls the
+   provider's live endpoint (`liveFixtures()`: API-Football
+   `/fixtures?live=all`, TheSportsDB `/livescore.php`, SportMonks
+   `/fixtures/live/{date}`, plus the labeled SANDBOX simulation) and upserts
+   every in-play match: status, minute and current score land in
+   `sports_matches.payload.live` (the normalizer copies provider-stated values
+   only — an absent score is never defaulted to 0-0).
+2. **Goal detection** — each sweep compares the provider's total goals with the
+   last stored total. An increase audits one `SPORTS_GOAL_SCORED` event
+   (match, previous score, new score, scoring side, minute, delta); a decrease
+   (provider correction) or the very first observation of a live match emits
+   nothing.
+3. **Board** — `LiveScoreService::board()` serves the stored LIVE matches, and
+   `goalEventsSince($since)` replays goal events for the UI flash.
+   `GET /api/sports/live?since=…` (`sports.view`) returns both; the Sports
+   console's "Live scores — auto-updating" panel polls it and flashes
+   ⚽ GOAL as soon as an event lands.
+
+### Quota-safe by construction
+
+Every consumer funnels into one **self-gated** refresh
+(`LiveScoreService::refresh()`):
+
+1. **In-play window gate** — when no stored match can currently be on the
+   pitch (nothing `LIVE`, no kickoff within the last 3 hours or the next 10
+   minutes), the sweep is skipped outright: `SKIPPED_NO_MATCHES_IN_PLAY`,
+   zero provider requests. Idle hours never eat a small daily quota.
+2. **Interval throttle** — the provider is polled at most once per
+   `WINDELS_SPORTS_LIVE_REFRESH_SECONDS` (default 60, minimum 10) regardless
+   of how many browsers are open; concurrent pollers inside one interval
+   bucket are deduplicated by the sweep's execution key, and between sweeps
+   the board is served purely from storage.
+
+`refresh()` is driven by:
+
+- the `/api/sports/live` poll itself (default when the console is open),
+- the **Sports live scores** cron job (`sports-live`, every minute, self-gated
+  — disable it in Admin → Cron or raise the interval to protect a free-tier
+  quota),
+- `php index.php tools sports-cron live`,
+- and the operator sync endpoint
+  `GET /api/sports/sync?provider=api-football&type=live` for a one-shot sweep.
+
+The circuit breaker applies as everywhere else: a quota-dead feed is skipped
+without a request. The refresh interval is the worst-case delay between the
+provider reporting a score and the board showing it — lower it on a paid feed
+for faster updates.
+
 ## Provider health, circuit breaker and DATA_UNAVAILABLE
 
 ### Why

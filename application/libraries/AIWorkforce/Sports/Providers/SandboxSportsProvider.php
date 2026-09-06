@@ -88,6 +88,61 @@ class SandboxSportsProvider implements SportsDataProvider
         ]];
     }
 
+    /**
+     * Live fixtures (SANDBOX simulation). A fixture is in play while wall-clock
+     * time is within [kickoff, kickoff + 105 min]; its minute and goal score
+     * advance with real time along deterministic simulated goal minutes, so
+     * the live board visibly auto-updates shortly after each simulated goal.
+     * Everything stays labeled simulated; matches outside the window are never
+     * reported live.
+     */
+    public function liveFixtures(): array
+    {
+        if (!$this->enabled) throw new ProviderException('sandbox provider is not enabled in this mode', ProviderException::OFFLINE);
+        $now = time();
+        $out = [];
+        foreach ([gmdate('Y-m-d', $now - 86400), gmdate('Y-m-d', $now), gmdate('Y-m-d', $now + 86400)] as $day) {
+            foreach (self::LEAGUES as $league => $teams) {
+                for ($i = 0; $i < 3; $i++) {
+                    $kickoff = $this->kickoffTs($day, $i);
+                    if ($now < $kickoff || $now > $kickoff + 6300) continue;   // 105-minute match window
+                    $elapsed = intdiv($now - $kickoff, 60);
+                    $ext = $this->externalId($league, $day, $i);
+                    [$home, $away] = $this->pairing($league, $day, $i);
+                    $row = $this->fixturePayload($ext, $league, $home, $away, $day, $i, 'LIVE', $teams);
+                    $row['minute'] = min(90, $elapsed);
+                    $row['extraMinute'] = $elapsed > 90 ? min(15, $elapsed - 90) : null;
+                    [$row['homeScore'], $row['awayScore']] = $this->liveScore($league, $ext, $home, $away, $elapsed);
+                    $out[] = $row;
+                }
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Deterministic in-play score: the simulated goals whose goal-minute has
+     * already elapsed. Same (fixture, elapsed) always yields the same score,
+     * so repeated live sweeps agree with each other and goals appear one at a
+     * time as the clock passes each goal-minute.
+     *
+     * @return array{0:int,1:int}
+     */
+    private function liveScore(string $league, string $ext, string $home, string $away, int $elapsed): array
+    {
+        $form = $this->form($league, $home, $away);
+        $scored = function (float $lambda, string $key) use ($ext, $elapsed): int {
+            $goals = $this->poisson(min(4.0, $lambda), $ext . ':' . $key);
+            $count = 0;
+            for ($k = 0; $k < $goals; $k++) {
+                $minute = $this->randInt($ext . ':' . $key . ':m' . $k, 3, 92);
+                if ($minute <= $elapsed) $count++;
+            }
+            return $count;
+        };
+        return [$scored($form['homeGoalsPerMatch'], 'lh'), $scored($form['awayGoalsPerMatch'], 'la')];
+    }
+
     public function results(string $fixtureExternalId): array
     {
         if (!$this->enabled) throw new ProviderException('sandbox provider is not enabled in this mode', ProviderException::OFFLINE);

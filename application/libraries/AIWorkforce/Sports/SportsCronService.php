@@ -18,7 +18,7 @@ use AIWorkforce\Sports\Providers\SportsProviderManager;
  */
 class SportsCronService
 {
-    public const JOBS = ['fixtures', 'odds', 'results', 'quality', 'ticket', 'settlement', 'performance', 'monitoring', 'cleanup'];
+    public const JOBS = ['fixtures', 'odds', 'live', 'results', 'quality', 'ticket', 'settlement', 'performance', 'monitoring', 'cleanup'];
 
     public function __construct(
         private SportsRepository $repo,
@@ -48,6 +48,7 @@ class SportsCronService
         return match ($job) {
             'fixtures' => $this->jobFixtures($date),
             'odds' => $this->jobOdds($date),
+            'live' => $this->jobLive($date),
             'results' => $this->jobResults($date),
             'quality' => $this->jobQuality($date),
             'ticket' => $this->jobTicket($date),
@@ -118,6 +119,23 @@ class SportsCronService
             if (($result['status'] ?? '') === 'FAILED') $errors[] = implode('; ', $result['errors'] ?? []);
         }
         return $this->combine('ODDS_SYNC', $out, count($out) . ' match(es) synced', $processed, $created, $errors);
+    }
+
+    /**
+     * Live score sweep — self-gated by LiveScoreService's throttle, so this
+     * job is safe to tick every minute: it spends a provider request only
+     * when WINDELS_SPORTS_LIVE_REFRESH_SECONDS (default 60) has elapsed, and
+     * records a SPORTS_GOAL_SCORED audit event per goal it observes.
+     */
+    private function jobLive(string $date): array
+    {
+        $result = $this->sports->liveScores->refresh();
+        return [
+            'status' => $result['status'],
+            'providers' => $result['providers'] ?? [],
+            'goals' => count($result['goalEvents'] ?? []),
+            'errors' => $result['errors'] ?? [],
+        ];
     }
 
     private function jobResults(string $date): array
