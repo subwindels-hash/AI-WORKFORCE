@@ -14,6 +14,7 @@ require_once TESTSPATH . 'football_support.php';
 
 use AIWorkforce\Football\FootballDiagnostics;
 use AIWorkforce\Football\PerformanceService;
+use AIWorkforce\Football\PredictionService;
 
 /**
  * Read an application source file. Inside CI this is FCPATH-relative; the flat
@@ -190,6 +191,7 @@ test('football: the football screens own their panels — no duplication, no lef
     // §10/§11: the board and its card vocabulary live here, once.
     assert_equals(1, substr_count($console, "TODAY'S FOOTBALL PREDICTIONS"), 'the board heading appears once');
     assert_equals(1, substr_count($console, '<h3>30-day performance'), 'the 30-day panel appears once');
+    assert_equals(1, substr_count($console, '<h3>Prediction history (settled results)'), 'the settled-results panel appears once on the board');
     assert_contains('$board[\'categories\']', $console, 'the view iterates the confidence categories the board produced');
     // The categories themselves are a data contract, so they are checked where
     // they are produced.
@@ -323,6 +325,20 @@ test('football: rendered console shows populated and empty states without warnin
     ]);
     fx_fb_sync_today($module, $day);
     $module->predictions()->predictDay($day);
+    // The provider reports a full-time score; the settlement sweep grades it so
+    // the board's prediction-history panel has a settled row to show.
+    $prediction = $repo->listPredictions(['date' => $day, 'kind' => PredictionService::KIND_PRE_MATCH], 1)[0] ?? null;
+    assert_true($prediction !== null, 'the harness fixture produced a prediction to settle');
+    $fixture = $repo->findFixtureById((int) $prediction['fixture_id']);
+    $repo->saveFixture((int) $fixture['provider_id'], array_merge(
+        array_intersect_key($fixture, array_flip(['external_id', 'competition', 'league_id', 'season', 'kickoff_at', 'home_team', 'away_team', 'home_team_id', 'away_team_id'])),
+        ['externalId' => (string) $fixture['external_id'], 'status' => 'FINISHED', 'homeScore' => 2, 'awayScore' => 0]
+    ));
+    $module->settlements()->settleFixture((int) $fixture['id'], 'test:ui:settle');
+    $dashboard = $module->dashboard($day);
+    assert_in_array('history', array_keys($dashboard), 'the dashboard envelope carries the settled history');
+    assert_equals('MEASURED', $dashboard['history']['state'], 'one settled row is a measured history');
+    assert_equals(1, (int) $dashboard['history']['count']);
     $render = static function (string $page, array $data) use ($ci): string {
         ob_start();
         $ci->load->view('layout/header', $data);
@@ -333,12 +349,18 @@ test('football: rendered console shows populated and empty states without warnin
     $base = ['title' => 'Football Intelligence', 'active' => 'football', 'notice' => null, 'error' => null,
         'caps' => ['sync' => true, 'calibrate' => true, 'approve' => true, 'settle' => true], 'csrfToken' => 'test-token'];
     $html = $render('football/index', array_merge($base, [
-        'dashboard' => $module->dashboard($day), 'date' => $day,
+        'dashboard' => $dashboard, 'date' => $day,
         'yesterday' => gmdate('Y-m-d', $kickoff - 86400), 'tomorrow' => gmdate('Y-m-d', $kickoff + 86400),
         'refresh' => false,
     ]));
     assert_contains("TODAY'S FOOTBALL PREDICTIONS", $html);
     assert_equals(1, substr_count($html, '<h3>30-day performance'), 'rendered once per page');
+    assert_contains('Prediction history (settled results)', $html, 'the settled-results panel renders on the board');
+    $historyStart = strpos($html, 'Prediction history (settled results)');
+    $historyBlock = (string) substr($html, (int) $historyStart, 4000);
+    assert_contains('Manchester City', $historyBlock, 'the settled match appears in the history panel');
+    assert_contains('2–0', $historyBlock, 'the actual final score is shown');
+    assert_contains('badge b-green">correct', $historyBlock, 'the graded outcome is labelled');
     assert_true(!str_contains($html, 'Call to a member function'), 'no fatal surfaced as text');
     assert_true(!str_contains($html, 'Undefined array key'), 'no PHP warnings');
     assert_true(!str_contains($html, 'Warning:</b>'), 'none at all');

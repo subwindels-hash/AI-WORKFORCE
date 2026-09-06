@@ -15,6 +15,7 @@ $d = $dashboard ?? [];
 $board = $d['board'] ?? [];
 $diag = $d['diagnostics'] ?? [];
 $perf = $d['performance'] ?? [];
+$history = $d['history'] ?? [];
 $live = $d['live'] ?? [];
 $models = $d['models'] ?? [];
 $caps = $caps ?? ['sync' => false, 'calibrate' => false, 'approve' => false, 'settle' => false];
@@ -441,6 +442,59 @@ $catTitle = static fn(string $key): string => match ($key) { 'A' => 'Home Advant
               <?php endforeach; ?>
             </tbody>
           </table>
+        <?php endif; ?>
+      </div>
+    </div>
+
+    <!-- ── prediction history: settled results, graded against the stored score ── -->
+    <div class="panel">
+      <h3>Prediction history (settled results)</h3>
+      <div class="body" style="padding-top:12px">
+        <?php $historyRows = (array) ($history['rows'] ?? []); ?>
+        <?php $resultLabel = static fn(?string $r): string => match (strtoupper((string) $r)) { 'HOME' => 'Home win', 'AWAY' => 'Away win', 'DRAW' => 'Draw', default => (string) ($r ?? '—'), }; ?>
+        <?php if ($historyRows === []): ?>
+          <p class="dim" style="font-size:12px">No settled predictions yet. Each row appears once the provider reports a final score and the settlement sweep has graded the stored prediction against it.</p>
+        <?php else: ?>
+          <table class="tbl">
+            <thead><tr><th>Kickoff</th><th>Match</th><th>Predicted</th><th>Category</th><th>Actual</th><th>Result</th><th>Confidence</th></tr></thead>
+            <tbody>
+              <?php foreach ($historyRows as $hrow): ?>
+                <?php
+                $hfixture = (array) ($hrow['fixture'] ?? []);
+                $hpredicted = (array) ($hrow['predicted'] ?? []);
+                $hactual = (array) ($hrow['actual'] ?? []);
+                $hcat = (string) ($hrow['category'] ?? '');
+                $ph = is_numeric($hpredicted['score']['home'] ?? null) ? (int) $hpredicted['score']['home'] : null;
+                $pa = is_numeric($hpredicted['score']['away'] ?? null) ? (int) $hpredicted['score']['away'] : null;
+                $ah = is_numeric($hactual['score']['home'] ?? null) ? (int) $hactual['score']['home'] : null;
+                $aa = is_numeric($hactual['score']['away'] ?? null) ? (int) $hactual['score']['away'] : null;
+                ?>
+                <tr>
+                  <td class="dim" style="font-size:12px;white-space:nowrap"><?= $kickoffLabel($hfixture['kickoff'] ?? null) ?></td>
+                  <td>
+                    <a href="/football/match/<?= (int) ($hfixture['id'] ?? 0) ?>"><?= e((string) ($hfixture['homeTeam'] ?? '—')) ?> <span class="dim">vs</span> <?= e((string) ($hfixture['awayTeam'] ?? '—')) ?></a>
+                    <div class="dim" style="font-size:11px"><?= e((string) ($hfixture['competition'] ?? '—')) ?></div>
+                  </td>
+                  <td class="mono"><?= e($resultLabel($hpredicted['result'] ?? null)) ?><?= $ph !== null && $pa !== null ? ' · ' . $ph . '–' . $pa : '' ?></td>
+                  <td>
+                    <?php if ($hcat !== ''): ?>
+                      <span class="badge <?= $catChip($hcat) ?>"><?= $hcat ?> — <?= e($catTitle($hcat)) ?></span>
+                    <?php else: ?>
+                      <span class="badge b-gray">—</span>
+                    <?php endif; ?>
+                  </td>
+                  <td class="mono"><?= e($resultLabel($hactual['result'] ?? null)) ?><?= $ah !== null && $aa !== null ? ' · ' . $ah . '–' . $aa : '' ?></td>
+                  <td>
+                    <?php if ($hrow['correctResult'] === true): ?><span class="badge b-green">correct</span>
+                    <?php elseif ($hrow['correctResult'] === false): ?><span class="badge b-red">missed</span>
+                    <?php else: ?><span class="badge b-gray">—</span><?php endif; ?>
+                  </td>
+                  <td class="mono dim"><?= is_numeric($hpredicted['confidence'] ?? null) ? number_format((float) $hpredicted['confidence'], 1) . '%' : '—' ?></td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+          <p class="dim" style="font-size:11px;margin-top:6px">Newest first · actual scores come from the provider's final result, never from this model. The full list and the per-category breakdown live under Admin → Football.</p>
         <?php endif; ?>
       </div>
     </div>

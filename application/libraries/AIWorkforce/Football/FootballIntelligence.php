@@ -209,6 +209,7 @@ final class FootballIntelligence
             'board' => $this->board()->forDate($date, $refresh, $categoryFilter),
             'diagnostics' => $diagnostics,
             'performance' => $this->performance()->report(30),
+            'history' => $this->history(15),
             'live' => $this->live()->board(false),
             'models' => $this->modelSummary(),
             'generatedAt' => gmdate('c'),

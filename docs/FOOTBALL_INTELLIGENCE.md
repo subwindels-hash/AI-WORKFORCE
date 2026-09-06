@@ -245,7 +245,16 @@ GET /api/football/calibrations           ?modelVersionId= (defaults to the model
 GET /api/football/provider/status
 GET /api/football/status
 GET /api/football/dashboard            ?date=&refresh=
+                                       board + diagnostics + 30-day performance +
+                                       settled history (newest 15) + live + models
 ```
+
+`GET /api/football/dashboard` is the single envelope the console board renders, so
+what the page shows is exactly what the API returns: the day's board (with its
+A/B/C category filter), the provider diagnostics, the 30-day performance window,
+the settled prediction history (newest 15 graded rows — the "Prediction history
+(settled results)" panel), the live board and the model summary. An empty history
+is the explicit `NO_SETTLED_PREDICTIONS` state, never a blank that reads as zero.
 
 Mutations require the native session plus the CSRF token (header or body field),
 then the capability named. They take a JSON body:
