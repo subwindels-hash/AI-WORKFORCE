@@ -74,4 +74,18 @@ $tests[] = function(): array {
     return ['msg' => 'email transports wired up'];
 };
 
+$tests[] = function(): array {
+    // Members see the white-labelled provider names (Windels G / Windels A); the
+    // contract underneath does not move — the option values are still the driver
+    // ids stored on leads and expected by /leads/search and Admin → API Management.
+    $view = file_get_contents(APPPATH . 'views/leads/index.php');
+    assert_true(str_contains($view, '<select id="provider">'), 'provider_select_present');
+    assert_true(str_contains($view, '<option value="google_places">Windels G</option>'), 'windels_g_label');
+    assert_true(str_contains($view, '<option value="apollo_io">Windels A (B2B people &amp; companies'), 'windels_a_label');
+    assert_false((bool) preg_match('/<option[^>]*>[^<]*(Google Places|Apollo\.io)/', $view), 'no_vendor_name_in_a_provider_option');
+    assert_true(str_contains($view, "provider: 'apollo_io'"), 'person_mode_still_posts_the_driver_id');
+    assert_true(str_contains($view, "$('provider').value = 'apollo_io';"), 'mode_switch_still_selects_the_driver_id');
+    return ['msg' => 'provider dropdown is white-labelled, driver ids unchanged'];
+};
+
 run('85-lead-discovery-modes', $tests);

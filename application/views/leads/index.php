@@ -170,9 +170,13 @@ $pageTitle = $isPipeline ? 'Lead Pipeline' : 'Lead Discovery';
         <input id="keywords" placeholder="Keywords (comma-separated): Banking, Commercial Real Estate, Architecture" style="min-width:320px;flex:2">
         <input id="country" placeholder="Country (e.g. Nigeria)">
         <input id="city" placeholder="City (e.g. Lagos)">
+        <!-- Member-facing provider names are white-labelled (Windels G / Windels A).
+             The option values stay the driver ids the API and the provider rows use:
+             google_places / apollo_io — renaming those would break stored leads, the
+             /leads/search contract and Admin → API Management. -->
         <select id="provider">
-          <option value="google_places">Google Places</option>
-          <option value="apollo_io">Apollo.io (B2B people &amp; companies — emails/phones need contact reveal)</option>
+          <option value="google_places">Windels G</option>
+          <option value="apollo_io">Windels A (B2B people &amp; companies — emails/phones need contact reveal)</option>
         </select>
         <button type="button" id="searchBtn">Search businesses</button>
       </div>
