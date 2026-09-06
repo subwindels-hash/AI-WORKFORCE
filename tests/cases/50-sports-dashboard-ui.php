@@ -119,6 +119,33 @@ test('sports UI: dashboard renders today odds prediction ticket with gated actio
     assert_contains('UI League', $html);
 });
 
+test('sports UI: the live scores board shows the match date and time', function () {
+    $repo = new SportsRepositoryStub();
+    $repo->ensureProvider('ui-test', 'UI Test');
+    // One live match with a stored kickoff, one the provider gave none for: the
+    // board prints the second as — rather than inventing a time.
+    $kickoff = gmdate("Y-m-d\TH:i:00+00:00", strtotime('today 14:30:00'));
+    $repo->matches[] = ['id' => 9101, 'provider_id' => 1, 'external_id' => 'ui-live-1', 'sport' => 'football',
+        'competition' => 'UI League', 'home_team' => 'LiveHome', 'away_team' => 'LiveAway', 'kickoff_at' => $kickoff,
+        'status' => 'LIVE', 'source_timestamp' => gmdate('c'), 'updated_at' => gmdate('c'),
+        'payload' => ['live' => ['minute' => 63, 'homeScore' => 2, 'awayScore' => 1, 'statusShort' => '2H']]];
+    $repo->matches[] = ['id' => 9102, 'provider_id' => 1, 'external_id' => 'ui-live-2', 'sport' => 'football',
+        'competition' => 'UI League', 'home_team' => 'NoKickoffHome', 'away_team' => 'NoKickoffAway', 'kickoff_at' => null,
+        'status' => 'LIVE', 'source_timestamp' => gmdate('c'), 'updated_at' => gmdate('c'),
+        'payload' => ['live' => ['minute' => 12, 'homeScore' => 0, 'awayScore' => 0]]];
+    $dash = (new SportsIntelligence($repo, fx_ui_audit()))->dashboard();
+    assert_equals(2, count($dash['todayIntelligence']['live']), 'both live rows reach the board');
+    $html = fx_render_sports('index', ['dashboard' => $dash]);
+    assert_contains('Kickoff (UTC)</th>', $html, 'the live board has a match date and time column');
+    assert_contains('<td class="mono dim live-kickoff-cell">' . gmdate('Y-m-d H:i', (int) strtotime($kickoff)) . '</td>', $html,
+        'the live row prints its stored kickoff as date and time');
+    assert_contains('<td class="mono dim live-kickoff-cell">—</td>', $html,
+        'a match with no stored kickoff prints — instead of a time');
+    assert_contains('NoKickoffHome vs NoKickoffAway', $html);
+    assert_true(!str_contains($html, 'Undefined array key'), 'no PHP warnings');
+    assert_true(!str_contains($html, '1970-01-01'), 'a missing kickoff is never rendered as the epoch');
+});
+
 test('sports UI: records console renders records, runs and performance', function () {
     $repo = new SportsRepositoryStub();
     $ticketId = fx_ui_today($repo);

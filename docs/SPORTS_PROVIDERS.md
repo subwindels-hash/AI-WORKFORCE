@@ -239,11 +239,16 @@ page reload, no manual "Sync now". The chain is:
    (match, previous score, new score, scoring side, minute, delta); a decrease
    (provider correction) or the very first observation of a live match emits
    nothing.
-3. **Board** — `LiveScoreService::board()` serves the stored LIVE matches, and
-   `goalEventsSince($since)` replays goal events for the UI flash.
-   `GET /api/sports/live?since=…` (`sports.view`) returns both; the Sports
-   console's "Live scores — auto-updating" panel polls it and flashes
-   ⚽ GOAL as soon as an event lands.
+3. **Board** — `LiveScoreService::board()` serves the stored LIVE matches, each
+   with the kickoff it was stored with, and `goalEventsSince($since)` replays
+   goal events for the UI flash. `GET /api/sports/live?since=…` (`sports.view`)
+   returns both; the Sports console's "Live scores — auto-updating" panel polls
+   it and flashes ⚽ GOAL as soon as an event lands. Every row prints the match
+   date and time in its own **Kickoff (UTC)** column (`YYYY-MM-DD HH:MM`,
+   rendered from the stored kickoff on both the server side and by the poll
+   handler); a match the provider gave no kickoff for shows `—`, never a
+   guessed time. The football console's live cards carry the same stamp
+   (`Sun 6 Sep 2026 · 14:00 UTC`, or `DATA_UNAVAILABLE`).
 
 ### Quota-safe by construction
 

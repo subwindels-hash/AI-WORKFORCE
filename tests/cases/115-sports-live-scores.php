@@ -226,6 +226,8 @@ test('live scores: board serves stored scores and replays goal events since a ti
     assert_equals(1, $m['awayScore']);
     assert_equals(88, $m['minute']);
     assert_true($m['scoreKnown']);
+    assert_equals('2026-09-06T14:00:00+00:00', $m['kickoff'],
+        'the stored kickoff travels with the live row so the board can print the match date and time');
     assert_equals(1, count($board['goalEvents']), 'goal event replayed for the UI flash');
     assert_equals('GOAL', $board['goalEvents'][0]['type']);
     $empty = $service->board(gmdate('c', time() + 3600));
@@ -317,6 +319,11 @@ test('live scores: live endpoint, route, console panel and cron jobs are wired',
     assert_contains('id="live-scores-panel"', $view, 'console has a live scores panel');
     assert_contains("fetch('/api/sports/live?since='", $view, 'the panel polls the live endpoint');
     assert_contains('live-count-stat', $view, 'the Live stat updates with the board');
+    assert_contains('Kickoff (UTC)</th>', $view, 'the live board has a match date and time column');
+    assert_equals(2, substr_count($view, 'live-kickoff-cell'),
+        'the kickoff stamp is rendered server-side and by the poll handler, so the two cannot drift');
+    assert_contains('kickoffStamp(m.kickoff)', $view, 'polled rows print the kickoff the live board sent');
+    assert_contains('colspan="6"', $view, 'the empty board still spans every column');
     $cron = file_get_contents(FCPATH . 'application/libraries/AIWorkforce/Cron/CronScheduler.php');
     assert_contains("'sports-live'", $cron, 'self-gated sports-live cron job registered');
     $runner = file_get_contents(FCPATH . 'application/libraries/AIWorkforce/Cron/CronRunner.php');
