@@ -434,3 +434,108 @@ test('admin API RBAC is explicit: view/test vs manage/credentials', function () 
     assert_contains('API Management', $header);
     assert_contains("admin_can('admin.api.view')", $header);
 });
+
+test('lead_discovery drivers resolve their own row — Apollo is not shadowed by a primary Google provider', function () {
+    $db = fx_api_db();
+    // Both providers configured for the same service: Google Places primary,
+    // Apollo.io fallback with contact reveal switched on.
+    $places = \AIWorkforce\ApiProviders::save($db, [
+        'service' => 'lead_discovery', 'driver' => 'google_places', 'label' => 'Places primary',
+        'role' => 'primary', 'enabled' => 1, 'api_key' => 'places-key-123',
+    ], null, 1, true);
+    $apollo = \AIWorkforce\ApiProviders::save($db, [
+        'service' => 'lead_discovery', 'driver' => 'apollo_io', 'label' => 'Apollo fallback',
+        'role' => 'fallback', 'enabled' => 1, 'api_key' => 'apollo-key-456',
+        'reveal_contacts' => '1', 'reveal_limit' => '5',
+    ], null, 1, true);
+    $ids = [(int) ($places['id'] ?? 0), (int) ($apollo['id'] ?? 0)];
+    try {
+        assert_true($ids[0] > 0 && $ids[1] > 0, 'both rows saved');
+
+        // resolve()/activeConfig() still return the single active row.
+        $active = \AIWorkforce\ApiProviders::activeConfig($db, 'lead_discovery');
+        assert_equals('google_places', $active['driver'] ?? null, 'primary row is the active one');
+
+        // The driver-scoped lookup finds Apollo even though it is the fallback,
+        // and never hands back the Google Places credential.
+        $cfg = \AIWorkforce\ApiProviders::resolveDriver($db, 'lead_discovery', 'apollo_io');
+        assert_not_null($cfg, 'apollo row resolved');
+        assert_equals('apollo_io', $cfg['driver'] ?? null, 'only ever the requested driver');
+        assert_not_equals('places-key-123', $cfg['secrets']['api_key'] ?? null, 'apollo never borrows the google key');
+
+        // Row-scoped facts (immune to an Apollo row already present in this DB).
+        $mine = \AIWorkforce\ApiProviders::find($db, $ids[1]);
+        assert_equals('1', $mine['extra']['reveal_contacts'] ?? null, 'reveal flag stored in extra');
+        assert_equals('5', $mine['extra']['reveal_limit'] ?? null, 'reveal cap stored in extra');
+        assert_equals('apollo-key-456', \AIWorkforce\ApiProviders::findSecrets($db, $ids[1])['api_key'] ?? null, 'apollo key stored encrypted');
+
+        // A disabled row is not served to the runtime, but stays diagnosable so
+        // healthCheck() can say "switched off" instead of "never configured".
+        \AIWorkforce\ApiProviders::setEnabled($db, $ids[1], false);
+        assert_null(\AIWorkforce\ApiProviders::resolveDriver($db, 'lead_discovery', 'apollo_io'), 'disabled row not served');
+        assert_not_null(\AIWorkforce\ApiProviders::resolveDriver($db, 'lead_discovery', 'apollo_io', false), 'disabled row still findable');
+        \AIWorkforce\ApiProviders::setEnabled($db, $ids[1], true);
+
+        // Same lookup the adapters perform inside a live request.
+        $viaRequest = \AIWorkforce\ApiProviders::resolveDriverForRequest('lead_discovery', 'apollo_io');
+        assert_not_null($viaRequest, 'request-scoped lookup works');
+        assert_equals('apollo_io', $viaRequest['driver'] ?? null, 'request-scoped driver');
+
+        // End to end: the Apollo adapter picks up its own row (key + reveal).
+        foreach (['LeadDiscoveryProvider.php', 'ProviderException.php', 'ApolloProvider.php'] as $f) {
+            require_once FCPATH . 'application/libraries/LeadDiscovery/' . $f;
+        }
+        if ((int) ($cfg['id'] ?? 0) === $ids[1]) {
+            $health = (new \LeadDiscovery\ApolloProvider())->healthCheck();
+            assert_equals('IMPLEMENTED', $health['status'], 'adapter configured from its own row');
+            assert_contains('contact reveal on', $health['detail'], 'reveal flag reaches the adapter');
+        }
+
+        // Neither adapter may read the active row without checking the driver.
+        $gp = file_get_contents(FCPATH . 'application/libraries/LeadDiscovery/GooglePlacesProvider.php');
+        assert_contains("resolveDriverForRequest('lead_discovery', 'google_places')", $gp, 'google adapter reads its own row');
+        $ap = file_get_contents(FCPATH . 'application/libraries/LeadDiscovery/ApolloProvider.php');
+        assert_contains("resolveDriverForRequest('lead_discovery', 'apollo_io')", $ap, 'apollo adapter reads its own row');
+    } finally {
+        fx_api_cleanup($ids);
+    }
+});
+
+test('Apollo connection test is staged end to end through ApiProviders::test()', function () {
+    // A scoped key: auth/health refuses (403), the endpoint Lead Discovery
+    // actually calls accepts it. The old build reported "Connection failed".
+    $seen = [];
+    $previous = \AIWorkforce\ApiProviders::$http;
+    try {
+        \AIWorkforce\ApiProviders::$http = function (string $url, array $headers = [], ?string $body = null) use (&$seen) {
+            $seen[] = ['url' => $url, 'headers' => $headers, 'body' => $body];
+            if (str_contains($url, '/auth/health')) {
+                return ['status' => 403, 'body' => '{"error_code":"API_INACCESSIBLE"}'];
+            }
+            return ['status' => 200, 'body' => '{"pagination":{"total_entries":17},"people":[{"id":"p1"}]}'];
+        };
+        $result = \AIWorkforce\ApiProviders::test(
+            ['driver' => 'apollo_io', 'service' => 'lead_discovery', 'base_url' => '', 'extra' => []],
+            ['api_key' => 'scoped-apollo-key-789']
+        );
+        assert_true($result['ok'], 'scoped key connects');
+        assert_contains('mixed_people/api_search', $result['message']);
+        assert_false(str_contains($result['message'], 'scoped-apollo-key-789'), 'key never echoed');
+        assert_equals(2, count($seen), 'two credit-free probes');
+        assert_in_array('x-api-key: scoped-apollo-key-789', $seen[0]['headers'], 'header auth on probe 1');
+        assert_in_array('x-api-key: scoped-apollo-key-789', $seen[1]['headers'], 'header auth on probe 2');
+        assert_true(isset($result['ms']), 'timing recorded');
+
+        \AIWorkforce\ApiProviders::$http = function (string $url, array $headers = [], ?string $body = null) {
+            return ['status' => 401, 'body' => '{"code":"API_KEY_MISSING"}'];
+        };
+        $bad = \AIWorkforce\ApiProviders::test(
+            ['driver' => 'apollo_io', 'service' => 'lead_discovery', 'base_url' => '', 'extra' => []],
+            ['api_key' => 'wrong-key']
+        );
+        assert_false($bad['ok'], 'invalid key rejected');
+        assert_contains('Invalid Apollo API key', $bad['message']);
+    } finally {
+        \AIWorkforce\ApiProviders::$http = $previous;
+    }
+});

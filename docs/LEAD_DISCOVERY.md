@@ -174,30 +174,113 @@ No AI inference is currently presented as a fact. Verification is derived
 exclusively from explicit provider signals (Apollo `email_status.verified`,
 direct phone presence, Google Places listing) — never fabricated.
 
-## Apollo.io provider (auth & endpoints)
+## Apollo.io provider (auth, endpoints, troubleshooting)
 
 Docs: https://docs.apollo.io/reference/apollo-api — base URL
-`https://api.apollo.io/api/v1`.
+`https://api.apollo.io/api/v1`. Adapter:
+`application/libraries/LeadDiscovery/ApolloProvider.php`; connection test:
+`ApiProviders::testApollo()`.
 
-- **Authentication:** the API key is sent in the **`x-api-key` request header**
-  on every call (https://docs.apollo.io/reference/authentication). The legacy
-  `api_key`-in-JSON-body mechanism is deprecated and is rejected by the current
-  API — using it is what produced the `apollo.io ✕ Connection failed` result.
-- **Connection test:** the admin "Test connection" button calls the documented,
-  credit-free key check `GET /api/v1/auth/health` with `x-api-key`. It returns
-  `{"healthy":true,"is_logged_in":true}` for a valid key and `401` for a bad
-  one. (The previous build pinged a paid search endpoint with body auth, which
-  failed even with a valid key.)
-- **Search:** the adapter first tries `POST /mixed_people/search` (legacy;
-  returns full email/phone/LinkedIn on paid plans) and transparently falls back
-  to the documented `POST /mixed_people/api_search` on `404/405/410`. Filters
-  are sent as query parameters in Apollo's bracket-array form
-  (`person_titles[]=…`, `person_seniorities[]=…`, `person_locations[]=…`,
-  `q_keywords`, `q_person_name`, `per_page`).
-- **Free-tier privacy:** the public `api_search` endpoint returns privacy-safe
-  rows (obfuscated surname, `has_email` / `has_direct_phone` flags) and does not
-  expose email addresses or phone numbers. Those rows are normalised honestly
-  with `metadata.privacy_safe = true` and empty `email`/`phone`; Person Mode's
-  free-webmail filter then yields no contacts on a free Apollo plan. Full
-  emails/phones require a paid Apollo plan (returned via the legacy endpoint or
-  Apollo's people-enrichment endpoints).
+### Authentication
+
+- The API key is sent in the **`x-api-key` request header** on every call
+  (https://docs.apollo.io/reference/authentication). The legacy
+  `api_key`-in-JSON-body mechanism was retired in September 2024 and now fails.
+- **Apollo keys are scoped per endpoint.** When a key is created you tick the
+  endpoints it may call; any other endpoint answers **403**
+  (https://docs.apollo.io/docs/create-api-key). Lead Discovery needs
+  `mixed_people/api_search`, plus `people/bulk_match` when contact reveal is on.
+  A **master key** ("Set as master key") covers every endpoint.
+- Keys are read from the provider row (Admin → API → Lead Discovery → Apollo.io)
+  or from `APOLLO_IO_API_KEY` / `APOLLO_API_KEY`.
+
+### Connection test (Admin → API → *Test Connection*)
+
+Two credit-free probes, in order:
+
+1. `GET /api/v1/auth/health` — the documented key check
+   (https://docs.apollo.io/docs/test-api-key); `200
+   {"healthy":true,"is_logged_in":true}` for a valid key.
+2. `POST /api/v1/mixed_people/api_search?per_page=1&q_keywords=apollo` — only
+   when probe 1 answers `403/404/422`, which is what a **scoped** key returns
+   for an endpoint it was not granted. Without this second probe a key that
+   works perfectly for Lead Discovery reported `✕ Connection failed`.
+
+`401` on probe 1 is final (the key itself is invalid). `429` and `5xx` are
+reported as rate limit / Apollo outage. A transport failure reports *which*
+transport problem it was (TLS CA bundle, DNS, blocked egress) instead of a bare
+"Connection failed". The key is never echoed back in a message or a log.
+
+A `200` is only a pass when it is Apollo answering: `is_logged_in=false`,
+`healthy=false` or a non-JSON body (an intercepting proxy, a wrong Base URL) all
+report their own reason rather than a false **Connected**. `422` on probe 2
+counts as authenticated — Apollo checked the key and only objected to the probe's
+parameters. Every message stays inside the 255 characters the provider row stores
+and is repeated under the badge on the API dashboard, so the reason is visible
+without opening the provider.
+
+### Endpoints used at runtime
+
+| Purpose | Endpoint | Credits |
+| --- | --- | --- |
+| People search | `POST /api/v1/mixed_people/api_search` | 0 |
+| Fallback for grandfathered keys only | `POST /api/v1/mixed_people/search` (deprecated, enforced off from 15 Dec 2025) | 0 |
+| Contact reveal (opt-in) | `POST /api/v1/people/bulk_match` (≤ 10 ids per call) | 1 per record |
+
+Filters are sent as **query parameters** in Apollo's bracket-array form
+(`person_titles[]=…`, `person_seniorities[]=…`, `person_locations[]=…`,
+`q_keywords`, `q_person_name`, `page`, `per_page`). A `401`/`403`/`400`/`422`
+from the documented search is **not** retried against the deprecated one — the
+deprecated route is only tried when Apollo says the documented route does not
+exist for this key (`404/405/410`).
+
+### Contact reveal (why Person Mode can return nothing)
+
+`mixed_people/api_search` **never returns email addresses or phone numbers**
+(https://docs.apollo.io/reference/people-api-search). Its rows are privacy-safe:
+obfuscated surname (`last_name_obfuscated`), `has_email` / `has_direct_phone`
+flags, and locked placeholders such as `email_not_unlocked@domain.com`, which the
+adapter discards rather than storing as if they were real contacts
+(`ApolloProvider::isUsableEmail()`).
+
+Person Mode filters on free-webmail domains (gmail.com, outlook.com, …), i.e. on
+**personal** emails, so it needs the documented enrichment endpoint:
+
+- Off by default. Enable per provider in Admin → API (`reveal_contacts = 1`) or
+  with `APOLLO_IO_REVEAL_CONTACTS=1`.
+- `reveal_personal_emails` defaults to the reveal setting (personal addresses are
+  what Person Mode filters on); `reveal_phone_number` defaults to **off** because
+  phone reveals cost more credits.
+- `reveal_limit` caps records enriched **per search** (default 25, max 100) and
+  only rows Apollo flags with `has_email` / `has_direct_phone` are sent, so
+  credits are not spent on records that hold nothing.
+- A refusal (no credits, missing `people_bulk_match` scope, `429`) degrades to
+  the privacy-safe rows and is recorded in the provider notes — the search never
+  fails because enrichment was refused.
+- Enriched rows are marked `metadata.enriched = true`, `privacy_safe = false`,
+  and carry the revealed `email`, `email_status`, `phone`, `linkedin_url` and
+  full name.
+
+The `/leads/search` response reports the facts as `providerInfo`
+(`results`, `revealEnabled`, `revealRequested`, `revealed`) and, when search rows
+hold no contact data, a `notice` that says exactly which setting to change.
+Internal notes stay in the CI error log; members never see connection internals.
+
+### `✕ Connection failed` — what it means now
+
+| Message on the provider page | Cause | Fix |
+| --- | --- | --- |
+| `An Apollo API key is required…` | no key saved | paste a key and save |
+| `That is the masked placeholder…` | the masked value was saved back | retype the full key |
+| `Invalid Apollo API key (HTTP 401…)` | key deleted/regenerated/expired | regenerate in Apollo → Settings → Integrations → API Keys |
+| `HTTP 403 API_INACCESSIBLE: this key may not call the tested endpoints…` | scoped key without `mixed_people_api_search`, plan without API access, or a free account registered with a personal (gmail/outlook) email | grant the scope or toggle "Set as master key"; free accounts need a work-email signup |
+| `Apollo says this key is not signed in…` | `auth/health` answered `is_logged_in=false` | regenerate the key; check the account's API plan |
+| `Apollo reported this key as unhealthy…` | `auth/health` answered `healthy=false` | regenerate the key; check the account's API plan |
+| `auth/health answered HTTP 200 with a non-JSON body…` | a proxy/firewall page intercepted the request, or the Base URL is not an Apollo API origin | clear the Base URL (or set it to `https://api.apollo.io`) and allow egress |
+| `Apollo.io’s TLS certificate could not be verified…` | missing/outdated CA bundle on the host | point `curl.cainfo` / `openssl.cafile` at a current `cacert.pem` |
+| `api.apollo.io does not resolve…` | DNS failure on the host | fix the server's resolver |
+| `Outbound HTTPS to … is blocked by a firewall or timed out…` | egress to port 443 blocked or Apollo unreachable | allow egress to `api.apollo.io:443` |
+| `Apollo rate limit reached (HTTP 429)…` | rate limit | retry in a minute (https://docs.apollo.io/reference/rate-limits) |
+| `Apollo.io server error … (HTTP 5xx)` | Apollo outage | retry shortly (https://status.apollo.io) |
+| *Lead Discovery:* `Apollo.io is configured but switched off…` | the provider row is disabled, so the runtime never sees the key | enable it in Admin → API Management |
+| *Lead Discovery:* `this API key may not call that endpoint (HTTP 403…)` during a search | key lacks `mixed_people_api_search` (or `people_bulk_match` when reveal is on) | grant the scope, or toggle "Set as master key" |

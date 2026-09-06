@@ -8,7 +8,17 @@ class GooglePlacesProvider implements LeadDiscoveryProvider
     public function __construct(private ?string $apiKey = null, private int $timeoutSeconds = 12, private int $maxAttempts = 2)
     {
         if ($this->apiKey === null || $this->apiKey === '') {
-            $cfg = class_exists(\AIWorkforce\ApiProviders::class) ? \AIWorkforce\ApiProviders::resolve('lead_discovery') : null;
+            // Read the google_places row itself: lead_discovery also hosts
+            // Apollo.io, and resolve() returns whichever provider is primary.
+            $cfg = null;
+            if (class_exists(\AIWorkforce\ApiProviders::class) && method_exists(\AIWorkforce\ApiProviders::class, 'resolveDriverForRequest')) {
+                try { $cfg = \AIWorkforce\ApiProviders::resolveDriverForRequest('lead_discovery', 'google_places'); }
+                catch (\Throwable $e) { $cfg = null; }
+            }
+            if (!is_array($cfg) && class_exists(\AIWorkforce\ApiProviders::class)) {
+                $any = \AIWorkforce\ApiProviders::resolve('lead_discovery');
+                $cfg = (is_array($any) && ($any['driver'] ?? '') === 'google_places') ? $any : null;
+            }
             $managedKey = is_array($cfg) ? (string) ($cfg['secrets']['api_key'] ?? '') : '';
             $this->apiKey = $managedKey !== '' ? $managedKey : (string) (getenv('GOOGLE_PLACES_API_KEY') ?: '');
         }

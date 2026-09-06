@@ -172,7 +172,7 @@ $pageTitle = $isPipeline ? 'Lead Pipeline' : 'Lead Discovery';
         <input id="city" placeholder="City (e.g. Lagos)">
         <select id="provider">
           <option value="google_places">Google Places</option>
-          <option value="apollo_io">Apollo.io (B2B contacts, emails, phones)</option>
+          <option value="apollo_io">Apollo.io (B2B people &amp; companies — emails/phones need contact reveal)</option>
         </select>
         <button type="button" id="searchBtn">Search businesses</button>
       </div>
@@ -201,7 +201,7 @@ $pageTitle = $isPipeline ? 'Lead Pipeline' : 'Lead Discovery';
         </div>
         <button type="button" id="searchPersonBtn" style="margin-top:6px">Search people</button>
       </div>
-      <p id="message" class="muted" style="margin:10px 2px 0">Enter keywords or names and a location to start. Apollo.io is required for Person Mode (it provides emails/phones).</p>
+      <p id="message" class="muted" style="margin:10px 2px 0">Enter keywords or names and a location to start. Person Mode needs Apollo.io with <b>Reveal emails/phones</b> switched on by an administrator (Admin &rarr; API Management): Apollo&rsquo;s people search returns names, titles and companies but no email addresses until a record is enriched, which spends Apollo credits.</p>
     </div>
     <?php endif; ?>
 
@@ -371,7 +371,9 @@ $pageTitle = $isPipeline ? 'Lead Pipeline' : 'Lead Discovery';
       $('searchPersonBtn').disabled = true;
       request('/search', { method: 'POST', body: JSON.stringify({ mode: 'person', provider: 'apollo_io', names, country, city, seniorities: seniority ? [seniority] : [], freeEmailDomains: checkedDomains }) })
         .then((d) => {
-          messageEl.textContent = `${d.results.length} people with free emails · ${d.newLeadsCreated} new · ${d.duplicatesDetected} existing refreshed`;
+          const note = d.notice || (d.providerInfo && d.providerInfo.notice) || '';
+          const revealed = d.providerInfo && d.providerInfo.revealed ? ` · ${d.providerInfo.revealed} contact details revealed` : '';
+          messageEl.textContent = `${d.results.length} people with free emails · ${d.newLeadsCreated} new · ${d.duplicatesDetected} existing refreshed${revealed}` + (note ? ` — ${note}` : '');
           return load();
         }).catch((e) => { messageEl.textContent = e.message; })
         .finally(() => { $('searchPersonBtn').disabled = false; });
@@ -386,7 +388,8 @@ $pageTitle = $isPipeline ? 'Lead Pipeline' : 'Lead Discovery';
       $('searchBtn').disabled = true;
       request('/search', { method: 'POST', body: JSON.stringify({ mode: 'business', provider, keywords, country, city }) })
         .then((d) => {
-          messageEl.textContent = `${d.results.length} live results · ${d.newLeadsCreated} new · ${d.duplicatesDetected} existing refreshed · provider ${d.providerStatus}`;
+          const note = d.notice || (d.providerInfo && d.providerInfo.notice) || '';
+          messageEl.textContent = `${d.results.length} live results · ${d.newLeadsCreated} new · ${d.duplicatesDetected} existing refreshed · provider ${d.providerStatus}` + (note ? ` — ${note}` : '');
           return load();
         }).catch((e) => { messageEl.textContent = e.message; })
         .finally(() => { $('searchBtn').disabled = false; });
