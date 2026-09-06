@@ -210,6 +210,7 @@ $route['api/sports/tickets'] = 'api_sports/tickets';
 $route['api/sports/tickets/(:any)'] = 'api_sports/show_ticket/$1';
 $route['api/sports/tickets/(:any)/decide'] = 'api_sports/decide_ticket/$1';
 $route['api/sports/tickets/(:any)/settle'] = 'api_sports/settle_ticket/$1';
+$route['api/sports/settle'] = 'api_sports/settle';
 $route['api/sports/daily-tickets'] = 'api_sports/daily_tickets';
 $route['api/sports/results'] = 'api_sports/results';
 $route['api/sports/results/verify'] = 'api_sports/verify_result';

@@ -525,6 +525,17 @@ class Api_sports extends Api_controller
         catch (\Throwable $e) { $this->jsonError($e->getMessage(), 409); }
     }
 
+
+
+    /** Settles all open odds prediction tickets from verified persisted results. */
+    public function settle()
+    {
+        if (!$this->requirePermission('sports.settle')) return;
+        try {
+            $this->json(['settlement' => $this->platform->sports->settlement->settleAllPending(200)]);
+        } catch (\Throwable $e) { $this->jsonError($e->getMessage(), 409); }
+    }
+
     /** Settles only from an already verified persisted provider result. */
     public function settle_ticket(string $id)
     {

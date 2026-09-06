@@ -56,7 +56,7 @@ class TicketSettlementService
     {
         $ticket = $this->repo->findTicket($ticketId);
         if (!$ticket) throw new \InvalidArgumentException('ticket not found');
-        if (in_array($ticket['settlement_status'] ?? '', ['WON', 'LOST', 'VOID', 'CANCELLED'], true) && count(array_filter($this->repo->ticketSelections($ticketId), fn($s) => $s['status'] === 'PENDING')) === 0) {
+        if (in_array($ticket['settlement_status'] ?? '', ['WON', 'LOST', 'VOID'], true) && count(array_filter($this->repo->ticketSelections($ticketId), fn($s) => $s['status'] === 'PENDING')) === 0) {
             return ['ticketId' => $ticketId, 'status' => $ticket['settlement_status'], 'unchanged' => true];
         }
         foreach ($this->repo->ticketSelections($ticketId) as $s) {
@@ -72,11 +72,29 @@ class TicketSettlementService
         return $this->finalizeTicket($ticketId);
     }
 
+
+
+    /** Settle every currently pending ticket; idempotent and safe to re-run. */
+    public function settleAllPending(int $limit = 200): array
+    {
+        $settled = 0; $pending = 0; $errors = [];
+        foreach ($this->repo->listTickets(['status' => 'PENDING'], min(500, max(1, $limit))) as $ticket) {
+            try {
+                $res = $this->settlePending((string) $ticket['id']);
+                if (($res['status'] ?? 'PENDING') === 'PENDING') $pending++;
+                else $settled++;
+            } catch (\Throwable $e) {
+                $errors[] = mb_substr($e->getMessage(), 0, 200);
+            }
+        }
+        return ['status' => $errors ? 'PARTIAL' : 'COMPLETED', 'settled' => $settled, 'pending' => $pending, 'errors' => $errors];
+    }
+
     private function finalizeTicket(string $ticketId): array
     {
         $all = $this->repo->ticketSelections($ticketId);
         $states = array_column($all, 'status');
-        $voidCount = count(array_filter($states, fn($s) => in_array($s, ['VOID', 'CANCELLED'], true)));
+        $voidCount = count(array_filter($states, fn($s) => $s === 'VOID'));
         $lostCount = count(array_filter($states, fn($s) => $s === 'LOST'));
         $pendingCount = count(array_filter($states, fn($s) => $s === 'PENDING'));
         $config = $this->repo->activeConfiguration();
@@ -90,7 +108,7 @@ class TicketSettlementService
         // Effective odds under the configured void policy.
         $effectiveOdds = 1.0;
         foreach ($all as $s) {
-            if (in_array($s['status'], ['VOID', 'CANCELLED'], true)) {
+            if ($s['status'] === 'VOID') {
                 if ($voidPolicy === 'RESTITUTE_ODDS') continue; // odds refunded (1.0)
             }
             $effectiveOdds *= (float) $s['odds'];

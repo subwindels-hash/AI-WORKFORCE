@@ -128,14 +128,20 @@ class DailyTicketService
                             // Prefer the bulk round fetch (one request per
                             // matchday) over a per-fixture odds() call.
                             $rawOdds = $roundOdds[$match['externalId']] ?? null;
+                            $oddsProvider = $provider;
                             if ($rawOdds === null) {
                                 $oddsAttempt = $this->providers->withFallback('odds', fn($p) => $p->odds($match['externalId']), $provider);
-                                if ($oddsAttempt['ok'] && is_array($oddsAttempt['result'] ?? null)) $rawOdds = $oddsAttempt['result'];
+                                if ($oddsAttempt['ok'] && is_array($oddsAttempt['result'] ?? null)) {
+                                    $rawOdds = $oddsAttempt['result'];
+                                    $oddsProvider = (string) ($oddsAttempt['provider'] ?? $provider);
+                                }
                             }
                             if (is_array($rawOdds) && $rawOdds !== []) {
                                 foreach ($rawOdds as $rawOddsRow) {
                                     try {
-                                        $this->repo->saveOdds((int) $saved['id'], $providerId, SportsDataNormalizer::odds($rawOddsRow, $provider));
+                                        if (!empty($rawOddsRow['fixtureId']) && (string) $rawOddsRow['fixtureId'] !== (string) $match['externalId']) throw new \InvalidArgumentException('odds fixture id mismatch');
+                                        $oddsProviderId = (int) $this->repo->ensureProvider($oddsProvider, $oddsProvider)['id'];
+                                        $this->repo->saveOdds((int) $saved['id'], $oddsProviderId, SportsDataNormalizer::odds($rawOddsRow, $oddsProvider));
                                     } catch (\Throwable $e) {
                                         $errors[] = 'odds rejected: ' . mb_substr($e->getMessage(), 0, 200);
                                     }
