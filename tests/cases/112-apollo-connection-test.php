@@ -138,6 +138,22 @@ $tests[] = function (): array {
 };
 
 $tests[] = function (): array {
+    // A 403 carrying an HTML body has no Apollo error envelope: the refusal came
+    // from a proxy/WAF, not Apollo. Sending the operator to change key scopes
+    // would point them at the wrong system, so the message must say so.
+    $run = apollo_test_run([
+        ['status' => 200, 'body' => '{"healthy":true,"is_logged_in":true}'],
+        ['status' => 403, 'body' => '<html><head><title>403 Forbidden</title></head><body>Request blocked</body></html>'],
+    ]);
+    $res = $run['result'];
+    assert_true($res['ok'] === false, 'refused');
+    assert_contains('non-JSON', $res['message'], 'names_the_body_shape');
+    assert_contains('proxy', $res['message'], 'points_at_the_intermediary');
+    assert_false(str_contains($res['message'], 'master key'), 'does_not_blame_key_scope');
+    return ['msg' => 'proxy 403 distinguished from an Apollo scope 403'];
+};
+
+$tests[] = function (): array {
     // 404 on the key check (old proxy, wrong base) still falls through to the
     // functional probe instead of failing.
     $run = apollo_test_run([

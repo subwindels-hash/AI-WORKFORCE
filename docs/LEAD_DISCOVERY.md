@@ -270,6 +270,22 @@ The `/leads/search` response reports the facts as `providerInfo`
 hold no contact data, a `notice` that says exactly which setting to change.
 Internal notes stay in the CI error log; members never see connection internals.
 
+### Confirming a verdict against the live API
+
+To check what Apollo really answers for a key — instead of trusting the verdict
+shown in Admin → API Management — run the probe CLI on the server:
+
+```
+APOLLO_IO_API_KEY=… php tools/apollo_probe.php          # add --reveal to also probe people/bulk_match
+php tools/apollo_probe.php --key=… --base=https://api.apollo.io
+```
+
+It calls the same two credit-free endpoints the connection test uses
+(`auth/health`, then `mixed_people/api_search`), prints each HTTP status and raw
+body, and ends with a verdict that distinguishes an Apollo scope/plan refusal
+from a proxy/WAF 403. The key is read from `--key`, the environment, or `.env`,
+and is never printed.
+
 ### `✕ Connection failed` — what it means now
 
 | Message on the provider page | Cause | Fix |
@@ -278,6 +294,7 @@ Internal notes stay in the CI error log; members never see connection internals.
 | `That is the masked placeholder…` | the masked value was saved back | retype the full key |
 | `Invalid Apollo API key (HTTP 401…)` | key deleted/regenerated/expired | regenerate in Apollo → Settings → Integrations → API Keys |
 | `HTTP 403 API_INACCESSIBLE: this Apollo key/plan cannot use the People Search endpoint…` | the key is valid (auth/health passed) but the key/plan is not permitted to call `mixed_people/api_search` — a scoped key without the `mixed_people_api_search` scope, a plan without API access, or a free account registered with a personal (gmail/outlook) email | grant the scope or toggle "Set as master key"; if the plan lacks API access, upgrade it (free accounts need a work-email signup). The test now runs the People Search probe even when auth/health passes, so this is reported as **Failure**, never **Connected**. |
+| `HTTP 403 with a non-JSON body …` | the 403 carried an HTML/proxy page instead of Apollo's `{"error_code":"API_INACCESSIBLE"}` envelope, so the refusal came from a proxy/WAF on the egress path — not from Apollo | fix egress / the Base URL first; the key's scopes are probably fine |
 | `Apollo says this key is not signed in…` | `auth/health` answered `is_logged_in=false` | regenerate the key; check the account's API plan |
 | `Apollo reported this key as unhealthy…` | `auth/health` answered `healthy=false` | regenerate the key; check the account's API plan |
 | `auth/health answered HTTP 200 with a non-JSON body…` | a proxy/firewall page intercepted the request, or the Base URL is not an Apollo API origin | clear the Base URL (or set it to `https://api.apollo.io`) and allow egress |

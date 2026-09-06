@@ -506,6 +506,14 @@ class ApolloProvider implements LeadDiscoveryProvider
                 // exactly what to enable/upgrade rather than "Connection failed".
                 $inaccessible = $code !== null && strtoupper($code) === 'API_INACCESSIBLE';
                 $reason = (is_string($msg) && trim($msg) !== '') ? ' — ' . trim($msg) : '';
+                if ($code === null && ($msg === null || trim((string) $msg) === '')) {
+                    // No Apollo error envelope: an intermediary (proxy/WAF), not
+                    // Apollo, refused the call. Say so instead of sending the
+                    // operator to change key scopes that are probably fine.
+                    return 'Apollo.io' . $where . ': HTTP 403 with no Apollo error envelope — the refusal may come from a'
+                        . ' proxy/WAF on the way to api.apollo.io rather than from Apollo. Confirm outbound HTTPS and the'
+                        . ' base URL, then check the key has the `mixed_people_api_search` scope (or is a master key).';
+                }
                 return 'Apollo.io' . $where . ': HTTP 403' . ($inaccessible ? ' API_INACCESSIBLE' : '') . $reason
                     . ' — this API key/plan is not permitted to use Apollo People Search. '
                     . 'Apollo keys are scoped per endpoint: grant the `mixed_people_api_search` scope'
