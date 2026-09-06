@@ -115,7 +115,9 @@ test('live scores: normalizer carries provider live state through unchanged', fu
     $scheduled = SportsDataNormalizer::fixture(['externalId' => 's-1', 'homeTeam' => 'H', 'awayTeam' => 'A', 'competition' => 'L', 'kickoff' => '2026-09-06T14:00:00Z'], 'live-test');
     assert_null($scheduled['live'], 'a scheduled fixture has no live state');
     // Non-numeric garbage is dropped rather than coerced.
-    $junk = SportsDataNormalizer::fixture(fx_live_row(1, 0) + ['minute' => 'n/a'], 'live-test');
+    $rawJunk = fx_live_row(1, 0);
+    $rawJunk['minute'] = 'n/a';          // explicit override (array union + would keep the left side)
+    $junk = SportsDataNormalizer::fixture($rawJunk, 'live-test');
     assert_false(isset($junk['live']['minute']), 'a non-numeric minute is dropped');
     assert_equals(1, $junk['live']['homeScore'], 'valid fields beside it survive');
 });
@@ -158,7 +160,9 @@ test('live scores: unchanged score, correction and missing score never emit goal
     $provider->liveRows = [fx_live_row(0, 0, 90)];                // provider corrects downwards
     $corrected = $sync->syncLive($provider, 'live-x-3');
     assert_equals([], $corrected['goalEvents'], 'a downward correction is not a goal');
-    $provider->liveRows = [fx_live_row(1, 1, 55) + ['homeScore' => null]];  // score withdrawn
+    $withdrawn = fx_live_row(1, 1, 55);   // explicit override (array union + would keep the left side)
+    $withdrawn['homeScore'] = null;       // score withdrawn
+    $provider->liveRows = [$withdrawn];
     $withdrawn = $sync->syncLive($provider, 'live-x-4');
     assert_equals([], $withdrawn['goalEvents'], 'a withdrawn score cannot be a goal');
 });

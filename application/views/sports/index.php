@@ -456,8 +456,7 @@ $operator = !empty($caps['sync']);
   // Live scores auto-update: poll the throttled /api/sports/live endpoint.
   // The server shares ONE provider request per refresh interval across all
   // viewers, so polling here is cheap between sweeps. New SPORTS_GOAL_SCORED
-  // events flash a GOAL banner and highlight the row.
-  var body = document.getElementById('live-scores-body');
+  // events flash a GOAL banner and highlight the row.  var body = document.getElementById('live-scores-body');
   if(!body) return;
   var dot = document.getElementById('live-poll-dot');
   var note = document.getElementById('live-poll-note');
@@ -539,7 +538,7 @@ $operator = !empty($caps['sync']);
   function schedule(){
     // Poll a little faster than the provider interval so a fresh sweep is
     // picked up quickly; the endpoint itself stays storage-only between
-    // sweeps, so this costs no provider quota.
+    // sweeps, so this costs no provider request.
     var ms = Math.max(10, Math.min(15, intervalSec)) * 1000;
     clearTimeout(pollTimer);
     pollTimer = setTimeout(poll, ms);
