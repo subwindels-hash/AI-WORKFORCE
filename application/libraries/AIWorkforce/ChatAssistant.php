@@ -102,7 +102,7 @@ TXT;
             'platform' => $this->answerPlatform(),
             'dashboard' => 'Dashboard (/dashboard) shows real widget values only — lottery jackpot (if feed configured), paper equity, language profiles count, sports providers count, Windels AI Agents count. Empty widgets stay empty, never filled with fake numbers.',
             'command' => 'AI Command Center (/command-center) shows health of ALL AI modules: Windels AI Agents, Multiplier AI, Lottery Intel, Trading Intel, Sports Intel, Language AI, Lead Discovery. Status is healthy/degraded/error from live checks, not placeholders.',
-            'agents' => 'Windels AI Agents (/app/workforce) — chat with 9 specialist agents: Market, Sports, Lottery, Language, Trading, Lead Scout, Video. Tools need approval; audit trail records dispatches. AGENTS NEVER CALL BROKERS. Platform health at /app/agent-platform.',
+            'agents' => 'Windels AI Agents (/app/workforce) — chat with 9 specialist agents: Market, Sports, Lottery, Language, Trading, Lead Scout, Video. Tools need approval; audit trail records dispatches. Agents never call brokers. Platform health at /app/agent-platform.',
             'analysis' => 'AI Workforce (/analysis) — multi-agent market analysis: technical, market structure, forex, crypto, sentiment agents vote, then consensus + adversarial debate (can only reduce conviction, never manufacture trades). Chart LIVE badge requires non-synthetic, fresh, undelayed provenance.',
             'language' => 'AI Language Teacher (/app/languages/teacher), My Languages (/app/languages) — 20+ languages. Create profile → assessment from authored banks → lessons + SRS vocabulary → browser TTS listening + SpeechRecognition speaking. Pronunciation scores from REAL transcripts, never fabricated.',
             'leads' => 'Lead Discovery (/leads) — search city/category/business type. Requires configured Places provider (Google Places or similar). Results from REAL provider data — each lead has provider + stable source ID. Empty results NOT filled with fake businesses. Duplicates reviewed in Intelligence; human confirms merge.',
@@ -110,12 +110,12 @@ TXT;
             'export' => 'Export leads from Lead Discovery or Intelligence as formula-safe CSV/JSON. Every export written to audit history. Nothing exported that was not stored from a real provider.',
             'duplicate' => 'Open Lead Discovery Intelligence to review duplicate candidates. Primary identity: provider + stable source ID. Secondary signals never auto-merge; human must confirm.',
             'trading' => 'Trading defaults to ANALYSIS_ONLY + kill switch ON. Paper Trading (/paper) simulates orders through FULL risk chain. Strategy Lab (/strategy) backtests, requires paper evidence before live approval. My Trading (/app/trading) shows positions. Agents analyze; never place broker orders.',
-            'paper' => 'Paper Trading (/paper) — SIMULATION: accounts, orders, fills, strategy deployments. Every order hits kill switch, trading mode, Risk Engine. Nothing leaves the process. Synthetic prices require explicit audited flag, stay labelled SIMULATION.',
+            'paper' => 'Paper Trading (/paper) — simulation: accounts, orders, fills, strategy deployments. Every order hits kill switch, trading mode, Risk Engine. Nothing leaves the process. Synthetic prices require explicit audited flag, stay labelled simulation.',
             'execution' => 'Execution (/execution) — 15-step Trade Execution Supervisor: kill switch, mode, strategy lifecycle, broker health, freshness, duplicates, risk, then human approval or configured automation envelope. Routing only through verified connector.',
             'brokers' => 'Brokers (/brokers) — connections: MT5, OANDA, Alpaca, IBKR, exchanges. Order routing needs healthy, demo-gated connector unless live explicitly allowed. Missing bridge = ROUTING_BLOCKED.',
             'risk' => 'Risk Center (/risk) — limits, kill switch, Portfolio Risk Monitor (exposure, leverage, correlated positions, drawdown, daily loss, broker disconnect). Risk Engine can veto any paper/live order. Default boot: ANALYSIS_ONLY + kill switch active.',
-            'sports' => 'Sports Intel (/sports) — fixtures/odds from connected sports data. No fixtures invented when feed missing. Predictions, when enabled, stamped with model version, never mixed with demo.',
-            'lottery' => 'EuroMillions (/lottery) — HISTORICAL OBSERVATIONS ONLY, NOT predictions. Every valid line has equal probability. Official draws only after configured feed ingests + verifies. Statistics (frequency/hot-cold/gaps/distribution), system builder (computes C(N,5)×C(S,2)), backtests with mandatory random baseline. Actual ticket results separate from backtests/sandbox.',
+            'sports' => 'Sports Intel (/sports) — fixtures/odds (and live goal scores) from connected sports data, no invented matches when a feed is missing. Predictions, when enabled, stamped with model version, never mixed with demo.',
+            'lottery' => 'EuroMillions (/lottery) — historical observations only, NOT predictions. Every valid line has equal probability. Official draws only after configured feed ingests + verifies. Statistics (frequency/hot-cold/gaps/distribution), system builder (computes C(N,5)×C(S,2)), backtests with mandatory random baseline. Actual ticket results separate from backtests/sandbox.',
             'multiplier' => 'Multiplier AI (/multiplier) — LIVE crash-history analysis (Bustabit public feed by default, or WINDELS_CRASH_HISTORY_URL). 9 specialist agents produce ensemble estimate with confidence + risk. NO demo multipliers silently substituted — if live feed down → NO_DATA. Crash games use provably-fair RNG; educational analysis, not guaranteed prediction.',
             'account' => 'My Account (/account) — profile, security, password. Messages with support at /messages. Alerts at /notifications. Sign in from homepage; register if new. Public pages never expose admin login.',
             'admin' => 'WINDELS AI WORKFORCE only exposes normal member sign-in on public site. Administrator tools (API providers, users, notifications) behind private entry after privileged session. I will not publish that URL. Members use /account.',
@@ -145,9 +145,13 @@ TXT;
     {
         $topics = [
             'greeting' => ['hello', 'hi ', 'hi,', "hi'", 'hey', 'good morning', 'good afternoon', 'good evening', 'thanks', 'thank you', 'greetings'],
-            'platform' => ['what is windels', 'what is this', 'about the platform', 'ai workforce', 'windels ai', 'what can you do', 'what do you do', 'who are you', 'tell me about', 'overview', 'full details', 'this product', 'explain', 'describe', 'introduction', 'what is', 'your platform'],
-            'command' => ['command center', 'command-center', 'all modules', 'module health', 'AI status'],
+            // Specific module topics are matched BEFORE the generic platform
+            // topic: "where is windels ai agents?" contains the platform
+            // needle 'windels ai' and "explain euromillions" contains
+            // 'explain', but both must answer with their module. 'platform'
+            // is therefore positioned near the end as a fallback.
             'agents' => ['windels ai agent', 'ai agent', 'workforce console', 'specialist agent', '/app/workforce', 'agent platform', 'agent chat', 'talk to agent'],
+            'command' => ['command center', 'command-center', 'all modules', 'module health', 'AI status'],
             'analysis' => ['analysis', 'consensus', 'candlestick', 'market data', '/analysis', 'market analysis', 'technical analysis', 'ai workforce analysis'],
             'language' => ['language', 'teacher', 'dutch', 'spanish', 'vocabulary', 'cefr', 'pronunciation', 'lesson', 'speak', 'learn language', 'language learning', 'my languages'],
             'leads' => ['lead', 'discover', 'google places', 'business search', 'places', 'find business', 'search business', 'lead discovery'],
@@ -164,6 +168,10 @@ TXT;
             'multiplier' => ['multiplier', 'crash game', 'aviator', 'bustabit', 'crash', 'multiplier ai', 'live crash'],
             'admin' => ['admin', 'administrator', 'super admin'],
             'account' => ['account', 'password', 'sign in', 'login', 'register', 'message', 'notification', 'alert', 'profile', 'security', 'my account'],
+            // Generic fallback — only when no specific module matched. Kept
+            // before 'dashboard' so "give me a summary/overview" still lands
+            // here rather than the dashboard widgets answer.
+            'platform' => ['what is windels', 'what is this', 'about the platform', 'ai workforce', 'windels ai', 'what can you do', 'what do you do', 'who are you', 'tell me about', 'overview', 'full details', 'this product', 'explain', 'describe', 'introduction', 'what is', 'your platform'],
             'dashboard' => ['dashboard', 'home widget', '/dashboard', 'home', 'widgets', 'summary'],
             'help' => ['help', 'faq', 'how do i', 'where do i', 'guide', 'which module'],
         ];

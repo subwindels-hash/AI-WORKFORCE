@@ -33,7 +33,9 @@ test('sports prod review: console mutation forms carry the session CSRF token', 
     foreach (['index', 'tickets'] as $page) {
         $v = file_get_contents(FCPATH . 'application/views/sports/' . $page . '.php');
         $forms = substr_count($v, 'method="post"');
-        $tokens = substr_count($v, 'name="csrf_token"');
+        // Count hidden inputs only — the views' polling JS also contains the
+        // selector string input[name="csrf_token"], which is not a form field.
+        $tokens = substr_count($v, '<input type="hidden" name="csrf_token"');
         assert_true($forms > 0, $page . ' view has mutation forms');
         assert_equals($forms, $tokens, 'every ' . $page . ' form carries a csrf_token field');
     }
