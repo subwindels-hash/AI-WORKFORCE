@@ -19,6 +19,9 @@ final class ApiProviders
 
     private static bool $schemaReady = false;
 
+    /** Persistent cache version for the request-time api_providers DDL guard. */
+    private const SCHEMA_STAMP_VERSION = '2026-09-06-api-providers-schema-v1';
+
     public static function services(): array
     {
         return [
@@ -311,6 +314,13 @@ final class ApiProviders
         $sqlite = str_contains($driver, 'sqlite') || (string) ($db->subdriver ?? '') === 'sqlite';
         $pgsql = str_contains(strtolower($driver), 'pgsql') || str_contains(strtolower($driver), 'postgre')
             || strtolower((string) ($db->subdriver ?? '')) === 'pgsql';
+
+        // Called indirectly from Platform bootstrap on normal page loads. Since
+        // each PHP request starts fresh, the static guard alone still caused a
+        // CREATE TABLE/INDEX probe every request. Skip the DDL path once a prior
+        // healthy request verified the provider store for this database.
+        if (self::schemaStampFresh($db, $sqlite, $pgsql)) return;
+
         try {
             if ($sqlite) {
                 $db->query("CREATE TABLE IF NOT EXISTS api_providers (
@@ -380,6 +390,41 @@ final class ApiProviders
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
             }
         } catch (\Throwable $e) { /* already exists */ }
+        try {
+            if ($db->table_exists('api_providers')) self::writeSchemaStamp($db, $sqlite, $pgsql);
+        } catch (\Throwable $e) { /* leave unstamped so a later request can retry */ }
+    }
+
+    private static function schemaStampPath(object $db, bool $sqlite, bool $pgsql): string
+    {
+        $cacheDir = defined('APPPATH') ? rtrim((string) APPPATH, '/\\') . DIRECTORY_SEPARATOR . 'cache' : sys_get_temp_dir();
+        if (!is_dir($cacheDir)) @mkdir($cacheDir, 0775, true);
+        if (!is_writable($cacheDir)) $cacheDir = sys_get_temp_dir();
+        $dialect = $sqlite ? 'sqlite' : ($pgsql ? 'pgsql' : 'mysql');
+        $dbKey = hash('sha256', implode('|', [
+            $dialect,
+            (string) ($db->hostname ?? ''),
+            (string) ($db->database ?? ''),
+            (string) ($db->dsn ?? ''),
+            (string) ($db->subdriver ?? ''),
+        ]));
+        return rtrim($cacheDir, '/\\') . DIRECTORY_SEPARATOR . 'ai_workforce_api_providers_' . $dbKey . '.stamp.json';
+    }
+
+    private static function schemaStampFresh(object $db, bool $sqlite, bool $pgsql): bool
+    {
+        $path = self::schemaStampPath($db, $sqlite, $pgsql);
+        if (!is_file($path)) return false;
+        $stamp = json_decode((string) @file_get_contents($path), true);
+        return is_array($stamp) && ($stamp['version'] ?? null) === self::SCHEMA_STAMP_VERSION;
+    }
+
+    private static function writeSchemaStamp(object $db, bool $sqlite, bool $pgsql): void
+    {
+        @file_put_contents(self::schemaStampPath($db, $sqlite, $pgsql), json_encode([
+            'version' => self::SCHEMA_STAMP_VERSION,
+            'written_at' => gmdate('c'),
+        ], JSON_UNESCAPED_SLASHES));
     }
 
     public static function bind(object $db): void

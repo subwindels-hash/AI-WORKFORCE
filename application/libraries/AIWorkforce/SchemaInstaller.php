@@ -69,6 +69,12 @@ final class SchemaInstaller
 
     private static bool $done = false;
 
+    /**
+     * Persistent cache version for the request-time schema guard. Bump whenever
+     * idempotent upgrade logic changes without a matching SQL-file mtime change.
+     */
+    private const STAMP_VERSION = '2026-09-06-request-schema-guard-v1';
+
     public static function databaseDir(): string
     {
         if (defined('APPPATH')) {
@@ -290,9 +296,33 @@ final class SchemaInstaller
         if (self::$done) return;
         self::$done = true;
         $dialect = self::dialect($db);
+
+        // PHP-FPM and the WASM preview both start a fresh PHP request context, so
+        // the static guard above only helps inside one request. Without this small
+        // persistent stamp every page load re-ran the full migration guard: table
+        // inventory, dozens of failed ALTER COLUMN attempts, and index creation
+        // probes. That is safe but very slow. A valid stamp means a previous
+        // request/install verified this exact schema-file fingerprint.
+        if (self::stampFresh($db, $dialect)) return;
+
         // Apply module files whenever any expected table is missing, not just core.
         // CREATE IF NOT EXISTS makes this idempotent and cheap on healthy boots.
-        $missing = false;
+        $missing = !self::hasExpectedTables($db, $dialect);
+        $exec = function (string $sql) use ($db) {
+            try { $db->query($sql); } catch (\Throwable $e) { /* duplicate / racing request */ }
+        };
+        if ($missing) self::applyFiles($exec, $dialect);
+        self::upgrade($exec, $dialect);
+
+        // Only stamp healthy databases. If a migration failed or permissions hide
+        // metadata, keep the old fail-safe behaviour and try again next request.
+        if (self::hasExpectedTables($db, $dialect)) {
+            self::writeStamp($db, $dialect);
+        }
+    }
+
+    private static function hasExpectedTables(object $db, string $dialect): bool
+    {
         try {
             $have = [];
             if ($dialect === 'sqlite') {
@@ -305,13 +335,58 @@ final class SchemaInstaller
                 $r = $db->query('SHOW TABLES');
                 foreach ($r->result_array() as $row) $have[] = (string) (reset($row));
             }
-            foreach (self::EXPECTED_TABLES as $t) { if (!in_array($t, $have, true)) { $missing = true; break; } }
-        } catch (\Throwable $e) { $missing = true; }
-        $exec = function (string $sql) use ($db) {
-            try { $db->query($sql); } catch (\Throwable $e) { /* duplicate / racing request */ }
-        };
-        if ($missing) self::applyFiles($exec, $dialect);
-        self::upgrade($exec, $dialect);
+            foreach (self::EXPECTED_TABLES as $t) {
+                if (!in_array($t, $have, true)) return false;
+            }
+            return true;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    private static function fingerprint(string $dialect): string
+    {
+        $parts = [self::STAMP_VERSION, $dialect];
+        foreach (self::files($dialect) as $file) {
+            $parts[] = basename($file) . ':' . (string) @filesize($file) . ':' . (string) @filemtime($file);
+        }
+        return hash('sha256', implode('|', $parts));
+    }
+
+    private static function stampPath(object $db, string $dialect): string
+    {
+        $cacheDir = defined('APPPATH') ? rtrim((string) APPPATH, '/\\') . DIRECTORY_SEPARATOR . 'cache' : sys_get_temp_dir();
+        if (!is_dir($cacheDir)) @mkdir($cacheDir, 0775, true);
+        if (!is_writable($cacheDir)) $cacheDir = sys_get_temp_dir();
+        $dbKey = hash('sha256', implode('|', [
+            $dialect,
+            (string) ($db->hostname ?? ''),
+            (string) ($db->database ?? ''),
+            (string) ($db->dsn ?? ''),
+            (string) ($db->subdriver ?? ''),
+        ]));
+        return rtrim($cacheDir, '/\\') . DIRECTORY_SEPARATOR . 'ai_workforce_schema_' . $dbKey . '.stamp.json';
+    }
+
+    private static function stampFresh(object $db, string $dialect): bool
+    {
+        $path = self::stampPath($db, $dialect);
+        if (!is_file($path)) return false;
+        $stamp = json_decode((string) @file_get_contents($path), true);
+        return is_array($stamp)
+            && ($stamp['version'] ?? null) === self::STAMP_VERSION
+            && ($stamp['dialect'] ?? null) === $dialect
+            && ($stamp['fingerprint'] ?? null) === self::fingerprint($dialect);
+    }
+
+    private static function writeStamp(object $db, string $dialect): void
+    {
+        @file_put_contents(self::stampPath($db, $dialect), json_encode([
+            'version' => self::STAMP_VERSION,
+            'dialect' => $dialect,
+            'fingerprint' => self::fingerprint($dialect),
+            'written_at' => gmdate('c'),
+        ], JSON_UNESCAPED_SLASHES));
     }
 
     public static function installCi(object $db): void
@@ -325,6 +400,7 @@ final class SchemaInstaller
             try { $db->query($sql); } catch (\Throwable $e) { /* duplicate */ }
         }, $dialect);
         self::$done = true;
+        if (self::hasExpectedTables($db, $dialect)) self::writeStamp($db, $dialect);
     }
 
     /**
