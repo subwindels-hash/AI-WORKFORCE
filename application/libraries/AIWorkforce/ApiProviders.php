@@ -143,7 +143,7 @@ final class ApiProviders
                 'label' => 'Apollo.io',
                 'fields' => [
                     $f('base_url', 'Base URL', false, false, 'Leave blank for https://api.apollo.io — apollo.io / app.apollo.io are not API origins and are rewritten automatically'),
-                    $f('api_key', 'API Key (x-api-key header)', true, true, 'Apollo → Settings → Integrations → API Keys (https://developer.apollo.io/#/keys). Apollo keys are scoped per endpoint: tick mixed_people/api_search (plus people/bulk_match to reveal contacts) or toggle “Set as master key”.'),
+                    $f('api_key', 'API Key (x-api-key header)', true, true, 'Apollo → Settings → Integrations → API Keys (https://developer.apollo.io/#/keys). Apollo keys are scoped per endpoint: tick mixed_people/api_search (plus people/bulk_match to reveal contacts) or toggle “Set as master key”. People Search needs the plan to include API access — free/personal-email signups cannot use it.'),
                     $f('reveal_contacts', 'Reveal emails/phones (1 = on, 0 = off)', false, false, 'Apollo search never returns emails or phone numbers. Set 1 to enrich each search through people/bulk_match — this spends Apollo credits (1 credit per record). Default 0.'),
                     $f('reveal_personal_emails', 'Reveal personal emails (1 = on, 0 = off)', false, false, 'Personal (gmail/outlook/yahoo …) addresses are what Person Mode filters on. Defaults to the Reveal setting above.'),
                     $f('reveal_phone_number', 'Reveal phone numbers (1 = on, 0 = off)', false, false, 'Mobile/direct dial reveals cost extra Apollo credits. Default 0.'),
@@ -433,7 +433,7 @@ final class ApiProviders
         $msg = trim((string) $internal);
         if ($msg === '') return self::USER_UNAVAILABLE;
         $hay = strtolower($msg);
-        foreach (['sk-', 'secret=', 'client_secret=', 'api_key=', 'apikey=', 'authorization: bearer', 'bearer ', 'password=', 'getenv '] as $needle) {
+        foreach (['sk-', 'secret=', 'client_secret=', 'api_key=', 'apikey=', 'x-api-key', 'authorization: bearer', 'bearer ', 'password=', 'getenv '] as $needle) {
             if (str_contains($hay, $needle)) return self::USER_UNAVAILABLE;
         }
         return mb_substr($msg, 0, 255);
@@ -885,6 +885,9 @@ final class ApiProviders
     private static function sanitizeTestMessage(string $msg): string
     {
         $msg = preg_replace('/(sk-|Bearer\s+|key=)[A-Za-z0-9_\-]{6,}/i', '$1••••', $msg) ?? $msg;
+        // Apollo authenticates with an `x-api-key` header; mask it too, in case
+        // a staged/proxy error text ever carries the header line back.
+        $msg = preg_replace('/(x-api-key\s*[:=]\s*)([A-Za-z0-9_\-]{4,})/i', '$1••••', $msg) ?? $msg;
         $msg = preg_replace('#https?://[^\s]+@#', 'https://••••@', $msg) ?? $msg;
         // 255 matches the provider row's last_test_message column, so what the
         // operator sees in the flash is exactly what the page stores and shows.
@@ -917,17 +920,20 @@ final class ApiProviders
     }
 
     /**
-     * Test an Apollo.io key the way Apollo documents, and — because Apollo keys
-     * are **scoped per endpoint** — verify against the endpoint this app really
-     * calls when the documented key check is refused.
+     * Test an Apollo.io key the way Apollo documents, then — because Apollo keys
+     * are **scoped per endpoint** and the People Search endpoint is not granted
+     * to every key/plan — verify against the endpoint this app really calls.
      *
-     * Probe 1: GET  {root}/api/v1/auth/health          (0 credits, documented)
-     *          → 200 {"healthy":true,"is_logged_in":true}
-     * Probe 2: POST {root}/api/v1/mixed_people/api_search?per_page=1&q_keywords=apollo  (0 credits)
-     *          → only used when probe 1 answers 403/404/422, which is what a
-     *            scoped key returns for an endpoint it was not granted
-     *            (https://docs.apollo.io/docs/create-api-key). Without this
-     *            second probe a perfectly usable key reports "Connection failed".
+     * Probe 1: GET  {root}/api/v1/auth/health   (0 credits, documented key check)
+     *          → 200 {"healthy":true,"is_logged_in":true} confirms the key itself
+     *            is valid; 401 is final (the key is wrong). A 200 here is NOT by
+     *            itself a pass: auth/health cannot tell whether the People Search
+     *            endpoint is in this key's scope or plan.
+     * Probe 2: POST {root}/api/v1/mixed_people/api_search?per_page=1&q_keywords=apollo
+     *          (0 credits) — the real connectivity test. A scoped or limited key
+     *          can authenticate on auth/health yet answer HTTP 403 API_INACCESSIBLE
+     *          here, so this test only reports Connected when the endpoint Lead
+     *          Discovery actually calls is usable.
      *
      * Neither probe spends credits and neither echoes the key back.
      */
@@ -968,10 +974,23 @@ final class ApiProviders
         ];
 
         // ---- Probe 1: documented, credit-free key check ----
+        // auth/health answers whether the KEY itself is valid before we spend a
+        // probe on the search endpoint. 401 means the key is wrong — final.
         $r1 = self::http($root . '/api/v1/auth/health', $headers);
         $s1 = (int) ($r1['status'] ?? 0);
         $b1 = self::decode($r1['body'] ?? '');
+
+        if ($s1 === 401) {
+            return ['ok' => false, 'message' => 'Invalid Apollo API key (HTTP 401 on auth/health). Regenerate it in Apollo → Settings → Integrations → API Keys and paste the full value.'];
+        }
+        if ($s1 === 429) return ['ok' => false, 'message' => 'Apollo rate limit reached (HTTP 429) — run the test again in a minute.'];
+        if ($s1 === 0) return ['ok' => false, 'message' => self::apolloNetworkMessage($r1, $root)];
+        if ($s1 >= 500) return ['ok' => false, 'message' => 'Apollo.io server error on auth/health (HTTP ' . $s1 . ') — retry the test shortly.'];
+
         if ($s1 >= 200 && $s1 < 300) {
+            // The key authenticates. auth/health alone cannot tell us whether the
+            // People Search endpoint is in the key's scope or plan, so rule out
+            // key-level problems first and then ALWAYS continue to the search probe.
             if (($b1['is_logged_in'] ?? null) === false) {
                 return ['ok' => false, 'message' => 'Apollo says this key is not signed in. Regenerate it in Apollo → Settings → Integrations → API Keys and paste the full value.'];
             }
@@ -981,53 +1000,64 @@ final class ApiProviders
             $raw1 = trim((string) ($r1['body'] ?? ''));
             if ($b1 === [] && $raw1 !== '') {
                 // A 200 with a non-JSON body is an intercepting proxy or the wrong
-                // base URL — reporting "Connected" here would hide a dead provider.
-                return ['ok' => false, 'message' => 'auth/health answered HTTP ' . $s1 . ' with a non-JSON body ('
+                // base URL — a search probe would be intercepted the same way.
+                return ['ok' => false, 'message' => 'auth/health answered HTTP 200 with a non-JSON body ('
                     . mb_substr($raw1, 0, 60) . '…) — a proxy is intercepting the request, or the Base URL is not api.apollo.io.'];
             }
-            return ['ok' => true, 'message' => 'Connected to Apollo.io (auth/health OK).' . $revealNote];
         }
-        if ($s1 === 401) {
-            return ['ok' => false, 'message' => 'Invalid Apollo API key (HTTP 401 on auth/health). Regenerate it in Apollo → Settings → Integrations → API Keys and paste the full value.'];
-        }
-        if ($s1 === 429) return ['ok' => false, 'message' => 'Apollo rate limit reached (HTTP 429) — run the test again in a minute.'];
-        if ($s1 === 0) return ['ok' => false, 'message' => self::apolloNetworkMessage($r1, $root)];
-        if ($s1 >= 500) return ['ok' => false, 'message' => 'Apollo.io server error on auth/health (HTTP ' . $s1 . ') — retry the test shortly.'];
+        // auth/health refused (403/404/422) or passed (200) — either way the key
+        // may still be scoped away from the People Search endpoint, so verify the
+        // endpoint Lead Discovery actually calls before declaring the outcome.
 
-        // ---- Probe 2: 403/404/422 usually means "this key is scoped to other
-        // endpoints", so verify on the endpoint Lead Discovery actually calls ----
+        // ---- Probe 2: the endpoint Lead Discovery actually calls (0 credits) ----
         $r2 = self::http($root . '/api/v1/mixed_people/api_search?per_page=1&q_keywords=apollo', $headers, '{}');
         $s2 = (int) ($r2['status'] ?? 0);
         $b2 = self::decode($r2['body'] ?? '');
-        if ($s2 >= 200 && $s2 < 300) {
-            return [
-                'ok' => true,
-                'message' => 'Connected to Apollo.io — key verified on mixed_people/api_search. auth/health answered HTTP ' . $s1
-                    . ', so this key is scoped to specific endpoints (that is fine for Lead Discovery).' . $revealNote,
-            ];
-        }
         $code = strtoupper(trim((string) ($b2['error_code'] ?? $b2['code'] ?? '')));
         $detail = trim((string) ($b2['error_message'] ?? $b2['message'] ?? $b2['error'] ?? ''));
+
         if ($s2 === 401) {
             return ['ok' => false, 'message' => 'Invalid Apollo API key (HTTP 401 on mixed_people/api_search). Regenerate it in Apollo → Settings → Integrations → API Keys.'];
         }
-        if ($s2 === 403) {
-            // Kept inside the 255 chars the provider row stores, so the fix
-            // survives both the flash message and the "Last test" line.
-            return ['ok' => false, 'message' => 'HTTP 403' . ($code !== '' ? ' ' . $code : '') . ': this key may not call the tested endpoints. '
-                . 'Grant it the mixed_people/api_search scope in Apollo → Settings → Integrations → API Keys, or toggle “Set as master key”. '
-                . 'Free accounts also need a work-email signup.'];
+        if ($s2 >= 200 && $s2 < 300) {
+            $via = ($s1 >= 200 && $s1 < 300)
+                ? 'auth/health and the People Search endpoint both answered'
+                : 'auth/health answered HTTP ' . $s1 . ' (scoped) but the People Search endpoint verified it';
+            return ['ok' => true, 'message' => 'Connected to Apollo.io — key verified on mixed_people/api_search (' . $via . ').' . $revealNote];
         }
         if ($s2 === 422) {
-            // 422 is a parameter-validation answer, not an auth answer: Apollo
-            // accepted the key and processed the request.
-            return ['ok' => true, 'message' => 'Connected to Apollo.io — the key authenticated on mixed_people/api_search (HTTP 422 on the probe filters only; auth/health answered HTTP ' . $s1 . ').'];
+            // Apollo accepted the key and only rejected the probe filters: the
+            // endpoint IS accessible (a validation error is not an auth failure).
+            return ['ok' => true, 'message' => 'Connected to Apollo.io — the key authenticated on mixed_people/api_search (HTTP 422 on the probe filters only; auth/health answered HTTP ' . $s1 . ').' . $revealNote];
+        }
+        if ($s2 === 403) {
+            // The key is valid but the People Search endpoint is not accessible:
+            // a scoped key without mixed_people_api_search, a plan without API
+            // access, or a free/personal-email account. Report the fix, never
+            // mark the provider as Connected. (The reveal scope note is left out
+            // here — there is no point revealing contacts on an endpoint the key
+            // cannot call in the first place.)
+            return ['ok' => false, 'message' => self::apolloInaccessibleMessage($code)];
         }
         if ($s2 === 429) return ['ok' => false, 'message' => 'Apollo rate limit reached (HTTP 429) — run the test again in a minute.'];
         if ($s2 === 0) return ['ok' => false, 'message' => self::apolloNetworkMessage($r2, $root)];
         if ($s2 >= 500) return ['ok' => false, 'message' => 'Apollo.io server error (HTTP ' . $s2 . ') — retry the test shortly.'];
         return ['ok' => false, 'message' => 'Connection failed: auth/health HTTP ' . $s1 . ', mixed_people/api_search HTTP ' . $s2
             . ($code !== '' ? ' ' . $code : '') . ($detail !== '' ? ' — ' . $detail : '')];
+    }
+
+    /**
+     * Apollo's HTTP 403 API_INACCESSIBLE on the People Search endpoint: the key
+     * or plan is not permitted to call it. The fix is to grant the scope (or use
+     * a master key) or upgrade the plan. The key is never echoed, and the text
+     * stays inside the 255 chars the provider row stores.
+     */
+    private static function apolloInaccessibleMessage(string $code = ''): string
+    {
+        $code = $code !== '' ? ' ' . strtoupper($code) : '';
+        return 'HTTP 403' . $code . ': this Apollo key/plan cannot use the People Search endpoint '
+            . '(mixed_people/api_search). Grant the mixed_people_api_search scope or "Set as master key"; '
+            . 'if the plan lacks API access, upgrade it (work-email signup required).';
     }
 
     /**

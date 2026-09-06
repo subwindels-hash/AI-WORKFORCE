@@ -47,17 +47,25 @@ function apollo_test_run(array $responses, string $key = 'apollo-key-abc123', ar
 
 $tests[] = function (): array {
     // Documented, credit-free key check: GET /api/v1/auth/health with x-api-key.
-    $run = apollo_test_run([['status' => 200, 'body' => '{"healthy":true,"is_logged_in":true}']]);
+    // A 200 on auth/health alone is NOT a pass — it cannot prove the key is
+    // permitted to call the People Search endpoint — so we probe that too.
+    $run = apollo_test_run([
+        ['status' => 200, 'body' => '{"healthy":true,"is_logged_in":true}'],
+        ['status' => 200, 'body' => '{"pagination":{"page":1,"per_page":1},"people":[{"id":"p1"}],"breadcrumbs":[]}'],
+    ]);
     $res = $run['result'];
     assert_true($res['ok'] === true, 'connected');
     assert_contains('Connected to Apollo.io', $res['message']);
-    assert_eq(1, count($run['calls']), 'single_probe_when_the_key_check_passes');
+    assert_eq(2, count($run['calls']), 'health_probe_then_search_probe');
     assert_eq('https://api.apollo.io/api/v1/auth/health', $run['calls'][0]['url'], 'documented_health_url');
     assert_eq(null, $run['calls'][0]['body'], 'health_check_is_a_get');
+    assert_contains('/api/v1/mixed_people/api_search?per_page=1', $run['calls'][1]['url'], 'search_probe_uses_the_documented_endpoint');
+    assert_eq('{}', $run['calls'][1]['body'], 'search_probe_is_a_post');
     assert_in_array('x-api-key: apollo-key-abc123', $run['calls'][0]['headers'], 'key_sent_in_the_x_api_key_header');
+    assert_in_array('x-api-key: apollo-key-abc123', $run['calls'][1]['headers'], 'key_sent_on_the_search_probe_too');
     assert_false(str_contains($run['calls'][0]['url'], 'api_key='), 'key_never_in_the_query_string');
     assert_false(str_contains($res['message'], 'apollo-key-abc123'), 'message_never_echoes_the_key');
-    return ['msg' => 'auth/health happy path'];
+    return ['msg' => 'auth/health + people search happy path'];
 };
 
 $tests[] = function (): array {
@@ -71,11 +79,34 @@ $tests[] = function (): array {
     assert_true($res['ok'] === true, 'scoped_key_is_still_connected');
     assert_contains('mixed_people/api_search', $res['message'], 'message_names_the_endpoint_that_verified_the_key');
     assert_contains('scoped', $res['message'], 'message_explains_why_auth_health_refused');
-    assert_eq(2, count($run['calls']), 'second_probe_only_after_a_refusal');
+    assert_eq(2, count($run['calls']), 'probes_the_search_endpoint');
     assert_contains('/api/v1/mixed_people/api_search?per_page=1', $run['calls'][1]['url'], 'functional_probe_url_is_credit_free');
     assert_eq('{}', $run['calls'][1]['body'], 'functional_probe_is_a_post');
     assert_in_array('x-api-key: apollo-key-abc123', $run['calls'][1]['headers'], 'key_sent_on_the_second_probe_too');
     return ['msg' => 'scoped key verified on the real endpoint'];
+};
+
+$tests[] = function (): array {
+    // THE reported regression: the key passes auth/health (valid key) but the
+    // People Search endpoint answers HTTP 403 API_INACCESSIBLE. The connection
+    // test must NOT mark the provider as Connected — a valid key with a plan or
+    // scope that cannot call mixed_people/api_search is not usable for Lead
+    // Discovery, and the operator has to be told to enable/upgrade instead.
+    $run = apollo_test_run([
+        ['status' => 200, 'body' => '{"healthy":true,"is_logged_in":true}'],
+        ['status' => 403, 'body' => '{"error_code":"API_INACCESSIBLE","error_message":"api/v1/mixed_people/api_search is not accessible with this api_key"}'],
+    ]);
+    $res = $run['result'];
+    assert_true($res['ok'] === false, 'search_endpoint_inaccessible_is_NOT_connected');
+    assert_true(str_contains($res['message'], '403'), 'reports_http_403');
+    assert_true(str_contains($res['message'], 'API_INACCESSIBLE'), 'surfaces_the_apollo_error_code');
+    assert_true(str_contains($res['message'], 'mixed_people/api_search'), 'names_the_people_search_endpoint');
+    assert_true(str_contains($res['message'], 'mixed_people_api_search') || str_contains($res['message'], 'master key'), 'names_the_scope_to_grant');
+    assert_true(str_contains($res['message'], 'upgrade') || str_contains($res['message'], 'work-email'), 'names_the_upgrade/plan_fix');
+    assert_not_contains('Connected', $res['message'], 'never_a_false_connected');
+    assert_false(str_contains($res['message'], 'apollo-key-abc123'), 'key_not_echoed');
+    assert_eq(2, count($run['calls']), 'health_then_search_both_probed');
+    return ['msg' => 'valid key but People Search endpoint 403 → honest failure'];
 };
 
 $tests[] = function (): array {
@@ -140,9 +171,14 @@ $tests[] = function (): array {
     assert_contains('proxy', $proxy['result']['message']);
     assert_eq(1, count($proxy['calls']), 'no second probe when the first answered 200');
 
-    // An empty 200 body is still a pass — Apollo answered the documented URL.
-    $empty = apollo_test_run([['status' => 200, 'body' => '']]);
+    // An empty 200 health body means the request reached Apollo; the search
+    // probe then decides whether the People Search endpoint is actually usable.
+    $empty = apollo_test_run([
+        ['status' => 200, 'body' => ''],
+        ['status' => 200, 'body' => '{"people":[]}'],
+    ]);
     assert_true($empty['result']['ok'] === true, 'empty_200_body_still_connects');
+    assert_eq(2, count($empty['calls']), 'empty_health_still_probes_search');
     return ['msg' => 'a 200 that is not Apollo is not a pass'];
 };
 
@@ -196,7 +232,10 @@ $tests[] = function (): array {
     ), 'key_extracted_from_a_pasted_curl_command');
     assert_eq('', \AIWorkforce\ApiProviders::normalizeApolloKey('   '), 'blank_stays_blank');
 
-    $run = apollo_test_run([['status' => 200, 'body' => '{"healthy":true,"is_logged_in":true}']], "  apollo-key-abc123 \n");
+    $run = apollo_test_run([
+        ['status' => 200, 'body' => '{"healthy":true,"is_logged_in":true}'],
+        ['status' => 200, 'body' => '{"people":[]}'],
+    ], "  apollo-key-abc123 \n");
     assert_true($run['result']['ok'] === true, 'padded_key_still_connects');
     assert_in_array('x-api-key: apollo-key-abc123', $run['calls'][0]['headers'], 'padded_key_sent_trimmed');
     return ['msg' => 'key hygiene'];
@@ -210,9 +249,12 @@ $tests[] = function (): array {
     assert_eq('https://api.apollo.io', \AIWorkforce\ApiProviders::apolloApiRoot(['base_url' => 'http://api.apollo.io']), 'http_upgraded');
     assert_eq('https://proxy.example.test', \AIWorkforce\ApiProviders::apolloApiRoot(['base_url' => 'https://proxy.example.test/']), 'proxy_kept');
 
-    $run = apollo_test_run([['status' => 200, 'body' => '{"healthy":true,"is_logged_in":true}']], 'apollo-key-abc123',
-        ['base_url' => 'https://api.apollo.io/api/v1']);
+    $run = apollo_test_run([
+        ['status' => 200, 'body' => '{"healthy":true,"is_logged_in":true}'],
+        ['status' => 200, 'body' => '{"people":[]}'],
+    ], 'apollo-key-abc123', ['base_url' => 'https://api.apollo.io/api/v1']);
     assert_eq('https://api.apollo.io/api/v1/auth/health', $run['calls'][0]['url'], 'no_doubled_api_v1_in_the_probe');
+    assert_eq('https://api.apollo.io/api/v1/mixed_people/api_search?per_page=1&q_keywords=apollo', $run['calls'][1]['url'], 'search_probe_base_url_is_not_doubled');
     return ['msg' => 'base URL canonicalisation'];
 };
 
@@ -244,8 +286,10 @@ $tests[] = function (): array {
 
     // Contact reveal switched on: a passing test also names the extra scope the
     // enrichment endpoint needs, so the first search does not fail silently.
-    $reveal = apollo_test_run([['status' => 200, 'body' => '{"healthy":true,"is_logged_in":true}']], 'apollo-key-abc123',
-        ['extra' => ['reveal_contacts' => '1']]);
+    $reveal = apollo_test_run([
+        ['status' => 200, 'body' => '{"healthy":true,"is_logged_in":true}'],
+        ['status' => 200, 'body' => '{"people":[]}'],
+    ], 'apollo-key-abc123', ['extra' => ['reveal_contacts' => '1']]);
     assert_true($reveal['result']['ok'] === true, 'connected_with_reveal_on');
     assert_contains('people/bulk_match', $reveal['result']['message'], 'names_the_extra_scope_reveal_needs');
     return ['msg' => '422 probe + reveal scope note'];

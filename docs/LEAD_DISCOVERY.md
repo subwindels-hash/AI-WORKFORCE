@@ -196,28 +196,32 @@ Docs: https://docs.apollo.io/reference/apollo-api — base URL
 
 ### Connection test (Admin → API → *Test Connection*)
 
-Two credit-free probes, in order:
+Two credit-free probes, run in order on **every** test:
 
 1. `GET /api/v1/auth/health` — the documented key check
    (https://docs.apollo.io/docs/test-api-key); `200
-   {"healthy":true,"is_logged_in":true}` for a valid key.
-2. `POST /api/v1/mixed_people/api_search?per_page=1&q_keywords=apollo` — only
-   when probe 1 answers `403/404/422`, which is what a **scoped** key returns
-   for an endpoint it was not granted. Without this second probe a key that
-   works perfectly for Lead Discovery reported `✕ Connection failed`.
+   {"healthy":true,"is_logged_in":true}` confirms the key itself is valid.
+   `401` here is final (the key is invalid/wrong). This alone is **not** a pass.
+2. `POST /api/v1/mixed_people/api_search?per_page=1&q_keywords=apollo` — the
+   endpoint Lead Discovery actually calls. Only this confirms the key/plan is
+   permitted to use People Search. Apollo keys are **scoped per endpoint**
+   (https://docs.apollo.io/docs/create-api-key), so a key can authenticate on
+   `auth/health` yet answer **HTTP 403 API_INACCESSIBLE** here because the
+   account/plan does not grant `mixed_people/api_search`. That is reported as
+   **Failure** with a clear "enable/upgrade" message — never as **Connected**.
 
-`401` on probe 1 is final (the key itself is invalid). `429` and `5xx` are
-reported as rate limit / Apollo outage. A transport failure reports *which*
-transport problem it was (TLS CA bundle, DNS, blocked egress) instead of a bare
-"Connection failed". The key is never echoed back in a message or a log.
+`429` and `5xx` are reported as rate limit / Apollo outage. A transport failure
+reports *which* transport problem it was (TLS CA bundle, DNS, blocked egress)
+instead of a bare "Connection failed". The key is never echoed back in a message
+or a log.
 
-A `200` is only a pass when it is Apollo answering: `is_logged_in=false`,
-`healthy=false` or a non-JSON body (an intercepting proxy, a wrong Base URL) all
-report their own reason rather than a false **Connected**. `422` on probe 2
-counts as authenticated — Apollo checked the key and only objected to the probe's
-parameters. Every message stays inside the 255 characters the provider row stores
-and is repeated under the badge on the API dashboard, so the reason is visible
-without opening the provider.
+`auth/health` must answer like Apollo: `is_logged_in=false`, `healthy=false` or
+a non-JSON body (an intercepting proxy, a wrong Base URL) all report their own
+reason rather than a false **Connected**. `422` on probe 2 counts as
+authenticated — Apollo checked the key and only objected to the probe's
+parameters, so the endpoint is accessible. Every message stays inside the 255
+characters the provider row stores and is repeated under the badge on the API
+dashboard, so the reason is visible without opening the provider.
 
 ### Endpoints used at runtime
 
@@ -273,7 +277,7 @@ Internal notes stay in the CI error log; members never see connection internals.
 | `An Apollo API key is required…` | no key saved | paste a key and save |
 | `That is the masked placeholder…` | the masked value was saved back | retype the full key |
 | `Invalid Apollo API key (HTTP 401…)` | key deleted/regenerated/expired | regenerate in Apollo → Settings → Integrations → API Keys |
-| `HTTP 403 API_INACCESSIBLE: this key may not call the tested endpoints…` | scoped key without `mixed_people_api_search`, plan without API access, or a free account registered with a personal (gmail/outlook) email | grant the scope or toggle "Set as master key"; free accounts need a work-email signup |
+| `HTTP 403 API_INACCESSIBLE: this Apollo key/plan cannot use the People Search endpoint…` | the key is valid (auth/health passed) but the key/plan is not permitted to call `mixed_people/api_search` — a scoped key without the `mixed_people_api_search` scope, a plan without API access, or a free account registered with a personal (gmail/outlook) email | grant the scope or toggle "Set as master key"; if the plan lacks API access, upgrade it (free accounts need a work-email signup). The test now runs the People Search probe even when auth/health passes, so this is reported as **Failure**, never **Connected**. |
 | `Apollo says this key is not signed in…` | `auth/health` answered `is_logged_in=false` | regenerate the key; check the account's API plan |
 | `Apollo reported this key as unhealthy…` | `auth/health` answered `healthy=false` | regenerate the key; check the account's API plan |
 | `auth/health answered HTTP 200 with a non-JSON body…` | a proxy/firewall page intercepted the request, or the Base URL is not an Apollo API origin | clear the Base URL (or set it to `https://api.apollo.io`) and allow egress |
