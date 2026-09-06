@@ -172,6 +172,7 @@
   <div class="faq">
     <details open><summary>Can I open the dashboard without an account?</summary><p>No. <span class="mono">/dashboard</span> and the module consoles redirect visitors to login.</p></details>
     <details><summary>What is WINDELS AI WORKFORCE?</summary><p>An AI-powered workforce platform for language learning, market analysis, sports and lottery research, and lead discovery. It never invents data to look complete.</p></details>
+    <details><summary>Does WINDELS hold my money?</summary><p>Never. We are software, not a bank or broker: no deposits, no withdrawals, and no client funds ever pass through us. Your money stays in your own broker account. Full policy on <a href="/safety">Safety &amp; trust</a>.</p></details>
     <details><summary>Who can use the admin area?</summary><p>Only accounts with the super-administrator permission. Other users see Access denied.</p></details>
   </div>
   <p class="center" style="margin-top:20px"><a class="btn ghost" href="/faq">All questions</a></p>

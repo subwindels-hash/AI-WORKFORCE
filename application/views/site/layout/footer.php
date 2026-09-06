@@ -3,7 +3,7 @@
   <div class="pub-foot-grid">
     <div>
       <strong>WINDELS AI WORKFORCE</strong>
-      <p>An evidence-first AI-powered platform for language learning, market analysis, sports research, lottery study and lead discovery. Analysis and simulation software — not investment advice.</p>
+      <p>An evidence-first AI-powered platform for language learning, market analysis, sports research, lottery study and lead discovery. Analysis and simulation software — not investment advice. We never hold client deposits or process withdrawals: your funds stay with your own broker.</p>
       <?php /* Contact phone/address intentionally not shown here — see /contact. */ ?>
     </div>
     <div>
