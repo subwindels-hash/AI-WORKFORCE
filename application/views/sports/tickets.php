@@ -7,20 +7,20 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
 ?>
 <div class="page-head">
   <div>
-    <h2>Match odds records</h2>
-    <p>Generated match odds records, review state and stored settlements. Approve, reject and settle stay permission-gated. This deployment records odds analysis only and has no external bookmaker.</p>
+    <h2>Odds prediction tickets</h2>
+    <p>Generated odds prediction tickets, approval state and stored settlements. Each ticket records the offered odds, model probability, expected value, confidence, risk and result; approve, reject and settle stay permission-gated. This deployment is odds analysis only and has no external bookmaker.</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px">
       <?php if (!empty($caps['sync'])): ?>
-        <form method="post" action="/sports/generate-ticket" style="display:flex;gap:6px;align-items:center" onsubmit="return confirm('Generate match odds record for today from stored fixtures & odds?')">
+        <form method="post" action="/sports/generate-ticket" style="display:flex;gap:6px;align-items:center" onsubmit="return confirm('Generate odds prediction ticket for today from stored fixtures & odds?')">
           <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
-          <input type="date" name="date" value="<?= e(gmdate('Y-m-d')) ?>" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px" title="Record date (UTC)">
+          <input type="date" name="date" value="<?= e(gmdate('Y-m-d')) ?>" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px" title="Ticket date (UTC)">
           <button class="btn small" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700;letter-spacing:0.02em">
-            Match Odds Record
+            🎯 Odds Prediction Ticket
           </button>
         </form>
         <a class="btn small" href="/sports">Sports Intelligence →</a>
       <?php else: ?>
-        <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">Match Odds Record — needs sports.manage</button>
+        <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">🎯 Odds Prediction Ticket — needs sports.manage</button>
         <a class="btn small" href="/sports">Sports Intelligence →</a>
       <?php endif; ?>
     </div>
@@ -30,25 +30,25 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 
 <div class="stack">
-    <p class="dim" style="margin:0 0 12px;font-size:12px">Record P/L is below; prediction accuracy, Brier, ECE and the 30-day settlement window are reported once, on <a href="/football">Football Intelligence</a>.<?php if (!empty($perf['demoBanner'])): ?> <b><?= e((string) $perf['demoBanner']) ?></b><?php endif; ?></p>
+    <p class="dim" style="margin:0 0 12px;font-size:12px">Ticket P/L is below; prediction accuracy, Brier, ECE and the 30-day settlement window are reported once, on <a href="/football">Football Intelligence</a>.<?php if (!empty($perf['demoBanner'])): ?> <b><?= e((string) $perf['demoBanner']) ?></b><?php endif; ?></p>
   <div class="panel">
-    <h3>Match odds records</h3>
+    <h3>Odds prediction tickets</h3>
     <div class="body scroll" style="padding-top:12px">
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
         <?php if (!empty($caps['sync'])): ?>
-          <form method="post" action="/sports/generate-ticket" style="display:flex;gap:6px;align-items:center" onsubmit="return confirm('Generate match odds record now?')">
+          <form method="post" action="/sports/generate-ticket" style="display:flex;gap:6px;align-items:center" onsubmit="return confirm('Generate odds prediction ticket now?')">
             <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
             <input type="hidden" name="date" value="<?= e(gmdate('Y-m-d')) ?>">
-            <button class="btn small primary" style="font-weight:700">Match Odds Record</button>
+            <button class="btn small primary" style="font-weight:700">🎯 Odds Prediction Ticket</button>
           </form>
-          <span class="dim" style="font-size:11px">Records qualified odds from stored fixtures & odds — no external call, idempotent</span>
+          <span class="dim" style="font-size:11px">Builds a reviewable odds prediction ticket from stored fixtures & odds — no external call, idempotent</span>
         <?php endif; ?>
       </div>
       <?php if (empty($tickets)): ?>
-        <p class="dim">No match odds records generated yet. Select <b>Match Odds Record</b> to build one from stored data.</p>
+        <p class="dim">No odds prediction tickets generated yet. Select <b>🎯 Odds Prediction Ticket</b> to build one from stored data.</p>
       <?php else: ?>
         <table class="tbl">
-          <thead><tr><th>Record</th><th>Created (UTC)</th><th class="num">Odds</th><th class="num">Sel.</th><th class="num">Conf.</th><th>Risk</th><th>Approval</th><th>Settlement</th><th class="num">P/L</th><th></th></tr></thead>
+          <thead><tr><th>Ticket</th><th>Created (UTC)</th><th class="num">Odds</th><th class="num">Sel.</th><th class="num">Conf.</th><th>Risk</th><th>Approval</th><th>Settlement</th><th class="num">P/L</th><th></th></tr></thead>
           <tbody>
             <?php foreach ($tickets as $t): $pnl = $t['pnl'] ?? null; ?>
               <tr>
@@ -93,13 +93,13 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
   </div>
 
   <div class="panel">
-    <h3>Daily match odds record runs</h3>
+    <h3>Daily odds prediction ticket runs</h3>
     <div class="body scroll" style="padding-top:12px">
       <?php if (empty($dailyRuns)): ?>
         <p class="dim">No daily runs recorded yet.</p>
       <?php else: ?>
         <table class="tbl">
-          <thead><tr><th>Date</th><th>Status</th><th>Record</th><th class="num">Evaluated</th><th class="num">Recorded</th><th class="num">Rejected</th><th>Message</th></tr></thead>
+          <thead><tr><th>Date</th><th>Status</th><th>Ticket</th><th class="num">Evaluated</th><th class="num">Recorded</th><th class="num">Rejected</th><th>Message</th></tr></thead>
           <tbody>
             <?php foreach ($dailyRuns as $r): ?>
               <tr>
@@ -130,7 +130,7 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
       if(btn.dataset.generating === '1') return;
       btn.dataset.generating = '1';
       btn.dataset.originalText = btn.innerHTML;
-      btn.innerHTML = '⏳ Generating match odds record...';
+      btn.innerHTML = '⏳ Generating odds prediction ticket...';
       btn.disabled = true;
       // allow form to submit, but re-enable after 10s if still on page (e.g. validation fail)
       setTimeout(function(){
@@ -162,8 +162,8 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
         });
         var data = await res.json();
         if(res.ok){
-          alert('Match odds record engine: ' + (data.status||'') + (data.ticketId ? '  — record ' + data.ticketId : '') + '\n' + (data.message||''));
-          location.href = '/sports/match-odds-records';
+          alert('Odds prediction ticket engine: ' + (data.status||'') + (data.ticketId ? '  — ticket ' + data.ticketId : '') + '\n' + (data.message||''));
+          location.href = '/sports/odds-prediction-ticket';
         } else {
           alert('Generate failed: ' + (data.message||data.error||res.status));
           apiBtn.disabled = false;
