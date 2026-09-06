@@ -189,7 +189,7 @@ $attempt = $providers->withFallback('round', function ($p) use ($roundId) {
 });
 ```
 
-The daily ticket engine uses this path: when the serving provider exposes
+The odds prediction ticket engine uses this path: when the serving provider exposes
 `round()` and the fetched fixtures carry a `roundId`, `DailyTicketService`
 bulk-fetches each matchday's odds with one `round()` call per round
 (`fetchRoundOdds`) and only falls back to the per-fixture `odds()` call for
@@ -337,7 +337,7 @@ same headers are checked on every data response.
 
 ### DATA_UNAVAILABLE
 
-When the fixtures pull fails on all providers the daily ticket engine no
+When the fixtures pull fails on all providers the odds prediction ticket engine no
 longer evaluates zero matches and reports `NO_QUALIFIED_TICKET`. Instead:
 
 * `DailyTicketService::runDaily()` returns
@@ -374,3 +374,25 @@ unreachable host, plan restriction) instead of guessing.
 ## Safe operation
 
 Provider data is untrusted input. The existing normalizers, data-quality gates, confidence checks, and ticket governance remain in the pipeline. Missing odds from providers without an odds feed must not be treated as fabricated odds; those predictions should be rejected or supplied by a separately licensed odds source.
+
+## Odds Prediction Ticket compliance rules
+
+The `🎯 Odds Prediction Ticket` builder is intentionally conservative:
+
+* It builds at most one football ticket per configured run from enabled Provider Hub feeds only (API-Football, Sportmonks, TheSportsDB where supported, or another registered `SportsDataProvider`). Missing fixture, form, odds, or provider data is reported as unavailable; it is never filled with synthetic values.
+* Runtime date/time is read when the run starts evaluating fixtures. Eligible fixtures must be football, must be provider-not-started (`NS`, or the provider adapter's explicit scheduled mapping), and must kick off strictly more than two hours after that runtime clock.
+* Current odds are accepted only when the provider returned numeric decimal odds greater than `1.00`, with a valid observation timestamp, for one of these supported markets: `MATCH_RESULT` (1X2), `TOTAL_GOALS / OVER_1_5`, `BTTS / YES`, or `DOUBLE_CHANCE`.
+* Ticket thresholds are hard floors: confidence must be at least `80%`, data quality at least `75/100`, odds must be fresh, and the combined decimal odds window is always `5.00` through `8.00` inclusive. The optimizer multiplies unrounded leg odds and rounds only the stored/displayed total.
+* The optimizer prefers stronger confidence, quality, expected value, fresh/reliable odds, lower risk, fewer unnecessary selections, and low correlation. It does not add weak selections just to reach the odds band.
+* If no verified combination satisfies those gates, the run records `NO_QUALIFIED_TICKET` with a `NO VALUE TICKET TODAY` message rather than guessing.
+
+### Pipeline endpoint aliases
+
+For the odds prediction pipeline contract, these API routes map to the implementation:
+
+* `GET /api/sports/fixtures?date=today` (also `/fixtures`) reads saved verified fixtures for the requested day.
+* `GET /api/sports/odds?fixture={fixture_id}` (also `/odds`) reads saved provider odds for that fixture/match.
+* `POST /api/sports/predict` (also `/predict`) runs the daily odds prediction ticket builder.
+* `POST /api/sports/settle` (also `/settle`) sweeps all open tickets and only settles picks with verified persisted final results.
+
+The endpoint aliases do not relax authentication, permissions, provider validation, odds freshness, or the `NO VALUE TICKET TODAY` fail-safe.

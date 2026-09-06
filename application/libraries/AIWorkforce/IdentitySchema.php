@@ -22,10 +22,22 @@ final class IdentitySchema
 
     private static bool $done = false;
 
+    /** Persistent cache version for profile-column/backfill guards. */
+    private const STAMP_VERSION = '2026-09-06-identity-schema-guard-v1';
+
     public static function ensure(object $db): void
     {
         if (self::$done) return;
         self::$done = true;
+        $sqlite = self::isSqlite($db);
+
+        // This guard runs from AIWorkforce_model's constructor. A PHP static only
+        // lasts for the current request, so healthy installs were still listing
+        // fields, selecting every user, and probing indexes on every page load.
+        // A small cache stamp lets normal requests skip that migration/backfill
+        // work until this guard version changes.
+        if (self::stampFresh($db, $sqlite)) return;
+
         try {
             if (!$db->table_exists('users')) return;
         } catch (\Throwable $e) {
@@ -33,7 +45,6 @@ final class IdentitySchema
         }
 
         $fields = self::fields($db);
-        $sqlite = self::isSqlite($db);
         $alters = [
             'username' => $sqlite ? 'TEXT' : 'VARCHAR(64) NULL',
             'user_uid' => $sqlite ? 'TEXT' : 'CHAR(6) NULL',
@@ -56,6 +67,7 @@ final class IdentitySchema
 
         self::backfill($db);
         self::ensureUniqueIndexes($db, $sqlite);
+        self::writeStamp($db, $sqlite);
     }
 
     /** @return array<int,string> */
@@ -194,6 +206,38 @@ final class IdentitySchema
             unset($user['security_pin'], $user['security_question'], $user['security_answer']);
         }
         return $user;
+    }
+
+
+    private static function stampPath(object $db, bool $sqlite): string
+    {
+        $cacheDir = defined('APPPATH') ? rtrim((string) APPPATH, '/\\') . DIRECTORY_SEPARATOR . 'cache' : sys_get_temp_dir();
+        if (!is_dir($cacheDir)) @mkdir($cacheDir, 0775, true);
+        if (!is_writable($cacheDir)) $cacheDir = sys_get_temp_dir();
+        $dbKey = hash('sha256', implode('|', [
+            $sqlite ? 'sqlite' : (string) ($db->dbdriver ?? ''),
+            (string) ($db->hostname ?? ''),
+            (string) ($db->database ?? ''),
+            (string) ($db->dsn ?? ''),
+            (string) ($db->subdriver ?? ''),
+        ]));
+        return rtrim($cacheDir, '/\\') . DIRECTORY_SEPARATOR . 'ai_workforce_identity_' . $dbKey . '.stamp.json';
+    }
+
+    private static function stampFresh(object $db, bool $sqlite): bool
+    {
+        $path = self::stampPath($db, $sqlite);
+        if (!is_file($path)) return false;
+        $stamp = json_decode((string) @file_get_contents($path), true);
+        return is_array($stamp) && ($stamp['version'] ?? null) === self::STAMP_VERSION;
+    }
+
+    private static function writeStamp(object $db, bool $sqlite): void
+    {
+        @file_put_contents(self::stampPath($db, $sqlite), json_encode([
+            'version' => self::STAMP_VERSION,
+            'written_at' => gmdate('c'),
+        ], JSON_UNESCAPED_SLASHES));
     }
 
     private static function isSqlite(object $db): bool

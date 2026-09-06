@@ -55,7 +55,7 @@ function fx_ui_today(SportsRepositoryStub $repo): string
     $repo->saveTicket(['id' => $ticketId, 'created_at' => gmdate('c'), 'model_version_id' => $modelId, 'configuration_version' => '0', 'total_odds' => 6.4, 'selection_count' => 2, 'combined_probability' => 0.15, 'confidence' => 88.0, 'risk' => 'LOW', 'correlation' => 'LOW', 'data_quality_score' => 100, 'status' => 'PENDING', 'approval_status' => 'PENDING_USER_APPROVAL', 'settlement_status' => 'PENDING', 'stake' => 10.0, 'pnl' => null]);
     $repo->saveTicketSelection(['ticket_id' => $ticketId, 'prediction_id' => 'prd_ui_1', 'match_id' => 9001, 'market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'odds' => 2.0, 'odds_timestamp' => gmdate('c'), 'model_probability' => 0.7, 'calibrated_probability' => 0.75, 'expected_value' => 0.5, 'risk' => 'LOW', 'result' => null, 'status' => 'PENDING']);
     $repo->savePrediction(['id' => 'prd_ui_1', 'match_id' => 9001, 'model_version_id' => $modelId, 'market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'raw_probability' => 0.7, 'calibrated_probability' => 0.75, 'expected_value' => 0.5, 'confidence' => 88.0, 'risk' => 'LOW', 'correlation' => 'LOW', 'data_quality_score' => 100, 'decision' => 'PREDICTION_READY', 'rejection_reasons' => '[]', 'factors' => json_encode(['gate' => ['passed' => []], 'drivers' => ['expectedGoalsProxy' => 2.45]]), 'input_version' => FeatureEngineeringEngine::VERSION, 'odds' => 2.0, 'odds_timestamp' => gmdate('c'), 'created_at' => gmdate('c')]);
-    $repo->saveDailyTicket(['date' => gmdate('Y-m-d'), 'ticket_id' => $ticketId, 'status' => 'PENDING_USER_APPROVAL', 'configuration_version' => 0, 'candidates_evaluated' => 1, 'predictions_recorded' => 1, 'rejections' => 0, 'rejection_summary' => json_encode([]), 'message' => 'ticket generated; awaiting user approval', 'provider' => 'ui-test', 'run_id' => 'run_ui', 'created_at' => gmdate('c'), 'updated_at' => gmdate('c')]);
+    $repo->saveDailyTicket(['date' => gmdate('Y-m-d'), 'ticket_id' => $ticketId, 'status' => 'PENDING_USER_APPROVAL', 'configuration_version' => 0, 'candidates_evaluated' => 1, 'predictions_recorded' => 1, 'rejections' => 0, 'rejection_summary' => json_encode([]), 'message' => 'odds prediction ticket generated; awaiting user approval', 'provider' => 'ui-test', 'run_id' => 'run_ui', 'created_at' => gmdate('c'), 'updated_at' => gmdate('c')]);
     return $ticketId;
 }
 
@@ -63,6 +63,7 @@ test('sports UI: console routes and controller are wired', function () {
     $routes = file_get_contents(FCPATH . 'application/config/routes.php');
     assert_contains('$route[\'sports\'] = \'sports\';', $routes);
     assert_contains('$route[\'sports/tickets\'] = \'sports/tickets\';', $routes);
+    assert_contains('$route[\'sports/match-odds-records\'] = \'sports/tickets\';', $routes);
     assert_contains('$route[\'sports/sync\'] = \'sports/sync\';', $routes);
     assert_contains('$route[\'sports/(:any)/decide\'] = \'sports/decide/$1\';', $routes);
     assert_contains('$route[\'sports/(:any)/settle\'] = \'sports/settle/$1\';', $routes);
@@ -91,7 +92,7 @@ test('sports UI: dashboard renders the honest DISABLED_NO_PROVIDER state', funct
     $dash = $intel->dashboard();
     assert_equals('DISABLED_NO_PROVIDER', $dash['systemStatus']['ticketEngine']);
     $html = fx_render_sports('index', ['dashboard' => $dash]);
-    assert_contains('Sports Intelligence — daily ticket engine', $html);
+    assert_contains('Sports Intelligence — odds prediction ticket engine', $html);
     assert_contains('DISABLED_NO_PROVIDER', $html);
     assert_contains('No providers registered', $html);
     assert_contains('Data feed', $html);
@@ -100,7 +101,7 @@ test('sports UI: dashboard renders the honest DISABLED_NO_PROVIDER state', funct
     assert_contains('</html>', $html);
 });
 
-test('sports UI: dashboard renders today ticket with gated actions', function () {
+test('sports UI: dashboard renders today odds prediction ticket with gated actions', function () {
     $repo = new SportsRepositoryStub();
     $ticketId = fx_ui_today($repo);
     $intel = new SportsIntelligence($repo, fx_ui_audit());
@@ -118,7 +119,7 @@ test('sports UI: dashboard renders today ticket with gated actions', function ()
     assert_contains('UI League', $html);
 });
 
-test('sports UI: tickets console renders tickets, runs and performance', function () {
+test('sports UI: records console renders records, runs and performance', function () {
     $repo = new SportsRepositoryStub();
     $ticketId = fx_ui_today($repo);
     $intel = new SportsIntelligence($repo, fx_ui_audit());
@@ -132,7 +133,7 @@ test('sports UI: tickets console renders tickets, runs and performance', functio
     assert_contains('awaiting user approval', $html);
     assert_contains('/sports/' . $ticketId . '/settle', $html);
     assert_contains('DEMO / SANDBOX DATA', $html, 'sandbox statistics are clearly labeled');
-    assert_true(!str_contains($html, 'No tickets generated yet'), 'seeded ticket must be listed, not the empty state');
+    assert_true(!str_contains($html, 'No odds prediction tickets generated yet'), 'seeded ticket must be listed, not the empty state');
 });
 
 test('sports UI: a read-only identity is told why, instead of being handed a refused button', function () {

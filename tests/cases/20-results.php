@@ -9,3 +9,12 @@ test('verified cancellation and void produce explicit non-win outcomes', functio
 test('verified result settles supported market deterministically', function () {
  $e=new ResultVerificationEngine(); $v=$e->verify(['verified'=>true,'status'=>'FINISHED','homeScore'=>1,'awayScore'=>1]); assert_true($v['verified']); assert_equals('WON',$e->settleSelection(['market'=>'TOTAL_GOALS','selection'=>'OVER_1_5'],$v)['status']);
 });
+
+test('result settlement covers all supported odds prediction ticket markets', function () {
+    $e = new ResultVerificationEngine();
+    $v = $e->verify(['verified' => true, 'status' => 'FINISHED', 'homeScore' => 2, 'awayScore' => 1]);
+    assert_equals('WON', $e->settleSelection(['market' => 'MATCH_RESULT', 'selection' => 'HOME'], $v)['status']);
+    assert_equals('LOST', $e->settleSelection(['market' => 'MATCH_RESULT', 'selection' => 'DRAW'], $v)['status']);
+    assert_equals('WON', $e->settleSelection(['market' => 'BTTS', 'selection' => 'YES'], $v)['status']);
+    assert_equals('WON', $e->settleSelection(['market' => 'DOUBLE_CHANCE', 'selection' => 'HOME_OR_DRAW'], $v)['status']);
+});

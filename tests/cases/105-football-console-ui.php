@@ -223,7 +223,7 @@ test('football: the football screens own their panels — no duplication, no lef
     foreach (['30-day performance (settled predictions)', 'Fixtures found', 'Qualified'] as $markup) {
         assert_true(substr_count($console, $markup) >= 1, 'the board reports ' . $markup);
     }
-    assert_contains('30-day ticket performance (stored settlements only)', $sports, 'the ticket screen keeps only ticket figures');
+    assert_contains('30-day odds prediction ticket performance (stored settlements only)', $sports, 'the odds prediction ticket screen keeps only ticket figures');
     // §12: the match screen is read-only — nothing here rewrites a prediction.
     assert_equals(0, substr_count($match, 'method="post"'), 'the match view contains no form at all');
     assert_contains('never rewritten', $match, 'and says plainly that the frozen prediction is not rewritten');

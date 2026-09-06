@@ -98,8 +98,17 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname.startsWith('/assets/')) {
     const file = path.join(APP_ROOT, url.pathname);
     if (file.startsWith(APP_ROOT) && fs.existsSync(file) && fs.statSync(file).isFile()) {
-      const types = { '.css': 'text/css', '.js': 'text/javascript', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.webp': 'image/webp' };
+      const types = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.webp': 'image/webp' };
+      const stat = fs.statSync(file);
+      const etag = `W/"${stat.size}-${Number(stat.mtimeMs).toString(36)}"`;
       res.setHeader('content-type', types[path.extname(file)] || 'application/octet-stream');
+      res.setHeader('cache-control', 'public, max-age=604800, stale-while-revalidate=86400');
+      res.setHeader('etag', etag);
+      if (req.headers['if-none-match'] === etag) {
+        res.statusCode = 304;
+        res.end();
+        return;
+      }
       res.end(fs.readFileSync(file));
       return;
     }

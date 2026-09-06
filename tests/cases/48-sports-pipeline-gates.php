@@ -37,7 +37,7 @@ function fx_approved_calibration(): array
  */
 function fx_gate_config(): array
 {
-    return ['min_confidence' => 75.0, 'min_data_quality' => 80, 'require_calibration' => 1, 'allowed_markets' => [], 'allowed_leagues' => []];
+    return ['min_confidence' => 80.0, 'min_data_quality' => 75, 'require_calibration' => 1, 'allowed_markets' => [], 'allowed_leagues' => []];
 }
 
 test('pipeline: qualified candidate carries full decision factors', function () {
@@ -49,7 +49,7 @@ test('pipeline: qualified candidate carries full decision factors', function () 
     assert_true(isset($f['odds']['decimal']) && $f['odds']['decimal'] > 1.0);
     assert_true(isset($f['calibration']['intercept']));
     assert_true(isset($f['gate']['passed']));
-    assert_true($out['confidence']['confidence'] >= 75.0);
+    assert_true($out['confidence']['confidence'] >= 80.0);
     assert_true($out['value']['qualified']);
     assert_true($out['value']['expectedValue'] > 0);
 });
@@ -146,7 +146,7 @@ test('risk: low confidence and low liquidity are explicit rejections', function 
     $eng = new RiskEngine();
     $value = ['qualified' => true, 'expectedValue' => 0.2, 'odds' => 2.0];
     $quality = ['score' => 100, 'eligibleForTicket' => true];
-    $lowConf = $eng->assess($value, $quality, ['min_data_quality' => 80, 'min_confidence' => 80], ['confidence' => 70]);
+    $lowConf = $eng->assess($value, $quality, ['min_data_quality' => 75, 'min_confidence' => 80], ['confidence' => 70]);
     assert_equals('REJECTED', $lowConf['classification']);
     assert_contains('LOW_CONFIDENCE', implode(',', $lowConf['reasons']));
     $lowLiq = $eng->assess($value, $quality, ['min_data_quality' => 80, 'min_liquidity' => 10000], ['confidence' => 90, 'liquidity' => 500]);
@@ -164,10 +164,10 @@ test('optimizer: configured confidence and quality floors filter the pool', func
         'match' => ['competition' => 'PoolL'],
     ];
     $opt = new TicketOptimizer();
-    $cands = [$mk(1, 2.0, 90, 95), $mk(2, 2.5, 60, 95), $mk(3, 2.2, 90, 70)];
+    $cands = [$mk(1, 6.0, 90, 95), $mk(2, 6.5, 60, 95), $mk(3, 6.2, 90, 70)];
     // odds window must be reachable by the surviving single leg (2.0) —
     // floors filter candidates, they never pad a ticket to a target value
-    $out = $opt->optimize($cands, ['targetOddsMin' => 1.5, 'targetOddsMax' => 9.0, 'maxSelections' => 3, 'minConfidence' => 75, 'minDataQuality' => 80]);
+    $out = $opt->optimize($cands, ['targetOddsMin' => 5.0, 'targetOddsMax' => 8.0, 'maxSelections' => 3, 'minConfidence' => 80, 'minDataQuality' => 75]);
     assert_equals('QUALIFIED', $out['status']);
     // only candidate 1 passes both floors
     assert_equals(1, $out['selectionCount']);

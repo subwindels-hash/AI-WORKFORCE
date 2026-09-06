@@ -94,7 +94,7 @@ test('api-football normalizes Both Teams to Score', function () {
     $p = new ApiFootballProvider('k', 'https://api.test', 10, makeTransport2(200, $body));
     $odds = $p->odds('400');
     assert_equals(2, count($odds));
-    assert_equals('BOTH_TEAMS_SCORE', $odds[0]['market']);
+    assert_equals('BTTS', $odds[0]['market']);
     assert_equals('YES', $odds[0]['selection']);
     assert_equals('NO', $odds[1]['selection']);
 });

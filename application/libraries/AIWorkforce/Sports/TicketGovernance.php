@@ -31,10 +31,16 @@ class TicketGovernance
         if (($optimized['status'] ?? '') !== 'QUALIFIED') return ['status' => 'NO_QUALIFIED_TICKET', 'reason' => $optimized['reason'] ?? 'No compliant combination'];
         $sels = $optimized['selections'];
 
-        $confidences = array_map(fn($s) => is_numeric($s['confidence']['confidence'] ?? null) ? (float) $s['confidence']['confidence'] : null, $sels);
+        $confidences = array_values(array_filter(array_map(fn($s) => is_numeric($s['confidence']['confidence'] ?? null) ? (float) $s['confidence']['confidence'] : null, $sels), fn($v) => $v !== null));
         $qualities = array_map(fn($s) => (int) ($s['quality']['score'] ?? 0), $sels);
         $combined = 1.0;
-        foreach ($sels as $s) $combined *= (float) ($s['prediction']['calibratedProbability'] ?? 0.5);
+        $oddsCalc = ['formula' => [], 'unroundedProduct' => 1.0, 'displayTotalOdds' => $optimized['totalOdds']];
+        foreach ($sels as $s) {
+            $combined *= (float) ($s['prediction']['calibratedProbability'] ?? 0.5);
+            $legOdds = (float) ($s['value']['odds'] ?? $s['odds'] ?? 0);
+            $oddsCalc['formula'][] = $legOdds;
+            $oddsCalc['unroundedProduct'] *= $legOdds;
+        }
         $pairwise = $this->correlation->classifySelections($sels);
         $risk = 'LOW';
         foreach ($sels as $s) {
@@ -49,9 +55,12 @@ class TicketGovernance
             'configuration_version' => (string) $configurationVersion,
             'total_odds' => $optimized['totalOdds'], 'selection_count' => count($sels),
             'combined_probability' => round($combined, 8),
-            'confidence' => array_filter($confidences) ? round(min(array_filter($confidences)), 2) : null,
+            'confidence' => $confidences ? round(min($confidences), 2) : null,
+            'average_confidence' => $confidences ? round(array_sum($confidences) / count($confidences), 2) : null,
             'risk' => $risk, 'correlation' => $pairwise['classification'],
             'data_quality_score' => min($qualities),
+            'average_data_quality' => $qualities ? round(array_sum($qualities) / count($qualities), 2) : null,
+            'odds_calculation' => json_encode($oddsCalc),
             'status' => $automated ? 'APPROVED' : 'PENDING',
             'approval_status' => $automated ? 'APPROVED_NOT_EXECUTED' : 'PENDING_USER_APPROVAL',
             'settlement_status' => 'PENDING',
@@ -61,8 +70,15 @@ class TicketGovernance
         foreach ($sels as $s) {
             $this->repo->saveTicketSelection([
                 'ticket_id' => $id, 'prediction_id' => $s['predictionId'] ?? 'unlinked',
-                'match_id' => (int) $s['matchId'], 'market' => $s['market'] ?? 'UNSPECIFIED', 'selection' => $s['selection'] ?? 'UNSPECIFIED',
+                'match_id' => (int) $s['matchId'],
+                'fixture_id' => $s['match']['fixtureId'] ?? null,
+                'home_team' => $s['match']['homeTeam'] ?? null,
+                'away_team' => $s['match']['awayTeam'] ?? null,
+                'kickoff_time' => $s['match']['kickoff'] ?? null,
+                'market' => $s['market'] ?? 'UNSPECIFIED', 'selection' => $s['selection'] ?? 'UNSPECIFIED',
                 'odds' => $s['value']['odds'], 'odds_timestamp' => $s['oddsTimestamp'] ?? gmdate('c'),
+                'confidence' => $s['confidence']['confidence'] ?? null,
+                'data_quality' => $s['quality']['score'] ?? null,
                 'model_probability' => $s['prediction']['rawModelProbability'] ?? null,
                 'calibrated_probability' => $s['prediction']['calibratedProbability'] ?? null,
                 'expected_value' => $s['value']['expectedValue'], 'risk' => $s['risk']['classification'],

@@ -18,11 +18,11 @@ class TicketOptimizer
 
     public function optimize(array $candidates, array $config = []): array
     {
-        $min = (float) ($config['targetOddsMin'] ?? 5.0);
-        $max = (float) ($config['targetOddsMax'] ?? 8.0);
-        $limit = (int) ($config['maxSelections'] ?? 5);
-        $minConfidence = isset($config['minConfidence']) && is_numeric($config['minConfidence']) ? (float) $config['minConfidence'] : null;
-        $minQuality = isset($config['minDataQuality']) && is_numeric($config['minDataQuality']) ? (int) $config['minDataQuality'] : null;
+        $min = max(5.0, (float) ($config['targetOddsMin'] ?? 5.0));
+        $max = min(8.0, (float) ($config['targetOddsMax'] ?? 8.0));
+        $limit = min(6, max(1, (int) ($config['maxSelections'] ?? 6)));
+        $minConfidence = max(80.0, isset($config['minConfidence']) && is_numeric($config['minConfidence']) ? (float) $config['minConfidence'] : 80.0);
+        $minQuality = max(75, isset($config['minDataQuality']) && is_numeric($config['minDataQuality']) ? (int) $config['minDataQuality'] : 75);
         $maxCorrelation = strtoupper((string) ($config['maxCorrelation'] ?? 'MEDIUM'));
         $allowedMarkets = (array) ($config['allowedMarkets'] ?? []);
         $allowedLeagues = (array) ($config['allowedLeagues'] ?? []);
@@ -38,6 +38,16 @@ class TicketOptimizer
             if (count($allowedLeagues) > 0 && !in_array($c['match']['competition'] ?? $c['competition'] ?? null, $allowedLeagues, true)) continue;
             $pool[] = $c;
         }
+        usort($pool, function (array $a, array $b): int {
+            $score = function (array $c): float {
+                $riskWeight = ['LOW' => 20.0, 'MEDIUM' => 10.0, 'HIGH' => -100.0, 'REJECTED' => -1000.0];
+                return 0.45 * (float) ($c['confidence']['confidence'] ?? 0)
+                    + 0.25 * (float) ($c['quality']['score'] ?? 0)
+                    + 100.0 * (float) ($c['value']['expectedValue'] ?? 0)
+                    + ($riskWeight[$c['risk']['classification'] ?? 'HIGH'] ?? 0.0);
+            };
+            return $score($b) <=> $score($a);
+        });
 
         $best = null;
         $corrLimit = $maxCorrelation === 'LOW' ? 'LOW' : 'MEDIUM'; // 'MEDIUM' permits LOW+MEDIUM pairs
@@ -45,7 +55,7 @@ class TicketOptimizer
         $search = function (array $chosen, int $start, float $odds) use (&$search, &$best, $pool, $min, $max, $limit, $corrLimit, $order) {
             if ($chosen && $odds >= $min && $odds <= $max) {
                 $score = array_sum(array_map(fn($c) => (float) ($c['value']['expectedValue'] ?? 0), $chosen));
-                if ($best === null || $score > $best['score']) $best = ['score' => $score, 'selections' => $chosen, 'totalOdds' => $odds];
+                if ($best === null || $score > $best['score'] || ($score === $best['score'] && count($chosen) < count($best['selections']))) $best = ['score' => $score, 'selections' => $chosen, 'totalOdds' => $odds];
             }
             if (count($chosen) >= $limit || $odds >= $max) return;
             for ($i = $start; $i < count($pool); $i++) {
@@ -60,7 +70,7 @@ class TicketOptimizer
         $search([], 0, 1.0);
 
         if ($best === null) {
-            return ['status' => 'NO_QUALIFIED_TICKET', 'reason' => 'No candidate combination satisfies odds, risk, value, correlation and configuration constraints', 'poolSize' => count($pool), 'config' => $config];
+            return ['status' => 'NO_QUALIFIED_TICKET', 'reason' => 'NO VALUE TICKET TODAY — no verified candidate combination satisfies the 5.00–8.00 odds, confidence, quality, risk, value, freshness and correlation constraints', 'poolSize' => count($pool), 'config' => $config];
         }
         return ['status' => 'QUALIFIED', 'ticketId' => 'tkt_' . bin2hex(random_bytes(8)), 'totalOdds' => round($best['totalOdds'], 4), 'selectionCount' => count($best['selections']), 'selections' => $best['selections'], 'optimizationScore' => round($best['score'], 6), 'poolSize' => count($pool), 'config' => $config];
     }

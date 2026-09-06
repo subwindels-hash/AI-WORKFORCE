@@ -20,7 +20,7 @@ placeholder percentage or a simulated match.
 | `/football` | today's prediction board, live matches, the data-feed panel, the refresh schedule, and the single 30-day performance panel |
 | `/football/match/:id` | one fixture: features, data-quality components, prediction, raw vs calibrated confidence, live estimates, settlement row |
 | `/football/models` | model lifecycle, stored metrics, calibration versions, per-version 30-day numbers, approve/activate forms |
-| `/sports`, `/sports/tickets` | the ticket engine only. They link to `/football` for football figures and never render them |
+| `/sports`, `/sports/tickets` | the odds prediction ticket engine only. They link to `/football` for football figures and never render them |
 
 `views/sports/index.php` keeps the ticket panels it has always had; the football
 performance panels were removed from it and from `views/workspace/index.php` so
@@ -103,7 +103,7 @@ upstream did not deliver.
 | model not yet ACTIVE | `MODEL_DRAFT` / `MODEL_APPROVED`-style label from `ModelRegistry::usable()`; a high-confidence badge requires an ACTIVE version |
 | kickoff passed | `NO_PREDICTION` + `KICKOFF_PASSED`; the stored pre-match row (if any) is returned next to it, unmodified |
 
-`MODEL_NOT_CALIBRATED` remains the ticket engine's decision code
+`MODEL_NOT_CALIBRATED` remains the odds prediction ticket engine's decision code
 (`AIWorkforce\Sports`); the football module uses `CALIBRATION_PENDING` so the two
 surfaces never disagree about what "uncalibrated" means.
 

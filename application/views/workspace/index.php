@@ -439,7 +439,7 @@ $_aiHealth = $_aiTotal > 0 ? round(($_aiHealthy / $_aiTotal) * 100, 0) : 0;
 <?php
 // Compact pointer card only: today's football predictions, live scores, the
 // 30-day performance window and the model/calibration state all live on
-// /football, and the ticket engine lives on /sports. Nothing is repeated here —
+// /football, and the odds prediction ticket engine lives on /sports. Nothing is repeated here —
 // one panel per figure, one source for each — and only real stored counts are
 // shown (no marketing numbers for coverage the platform cannot verify).
 $sportsProviders = $sportsWidget['providers'] ?? [];
@@ -461,7 +461,7 @@ $sportsFeeds = (int) ($sportsWidget['totalProviders'] ?? 0);
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <a class="btn primary" href="/football">Today's predictions</a>
         <a class="btn" href="/football/models">Models &amp; calibration</a>
-        <a class="btn" href="/sports">Sports ticket engine</a>
+        <a class="btn" href="/sports">Sports odds prediction ticket engine</a>
       </div>
     </div>
   </div>

@@ -35,7 +35,7 @@ class MatchIntelligenceEngine
         if (!$fields['recentForm']) $rejections[] = 'INSUFFICIENT_DATA';
         if ($fields['marketLiquidity'] !== null && (float) $fields['marketLiquidity'] < 1) $rejections[] = 'INSUFFICIENT_LIQUIDITY';
         return [
-            'match' => ['id' => $match['id'] ?? null, 'homeTeam' => $match['home_team'] ?? $match['homeTeam'] ?? null, 'awayTeam' => $match['away_team'] ?? $match['awayTeam'] ?? null, 'competition' => $match['competition'] ?? null, 'kickoff' => $match['kickoff_at'] ?? $match['kickoff'] ?? null, 'status' => $status, 'simulated' => !empty($payload['simulated'])],
+            'match' => ['id' => $match['id'] ?? null, 'fixtureId' => $match['external_id'] ?? $match['externalId'] ?? null, 'homeTeam' => $match['home_team'] ?? $match['homeTeam'] ?? null, 'awayTeam' => $match['away_team'] ?? $match['awayTeam'] ?? null, 'competition' => $match['competition'] ?? null, 'kickoff' => $match['kickoff_at'] ?? $match['kickoff'] ?? null, 'status' => $status, 'simulated' => !empty($payload['simulated'])],
             'odds' => $latestOdds, 'oddsFreshness' => $odds, 'inputs' => $fields,
             'unavailableInputs' => $unavailable, 'rejectionReasons' => array_values(array_unique($rejections)),
             'decision' => $rejections ? 'NO_QUALIFIED_TICKET' : 'INTELLIGENCE_READY',

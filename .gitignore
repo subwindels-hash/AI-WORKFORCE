@@ -16,6 +16,7 @@ npm-debug.log*
 application/data/*.sqlite
 application/data/*.sqlite-journal
 application/logs/*.log
+application/cache/ai_workforce_*.stamp.json
 .venv/
 __pycache__/
 *.pyc

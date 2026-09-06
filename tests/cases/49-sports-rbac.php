@@ -71,6 +71,9 @@ test('sports API routes are wired with permission-bearing endpoints', function (
     $routes = file_get_contents(FCPATH . 'application/config/routes.php');
     assert_contains('api/sports/status', $routes);
     assert_contains('api/sports/performance', $routes);
+    assert_contains('api/sports/fixtures', $routes);
+    assert_contains('api/sports/predict', $routes);
+    assert_contains('api/sports/settle', $routes);
     assert_contains('api/sports/tickets/(:any)/decide', $routes);
     assert_contains('api/sports/tickets/(:any)/settle', $routes);
     assert_contains('api/sports/results/verify', $routes);

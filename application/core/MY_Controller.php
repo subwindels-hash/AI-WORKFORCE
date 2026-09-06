@@ -3,13 +3,38 @@ defined('BASEPATH') or exit('No direct script access allowed');
 
 require_once __DIR__ . '/../libraries/AIWorkforce/autoload.php';
 
+/** Lightweight proxy that preserves `$this->platform->...` while deferring the
+ * expensive Platform service graph until a controller actually dereferences it.
+ */
+class AIWorkforce_LazyPlatform
+{
+    /** @var callable():\AIWorkforce\Platform */
+    private $factory;
+
+    public function __construct(callable $factory) { $this->factory = $factory; }
+
+    private function target(): \AIWorkforce\Platform
+    {
+        $factory = $this->factory;
+        return $factory();
+    }
+
+    public function __get(string $name): mixed { return $this->target()->{$name}; }
+    public function __call(string $name, array $arguments): mixed { return $this->target()->{$name}(...$arguments); }
+    public function __isset(string $name): bool { return isset($this->target()->{$name}); }
+}
+
 /**
  * Base controller: builds the AI Workforce Platform (domain services wired to the
  * database through CI3's model layer) once per request.
  */
 class MY_Controller extends CI_Controller
 {
-    public \AIWorkforce\Platform $platform;
+    /** Existing controllers access `$this->platform`; web requests get a lazy proxy, CLI tests get the concrete platform. */
+    public $platform;
+
+    /** Lazily-built domain service graph; many public/auth requests only need CI + the model. */
+    private ?\AIWorkforce\Platform $platformInstance = null;
 
     /** Per-request guard: permissions are re-read from the database at most once. */
     private bool $identityPermissionsRefreshed = false;
@@ -21,9 +46,37 @@ class MY_Controller extends CI_Controller
     {
         parent::__construct();
         $this->load->model('AIWorkforce_model');
-        $disableReal = getenv('AI_WORKFORCE_DISABLE_REAL_PROVIDERS') === '1';
-        $this->platform = new \AIWorkforce\Platform($this->AIWorkforce_model, $disableReal);
+        $isTestRunner = isset($_SERVER['argv']) && in_array('tests', array_map('strval', (array) $_SERVER['argv']), true);
+        $this->platform = (PHP_SAPI === 'cli' || $isTestRunner) ? $this->platform() : new AIWorkforce_LazyPlatform(fn() => $this->platform());
     }
+
+    /**
+     * Build the expensive domain container only for actions that actually use it.
+     * Public/static marketing pages and simple auth form renders no longer pay to
+     * instantiate sports, lottery, trading, Cloudflare, multiplier and broker
+     * services on every request. Access through `$this->platform` is preserved by
+     * __get() for existing controllers.
+     */
+    protected function platform(): \AIWorkforce\Platform
+    {
+        if ($this->platformInstance !== null) return $this->platformInstance;
+        $disableReal = getenv('AI_WORKFORCE_DISABLE_REAL_PROVIDERS') === '1';
+        $this->platformInstance = new \AIWorkforce\Platform($this->AIWorkforce_model, $disableReal);
+
+        // Authenticated requests should see user-configured connectors whenever
+        // the platform is needed, but pages that never touch the platform skip
+        // this DB/provider work entirely.
+        try {
+            $user = $this->session->userdata('identity');
+            if (is_array($user) && !empty($user['id'])) {
+                $this->platformInstance->bindUserConnectors((int) $user['id']);
+            }
+        } catch (\Throwable $e) {
+            log_message('error', 'bindUserConnectors failed: ' . $e->getMessage());
+        }
+        return $this->platformInstance;
+    }
+
 
     /**
      * Re-read the signed-in identity's permissions from the database and refresh
@@ -96,7 +149,7 @@ class MY_Controller extends CI_Controller
         if ((int) $expires < time()) return null;
         $expected = hash_hmac('sha256', "v1.{$id}.{$expires}", $key);
         if (!hash_equals($expected, $sig)) return null;
-        $user = $this->platform->identity->rememberUser((int) $id);
+        $user = $this->platform()->identity->rememberUser((int) $id);
         if (!$user) return null;
         $this->session->set_userdata([
             'identity' => $user,
@@ -140,13 +193,13 @@ class MY_Controller extends CI_Controller
     protected function isSuperAdmin(?array $user = null): bool
     {
         $user = $user ?? $this->currentUser();
-        return $user !== null && $this->platform->identity->can($user, 'system.super_admin');
+        return $user !== null && $this->platform()->identity->can($user, 'system.super_admin');
     }
 
     protected function canAccessAdmin(?array $user = null): bool
     {
         $user = $user ?? $this->currentUser();
-        return $user !== null && $this->platform->identity->canAccessAdmin($user);
+        return $user !== null && $this->platform()->identity->canAccessAdmin($user);
     }
 
     /** Any administrator portal role — used for login routing and chrome. */
@@ -220,7 +273,7 @@ class MY_Controller extends CI_Controller
     protected function requireAdminPermission(string $permission): ?array
     {
         $user = $this->requireAdminPage();
-        if (!$this->platform->identity->can($user, $permission)) {
+        if (!$this->platform()->identity->can($user, $permission)) {
             $this->session->set_flashdata('error', 'You do not have permission to perform that action.');
             redirect('/admin');
             return null;
@@ -233,7 +286,7 @@ class MY_Controller extends CI_Controller
     {
         // Permissions come from the database, not from the sign-in snapshot.
         $user = $this->refreshIdentityPermissions();
-        if (!is_array($user) || !$this->platform->identity->can($user, $permission)) {
+        if (!is_array($user) || !$this->platform()->identity->can($user, $permission)) {
             $this->jsonError('forbidden', 403); return null;
         }
         if ($csrf && !in_array($this->input->method(true), ['GET', 'HEAD'], true)) {

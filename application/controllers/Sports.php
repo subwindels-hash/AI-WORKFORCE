@@ -10,7 +10,7 @@ require_once APPPATH . 'core/App_Controller.php';
  * JSON API exposes (no data fabrication in either path). Read pages are open
  * like the rest of the console; mutation actions enforce the sports RBAC
  * matrix (sports.approve / sports.settle) from the signed-in identity — the
- * same permission checks the API enforces, and the ticket stays audited with
+ * same permission checks the API enforces, and the odds prediction ticket stays audited with
  * the acting user.
  */
 class Sports extends App_Controller
@@ -24,7 +24,7 @@ class Sports extends App_Controller
 
     public function tickets()
     {
-        $data = $this->base('Sports Tickets', 'sports');
+        $data = $this->base('🎯 Odds Prediction Tickets', 'sports');
         $data['tickets'] = $this->platform->model->sports->listTickets([], 100);
         $data['dailyRuns'] = $this->platform->model->sports->listDailyTickets(30);
         $data['performance'] = $this->platform->sports->performanceReport([]);
@@ -45,38 +45,38 @@ class Sports extends App_Controller
         return ['sync' => $can('sports.manage'), 'approve' => $can('sports.approve'), 'settle' => $can('sports.settle')];
     }
 
-    /** Approve / reject a PENDING_USER_APPROVAL ticket (sports.approve). */
+    /** Approve / reject a PENDING_USER_APPROVAL odds prediction ticket (sports.approve). */
     public function decide(string $id)
     {
         if (!$this->requireSportsPermission('sports.approve', 'approve/reject')) return;
         if ($this->killSwitchActive()) {
-            $this->flash('error', 'Refused: platform kill switch is ACTIVE — release it before approving sports tickets (settlement remains available).');
-            redirect('/sports/tickets');
+            $this->flash('error', 'Refused: platform kill switch is ACTIVE — release it before approving odds prediction tickets (settlement remains available).');
+            redirect('/sports/odds-prediction-ticket');
             return;
         }
         $approve = $this->input->post('approve') === '1';
         $reason = trim((string) $this->input->post('reason'));
         try {
             $this->platform->sports->governance->decide($id, $approve, $this->actor(), $reason);
-            $this->flash('notice', 'Ticket ' . ($approve ? 'approved' : 'rejected') . ' and audited — no external execution exists in this deployment.');
+            $this->flash('notice', 'Odds prediction ticket ' . ($approve ? 'approved' : 'rejected') . ' and audited — no external execution exists in this deployment.');
         } catch (Throwable $e) {
             $this->flash('error', $e->getMessage());
         }
-        redirect('/sports/tickets');
+        redirect('/sports/odds-prediction-ticket');
     }
 
-    /** Settle a ticket from stored verified results (sports.settle). */
+    /** Settle an odds prediction ticket from stored verified results (sports.settle). */
     public function settle(string $id)
     {
         if (!$this->requireSportsPermission('sports.settle', 'settle')) return;
         try {
             $out = $this->platform->sports->settlement->settlePending($id);
-            $this->flash('notice', sprintf('Ticket settlement: %s (effective odds %s, P/L %s)',
+            $this->flash('notice', sprintf('Odds prediction ticket settlement: %s (effective odds %s, P/L %s)',
                 $out['status'] ?? 'PENDING', $out['effectiveOdds'] ?? 'n/a', $out['pnl'] ?? 'n/a'));
         } catch (Throwable $e) {
             $this->flash('error', $e->getMessage());
         }
-        redirect('/sports/tickets');
+        redirect('/sports/odds-prediction-ticket');
     }
 
     /**
@@ -84,13 +84,13 @@ class Sports extends App_Controller
      * Browser-accessible equivalent of POST /api/sports/ticket-engine/run for
      * operators without CLI/cron access. Runs only the DailyTicketService pipeline
      * (no external provider calls) — it evaluates stored matches, applies
-     * calibration/value/confidence/risk/correlation gates and optimizes a ticket.
+     * calibration/value/confidence/risk/correlation gates and optimizes an odds prediction ticket.
      * Idempotent per (date, config version): duplicate execution keys are skipped.
      */
     public function generate_ticket()
     {
         if ($this->input->method(true) !== 'POST') { redirect('/sports'); return; }
-        if (!$this->requireSportsPermission('sports.manage', 'generate ticket')) return;
+        if (!$this->requireSportsPermission('sports.manage', 'generate odds prediction ticket')) return;
         @set_time_limit(180);
         $date = trim((string) $this->input->post('date'));
         if ($date === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) $date = gmdate('Y-m-d');
@@ -103,7 +103,7 @@ class Sports extends App_Controller
         try {
             $result = $sports->dailyTickets->runDaily($date);
         } catch (Throwable $e) {
-            $this->flash('error', 'Ticket generation failed: ' . mb_substr($e->getMessage(), 0, 300));
+            $this->flash('error', 'Odds prediction ticket generation failed: ' . mb_substr($e->getMessage(), 0, 300));
             redirect('/sports');
             return;
         }
@@ -115,15 +115,15 @@ class Sports extends App_Controller
         $message = (string) ($result['message'] ?? '');
 
         if ($status === 'DUPLICATE_SKIPPED') {
-            $this->flash('notice', sprintf('Ticket generation skipped (already run for %s — idempotent). %s', $date, $message));
-            redirect('/sports/tickets');
+            $this->flash('notice', sprintf('Odds prediction ticket generation skipped (already run for %s — idempotent). %s', $date, $message));
+            redirect('/sports/odds-prediction-ticket');
             return;
         }
         if ($ticketId) {
             $msg = sprintf('GENERATED odds prediction ticket %s for %s — status %s, %d evaluated, %d predictions, %d rejections. %s',
                 $ticketId, $date, $status, $evaluated, $recorded, $rejections, $message);
             $this->flash('notice', $msg);
-            redirect('/sports/tickets');
+            redirect('/sports/odds-prediction-ticket');
             return;
         }
         if ($status === 'DATA_UNAVAILABLE') {
@@ -135,7 +135,7 @@ class Sports extends App_Controller
             redirect('/sports');
             return;
         }
-        // No ticket qualified — still a valid outcome (spec §3)
+        // No record qualified — still a valid outcome (spec §3)
         $summary = '';
         if (!empty($result['rejectionSummary']) && is_array($result['rejectionSummary'])) {
             $parts = [];
@@ -156,7 +156,7 @@ class Sports extends App_Controller
      * Pull fresh data from the configured sports providers (sports.manage).
      * Browser-accessible equivalent of the cron sweep for operators without
      * CLI/cron access: fixtures for today+tomorrow, a bounded odds/results
-     * refresh, quality recalc and the daily ticket run. Bounded so a first
+     * refresh, quality recalc and the daily odds prediction ticket run. Bounded so a first
      * pull cannot exhaust a free-tier daily quota or PHP's time limit.
      */
     public function sync()
@@ -194,11 +194,11 @@ class Sports extends App_Controller
             $ticket = $cron->run('ticket', $date);
             $ticketStatus = (string) ($ticket['status'] ?? '');
         } catch (Throwable $e) {
-            $errors[] = 'ticket: ' . mb_substr($e->getMessage(), 0, 160);
+            $errors[] = 'record: ' . mb_substr($e->getMessage(), 0, 160);
         }
         if ($fixtures > 0 || $created > 0 || $oddsDone > 0 || $resultsDone > 0) {
             $msg = sprintf('Sync complete: %d fixture(s) pulled (%d new), odds refreshed for %d, results checked for %d.', $fixtures, $created, $oddsDone, $resultsDone);
-            if ($ticketStatus !== null && $ticketStatus !== '') $msg .= ' Ticket engine: ' . $ticketStatus . '.';
+            if ($ticketStatus !== null && $ticketStatus !== '') $msg .= ' Odds prediction ticket engine: ' . $ticketStatus . '.';
             if ($errors) $msg .= ' ' . count($errors) . ' warning(s) — see Data feed below.';
             $this->flash('notice', $msg);
         } else {
