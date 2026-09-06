@@ -1031,6 +1031,16 @@ final class ApiProviders
             return ['ok' => true, 'message' => 'Connected to Apollo.io — the key authenticated on mixed_people/api_search (HTTP 422 on the probe filters only; auth/health answered HTTP ' . $s1 . ').' . $revealNote];
         }
         if ($s2 === 403) {
+            // A 403 only means "Apollo refused the scope" when Apollo actually
+            // answered. A proxy/WAF in front of the egress path returns 403 with
+            // an HTML body and no Apollo error envelope — telling the operator to
+            // change key scopes then sends them to fix the wrong system.
+            $raw2 = trim((string) ($r2['body'] ?? ''));
+            if ($b2 === [] && $raw2 !== '') {
+                return ['ok' => false, 'message' => 'HTTP 403 with a non-JSON body ('
+                    . mb_substr($raw2, 0, 60) . '…) — this refusal did not come from Apollo. '
+                    . 'A proxy/WAF is blocking egress to ' . $root . ', or the Base URL is not api.apollo.io.'];
+            }
             // The key is valid but the People Search endpoint is not accessible:
             // a scoped key without mixed_people_api_search, a plan without API
             // access, or a free/personal-email account. Report the fix, never

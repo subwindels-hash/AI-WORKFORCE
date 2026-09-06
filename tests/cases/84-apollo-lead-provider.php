@@ -189,6 +189,21 @@ $tests[] = function (): array {
 };
 
 $tests[] = function (): array {
+    // A 403 with no Apollo error envelope (bare code/message) is most likely an
+    // intermediary refusing the request, so the message must not assert that the
+    // key's scopes are wrong.
+    $p = new FakeTransportProvider([['status' => 403, 'json' => []]]);
+    $thrown = null;
+    try { $p->searchBusinesses(['query' => 'x']); } catch (\Throwable $e) { $thrown = $e; }
+    assert_true($thrown instanceof ProviderException, 'throws');
+    assert_true($thrown->httpStatus === 403, 'http_403');
+    $m = $thrown->getMessage();
+    assert_true(str_contains($m, 'proxy') || str_contains($m, 'WAF'), 'points_at_the_intermediary');
+    assert_true(str_contains($m, 'mixed_people_api_search'), 'still_mentions_the_scope_to_check');
+    return ['msg' => 'envelope-less 403 not blamed solely on key scope'];
+};
+
+$tests[] = function (): array {
     // A 200 body that is actually an error envelope must not be read as data.
     $p = new FakeTransportProvider([['json' => [
         'status' => 'error', 'error_code' => 'API_INACCESSIBLE', 'error_message' => 'Your plan does not include API access',
