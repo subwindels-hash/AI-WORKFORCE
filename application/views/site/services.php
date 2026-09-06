@@ -8,7 +8,7 @@
   <div class="cards two">
     <article class="card">
       <h3>Trading intelligence</h3>
-      <p>Multi-agent analysis, consensus, regime detection and a risk-reviewed trade proposal. The public site cannot place an order.</p>
+      <p>Multi-agent analysis, consensus, regime detection and a risk-reviewed trade proposal. The public site cannot place an order. Non-custodial: your funds stay with your own broker — we never hold deposits or process withdrawals. See <a href="/safety">Safety &amp; trust</a>.</p>
       <p class="dim">Workspace: Analysis, Strategy Lab, Paper Trading, Execution, Brokers, Risk, Journal</p>
       <a class="btn ghost" href="/login">Open after login</a>
     </article>
