@@ -177,6 +177,99 @@ class SportsSyncService
         return array_merge(['runId' => $run['id']], $result);
     }
 
+    /**
+     * Live sweep: refresh every in-play fixture the provider reports (status,
+     * minute, current goal score) in ONE live-endpoint request, and record a
+     * SPORTS_GOAL_SCORED audit event the moment the provider's total goals is
+     * higher than the last stored one — that event is what the console's live
+     * board flashes as "GOAL".
+     *
+     * Detection rules (nothing is invented):
+     *  - the FIRST observation of a live match emits nothing (no previous
+     *    state to compare with — a board that already shows 1-0 is not a goal);
+     *  - a higher total emits one event carrying the delta (the provider does
+     *    not report individual goal minutes for a multi-goal jump);
+     *  - a lower or equal total (correction, re-observation) updates the row
+     *    silently. Scores only ever come from the provider payload.
+     */
+    public function syncLive(SportsDataProvider $provider, string $executionKey): array
+    {
+        $source = $this->repo->ensureProvider($provider->id(), $provider->id());
+        $run = ['id' => Backtester::uuid(), 'providerId' => (int) $source['id'], 'jobType' => 'LIVE', 'executionKey' => $executionKey];
+        if ($this->repo->startSync($run) === null) return ['status' => 'DUPLICATE_SKIPPED', 'executionKey' => $executionKey, 'goalEvents' => [], 'errors' => []];
+        $processed = 0; $created = 0; $updated = 0; $invalid = 0; $errors = []; $goalEvents = [];
+        try {
+            $health = $this->preflight($provider, (int) $source['id']);
+            if (!method_exists($provider, 'liveFixtures')) throw new \RuntimeException('provider does not support live fixtures (no live endpoint)');
+            foreach ($provider->liveFixtures() as $raw) {
+                $processed++;
+                try {
+                    $match = SportsDataNormalizer::fixture($raw, $provider->id());
+                    $existing = $this->repo->findMatch((int) $source['id'], $match['externalId']);
+                    $stored = $this->repo->saveMatch((int) $source['id'], $match);
+                    !empty($stored['created_at']) && $stored['created_at'] === $stored['updated_at'] ? $created++ : $updated++;
+                    $assessment = $this->quality->assess($match, [
+                        'oddsAvailable' => $this->repo->latestOdds((int) $stored['id'], 'TOTAL_GOALS', 'OVER_1_5') !== null,
+                        'recentFormAvailable' => !empty($match['context']['recentForm']),
+                        'providerReliability' => (float) ($health['reliability'] ?? 0),
+                        'dataAgeSeconds' => 0,
+                    ]);
+                    $this->repo->saveQuality((int) $stored['id'], $assessment);
+                    $goalEvents = array_merge($goalEvents, $this->recordGoalEvents($provider->id(), $existing, $match));
+                } catch (\Throwable $e) { $invalid++; $errors[] = mb_substr($e->getMessage(), 0, 200); }
+            }
+            $this->settle($provider, null);
+            $result = ['status' => 'COMPLETED', 'processed' => $processed, 'created' => $created, 'updated' => $updated, 'goalEvents' => $goalEvents, 'errors' => $errors];
+        } catch (\Throwable $e) {
+            $result = ['status' => 'FAILED', 'processed' => $processed, 'created' => 0, 'updated' => 0, 'goalEvents' => $goalEvents, 'errors' => [$this->settle($provider, $e)]];
+        }
+        $this->repo->finishSync($run['id'], $result);
+        if ($result['status'] === 'COMPLETED') $this->markProviderReachable((int) $source['id']);
+        $this->audit->emit($result['status'] === 'COMPLETED' ? 'SPORTS_LIVE_SYNC_COMPLETED' : 'SPORTS_LIVE_SYNC_FAILED', 'Sports live score sync ' . strtolower($result['status']), ['provider' => $provider->id(), 'runId' => $run['id'], 'goals' => count($goalEvents), 'result' => ['processed' => $processed, 'created' => $created, 'updated' => $updated, 'errors' => $errors]]);
+        return array_merge(['runId' => $run['id']], $result);
+    }
+
+    /**
+     * Compare the freshly normalized live state with the stored one and audit
+     * one SPORTS_GOAL_SCORED event per match whose total goals increased.
+     *
+     * @param array|null $existing stored match row (payload may still be a JSON string depending on the repository backend)
+     * @return list<array<string,mixed>> the recorded goal events
+     */
+    private function recordGoalEvents(string $providerId, ?array $existing, array $match): array
+    {
+        $new = is_array($match['live'] ?? null) ? $match['live'] : [];
+        if (!isset($new['homeScore'], $new['awayScore'])) return [];    // provider stated no score
+        if ($existing === null) return [];                              // first observation — nothing to compare
+        $payload = $existing['payload'] ?? null;
+        if (is_string($payload)) $payload = json_decode($payload, true);
+        $old = is_array($payload) && is_array($payload['live'] ?? null) ? $payload['live'] : [];
+        if (!isset($old['homeScore'], $old['awayScore'])) return [];    // no previous score — cannot call it a goal
+        $newTotal = (int) $new['homeScore'] + (int) $new['awayScore'];
+        $oldTotal = (int) $old['homeScore'] + (int) $old['awayScore'];
+        if ($newTotal <= $oldTotal) return [];                          // unchanged or a provider correction
+        $side = (int) $new['homeScore'] > (int) $old['homeScore'] ? 'home' : 'away';
+        $event = [
+            'type' => 'GOAL',
+            'occurredAt' => gmdate('c'),
+            'matchId' => (int) ($existing['id'] ?? 0),
+            'provider' => $providerId,
+            'externalId' => (string) $match['externalId'],
+            'homeTeam' => $match['homeTeam'],
+            'awayTeam' => $match['awayTeam'],
+            'competition' => $match['competition'],
+            'previous' => ['home' => (int) $old['homeScore'], 'away' => (int) $old['awayScore']],
+            'score' => ['home' => (int) $new['homeScore'], 'away' => (int) $new['awayScore']],
+            'delta' => $newTotal - $oldTotal,
+            'side' => $side,
+            'minute' => isset($new['minute']) ? (int) $new['minute'] : null,
+        ];
+        $this->audit->emit('SPORTS_GOAL_SCORED', sprintf('GOAL — %s %d-%d %s (%s, %s%s)',
+            $match['homeTeam'], $event['score']['home'], $event['score']['away'], $match['awayTeam'],
+            $match['competition'], $event['minute'] !== null ? $event['minute'] . "' " : '', $side === 'home' ? $match['homeTeam'] : $match['awayTeam']), $event);
+        return [$event];
+    }
+
     public function syncFixtures(SportsDataProvider $provider, array $query, string $executionKey): array
     {
         $source = $this->repo->ensureProvider($provider->id(), $provider->id());

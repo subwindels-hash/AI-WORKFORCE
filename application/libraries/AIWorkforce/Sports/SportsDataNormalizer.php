@@ -22,8 +22,30 @@ class SportsDataNormalizer
             'simulated' => !empty($raw['simulated']),
             'context' => self::context($raw['context'] ?? null),
             'roundId' => (string) ($raw['roundId'] ?? ''),
+            // In-play state (minute + current goal score), copied through only
+            // when the provider sent it. Absent stays absent: a live match the
+            // provider gave no score for is never defaulted to 0-0 — the live
+            // board reports "—" instead of inventing a score.
+            'live' => self::liveState($raw),
             'fieldsPresent' => array_keys($raw),
         ];
+    }
+
+    /**
+     * Optional in-play state from a provider fixture/live payload. Only
+     * numeric minute/score fields and a non-empty status detail are kept;
+     * anything else the provider did not state is omitted, never guessed.
+     */
+    private static function liveState(array $raw): ?array
+    {
+        $out = [];
+        foreach (['minute', 'extraMinute', 'homeScore', 'awayScore'] as $key) {
+            $value = $raw[$key] ?? null;
+            if ($value !== null && $value !== '' && is_numeric($value) && $value >= 0) $out[$key] = (int) $value;
+        }
+        $statusShort = $raw['statusShort'] ?? null;
+        if (is_string($statusShort) && trim($statusShort) !== '') $out['statusShort'] = trim($statusShort);
+        return $out === [] ? null : $out;
     }
 
     /**

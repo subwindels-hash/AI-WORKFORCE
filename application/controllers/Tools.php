@@ -108,8 +108,10 @@ class Tools extends MY_Controller
      * Sports Intelligence scheduled jobs (spec §31) — idempotent, safe to run
      * from cron every 15 minutes (use the standard "every 15 minutes" cron
      * expression) e.g.: php /path/to/index.php tools sports-cron
-     * Individual jobs: fixtures | odds | results | quality | ticket |
+     * Individual jobs: fixtures | odds | live | results | quality | ticket |
      *                  settlement | performance | monitoring | cleanup
+     * `live` self-gates on WINDELS_SPORTS_LIVE_REFRESH_SECONDS, so it is also
+     * safe on a every-minute schedule (tools sports-cron live).
      */
     public function sports_cron()
     {

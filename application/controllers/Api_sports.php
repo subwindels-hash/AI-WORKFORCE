@@ -42,6 +42,60 @@ class Api_sports extends Api_controller
         $this->json($this->platform->sports->performanceReport($filter));
     }
 
+    /**
+     * Auto-updating live match board — the goal scores update by themselves.
+     * GET /api/sports/live[?refresh=0|1][&since=ISO8601]   (sports.view)
+     *
+     * Read is always from stored state; with refresh=1 (the default) the
+     * endpoint first triggers the throttled live sweep, so a goal lands here
+     * automatically at most WINDELS_SPORTS_LIVE_REFRESH_SECONDS after the
+     * provider reports it — regardless of how many clients poll, they share
+     * one provider request per interval. `since` replays SPORTS_GOAL_SCORED
+     * events (at/after that timestamp) for the UI's GOAL flash.
+     */
+    public function live()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $svc = $this->platform->sports->liveScores;
+        $refreshed = null;
+        if (!isset($g['refresh']) || (string) $g['refresh'] !== '0') {
+            @set_time_limit(60);
+            try {
+                $refreshed = $svc->refresh();
+            } catch (\Throwable $e) {
+                $refreshed = ['status' => 'FAILED', 'providers' => [], 'goalEvents' => [], 'errors' => [mb_substr($e->getMessage(), 0, 200)]];
+            }
+        }
+        $since = trim((string) ($g['since'] ?? ''));
+        if ($since !== '' && strtotime($since) === false) $since = '';
+        $board = $svc->board($since !== '' ? $since : null);
+        // A sweep can both return its freshly detected events and have them
+        // already audited (then replayed by board()); dedupe by identity so a
+        // goal flashes once.
+        $seen = [];
+        $events = array_values(array_filter(array_merge((array) ($refreshed['goalEvents'] ?? []), (array) $board['goalEvents']), static function ($e) use (&$seen) {
+            if (!is_array($e)) return false;
+            $key = ($e['matchId'] ?? 0) . ':' . ($e['score']['home'] ?? '?') . '-' . ($e['score']['away'] ?? '?') . ':' . ($e['minute'] ?? '');
+            if (isset($seen[$key])) return false;
+            $seen[$key] = true;
+            return true;
+        }));
+        $this->json([
+            'status' => $board['status'],
+            'matches' => $board['matches'],
+            'goalEvents' => $events,
+            'refreshed' => $refreshed === null ? null : [
+                'status' => $refreshed['status'] ?? null,
+                'providers' => $refreshed['providers'] ?? [],
+                'errors' => $refreshed['errors'] ?? [],
+                'retryInSeconds' => $refreshed['retryInSeconds'] ?? null,
+            ],
+            'refreshIntervalSeconds' => $board['refreshIntervalSeconds'],
+            'serverTime' => gmdate('c'),
+        ]);
+    }
+
     public function matches()
     {
         if (!$this->requirePermission('sports.view', false)) return;
@@ -489,6 +543,8 @@ class Api_sports extends Api_controller
     /**
      * Sync fixtures/odds/results from a specific named provider.
      * GET /api/sports/sync?provider=api-football&type=fixtures&from=2026-09-01&to=2026-09-07
+     * type=live refreshes every in-play fixture of the provider (minute + goal
+     * score) from its live endpoint and records SPORTS_GOAL_SCORED events.
      * type=round bulk-syncs a whole matchday (fixtures + odds + results) in
      * one provider request: ?provider=sportmonks&type=round&roundId=396698
      */
@@ -524,11 +580,16 @@ class Api_sports extends Api_controller
             } elseif ($type === 'results') {
                 if (empty($g['fixtureId'])) return $this->jsonError('fixtureId is required for results sync');
                 $result = $this->platform->sports->sync->syncResults($provider, (string) $g['fixtureId'], 'api-sync-results-' . $providerId . '-' . gmdate('YmdHis'));
+            } elseif ($type === 'live') {
+                // One live-endpoint request: refresh every in-play fixture of
+                // this provider (minute + goal score) and record goal events.
+                if (!method_exists($provider, 'liveFixtures')) return $this->jsonError('provider does not support live fixtures: ' . $providerId, 422);
+                $result = $this->platform->sports->sync->syncLive($provider, 'api-sync-live-' . $providerId . '-' . gmdate('YmdHis'));
             } elseif ($type === 'round') {
                 if (empty($g['roundId'])) return $this->jsonError('roundId is required for round sync (resolve with the provider season rounds)');
                 $result = $this->platform->sports->sync->syncRound($provider, (string) $g['roundId'], 'api-sync-round-' . $providerId . '-' . $g['roundId'] . '-' . gmdate('YmdHis'));
             } else {
-                return $this->jsonError('type must be fixtures, odds, results, or round');
+                return $this->jsonError('type must be fixtures, odds, results, live, or round');
             }
             $this->json(['sync' => $result, 'provider' => $providerId, 'type' => $type]);
         } catch (\Throwable $e) {

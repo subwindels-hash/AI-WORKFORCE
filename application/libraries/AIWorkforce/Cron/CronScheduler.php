@@ -35,7 +35,19 @@ class CronScheduler
             'group' => 'Sports Intelligence',
             'interval' => 900,
             'schedule' => 'Every 15 minutes',
-            'description' => 'Fixtures, odds, results, quality, daily ticket, settlement, performance, monitoring and cleanup.',
+            'description' => 'Fixtures, odds, live scores, results, quality, daily ticket, settlement, performance, monitoring and cleanup.',
+            'defaultEnabled' => true,
+        ],
+        'sports-live' => [
+            'label' => 'Sports live scores',
+            'group' => 'Sports Intelligence',
+            // Ticked at the runner's granularity; the live job self-gates on
+            // WINDELS_SPORTS_LIVE_REFRESH_SECONDS (default 60s), so a minute
+            // tick spends a provider request only when the interval elapsed —
+            // exactly like the football sweep's RefreshPolicy pattern.
+            'interval' => 60,
+            'schedule' => 'Every minute (self-gated)',
+            'description' => 'Live goal-score sweep: refreshes in-play matches (minute + score) and records SPORTS_GOAL_SCORED events for the Sports Intelligence live board. Self-gated twice — skipped outright when no stored match can be in play, and at most one provider request per WINDELS_SPORTS_LIVE_REFRESH_SECONDS — so idle hours cost zero quota. Raise that value or disable this job to protect a small daily quota further.',
             'defaultEnabled' => true,
         ],
         'football' => [
