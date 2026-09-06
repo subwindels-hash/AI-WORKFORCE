@@ -215,6 +215,26 @@ test('publicError never leaks key, token, env or configuration internals to memb
     assert_contains('ApiProviders::publicError', $lead);
 });
 
+test('lead discovery surfaces actionable provider reasons and uses a cURL-capable transport', function () {
+    // Regression: the search used to flatten every provider failure into the
+    // same opaque "This feature is temporarily unavailable." line, hiding why a
+    // search that passed Admin → Test Connection returned nothing. Provider
+    // exceptions now surface their secret-free reason, and Google Places uses
+    // the same cURL-first transport as the connection test so runtime and test
+    // behave identically on hosts where allow_url_fopen is Off.
+    $safe = \AIWorkforce\ApiProviders::providerMessage('Apollo.io: this API key may not call that endpoint (HTTP 403) — grant mixed_people/api_search or toggle master key.');
+    assert_contains('mixed_people/api_search', $safe, 'actionable text is not hidden');
+    assert_equals(\AIWorkforce\ApiProviders::USER_UNAVAILABLE, \AIWorkforce\ApiProviders::providerMessage('sk-abcdefghij secret leaked'), 'credential-shaped text stays hidden');
+
+    $lead = file_get_contents(FCPATH . 'application/controllers/Api_lead_discovery.php');
+    assert_contains('ApiProviders::publicError', $lead, 'unexpected errors still use the opaque fallback');
+    assert_contains('ApiProviders::providerMessage', $lead, 'provider exceptions surface the real reason');
+
+    $gp = file_get_contents(FCPATH . 'application/libraries/LeadDiscovery/GooglePlacesProvider.php');
+    assert_contains('ApiProviders::http', $gp, 'google places uses the cURL-first transport');
+    assert_contains('X-Goog-Api-Key', $gp, 'google key stays in the documented header');
+});
+
 test('Google Places, lottery and sports resolve managed credentials from the store', function () {
     $db = fx_api_db();
     $ids = [];
