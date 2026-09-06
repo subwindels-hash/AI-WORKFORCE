@@ -120,14 +120,14 @@ The `/leads` view (`application/views/leads/index.php`) ships with two modes:
 1. **Business Mode** — keyword + country + city targeting. Example inputs:
    - Keywords: `Banking, Commercial Real Estate, Architecture`
    - Country: `Nigeria`, City: `Lagos`
-   Works with both Google Places (business listings) and Apollo.io (B2B contacts with emails/phones).
+   Works with both Windels G (business listings) and Windels A (B2B contacts with emails/phones).
 
 2. **Person Mode** — first-name list + country + city. Results are **server-side
    filtered** to people whose email resolves to a free/personal webmail domain
    (`icloud.com`, `gmail.com`, `yahoo.com`, `outlook.com`, plus
    `hotmail.com`, `aol.com`, `proton.me`, `live.com`, `me.com`, `mail.com`,
-   `gmx.com`, `yandex.com`). Requires Apollo.io (`APOLLO_IO_API_KEY`) because
-   only Apollo returns people with personal emails. Name matching is a
+   `gmx.com`, `yandex.com`). Requires Windels A (`APOLLO_IO_API_KEY`) because
+   only Windels A returns people with personal emails. Name matching is a
    startswith prefix on the normalized contact name.
 
 New API endpoints:
@@ -137,10 +137,10 @@ New API endpoints:
   `lead_kind` (`business`|`person`), per-lead `email`, `job_title`,
   `company_name`, `linkedin_url`, and a truthful `verification_status` in
   metadata:
-  - `verified` — Apollo-reported verified email/direct phone.
+  - `verified` — Windels.ai-reported verified email/direct phone.
   - `partial_verified` — phone present but email not fully verified.
   - `provider_enriched` — data present but no provider-level verification signal.
-  - `business_listing` — Google Places business listing (no person verification).
+  - `business_listing` — Windels G business listing (no person verification).
 
   We never claim "100% verified" globally; verification is per-lead and shown as a coloured pill.
 

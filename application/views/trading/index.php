@@ -15,6 +15,7 @@ $overall = $perfSummary['overall'] ?? [];
 /* ─── Tabs ──────────────────────────────────────────────────────── */
 .trading-tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:0 0 18px;overflow-x:auto}
 .trading-tabs button{background:none;border:none;color:var(--muted);padding:10px 16px;font:600 13px/1 inherit;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:all .15s}
+.trading-tabs button svg{width:18px;height:18px;flex:none;display:block}
 .trading-tabs button:hover{color:var(--text)}.trading-tabs button.active{color:var(--brand);border-bottom-color:var(--brand)}
 .tab-panel{display:none}.tab-panel.active{display:block}
 /* ─── Stats ─────────────────────────────────────────────────────── */
