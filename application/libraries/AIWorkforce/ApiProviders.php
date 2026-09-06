@@ -416,6 +416,29 @@ final class ApiProviders
         return self::USER_UNAVAILABLE;
     }
 
+    /**
+     * Member-facing reason for a provider failure that already carried a safe,
+     * actionable message (the Lead Discovery providers never echo credentials).
+     *
+     * publicError() flattens every cause — missing key, wrong scope, rate limit,
+     * vendor outage — into the same opaque "This feature is temporarily
+     * unavailable." line, which hid why a search that passed Admin → Test
+     * Connection still returned nothing. For ProviderException we already hold a
+     * secret-free message built by the adapter, so surface it. As a safety net
+     * we still fall back to USER_UNAVAILABLE if the text itself looks like a
+     * leaked credential, and we always cap the length at 255 characters.
+     */
+    public static function providerMessage(string $internal): string
+    {
+        $msg = trim((string) $internal);
+        if ($msg === '') return self::USER_UNAVAILABLE;
+        $hay = strtolower($msg);
+        foreach (['sk-', 'secret=', 'client_secret=', 'api_key=', 'apikey=', 'authorization: bearer', 'bearer ', 'password=', 'getenv '] as $needle) {
+            if (str_contains($hay, $needle)) return self::USER_UNAVAILABLE;
+        }
+        return mb_substr($msg, 0, 255);
+    }
+
     public static function mask(?string $value): string
     {
         $value = (string) $value;

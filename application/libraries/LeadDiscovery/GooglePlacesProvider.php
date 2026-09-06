@@ -41,13 +41,54 @@ class GooglePlacesProvider implements LeadDiscoveryProvider
     /** Separated for deterministic integration tests with a staged transport. */
     protected function post(string $payload): array
     {
-        $headers="Content-Type: application/json\r\nX-Goog-Api-Key: {$this->apiKey}\r\nX-Goog-FieldMask: places.id,places.displayName,places.formattedAddress,places.types,places.nationalPhoneNumber,places.websiteUri,places.location\r\n";
-        $context=stream_context_create(['http'=>['method'=>'POST','timeout'=>$this->timeoutSeconds,'ignore_errors'=>true,'header'=>$headers,'content'=>$payload]]);
-        $body=@file_get_contents(self::URL,false,$context); $status=0;
-        foreach(($http_response_header??[]) as $line) if(preg_match('#HTTP/\S+\s+(\d+)#',$line,$m)) {$status=(int)$m[1];break;}
-        if($body===false) throw new ProviderException('Google Places request timed out or could not connect',503,true);
-        $decoded=json_decode($body,true); if(!is_array($decoded)) throw new ProviderException('Google Places returned an invalid response',502,true);
-        if($status>=400 || isset($decoded['error'])) { $message=(string)($decoded['error']['message']??'Google Places request failed'); throw new ProviderException($message,$status?:502,$status===429||$status>=500); }
+        $headers = [
+            'Content-Type: application/json',
+            'X-Goog-Api-Key: ' . $this->apiKey,
+            'X-Goog-FieldMask: places.id,places.displayName,places.formattedAddress,places.types,places.nationalPhoneNumber,places.websiteUri,places.location',
+        ];
+        $status = 0;
+        $body = '';
+        $networkNote = '';
+        // Prefer the same cURL-first transport the connection test uses
+        // (ApiProviders::http). This provider used to rely on allow_url_fopen
+        // / streams alone, so on hosts where that is Off but cURL works
+        // (common on cPanel), Admin → Test Connection passed while the live
+        // search failed with the opaque "feature temporarily unavailable".
+        if (class_exists(\AIWorkforce\ApiProviders::class)
+            && method_exists(\AIWorkforce\ApiProviders::class, 'http')) {
+            $resp = \AIWorkforce\ApiProviders::http(self::URL, $headers, $payload);
+            $status = (int) ($resp['status'] ?? 0);
+            $body = (string) ($resp['body'] ?? '');
+            $err = trim((string) ($resp['error'] ?? ''));
+            if ($err !== '') $networkNote = ' (' . mb_substr($err, 0, 120) . ')';
+        } else {
+            // Standalone fallback (outside the CodeIgniter app): plain streams.
+            $hdr = implode("\r\n", $headers) . "\r\n";
+            $context = stream_context_create(['http' => [
+                'method' => 'POST',
+                'timeout' => $this->timeoutSeconds,
+                'ignore_errors' => true,
+                'header' => $hdr,
+                'content' => $payload,
+            ]]);
+            $raw = @file_get_contents(self::URL, false, $context);
+            foreach (($http_response_header ?? []) as $line) {
+                if (preg_match('#HTTP/\S+\s+(\d+)#', $line, $m)) { $status = (int) $m[1]; break; }
+            }
+            if ($raw === false) {
+                throw new ProviderException('Google Places request timed out or could not connect' . $networkNote, 503, true);
+            }
+            $body = (string) $raw;
+        }
+        if ($status === 0 && $body === '') {
+            throw new ProviderException('Google Places request timed out or could not connect' . $networkNote, 503, true);
+        }
+        $decoded = json_decode($body, true);
+        if (!is_array($decoded)) throw new ProviderException('Google Places returned an invalid response', 502, true);
+        if ($status >= 400 || isset($decoded['error'])) {
+            $message = (string) ($decoded['error']['message'] ?? 'Google Places request failed');
+            throw new ProviderException($message, $status ?: 502, $status === 429 || $status >= 500);
+        }
         return $decoded;
     }
     private function normalize(array $payload): array

@@ -70,7 +70,7 @@ class Api_lead_discovery extends Api_controller
             if($names) $providerInput['first_names']=$names;
         }
         try { $registry=new \LeadDiscovery\ProviderRegistry([new \LeadDiscovery\GooglePlacesProvider(), new \LeadDiscovery\ApolloProvider()]); $provider=$registry->get($providerName); $providerStatus=$provider->healthCheck()['status']; $raw=$provider->searchBusinesses($providerInput); if(method_exists($provider,'lastSearchInfo')) $providerInfo=$provider->lastSearchInfo(); }
-        catch(\LeadDiscovery\ProviderException $e) { log_message('error','lead_discovery '.$providerName.': '.$e->getMessage()); $error=\AIWorkforce\ApiProviders::publicError($e->getMessage()); $providerStatus=$e->httpStatus===422?'PLANNED':'DISABLED'; }
+        catch(\LeadDiscovery\ProviderException $e) { log_message('error','lead_discovery '.$providerName.': '.$e->getMessage()); $error=\AIWorkforce\ApiProviders::providerMessage($e->getMessage()); $providerStatus=$e->httpStatus===422?'PLANNED':'DISABLED'; }
         catch(\Throwable $e) { log_message('error','lead_discovery '.$providerName.' unexpected: '.$e->getMessage()); $error=\AIWorkforce\ApiProviders::publicError($e->getMessage()); }
         // Provider facts an operator may act on. Apollo's search endpoint never
         // returns emails/phones (https://docs.apollo.io/reference/people-api-search),
