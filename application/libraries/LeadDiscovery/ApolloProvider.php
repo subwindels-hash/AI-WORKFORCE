@@ -160,7 +160,8 @@ class ApolloProvider implements LeadDiscoveryProvider
         return [
             'status' => 'IMPLEMENTED',
             'detail' => 'Apollo.io REST API (mixed_people/api_search) — key configured'
-                . ($this->revealContacts ? ', contact reveal on (spends Apollo credits)' : ', contact reveal off (search rows carry no emails/phones)'),
+                . ($this->revealContacts ? ', contact reveal on (spends Apollo credits)' : ', contact reveal off (search rows carry no emails/phones)')
+                . '; run Admin → Test Connection to confirm the People Search endpoint is permitted',
         ];
     }
 
@@ -499,10 +500,17 @@ class ApolloProvider implements LeadDiscoveryProvider
                 return 'Apollo.io' . $where . ': the API key was rejected (HTTP 401'
                     . ($detail ? ': ' . $detail : '') . '). Regenerate it in Apollo → Settings → Integrations → API Keys and save the full value again.';
             case 403:
-                return 'Apollo.io' . $where . ': this API key may not call that endpoint (HTTP 403'
-                    . ($detail ? ': ' . $detail : '') . '). Apollo keys are scoped per endpoint — add `mixed_people_api_search`'
+                // HTTP 403 / error_code API_INACCESSIBLE means the key or plan is
+                // not permitted to use this endpoint — not that the request was
+                // malformed and not that the key is invalid. Tell the operator
+                // exactly what to enable/upgrade rather than "Connection failed".
+                $inaccessible = $code !== null && strtoupper($code) === 'API_INACCESSIBLE';
+                $reason = (is_string($msg) && trim($msg) !== '') ? ' — ' . trim($msg) : '';
+                return 'Apollo.io' . $where . ': HTTP 403' . ($inaccessible ? ' API_INACCESSIBLE' : '') . $reason
+                    . ' — this API key/plan is not permitted to use Apollo People Search. '
+                    . 'Apollo keys are scoped per endpoint: grant the `mixed_people_api_search` scope'
                     . ' (and `people_bulk_match` for contact reveal) or toggle “Set as master key” in Apollo → Settings → Integrations → API Keys.'
-                    . ' Free Apollo accounts must be registered with a work email address and the plan must include API access.';
+                    . ' If the plan lacks API access, upgrade it — free accounts must be registered with a work email.';
             case 404:
                 return 'Apollo.io' . $where . ': endpoint not found (HTTP 404' . ($detail ? ': ' . $detail : '')
                     . '). Check the base URL — it must be https://api.apollo.io.';

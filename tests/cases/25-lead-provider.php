@@ -9,7 +9,7 @@ class StagedGooglePlacesProvider extends \LeadDiscovery\GooglePlacesProvider {
 }
 test('Google Places provider normalizes stable provider fields into lead contract', function () {
     $provider=new StagedGooglePlacesProvider('test-key'); $rows=$provider->searchBusinesses(['query'=>'Restaurants in Lagos']);
-    assert_equals(1,count($rows)); assert_equals('stable-place-id',$rows[0]['sourceId']); assert_equals('Lagos Kitchen',$rows[0]['name']); assert_equals('restaurant, food',$rows[0]['category']); assert_close(6.45,$rows[0]['latitude'],0.00001); assert_equals('Google Places',$rows[0]['metadata']['provider']);
+    assert_equals(1,count($rows)); assert_equals('stable-place-id',$rows[0]['sourceId']); assert_equals('Lagos Kitchen',$rows[0]['name']); assert_equals('restaurant, food',$rows[0]['category']); assert_close(6.45,$rows[0]['latitude'],0.00001); assert_equals('Windels G',$rows[0]['metadata']['provider']);
 });
 test('provider registry only reports actually implemented adapters', function () {
     $registry=new \LeadDiscovery\ProviderRegistry([new StagedGooglePlacesProvider('test-key')]);

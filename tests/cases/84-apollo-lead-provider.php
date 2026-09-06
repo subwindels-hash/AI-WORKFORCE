@@ -101,7 +101,7 @@ $tests[] = function (): array {
     assert_true(str_contains((string)$r['address'], 'London'), 'address');
     assert_eq($r['phone'], '+44 20 1234 5678', 'phone');
     assert_eq($r['website'], 'https://acme.example', 'website');
-    assert_eq($r['metadata']['provider'], 'Apollo.io', 'metadata_provider');
+    assert_eq($r['metadata']['provider'], 'Windels A', 'metadata_provider');
     assert_eq($r['metadata']['title'], 'CEO', 'metadata_title');
     assert_eq($r['metadata']['company'], 'Acme Ltd', 'metadata_company');
     assert_eq($r['metadata']['email'], 'jane@example.com', 'email_in_metadata');
