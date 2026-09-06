@@ -205,7 +205,7 @@ $pageTitle = $isPipeline ? 'Lead Pipeline' : 'Lead Discovery';
         </div>
         <button type="button" id="searchPersonBtn" style="margin-top:6px">Search people</button>
       </div>
-      <p id="message" class="muted" style="margin:10px 2px 0">Enter keywords or names and a location to start. Person Mode needs Apollo.io with <b>Reveal emails/phones</b> switched on by an administrator (Admin &rarr; API Management): Apollo&rsquo;s people search returns names, titles and companies but no email addresses until a record is enriched, which spends Apollo credits.</p>
+      <p id="message" class="muted" style="margin:10px 2px 0">Enter keywords or names and a location to start. Windels.ai is required for Person Mode (it provides emails/phones).</p>
     </div>
     <?php endif; ?>
 
