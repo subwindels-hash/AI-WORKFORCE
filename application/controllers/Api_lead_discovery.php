@@ -25,8 +25,8 @@ class Api_lead_discovery extends Api_controller
     public function workspaces(){ if(!$this->guard())return; $rows=$this->db->select('o.id,o.name,m.role')->from('lead_organizations o')->join('lead_organization_members m','m.organization_id=o.id')->where('m.user_id',(int)$this->user['id'])->get()->result_array(); $this->json(['workspaces'=>$rows,'activeOrganizationId'=>$this->org]); }
     public function providers(){ if(!$this->guard())return; $this->json(['providers'=>(new \LeadDiscovery\ProviderRegistry([new \LeadDiscovery\GooglePlacesProvider(), new \LeadDiscovery\ApolloProvider()]))->health()]); }
     public function modes(){ if(!$this->guard())return; $this->json(['modes'=>[
-        ['id'=>'business','label'=>'Business Mode','description'=>'Search B2B/business contacts by keyword + country/city. Works with both Google Places and Apollo.io.'],
-        ['id'=>'person','label'=>'Person Mode','description'=>'Search for individuals by first-name list + country/city; results are filtered to people whose email is on a free webmail provider (gmail.com, yahoo.com, outlook.com, icloud.com, hotmail.com, aol.com, proton.me, live.com). Apollo.io required, with contact reveal enabled on the provider: Apollo people search returns no email addresses until a record is enriched (spends Apollo credits).'],
+        ['id'=>'business','label'=>'Business Mode','description'=>'Search B2B/business contacts by keyword + country/city. Works with both Windels G and Windels A (B2B contacts with emails/phones).'],
+        ['id'=>'person','label'=>'Person Mode','description'=>'Search for individuals by first-name list + country/city; results are filtered to people whose email is on a free webmail provider (gmail.com, yahoo.com, outlook.com, icloud.com, hotmail.com, aol.com, proton.me, live.com). Windels A required, with contact reveal enabled on the provider: Windels A people search returns no email addresses until a record is enriched (spends credits).'],
     ]]); }
     private function id(): string { return bin2hex(random_bytes(16)); }
     private function now(): string { return gmdate('c'); }

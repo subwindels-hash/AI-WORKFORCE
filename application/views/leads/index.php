@@ -371,7 +371,7 @@ $pageTitle = $isPipeline ? 'Lead Pipeline' : 'Lead Discovery';
       const checkedDomains = [...document.querySelectorAll('#freeDomains input:checked')].map((i) => i.value);
       if (!names.length) { messageEl.textContent = 'Enter at least one first name.'; return; }
       if (!city && !country) { messageEl.textContent = 'Add a city/country to narrow person searches.'; return; }
-      messageEl.textContent = 'Searching Apollo.io for people (filtered to free emails)…';
+      messageEl.textContent = 'Searching Windels.ai for people (filtered to free emails)…';
       $('searchPersonBtn').disabled = true;
       request('/search', { method: 'POST', body: JSON.stringify({ mode: 'person', provider: 'apollo_io', names, country, city, seniorities: seniority ? [seniority] : [], freeEmailDomains: checkedDomains }) })
         .then((d) => {

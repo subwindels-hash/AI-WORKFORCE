@@ -52,7 +52,7 @@ class GooglePlacesProvider implements LeadDiscoveryProvider
     }
     private function normalize(array $payload): array
     {
-        $out=[]; foreach(($payload['places']??[]) as $p) { $sourceId=(string)($p['id']??''); if($sourceId==='') continue; $types=array_values($p['types']??[]); $out[]=['sourceId'=>$sourceId,'name'=>(string)($p['displayName']['text']??'Unnamed business'),'category'=>implode(', ',array_slice($types,0,3))?:null,'address'=>$p['formattedAddress']??null,'phone'=>$p['nationalPhoneNumber']??null,'website'=>$p['websiteUri']??null,'latitude'=>isset($p['location']['latitude'])?(float)$p['location']['latitude']:null,'longitude'=>isset($p['location']['longitude'])?(float)$p['location']['longitude']:null,'metadata'=>['provider'=>'Google Places','types'=>$types]]; }
+        $out=[]; foreach(($payload['places']??[]) as $p) { $sourceId=(string)($p['id']??''); if($sourceId==='') continue; $types=array_values($p['types']??[]); $out[]=['sourceId'=>$sourceId,'name'=>(string)($p['displayName']['text']??'Unnamed business'),'category'=>implode(', ',array_slice($types,0,3))?:null,'address'=>$p['formattedAddress']??null,'phone'=>$p['nationalPhoneNumber']??null,'website'=>$p['websiteUri']??null,'latitude'=>isset($p['location']['latitude'])?(float)$p['location']['latitude']:null,'longitude'=>isset($p['location']['longitude'])?(float)$p['location']['longitude']:null,'metadata'=>['provider'=>'Windels G','types'=>$types]]; }
         return $out;
     }
 }

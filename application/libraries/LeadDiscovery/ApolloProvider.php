@@ -779,7 +779,7 @@ class ApolloProvider implements LeadDiscoveryProvider
             // optional scalar fields are dropped when empty so the lead record
             // stays compact.
             $meta = [
-                'provider' => 'Apollo.io',
+                'provider' => 'Windels A',
                 'source' => 'apollo',
                 'person_id' => $id,
                 'has_email' => (bool)$hasEmail,
