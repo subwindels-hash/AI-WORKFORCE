@@ -11,7 +11,9 @@ class SportsDataNormalizer
         }
         try { $kickoff = (new \DateTimeImmutable((string) $raw['kickoff']))->setTimezone(new \DateTimeZone('UTC'))->format('c'); }
         catch (\Throwable $e) { throw new \InvalidArgumentException('fixture kickoff is invalid'); }
+        $sourceStatus = strtoupper(trim((string) ($raw['statusShort'] ?? $raw['status'] ?? '')));
         $status = strtoupper((string) ($raw['status'] ?? 'SCHEDULED'));
+        if ($status === 'NS') $status = 'SCHEDULED';
         if (!in_array($status, ['SCHEDULED', 'LIVE', 'FINISHED', 'POSTPONED', 'CANCELLED', 'SUSPENDED'], true)) throw new \InvalidArgumentException('fixture status is invalid');
         return [
             'provider' => $provider, 'externalId' => (string) $raw['externalId'],
@@ -19,6 +21,7 @@ class SportsDataNormalizer
             'homeTeam' => trim((string) $raw['homeTeam']), 'awayTeam' => trim((string) $raw['awayTeam']),
             'competition' => trim((string) $raw['competition']), 'kickoff' => $kickoff, 'status' => $status,
             'sourceTimestamp' => self::timestamp($raw['sourceTimestamp'] ?? null),
+            'sourceStatus' => $sourceStatus !== '' ? $sourceStatus : $status,
             'simulated' => !empty($raw['simulated']),
             'context' => self::context($raw['context'] ?? null),
             'roundId' => (string) ($raw['roundId'] ?? ''),

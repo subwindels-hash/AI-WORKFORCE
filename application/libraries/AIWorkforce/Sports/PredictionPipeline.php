@@ -52,7 +52,7 @@ class PredictionPipeline
         $intel = $this->intelligence->analyze($match, $odds, [], $now);
         $factors = [
             'drivers' => [],
-            'odds' => $odds ? ['decimal' => (float) ($odds['decimalOdds'] ?? $odds['decimal_odds'] ?? 0), 'observedAt' => $odds['observedAt'] ?? $odds['observed_at'] ?? null, 'ageSeconds' => $intel['oddsFreshness']['ageSeconds'] ?? null] : null,
+            'odds' => $odds ? ['market' => strtoupper((string) ($odds['market'] ?? '')), 'selection' => strtoupper((string) ($odds['selection'] ?? '')), 'decimal' => (float) ($odds['decimalOdds'] ?? $odds['decimal_odds'] ?? 0), 'observedAt' => $odds['observedAt'] ?? $odds['observed_at'] ?? null, 'ageSeconds' => $intel['oddsFreshness']['ageSeconds'] ?? null] : null,
             'calibration' => null,
             'quality' => ['score' => $quality['score'] ?? 0, 'band' => $quality['band'] ?? 'UNKNOWN', 'missing' => $quality['missing'] ?? []],
             'inputsUnavailable' => $intel['unavailableInputs'] ?? [],
@@ -63,8 +63,8 @@ class PredictionPipeline
         $candidate = [
             'matchId' => $match['id'] ?? null,
             'match' => $intel['match'],
-            'market' => 'TOTAL_GOALS',
-            'selection' => 'OVER_1_5',
+            'market' => $odds ? strtoupper((string) ($odds['market'] ?? '')) : 'TOTAL_GOALS',
+            'selection' => $odds ? strtoupper((string) ($odds['selection'] ?? '')) : 'OVER_1_5',
             'odds' => $odds ? (float) ($odds['decimalOdds'] ?? $odds['decimal_odds'] ?? 0) : null,
             'oddsTimestamp' => $odds ? ($odds['observedAt'] ?? $odds['observed_at'] ?? null) : null,
             'intelligence' => $intel,
@@ -87,7 +87,7 @@ class PredictionPipeline
         if ($calibrationInput !== null) {
             $factors['calibration'] = ['version' => $calibrationInput['version'], 'intercept' => $calibrationInput['intercept'], 'slope' => $calibrationInput['slope'], 'ece' => $calibrationInput['ece'], 'samples' => $calibrationInput['samples'], 'approvedAt' => $calibrationInput['approvedAt']];
         }
-        $prediction = $this->prediction->predictOver15($fs, $calibrationInput ?? []);
+        $prediction = $this->prediction->predict((string) $candidate['market'], (string) $candidate['selection'], $fs, $calibrationInput ?? []);
         if (!empty($prediction['market'])) { $candidate['market'] = $prediction['market']; $candidate['selection'] = $prediction['selection']; }
 
         // Value
@@ -117,6 +117,7 @@ class PredictionPipeline
         if (!empty($value['reason']) && ($prediction['decision'] ?? '') === 'PREDICTION_READY' && !empty($value['qualified']) === false) $failed[] = $value['reason'];
         if (($conf['confidence'] ?? 0) !== null && (float) $conf['confidence'] < (float) ($config['min_confidence'] ?? 0)) $failed[] = 'LOW_CONFIDENCE';
         $allowedMarkets = $config['allowed_markets'] ?? [];
+        if (!PredictionEngine::isSupportedMarketSelection((string) $candidate['market'], (string) $candidate['selection'])) $failed[] = 'UNSUPPORTED_MARKET';
         if (is_array($allowedMarkets) && count($allowedMarkets) > 0 && !in_array($candidate['market'], $allowedMarkets, true)) $failed[] = 'OUTSIDE_CONFIGURATION';
         $allowedLeagues = $config['allowed_leagues'] ?? [];
         if (is_array($allowedLeagues) && count($allowedLeagues) > 0 && !in_array($candidate['match']['competition'] ?? null, $allowedLeagues, true)) $failed[] = 'OUTSIDE_CONFIGURATION';

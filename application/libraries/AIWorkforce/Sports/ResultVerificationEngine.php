@@ -15,8 +15,17 @@ class ResultVerificationEngine
   if (empty($verified['verified'])) return ['status'=>'PENDING','reason'=>$verified['reason']??'RESULT_UNVERIFIED'];
   if (($verified['terminalStatus'] ?? '') === 'VOID') return ['status'=>'VOID','reason'=>'VERIFIED_VOID'];
   if (($verified['terminalStatus'] ?? '') === 'CANCELLED') return ['status'=>'CANCELLED','reason'=>'VERIFIED_CANCELLATION'];
-  $total=$verified['homeScore']+$verified['awayScore']; $market=$selection['market']??''; $pick=$selection['selection']??'';
+  $home=(int)$verified['homeScore']; $away=(int)$verified['awayScore']; $total=$home+$away; $market=strtoupper((string)($selection['market']??'')); $pick=strtoupper((string)($selection['selection']??''));
   if ($market==='TOTAL_GOALS' && $pick==='OVER_1_5') return ['status'=>$total>1?'WON':'LOST','reason'=>'VERIFIED_RESULT'];
+  if ($market==='BTTS' && $pick==='YES') return ['status'=>($home>0 && $away>0)?'WON':'LOST','reason'=>'VERIFIED_RESULT'];
+  if ($market==='MATCH_RESULT') {
+   $won=($pick==='HOME' && $home>$away) || ($pick==='DRAW' && $home===$away) || ($pick==='AWAY' && $away>$home);
+   if (in_array($pick,['HOME','DRAW','AWAY'],true)) return ['status'=>$won?'WON':'LOST','reason'=>'VERIFIED_RESULT'];
+  }
+  if ($market==='DOUBLE_CHANCE') {
+   $won=($pick==='HOME_OR_DRAW' && $home>=$away) || ($pick==='AWAY_OR_DRAW' && $away>=$home) || ($pick==='HOME_OR_AWAY' && $home!==$away);
+   if (in_array($pick,['HOME_OR_DRAW','AWAY_OR_DRAW','HOME_OR_AWAY'],true)) return ['status'=>$won?'WON':'LOST','reason'=>'VERIFIED_RESULT'];
+  }
   return ['status'=>'PENDING','reason'=>'MARKET_SETTLEMENT_RULE_UNAVAILABLE'];
  }
 }

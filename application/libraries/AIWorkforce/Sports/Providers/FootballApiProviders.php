@@ -266,7 +266,7 @@ trait HttpTransport
 
     /**
      * Normalize a provider-specific market name to the pipeline's canonical names.
-     * The prediction pipeline expects: TOTAL_GOALS, MATCH_RESULT, BOTH_TEAMS_SCORE, etc.
+     * The prediction pipeline expects: TOTAL_GOALS, MATCH_RESULT, BTTS, DOUBLE_CHANCE, etc.
      */
     protected static function normalizeMarket(string $raw): string
     {
@@ -276,7 +276,7 @@ trait HttpTransport
         // Match Result / 1X2 / Match Winner
         if (preg_match('/match.?result|match.?winner|1x2|full.?time.?result|result/', $r)) return 'MATCH_RESULT';
         // Both Teams to Score
-        if (preg_match('/both.?teams|btts|goal.*goal/', $r)) return 'BOTH_TEAMS_SCORE';
+        if (preg_match('/both.?teams|btts|goal.*goal/', $r)) return 'BTTS';
         // Double Chance
         if (preg_match('/double.?chance/', $r)) return 'DOUBLE_CHANCE';
         // Correct Score
@@ -319,9 +319,15 @@ trait HttpTransport
             if (preg_match('/draw|x$/', $r)) return 'DRAW';
             if (preg_match('/away|2$/', $r)) return 'AWAY';
         }
-        if ($market === 'BOTH_TEAMS_SCORE') {
+        if ($market === 'BTTS') {
             if (preg_match('/yes|1/', $r)) return 'YES';
             if (preg_match('/no|0/', $r)) return 'NO';
+        }
+        if ($market === 'DOUBLE_CHANCE') {
+            $compact = str_replace([' ', '-', '_', '/'], '', strtoupper($raw));
+            if (in_array($compact, ['1X', 'HOMEDRAW', 'HOMEORDRAW'], true)) return 'HOME_OR_DRAW';
+            if (in_array($compact, ['X2', 'DRAWAWAY', 'DRAWORAWAY', 'AWAYORDRAW'], true)) return 'AWAY_OR_DRAW';
+            if (in_array($compact, ['12', 'HOMEAWAY', 'HOMEORAWAY'], true)) return 'HOME_OR_AWAY';
         }
         return strtoupper(preg_replace('/[^A-Za-z0-9_.]/', '_', $raw));
     }

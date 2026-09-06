@@ -78,7 +78,7 @@ class DailyTicketService
                 $message = 'engine mode ' . $config['engine_mode'] . ' does not generate tickets';
                 $dataState = 'DISABLED';
             } elseif (!$this->providers->configured()) {
-                $message = 'no sports provider configured (DISABLED_NO_PROVIDER) — nothing is fabricated';
+                $message = 'NO VALUE TICKET TODAY — no sports provider configured (DISABLED_NO_PROVIDER); nothing is fabricated';
                 $dataState = 'NO_PROVIDER';
             } else {
                 $attempt = $this->providers->withFallback('fixtures', fn($p) => $p->fixtures(['from' => $date, 'to' => $date]));
@@ -91,7 +91,7 @@ class DailyTicketService
                     $dataState = 'DATA_UNAVAILABLE';
                     $providerFailures = $attempt['failures'];
                     $providerStatuses = $attempt['failureStatuses'] ?? [];
-                    $message = 'all configured sports-data providers failed — ' . ($attempt['summary'] ?: SportsProviderManager::summarize('fixtures', $providerStatuses));
+                    $message = 'NO VALUE TICKET TODAY — all configured sports-data providers failed; no data was fabricated — ' . ($attempt['summary'] ?: SportsProviderManager::summarize('fixtures', $providerStatuses));
                     $errors[] = 'provider failure: ' . json_encode($attempt['failures']);
                 } else {
                     $provider = $attempt['provider'];
@@ -103,6 +103,7 @@ class DailyTicketService
                     // Matches it does not cover fall back to per-fixture odds().
                     $roundOdds = $this->fetchRoundOdds($provider, $this->providers->provider($provider), $enrichedFixtures, $errors);
                     $candidates = [];
+                    $runtimeNow = time();
                     foreach ($enrichedFixtures as $rawFixture) {
                         try {
                             $match = SportsDataNormalizer::fixture($rawFixture, $provider);
@@ -115,8 +116,15 @@ class DailyTicketService
                         $matchRow = $this->repo->findMatchById((int) $saved['id']);
                         if ($matchRow === null) continue;
 
-                        $oddsRow = $this->repo->latestOdds((int) $saved['id'], 'TOTAL_GOALS', 'OVER_1_5');
-                        if ($oddsRow === null) {
+                        if (!$this->fixtureEligibleForDailyTicket($match, $runtimeNow)) {
+                            $rejections++;
+                            $reason = 'FIXTURE_NOT_NS_OR_TOO_SOON';
+                            $rejectionSummary[$reason] = ($rejectionSummary[$reason] ?? 0) + 1;
+                            continue;
+                        }
+
+                        $oddsRows = method_exists($this->repo, 'listOdds') ? $this->repo->listOdds((int) $saved['id'], 200) : [];
+                        if ($oddsRows === []) {
                             // Prefer the bulk round fetch (one request per
                             // matchday) over a per-fixture odds() call.
                             $rawOdds = $roundOdds[$match['externalId']] ?? null;
@@ -132,40 +140,48 @@ class DailyTicketService
                                         $errors[] = 'odds rejected: ' . mb_substr($e->getMessage(), 0, 200);
                                     }
                                 }
-                                $oddsRow = $this->repo->latestOdds((int) $saved['id'], 'TOTAL_GOALS', 'OVER_1_5');
+                                $oddsRows = method_exists($this->repo, 'listOdds') ? $this->repo->listOdds((int) $saved['id'], 200) : [];
                             }
                         }
-                        $odds = $oddsRow ? ['market' => $oddsRow['market'], 'selection' => $oddsRow['selection'], 'decimalOdds' => (float) $oddsRow['decimal_odds'], 'observedAt' => $oddsRow['observed_at']] : null;
+                        $supportedOdds = $this->supportedOddsRows($oddsRows);
+                        if ($supportedOdds === []) {
+                            $rejections++;
+                            $reason = 'SUPPORTED_ODDS_UNAVAILABLE';
+                            $rejectionSummary[$reason] = ($rejectionSummary[$reason] ?? 0) + 1;
+                            continue;
+                        }
 
                         $health = $this->providers->provider($provider)?->health() ?? [];
-                        $quality = $this->quality->assess($match, $this->qualityContext($match, $odds, (float) ($health['reliability'] ?? 0)));
+                        $quality = $this->quality->assess($match, $this->qualityContext($match, $supportedOdds[0], (float) ($health['reliability'] ?? 0)));
                         $this->repo->saveQuality((int) $saved['id'], $quality);
 
                         $calibration = $this->calibrationFor($matchRow);
-                        $candidate = $this->pipeline->evaluate($matchRow, $odds, $quality, $calibration, $config);
+                        foreach ($supportedOdds as $odds) {
+                            $candidate = $this->pipeline->evaluate($matchRow, $odds, $quality, $calibration, $config, $runtimeNow);
 
-                        $factors = array_merge(['market' => $candidate['market'], 'selection' => $candidate['selection']], $candidate['factors']);
-                        $predictionId = $this->decisions->recordPrediction(
-                            (int) $saved['id'],
-                            $candidate['prediction'] + ['market' => $candidate['market'], 'selection' => $candidate['selection']],
-                            $candidate['value'],
-                            $candidate['risk'],
-                            $quality,
-                            $factors,
-                            is_numeric($candidate['confidence']['confidence'] ?? null) ? (float) $candidate['confidence']['confidence'] : null,
-                            $candidate['odds'],
-                            $candidate['oddsTimestamp'],
-                            'LOW'
-                        );
-                        $candidate['predictionId'] = $predictionId;
-                        $recorded++;
-                        if ($modelVersionId === null) $modelVersionId = $this->modelVersionIdFor($candidate['prediction']);
+                            $factors = array_merge(['market' => $candidate['market'], 'selection' => $candidate['selection']], $candidate['factors']);
+                            $predictionId = $this->decisions->recordPrediction(
+                                (int) $saved['id'],
+                                $candidate['prediction'] + ['market' => $candidate['market'], 'selection' => $candidate['selection']],
+                                $candidate['value'],
+                                $candidate['risk'],
+                                $quality,
+                                $factors,
+                                is_numeric($candidate['confidence']['confidence'] ?? null) ? (float) $candidate['confidence']['confidence'] : null,
+                                $candidate['odds'],
+                                $candidate['oddsTimestamp'],
+                                'LOW'
+                            );
+                            $candidate['predictionId'] = $predictionId;
+                            $recorded++;
+                            if ($modelVersionId === null) $modelVersionId = $this->modelVersionIdFor($candidate['prediction']);
 
-                        if ($candidate['decision'] === 'REJECTED') {
-                            $rejections++;
-                            foreach ($candidate['rejectionReasons'] as $r) $rejectionSummary[$r] = ($rejectionSummary[$r] ?? 0) + 1;
-                        } else {
-                            $candidates[] = $candidate;
+                            if ($candidate['decision'] === 'REJECTED') {
+                                $rejections++;
+                                foreach ($candidate['rejectionReasons'] as $r) $rejectionSummary[$r] = ($rejectionSummary[$r] ?? 0) + 1;
+                            } else {
+                                $candidates[] = $candidate;
+                            }
                         }
                     }
 
@@ -188,10 +204,10 @@ class DailyTicketService
                                 $message = $status === 'APPROVED' ? 'ticket generated and auto-approved (AUTOMATED_EXECUTION); no external execution' : 'odds prediction ticket generated; awaiting user approval';
                             }
                         } else {
-                            $message = $optimized['reason'] ?? 'no compliant combination';
+                            $message = 'NO VALUE TICKET TODAY — ' . ($optimized['reason'] ?? 'no compliant combination');
                         }
                     } else {
-                        $message = $evaluated === 0 ? 'no fixtures received for ' . $date : 'no candidate passed the risk/value/calibration gates';
+                        $message = $evaluated === 0 ? 'NO VALUE TICKET TODAY — no verified fixtures received for ' . $date : 'NO VALUE TICKET TODAY — no candidate passed the eligibility, odds, confidence, quality, risk/value and correlation gates';
                     }
                 }
             }
@@ -234,6 +250,44 @@ class DailyTicketService
             'provider' => $provider, 'providerFailures' => $providerFailures, 'providerStatuses' => $providerStatuses,
             'runId' => $run['id'], 'errors' => $errors,
         ];
+    }
+
+
+    /**
+     * Daily odds-prediction ticket eligibility: football only, provider state
+     * must be NS (or the provider's explicit NS→SCHEDULED mapping preserved in
+     * payload/sourceStatus), and kickoff must be strictly more than two hours
+     * from the runtime clock.
+     */
+    private function fixtureEligibleForDailyTicket(array $match, int $now): bool
+    {
+        if (strtolower((string) ($match['sport'] ?? '')) !== 'football') return false;
+        $sourceStatus = strtoupper((string) ($match['sourceStatus'] ?? $match['status'] ?? ''));
+        $canonical = strtoupper((string) ($match['status'] ?? ''));
+        if ($sourceStatus !== 'NS' && !($sourceStatus === 'SCHEDULED' && $canonical === 'SCHEDULED')) return false;
+        try { $kickoff = (new \DateTimeImmutable((string) ($match['kickoff'] ?? '')))->getTimestamp(); }
+        catch (\Throwable $e) { return false; }
+        return $kickoff > ($now + 2 * 3600);
+    }
+
+    /** Return latest provider odds for the supported ticket markets only. */
+    private function supportedOddsRows(array $rows): array
+    {
+        $latest = [];
+        foreach ($rows as $row) {
+            $market = strtoupper(trim((string) ($row['market'] ?? '')));
+            $selection = strtoupper(trim((string) ($row['selection'] ?? '')));
+            $decimal = $row['decimalOdds'] ?? $row['decimal_odds'] ?? null;
+            $observed = $row['observedAt'] ?? $row['observed_at'] ?? null;
+            if (!PredictionEngine::isSupportedMarketSelection($market, $selection)) continue;
+            if (!is_numeric($decimal) || (float) $decimal <= 1.0 || !is_finite((float) $decimal)) continue;
+            if (!$observed) continue;
+            $key = $market . ':' . $selection;
+            if (!isset($latest[$key]) || strcmp((string) $observed, (string) $latest[$key]['observedAt']) > 0) {
+                $latest[$key] = ['market' => $market, 'selection' => $selection, 'decimalOdds' => (float) $decimal, 'observedAt' => (string) $observed, 'payload' => $row['payload'] ?? []];
+            }
+        }
+        return array_values($latest);
     }
 
     /**

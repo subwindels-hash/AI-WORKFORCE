@@ -11,7 +11,9 @@ test('configuration returns safe defaults before any admin change', function () 
     [, , $svc] = fx_config_audit();
     $c = $svc->active();
     assert_equals('USER_APPROVAL_REQUIRED', $c['engine_mode']);
-    assert_equals(75.0, (float) $c['min_confidence']);
+    assert_equals(80.0, (float) $c['min_confidence']);
+    assert_equals(75, (int) $c['min_data_quality']);
+    assert_equals(['MATCH_RESULT', 'TOTAL_GOALS', 'BTTS', 'DOUBLE_CHANCE'], $c['allowed_markets']);
     assert_equals('RESTITUTE_ODDS', $c['void_policy']);
 });
 
@@ -22,7 +24,7 @@ test('configuration updates are versioned and audited with old/new values', func
     $r1 = $svc->update(['target_odds_min' => 6.0, 'target_odds_max' => 9.0], 'admin-1', 'tighten odds band');
     assert_true($r1['ok']);
     assert_equals(1, (int) $r1['configuration']['version']);
-    $r2 = $svc->update(['min_confidence' => 80.0], 'admin-2', 'stricter');
+    $r2 = $svc->update(['min_confidence' => 85.0], 'admin-2', 'stricter');
     assert_true($r2['ok']);
     assert_equals(2, (int) $r2['configuration']['version']);
     assert_equals(6.0, (float) $r2['configuration']['target_odds_min']); // previous value preserved

@@ -94,7 +94,7 @@ test('daily ticket E2E: qualified ticket awaits user approval', function () {
     assert_equals('PENDING_USER_APPROVAL', $ticket['approval_status']);
     assert_true($ticket['total_odds'] >= 5.0 && $ticket['total_odds'] <= 8.0, 'odds inside configured range');
     assert_true($ticket['selection_count'] >= 1 && $ticket['selection_count'] <= 5);
-    assert_true($ticket['confidence'] >= 75.0, 'min confidence enforced');
+    assert_true($ticket['confidence'] >= 80.0, 'min confidence enforced');
     assert_equals(10.0, (float) $ticket['stake']);
     $daily = $repo->findDailyTicket($date);
     assert_equals('PENDING_USER_APPROVAL', $daily['status']);
