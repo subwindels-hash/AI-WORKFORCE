@@ -33,6 +33,13 @@ $stateClass = static fn(string $state): string => match (strtoupper($state)) {
     default => 'down',
 };
 $kickoffLabel = static fn(?string $iso): string => $iso === null || $iso === '' ? '—' : gmdate('M j, H:i', (int) strtotime($iso)) . ' UTC';
+// Kickoff date and time, printed separately so a live card can say when the
+// match actually started. Both come from the stored fixture; a fixture the
+// provider gave no kickoff for prints the state token, never a guessed time.
+$kickoffStamp = static function (mixed $iso): string {
+    $ts = is_string($iso) && trim($iso) !== '' ? strtotime($iso) : false;
+    return $ts === false ? 'DATA_UNAVAILABLE' : gmdate('D j M Y · H:i', $ts) . ' UTC';
+};
 ?>
 <div class="page-head">
   <div>
@@ -257,6 +264,7 @@ $kickoffLabel = static fn(?string $iso): string => $iso === null || $iso === '' 
                     <span class="dim">vs</span>
                     <b><?= e((string) ($fx['awayTeam'] ?? '—')) ?></b>
                     <div class="dim" style="font-size:11px"><?= e((string) ($fx['competition'] ?? '—')) ?> · <?= e((string) ($lv['state'] ?? 'UNKNOWN')) ?><?= isset($lv['minute']) && $lv['minute'] !== null ? ' · ' . (int) $lv['minute'] . "'" : '' ?></div>
+                    <div class="dim mono" style="font-size:11px">Kickoff <?= e($kickoffStamp($fx['kickoff'] ?? null)) ?></div>
                   </div>
                   <div style="text-align:right">
                     <div class="mono" style="font-size:18px;font-weight:700">

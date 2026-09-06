@@ -454,3 +454,49 @@ test('football: every schema source declares the same tables and columns', funct
     assert_in_array('execution_key', $mysql['football_provider_sync_logs'] ?? [], 'a sweep run is idempotent by execution key');
     assert_in_array('settlement_state', $mysql['football_match_predictions'] ?? [], 'settlement state is a stored column, not a join');
 });
+
+test('football: a live match card carries the match date and time from the stored kickoff', function () {
+    $console = fx_fb_source('application/views/football/index.php');
+    assert_contains('<h3>Live now</h3>', $console, 'the live panel is on the football console');
+    assert_contains("\$kickoffStamp(\$fx['kickoff']", $console, 'every live card prints its kickoff');
+    assert_contains("gmdate('D j M Y · H:i'", $console, 'as the match date and the UTC time together');
+    assert_contains("'DATA_UNAVAILABLE'", $console, 'and a fixture with no stored kickoff says so instead of printing a guessed one');
+
+    // The card renders the fixture summary the live board already returns, so
+    // the printed date and time are the stored kickoff row — never the moment
+    // the page happened to be rendered.
+    $kickoff = gmdate('c', time() - 1800);
+    [$repo, , $module] = fx_fb_harness([], ['skipHistory' => true]);
+    $stored = $repo->saveFixture(1, [
+        'externalId' => 'fx-live-kickoff', 'competition' => 'Premier League', 'leagueId' => '39', 'season' => '2026',
+        'kickoff' => $kickoff, 'status' => 'LIVE', 'minute' => 34,
+        'homeTeam' => 'Manchester City', 'awayTeam' => 'Everton', 'homeTeamId' => '10', 'awayTeamId' => '20',
+        'homeScore' => 1, 'awayScore' => 1,
+    ]);
+    $match = ($module->live()->board(false)['matches'] ?? [])[0] ?? [];
+    assert_equals((string) $stored['kickoff_at'], (string) ($match['fixture']['kickoff'] ?? ''),
+        'the live board reads the stored kickoff');
+    $shown = (string) ($match['fixture']['kickoff'] ?? '');
+    assert_equals(gmdate('D j M Y', (int) strtotime($kickoff)), gmdate('D j M Y', (int) strtotime($shown)),
+        'the card shows the match date');
+    assert_equals(gmdate('H:i', (int) strtotime($kickoff)), gmdate('H:i', (int) strtotime($shown)),
+        'and the kickoff time, in UTC');
+
+    // Rendered output, when CodeIgniter's view loader is available: the string a
+    // user reads on the live card.
+    if (function_exists('get_instance')) {
+        $day = gmdate('Y-m-d', (int) strtotime($kickoff));
+        ob_start();
+        ci()->load->view('football/index', [
+            'title' => 'Football Intelligence', 'active' => 'football', 'notice' => null, 'error' => null,
+            'caps' => ['sync' => false, 'calibrate' => false, 'approve' => false, 'settle' => false],
+            'csrfToken' => 'test-token', 'dashboard' => $module->dashboard($day), 'date' => $day,
+            'yesterday' => gmdate('Y-m-d', (int) strtotime($kickoff) - 86400),
+            'tomorrow' => gmdate('Y-m-d', (int) strtotime($kickoff) + 86400), 'refresh' => false,
+        ]);
+        $html = (string) ob_get_clean();
+        assert_contains('Kickoff ' . gmdate('D j M Y · H:i', (int) strtotime($kickoff)) . ' UTC', $html,
+            'the rendered live card carries the match date and time');
+        assert_true(!str_contains($html, 'Undefined array key'), 'no PHP warnings from the live card');
+    }
+});

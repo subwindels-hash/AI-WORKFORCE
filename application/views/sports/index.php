@@ -46,6 +46,13 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
 // operator diagnostics (sports.manage). A read-only user sees only whether
 // data is available — never which vendor, key tier or endpoint is behind it.
 $operator = !empty($caps['sync']);
+// Match date + time as one UTC stamp (`YYYY-MM-DD HH:MM`) from the stored
+// kickoff. A match the provider gave no kickoff for prints — : never a blank
+// cell, never 00:00, because a guessed time would read as a real one.
+$kickoffStamp = static function (mixed $iso): string {
+    $ts = is_string($iso) && trim($iso) !== '' ? strtotime($iso) : false;
+    return $ts === false ? '—' : gmdate('Y-m-d H:i', $ts);
+};
 ?>
 <div class="page-head">
   <div>
@@ -147,23 +154,24 @@ $operator = !empty($caps['sync']);
         </div>
         <div id="live-goal-flash" style="display:none;background:var(--violet,#6d28d9);color:#fff;border-radius:8px;padding:8px 12px;font-weight:700;margin-bottom:10px"></div>
         <table class="tbl">
-          <thead><tr><th style="width:70px">Minute</th><th>Match</th><th>Competition</th><th class="num">Score</th><th style="width:90px">Updated (UTC)</th></tr></thead>
+          <thead><tr><th style="width:70px">Minute</th><th style="width:118px">Kickoff (UTC)</th><th>Match</th><th>Competition</th><th class="num">Score</th><th style="width:90px">Updated (UTC)</th></tr></thead>
           <tbody id="live-scores-body">
             <?php $liveRows = $today['live'] ?? []; ?>
             <?php if ($liveRows): foreach ($liveRows as $m): $ls = is_array($m['liveState'] ?? null) ? $m['liveState'] : []; $known = isset($ls['homeScore'], $ls['awayScore']); ?>
               <tr data-match-id="<?= (int) ($m['id'] ?? 0) ?>">
                 <td class="mono dim"><?= isset($ls['minute']) ? e((string) (int) $ls['minute']) . "'" : '—' ?></td>
+                <td class="mono dim live-kickoff-cell"><?= e($kickoffStamp($m['kickoff_at'] ?? null)) ?></td>
                 <td style="font-weight:700"><?= e(($m['home_team'] ?? '?') . ' vs ' . ($m['away_team'] ?? '?')) ?><?php if (!empty($m['simulated'])): ?> <span class="badge b-gray">sim</span><?php endif; ?></td>
                 <td class="dim"><?= e((string) ($m['competition'] ?? '')) ?></td>
                 <td class="num mono live-score-cell" style="font-weight:700;font-size:14px"><?= $known ? e((int) $ls['homeScore'] . ' – ' . (int) $ls['awayScore']) : '—' ?></td>
                 <td class="mono dim" style="font-size:11px"><?= e(substr((string) ($m['updated_at'] ?? ''), 11, 5)) ?></td>
               </tr>
             <?php endforeach; else: ?>
-              <tr><td colspan="5" class="dim" id="live-scores-empty">No live matches right now — the board refreshes automatically while matches are in play.</td></tr>
+              <tr><td colspan="6" class="dim" id="live-scores-empty">No live matches right now — the board refreshes automatically while matches are in play.</td></tr>
             <?php endif; ?>
           </tbody>
         </table>
-        <p class="dim" style="font-size:11px;margin-top:8px">Scores come from the provider's live endpoint (one shared, self-gated request — <span class="mono">WINDELS_SPORTS_LIVE_REFRESH_SECONDS</span>, default 60, skipped entirely while nothing is in play). A match the provider gives no score for shows <b>—</b>, never 0-0. Goal events are audited as <span class="mono">SPORTS_GOAL_SCORED</span>.</p>
+        <p class="dim" style="font-size:11px;margin-top:8px">Scores come from the provider's live endpoint (one shared, self-gated request — <span class="mono">WINDELS_SPORTS_LIVE_REFRESH_SECONDS</span>, default 60, skipped entirely while nothing is in play). <b>Kickoff (UTC)</b> is the stored match date and time; a match with no stored kickoff shows <b>—</b>, never a guessed one. A match the provider gives no score for shows <b>—</b>, never 0-0. Goal events are audited as <span class="mono">SPORTS_GOAL_SCORED</span>.</p>
       </div>
     </div>
 
@@ -475,6 +483,13 @@ $operator = !empty($caps['sync']);
     });
   }
 
+  function kickoffStamp(v){
+    // Match date + time in UTC, matching the server-rendered cell. A match with
+    // no stored kickoff prints — rather than an epoch date.
+    var t = v ? Date.parse(v) : NaN;
+    return isNaN(t) ? '—' : new Date(t).toISOString().substring(0, 16).replace('T', ' ');
+  }
+
   function rowHtml(m){
     var score = m.scoreKnown ? esc(m.homeScore) + ' – ' + esc(m.awayScore) : '—';
     var minute = (m.minute !== null && m.minute !== undefined) ? esc(m.minute) + "'" : '—';
@@ -482,6 +497,7 @@ $operator = !empty($caps['sync']);
     var updated = (m.updatedAt || '').substring(11, 16);
     return '<tr data-match-id="' + esc(m.id) + '">'
       + '<td class="mono dim">' + minute + '</td>'
+      + '<td class="mono dim live-kickoff-cell">' + esc(kickoffStamp(m.kickoff)) + '</td>'
       + '<td style="font-weight:700">' + esc(m.homeTeam) + ' vs ' + esc(m.awayTeam) + sim + '</td>'
       + '<td class="dim">' + esc(m.competition) + '</td>'
       + '<td class="num mono live-score-cell" style="font-weight:700;font-size:14px">' + score + '</td>'
@@ -491,7 +507,7 @@ $operator = !empty($caps['sync']);
 
   function render(matches){
     if(!matches.length){
-      body.innerHTML = '<tr><td colspan="5" class="dim" id="live-scores-empty">No live matches right now — the board refreshes automatically while matches are in play.</td></tr>';
+      body.innerHTML = '<tr><td colspan="6" class="dim" id="live-scores-empty">No live matches right now — the board refreshes automatically while matches are in play.</td></tr>';
     } else {
       body.innerHTML = matches.map(rowHtml).join('');
     }
