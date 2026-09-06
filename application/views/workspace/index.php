@@ -3,7 +3,11 @@
 $first = explode(' ', trim((string)($user['display_name'] ?? 'Member')))[0];
 $unread = (int)($inbox['unread'] ?? 0);
 $notes = $inbox['notifications'] ?? [];
-$ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">';
+// 18x18 is an intrinsic floor, not the design size: an <svg> with a viewBox and
+// no width/height falls back to the browser's default replaced-element box
+// (~150-300px), so any wrapper that forgets its CSS rule shows a giant icon.
+// Wrapper CSS (.btn svg, .kp-ic svg, .sidebar a svg, …) still overrides this.
+$ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">';
 $ks = $status['killSwitch'] ?? null;
 $mode = $status['tradingMode'] ?? null;
 ?>

@@ -142,7 +142,12 @@ final class ApiProviders
             'apollo_io' => [
                 'label' => 'Apollo.io',
                 'fields' => [
-                    $f('api_key', 'API Key', true, true, 'Apollo.io API key (Settings → API → API Keys). B2B people + company enrichment.'),
+                    $f('base_url', 'Base URL', false, false, 'Leave blank for https://api.apollo.io — apollo.io / app.apollo.io are not API origins and are rewritten automatically'),
+                    $f('api_key', 'API Key (x-api-key header)', true, true, 'Apollo → Settings → Integrations → API Keys (https://developer.apollo.io/#/keys). Apollo keys are scoped per endpoint: tick mixed_people/api_search (plus people/bulk_match to reveal contacts) or toggle “Set as master key”.'),
+                    $f('reveal_contacts', 'Reveal emails/phones (1 = on, 0 = off)', false, false, 'Apollo search never returns emails or phone numbers. Set 1 to enrich each search through people/bulk_match — this spends Apollo credits (1 credit per record). Default 0.'),
+                    $f('reveal_personal_emails', 'Reveal personal emails (1 = on, 0 = off)', false, false, 'Personal (gmail/outlook/yahoo …) addresses are what Person Mode filters on. Defaults to the Reveal setting above.'),
+                    $f('reveal_phone_number', 'Reveal phone numbers (1 = on, 0 = off)', false, false, 'Mobile/direct dial reveals cost extra Apollo credits. Default 0.'),
+                    $f('reveal_limit', 'Max enrichments per search', false, false, 'Credit cap per search, 1–100. Default 25.'),
                 ],
             ],
             'api_football' => [
@@ -510,6 +515,42 @@ final class ApiProviders
         return is_array($decoded) ? $decoded : [];
     }
 
+    /**
+     * Active config for **one driver** of a service (primary → fallback → any
+     * other enabled row), with secrets — server-side only.
+     *
+     * A service such as `lead_discovery` runs several providers side by side,
+     * and `activeConfig()` only ever returns the single active row. Without a
+     * driver-scoped lookup, a provider configured as a fallback looks
+     * "not configured" at runtime — or worse, is handed the other provider's
+     * key (Google Places used to read whichever row was primary).
+     *
+     * Pass `$enabledOnly = false` to find a saved-but-disabled row, which lets
+     * callers tell "never configured" apart from "switched off".
+     */
+    public static function resolveDriver(object $db, string $service, string $driver, bool $enabledOnly = true): ?array
+    {
+        self::ensureSchema($db);
+        foreach (['primary', 'fallback', null] as $role) {
+            $db->where('service', $service)->where('driver', $driver);
+            if ($enabledOnly) $db->where('enabled', 1);
+            if ($role !== null) $db->where('role', $role);
+            $row = $db->order_by('id', 'ASC')->limit(1)->get('api_providers')->row_array();
+            if ($row) return self::hydrate($row, true);
+        }
+        return null;
+    }
+
+    /** resolveDriver() against the current request's database handle. */
+    public static function resolveDriverForRequest(string $service, string $driver, bool $enabledOnly = true): ?array
+    {
+        $ci = function_exists('get_instance') ? get_instance() : null;
+        $db = ($ci && isset($ci->AIWorkforce_model)) ? $ci->AIWorkforce_model->db : null;
+        if (!$db) return null;
+        try { return self::resolveDriver($db, $service, $driver, $enabledOnly); }
+        catch (\Throwable $e) { return null; }
+    }
+
     /** Active primary (then fallback) config with secrets — server-side only. */
     /** Resolve using the current request's database handle. */
     public static function resolve(string $service): ?array
@@ -786,7 +827,7 @@ final class ApiProviders
         try {
             $ok = match ($driver) {
                 'google_places' => self::testGooglePlaces((string) ($secrets['api_key'] ?? '')),
-                'apollo_io' => self::testApollo((string) ($secrets['api_key'] ?? '')),
+                'apollo_io' => self::testApollo((string) ($secrets['api_key'] ?? ''), $row),
                 'binance_public' => self::testGet(($base !== '' ? $base : 'https://api.binance.com') . '/api/v3/ping'),
                 'bybit_public'   => self::testGet(($base !== '' ? $base : 'https://api.bybit.com') . '/v5/market/time'),
                 'okx_public'     => self::testGet(($base !== '' ? $base : 'https://www.okx.com') . '/api/v5/public/time'),
@@ -822,7 +863,9 @@ final class ApiProviders
     {
         $msg = preg_replace('/(sk-|Bearer\s+|key=)[A-Za-z0-9_\-]{6,}/i', '$1••••', $msg) ?? $msg;
         $msg = preg_replace('#https?://[^\s]+@#', 'https://••••@', $msg) ?? $msg;
-        return mb_substr($msg, 0, 180);
+        // 255 matches the provider row's last_test_message column, so what the
+        // operator sees in the flash is exactly what the page stores and shows.
+        return mb_substr($msg, 0, 255);
     }
 
     private static function testGet(string $url, string $token = ''): array
@@ -850,38 +893,194 @@ final class ApiProviders
         return ['ok' => $status >= 200 && $status < 400, 'message' => ($status >= 200 && $status < 400) ? 'Connected' : 'Connection failed'];
     }
 
-    private static function testApollo(string $key): array
+    /**
+     * Test an Apollo.io key the way Apollo documents, and — because Apollo keys
+     * are **scoped per endpoint** — verify against the endpoint this app really
+     * calls when the documented key check is refused.
+     *
+     * Probe 1: GET  {root}/api/v1/auth/health          (0 credits, documented)
+     *          → 200 {"healthy":true,"is_logged_in":true}
+     * Probe 2: POST {root}/api/v1/mixed_people/api_search?per_page=1&q_keywords=apollo  (0 credits)
+     *          → only used when probe 1 answers 403/404/422, which is what a
+     *            scoped key returns for an endpoint it was not granted
+     *            (https://docs.apollo.io/docs/create-api-key). Without this
+     *            second probe a perfectly usable key reports "Connection failed".
+     *
+     * Neither probe spends credits and neither echoes the key back.
+     */
+    private static function testApollo(string $key, array $row = []): array
     {
-        $key = trim($key);
-        if ($key === '') return ['ok' => false, 'message' => 'An API key is required.'];
-        // Canonical key check per https://docs.apollo.io/docs/test-api-key:
-        //   GET https://api.apollo.io/api/v1/auth/health  with header x-api-key.
-        // The API key MUST be in the x-api-key header — Apollo rejects the old
-        // api_key-in-body auth. auth/health is free (no credits) and answers:
-        //   200 {"healthy":true,"is_logged_in":true} | 401 invalid key.
-        // We honour a custom base (proxy/sandbox) the same way the runtime adapter does.
-        $base = rtrim((string) (getenv('APOLLO_IO_API_BASE') ?: getenv('APOLLO_API_BASE') ?: 'https://api.apollo.io'), '/');
-        $resp = self::http($base . '/api/v1/auth/health', [
+        $raw = trim($key);
+        if ($raw === '') {
+            return ['ok' => false, 'message' => 'An Apollo API key is required. Create one in Apollo → Settings → Integrations → API Keys (developer.apollo.io), then paste the full value here.'];
+        }
+        // The form masks stored secrets; pasting the mask back saves a value
+        // that can never authenticate. Say so instead of "Connection failed".
+        if (str_contains($raw, "\u{2022}")) {
+            return ['ok' => false, 'message' => 'That is the masked placeholder, not a key. Open the provider, paste the full Apollo API key and save again.'];
+        }
+        $key = self::normalizeApolloKey($raw);
+        if ($key === '') {
+            return ['ok' => false, 'message' => 'An Apollo API key is required. Create one in Apollo → Settings → Integrations → API Keys (developer.apollo.io), then paste the full value here.'];
+        }
+        $root = self::apolloApiRoot($row);
+        // When contact reveal is switched on the key also needs the enrichment
+        // endpoint scope, so a successful test says so instead of letting the
+        // first search silently come back without emails.
+        $rowExtra = is_array($row['extra'] ?? null) ? $row['extra'] : [];
+        $revealRaw = (string) ($rowExtra['reveal_contacts'] ?? '');
+        if ($revealRaw === '') {
+            $revealEnv = getenv('APOLLO_IO_REVEAL_CONTACTS');
+            $revealRaw = $revealEnv === false ? '' : (string) $revealEnv;
+        }
+        $revealNote = in_array(strtolower(trim($revealRaw)), ['1', 'true', 'on', 'yes'], true)
+            ? ' Contact reveal is on — the key also needs the people/bulk_match endpoint scope.'
+            : '';
+        $headers = [
             'Accept: application/json',
             'Content-Type: application/json',
             'Cache-Control: no-cache',
             'x-api-key: ' . $key,
-        ]);
-        $status = (int) ($resp['status'] ?? 0);
-        $body = (string) ($resp['body'] ?? '');
-        $decoded = json_decode($body, true);
-        $decoded = is_array($decoded) ? $decoded : [];
-        if ($status >= 200 && $status < 300) {
-            // A 200 that explicitly reports not logged in still means a bad key.
-            if (array_key_exists('is_logged_in', $decoded) && $decoded['is_logged_in'] === false) {
-                return ['ok' => false, 'message' => 'Invalid API key'];
+            'User-Agent: WINDELS-AIWorkforce/1.0 (+api-management)',
+        ];
+
+        // ---- Probe 1: documented, credit-free key check ----
+        $r1 = self::http($root . '/api/v1/auth/health', $headers);
+        $s1 = (int) ($r1['status'] ?? 0);
+        $b1 = self::decode($r1['body'] ?? '');
+        if ($s1 >= 200 && $s1 < 300) {
+            if (($b1['is_logged_in'] ?? null) === false) {
+                return ['ok' => false, 'message' => 'Apollo says this key is not signed in. Regenerate it in Apollo → Settings → Integrations → API Keys and paste the full value.'];
             }
-            return ['ok' => true, 'message' => 'Connected to Apollo.io'];
+            if (($b1['healthy'] ?? null) === false) {
+                return ['ok' => false, 'message' => 'Apollo reported this key as unhealthy (auth/health: healthy=false). Regenerate the key and check the plan has API access.'];
+            }
+            $raw1 = trim((string) ($r1['body'] ?? ''));
+            if ($b1 === [] && $raw1 !== '') {
+                // A 200 with a non-JSON body is an intercepting proxy or the wrong
+                // base URL — reporting "Connected" here would hide a dead provider.
+                return ['ok' => false, 'message' => 'auth/health answered HTTP ' . $s1 . ' with a non-JSON body ('
+                    . mb_substr($raw1, 0, 60) . '…) — a proxy is intercepting the request, or the Base URL is not api.apollo.io.'];
+            }
+            return ['ok' => true, 'message' => 'Connected to Apollo.io (auth/health OK).' . $revealNote];
         }
-        if ($status === 401 || $status === 403) return ['ok' => false, 'message' => 'Invalid API key or plan without API access'];
-        if ($status === 429) return ['ok' => false, 'message' => 'Rate limited — try again later'];
-        if ($status === 0) return ['ok' => false, 'message' => 'Could not reach Apollo.io (network/SSL/firewall). Check outbound HTTPS to api.apollo.io'];
-        return ['ok' => false, 'message' => 'Connection failed (HTTP ' . $status . ')'];
+        if ($s1 === 401) {
+            return ['ok' => false, 'message' => 'Invalid Apollo API key (HTTP 401 on auth/health). Regenerate it in Apollo → Settings → Integrations → API Keys and paste the full value.'];
+        }
+        if ($s1 === 429) return ['ok' => false, 'message' => 'Apollo rate limit reached (HTTP 429) — run the test again in a minute.'];
+        if ($s1 === 0) return ['ok' => false, 'message' => self::apolloNetworkMessage($r1, $root)];
+        if ($s1 >= 500) return ['ok' => false, 'message' => 'Apollo.io server error on auth/health (HTTP ' . $s1 . ') — retry the test shortly.'];
+
+        // ---- Probe 2: 403/404/422 usually means "this key is scoped to other
+        // endpoints", so verify on the endpoint Lead Discovery actually calls ----
+        $r2 = self::http($root . '/api/v1/mixed_people/api_search?per_page=1&q_keywords=apollo', $headers, '{}');
+        $s2 = (int) ($r2['status'] ?? 0);
+        $b2 = self::decode($r2['body'] ?? '');
+        if ($s2 >= 200 && $s2 < 300) {
+            return [
+                'ok' => true,
+                'message' => 'Connected to Apollo.io — key verified on mixed_people/api_search. auth/health answered HTTP ' . $s1
+                    . ', so this key is scoped to specific endpoints (that is fine for Lead Discovery).' . $revealNote,
+            ];
+        }
+        $code = strtoupper(trim((string) ($b2['error_code'] ?? $b2['code'] ?? '')));
+        $detail = trim((string) ($b2['error_message'] ?? $b2['message'] ?? $b2['error'] ?? ''));
+        if ($s2 === 401) {
+            return ['ok' => false, 'message' => 'Invalid Apollo API key (HTTP 401 on mixed_people/api_search). Regenerate it in Apollo → Settings → Integrations → API Keys.'];
+        }
+        if ($s2 === 403) {
+            // Kept inside the 255 chars the provider row stores, so the fix
+            // survives both the flash message and the "Last test" line.
+            return ['ok' => false, 'message' => 'HTTP 403' . ($code !== '' ? ' ' . $code : '') . ': this key may not call the tested endpoints. '
+                . 'Grant it the mixed_people/api_search scope in Apollo → Settings → Integrations → API Keys, or toggle “Set as master key”. '
+                . 'Free accounts also need a work-email signup.'];
+        }
+        if ($s2 === 422) {
+            // 422 is a parameter-validation answer, not an auth answer: Apollo
+            // accepted the key and processed the request.
+            return ['ok' => true, 'message' => 'Connected to Apollo.io — the key authenticated on mixed_people/api_search (HTTP 422 on the probe filters only; auth/health answered HTTP ' . $s1 . ').'];
+        }
+        if ($s2 === 429) return ['ok' => false, 'message' => 'Apollo rate limit reached (HTTP 429) — run the test again in a minute.'];
+        if ($s2 === 0) return ['ok' => false, 'message' => self::apolloNetworkMessage($r2, $root)];
+        if ($s2 >= 500) return ['ok' => false, 'message' => 'Apollo.io server error (HTTP ' . $s2 . ') — retry the test shortly.'];
+        return ['ok' => false, 'message' => 'Connection failed: auth/health HTTP ' . $s1 . ', mixed_people/api_search HTTP ' . $s2
+            . ($code !== '' ? ' ' . $code : '') . ($detail !== '' ? ' — ' . $detail : '')];
+    }
+
+    /**
+     * Apollo API origin **without** the /api/v1 suffix (callers append it), so a
+     * pasted `https://api.apollo.io/api/v1`, a marketing host (`apollo.io`,
+     * `app.apollo.io`) or an `http://` URL all resolve to a working endpoint.
+     * Honours the provider row first, then APOLLO_IO_API_BASE / APOLLO_API_BASE.
+     */
+    public static function apolloApiRoot(array $row = []): string
+    {
+        $base = trim((string) ($row['base_url'] ?? ''));
+        if ($base === '') $base = trim((string) (getenv('APOLLO_IO_API_BASE') ?: getenv('APOLLO_API_BASE') ?: ''));
+        if ($base === '') $base = 'https://api.apollo.io';
+        // Strip markdown/link wrappers an operator may have pasted.
+        $base = (string) (preg_replace('#^\[[^\]]*\]\((https?://[^)\s]+)\)\s*$#i', '$1', $base) ?? $base);
+        $base = (string) (preg_replace('#^<\s*(https?://[^>\s]+)\s*>$#i', '$1', $base) ?? $base);
+        if (!preg_match('#^https?://#i', $base)) $base = 'https://' . ltrim($base, '/');
+        if (stripos($base, 'http://') === 0) $base = 'https://' . substr($base, 7);
+        $base = rtrim($base, "/ \t");
+        $base = (string) (preg_replace('#/api/v\d+$#i', '', $base) ?? $base);
+        $host = strtolower((string) (parse_url($base, PHP_URL_HOST) ?: ''));
+        $notApiOrigins = ['apollo.io', 'www.apollo.io', 'app.apollo.io', 'developer.apollo.io', 'docs.apollo.io'];
+        if (in_array($host, $notApiOrigins, true)) $base = 'https://api.apollo.io';
+        return rtrim($base, '/');
+    }
+
+    /**
+     * Clean a pasted Apollo key: no surrounding quotes/whitespace, no line
+     * breaks inside the token, and a whole copied cURL command still yields the
+     * key from its `x-api-key:` header.
+     */
+    public static function normalizeApolloKey(string $key): string
+    {
+        $k = trim($key);
+        if ($k === '') return '';
+        if (preg_match('#x-api-key["\']?\s*[:=]\s*["\']?([A-Za-z0-9_\-]{12,})#i', $k, $m)) return $m[1];
+        $k = trim($k, "\"'`");
+        // API keys are single opaque tokens — a newline or space is a paste artefact.
+        $k = (string) preg_replace('/\s+/', '', $k);
+        return trim($k, "\"'`,;");
+    }
+
+    /** @return array<string,mixed> */
+    private static function decode(mixed $body): array
+    {
+        $decoded = json_decode((string) $body, true);
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    /**
+     * Turn a transport failure (status 0) into something an operator can act on:
+     * a missing/outdated CA bundle, DNS, or a firewall are different problems
+     * with different fixes, and "Connection failed" hides all three.
+     */
+    private static function apolloNetworkMessage(array $resp, string $root): string
+    {
+        $errno = (int) ($resp['errno'] ?? 0);
+        $error = trim((string) ($resp['error'] ?? ''));
+        // Fix first, raw transport text last: the provider row stores 255 chars,
+        // so whatever gets truncated must be the part the operator can live
+        // without. cURL error text is also capped so it cannot crowd out the fix.
+        $hint = $error !== '' ? ' cURL said: ' . mb_substr($error, 0, 80) : '';
+        $low = strtolower($error);
+        if ($errno === 60 || $errno === 51 || $errno === 77 || str_contains($low, 'certificate') || str_contains($low, 'ca bundle') || str_contains($low, 'ssl')) {
+            return 'Apollo.io’s TLS certificate could not be verified — point curl.cainfo (and openssl.cafile) in php.ini at a current cacert.pem, then test again.' . $hint;
+        }
+        if ($errno === 6 || str_contains($low, 'resolve host') || str_contains($low, 'name or service not known')) {
+            return 'api.apollo.io does not resolve — DNS is failing on this server.' . $hint;
+        }
+        if ($errno === 7 || $errno === 28 || str_contains($low, 'timed out') || str_contains($low, 'connection refused')) {
+            return 'Outbound HTTPS to ' . $root . ' is blocked by a firewall or timed out — allow egress to api.apollo.io on port 443.' . $hint;
+        }
+        if ($error === '' && !function_exists('curl_init') && !ini_get('allow_url_fopen')) {
+            return 'This PHP install has neither cURL nor allow_url_fopen, so no outbound HTTPS request is possible. Enable the cURL extension, then test again.';
+        }
+        return 'Could not reach Apollo.io — check outbound HTTPS to api.apollo.io (port 443).' . $hint;
     }
 
     private static function testCloudflare(array $row, array $secrets): array
@@ -1144,13 +1343,24 @@ final class ApiProviders
      *
      * Prefer cURL when available (typical on cPanel; works when allow_url_fopen
      * is off). Fall back to file_get_contents streams. Always returns a status
-     * so callers can distinguish network failure (0) from HTTP errors.
+     * so callers can distinguish network failure (0) from HTTP errors, plus the
+     * transport error text (`error` / `errno`) so a TLS, DNS or firewall problem
+     * can be reported instead of a bare "Connection failed".
      *
-     * @return array{status:int,body:string}
+     * @return array{status:int,body:string,errno:int,error:string}
      */
     public static function http(string $url, array $headers = [], ?string $body = null): array
     {
-        if (is_callable(self::$http)) return (self::$http)($url, $headers, $body);
+        if (is_callable(self::$http)) {
+            $stub = (self::$http)($url, $headers, $body);
+            if (!is_array($stub)) $stub = [];
+            return [
+                'status' => (int) ($stub['status'] ?? 0),
+                'body' => (string) ($stub['body'] ?? ''),
+                'errno' => (int) ($stub['errno'] ?? 0),
+                'error' => (string) ($stub['error'] ?? ''),
+            ];
+        }
 
         $method = $body === null ? 'GET' : 'POST';
         $headerList = ['Accept: application/json', 'User-Agent: WINDELS-API-Management/1.0'];
@@ -1167,6 +1377,8 @@ final class ApiProviders
             $headerList[] = $h;
         }
 
+        $errno = 0;
+        $error = '';
         if (function_exists('curl_init')) {
             $ch = curl_init($url);
             if ($ch !== false) {
@@ -1188,21 +1400,28 @@ final class ApiProviders
                 }
                 $raw = curl_exec($ch);
                 $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                $errno = curl_errno($ch);
+                $errno = (int) curl_errno($ch);
+                $error = (string) curl_error($ch);
                 curl_close($ch);
                 if ($raw !== false) {
-                    return ['status' => $status > 0 ? $status : ($errno ? 0 : 0), 'body' => (string) $raw];
+                    return ['status' => $status, 'body' => (string) $raw, 'errno' => $errno, 'error' => $error];
                 }
                 // Fall through to streams if cURL failed to produce a body and
                 // reported a transport error — some hosts mis-configure cURL CA.
                 if ($status > 0) {
-                    return ['status' => $status, 'body' => ''];
+                    return ['status' => $status, 'body' => '', 'errno' => $errno, 'error' => $error];
                 }
+                if ($error === '') $error = 'cURL error ' . $errno;
             }
         }
 
         if (!ini_get('allow_url_fopen')) {
-            return ['status' => 0, 'body' => ''];
+            return [
+                'status' => 0,
+                'body' => '',
+                'errno' => $errno,
+                'error' => $error !== '' ? $error : 'no HTTP transport available (cURL missing and allow_url_fopen is off)',
+            ];
         }
 
         $hdr = '';
@@ -1223,7 +1442,8 @@ final class ApiProviders
         foreach ($http_response_header ?? [] as $line) {
             if (preg_match('#HTTP/\S+\s+(\d+)#', $line, $m)) { $status = (int) $m[1]; break; }
         }
-        return ['status' => $status, 'body' => is_string($raw) ? $raw : ''];
+        if (!is_string($raw) && $error === '') $error = 'stream request failed (HTTP ' . $status . ')';
+        return ['status' => $status, 'body' => is_string($raw) ? $raw : '', 'errno' => $errno, 'error' => $error];
     }
 
     private static function hydrate(array $row, bool $withSecrets): array

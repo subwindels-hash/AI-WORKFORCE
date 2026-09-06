@@ -26,7 +26,7 @@ class Api_lead_discovery extends Api_controller
     public function providers(){ if(!$this->guard())return; $this->json(['providers'=>(new \LeadDiscovery\ProviderRegistry([new \LeadDiscovery\GooglePlacesProvider(), new \LeadDiscovery\ApolloProvider()]))->health()]); }
     public function modes(){ if(!$this->guard())return; $this->json(['modes'=>[
         ['id'=>'business','label'=>'Business Mode','description'=>'Search B2B/business contacts by keyword + country/city. Works with both Google Places and Apollo.io.'],
-        ['id'=>'person','label'=>'Person Mode','description'=>'Search for individuals by first-name list + country/city; results are filtered to people whose email is on a free webmail provider (gmail.com, yahoo.com, outlook.com, icloud.com, hotmail.com, aol.com, proton.me, live.com). Apollo.io required.'],
+        ['id'=>'person','label'=>'Person Mode','description'=>'Search for individuals by first-name list + country/city; results are filtered to people whose email is on a free webmail provider (gmail.com, yahoo.com, outlook.com, icloud.com, hotmail.com, aol.com, proton.me, live.com). Apollo.io required, with contact reveal enabled on the provider: Apollo people search returns no email addresses until a record is enriched (spends Apollo credits).'],
     ]]); }
     private function id(): string { return bin2hex(random_bytes(16)); }
     private function now(): string { return gmdate('c'); }
@@ -60,7 +60,7 @@ class Api_lead_discovery extends Api_controller
         $finalQuery=trim(implode(' ',$parts));
         if(strlen($finalQuery)<3||strlen($finalQuery)>300) return $this->jsonError('query must be 3–300 characters');
         $location=trim(implode(', ',array_filter([$city,$country])));
-        $started=microtime(true); $error=null; $raw=[]; $providerStatus='DISABLED';
+        $started=microtime(true); $error=null; $raw=[]; $providerStatus='DISABLED'; $providerInfo=null;
         $providerInput=['query'=>$finalQuery,'limit'=>(int)($b['limit']??20)];
         if($mode==='person'||$providerName==='apollo_io'){
             $providerInput['person_locations']=$location!==''?[$location]:null;
@@ -69,8 +69,17 @@ class Api_lead_discovery extends Api_controller
             if($titles) $providerInput['person_titles']=$titles;
             if($names) $providerInput['first_names']=$names;
         }
-        try { $registry=new \LeadDiscovery\ProviderRegistry([new \LeadDiscovery\GooglePlacesProvider(), new \LeadDiscovery\ApolloProvider()]); $provider=$registry->get($providerName); $providerStatus=$provider->healthCheck()['status']; $raw=$provider->searchBusinesses($providerInput); }
-        catch(\LeadDiscovery\ProviderException $e) { $error=\AIWorkforce\ApiProviders::publicError($e->getMessage()); $providerStatus=$e->httpStatus===422?'PLANNED':'DISABLED'; }
+        try { $registry=new \LeadDiscovery\ProviderRegistry([new \LeadDiscovery\GooglePlacesProvider(), new \LeadDiscovery\ApolloProvider()]); $provider=$registry->get($providerName); $providerStatus=$provider->healthCheck()['status']; $raw=$provider->searchBusinesses($providerInput); if(method_exists($provider,'lastSearchInfo')) $providerInfo=$provider->lastSearchInfo(); }
+        catch(\LeadDiscovery\ProviderException $e) { log_message('error','lead_discovery '.$providerName.': '.$e->getMessage()); $error=\AIWorkforce\ApiProviders::publicError($e->getMessage()); $providerStatus=$e->httpStatus===422?'PLANNED':'DISABLED'; }
+        catch(\Throwable $e) { log_message('error','lead_discovery '.$providerName.' unexpected: '.$e->getMessage()); $error=\AIWorkforce\ApiProviders::publicError($e->getMessage()); }
+        // Provider facts an operator may act on. Apollo's search endpoint never
+        // returns emails/phones (https://docs.apollo.io/reference/people-api-search),
+        // so the notice explains why Person Mode can come back empty. Internal
+        // detail stays in the error log — members never see connection internals.
+        if(is_array($providerInfo)){
+            if(!empty($providerInfo['notes'])) log_message('error','lead_discovery '.$providerName.' notes: '.implode(' | ',$providerInfo['notes']));
+            $providerInfo=['results'=>(int)($providerInfo['results']??0),'revealEnabled'=>!empty($providerInfo['reveal_enabled']),'revealRequested'=>(int)($providerInfo['reveal_requested']??0),'revealed'=>(int)($providerInfo['revealed']??0),'notice'=>($providerInfo['notice']??null)];
+        }
         $freeDomains=['gmail.com','yahoo.com','outlook.com','icloud.com','hotmail.com','aol.com','proton.me','live.com','me.com','mail.com','gmx.com','yandex.com'];
         if($mode==='person'){
             $raw=array_values(array_filter($raw,function($p)use($names,$freeDomains){
@@ -122,7 +131,7 @@ class Api_lead_discovery extends Api_controller
         }
         $this->db->insert('search_history',['id'=>$this->id(),'organization_id'=>$this->org,'user_id'=>(int)$this->user['id'],'query'=>$finalQuery,'provider'=>$providerName,'filters'=>json_encode(['mode'=>$mode,'limit'=>$b['limit']??20,'country'=>$country,'city'=>$city,'keywords'=>$keywords,'names'=>$names,'seniorities'=>$seniorities,'titles'=>$titles]),'results_returned'=>count($raw),'new_leads_created'=>$new,'duplicates_detected'=>$dupes+$candidateCount,'errors'=>$error,'duration_ms'=>(int)((microtime(true)-$started)*1000),'created_at'=>$this->now()]);
         if($error)return $this->jsonError($error,503,['providerStatus'=>$providerStatus]);
-        $this->json(['mode'=>$mode,'provider'=>$providerName,'providerStatus'=>$providerStatus,'results'=>$results,'newLeadsCreated'=>$new,'duplicatesDetected'=>$dupes+$candidateCount,'duplicateCandidatesCreated'=>$candidateCount,'freeEmailCount'=>($mode==='person'?count($results):null)]);
+        $this->json(['mode'=>$mode,'provider'=>$providerName,'providerStatus'=>$providerStatus,'results'=>$results,'newLeadsCreated'=>$new,'duplicatesDetected'=>$dupes+$candidateCount,'duplicateCandidatesCreated'=>$candidateCount,'freeEmailCount'=>($mode==='person'?count($results):null),'providerInfo'=>$providerInfo,'notice'=>(is_array($providerInfo)?($providerInfo['notice']??null):null)]);
     }
     public function leads($id=null){if(!$this->guard())return;if($id){$x=$this->lead($id);return $x?$this->json($x):$this->jsonError('lead not found',404);} $this->db->where('organization_id',$this->org);if($s=$this->input->get('status'))$this->db->where('status',$s);$this->json(['leads'=>$this->db->order_by('updated_at','DESC')->limit(250)->get('leads')->result_array()]);}
     public function collections($id=null){

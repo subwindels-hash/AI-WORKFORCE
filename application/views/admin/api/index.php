@@ -40,6 +40,11 @@
                 $badge = $st === 'Connected' ? 'b-green' : ($st === 'Connection failed' ? 'b-red' : ($st === 'Disabled' ? 'b-amber' : 'b-gray'));
               ?>
               <span class="badge <?= $badge ?>"><?= e($st) ?></span>
+              <?php if ($p && !empty($p['last_test_message'])): ?>
+                <!-- The badge alone said only "Connection failed"; the reason the
+                     provider reported is what an operator can actually act on. -->
+                <div class="dim" style="font-size:11px;margin-top:4px;max-width:360px"><?= e($p['last_test_message']) ?></div>
+              <?php endif; ?>
             </td>
             <td><?= $row['primary'] ? 'Yes' : 'No' ?></td>
             <td class="dim">

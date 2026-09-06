@@ -1,6 +1,10 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed');
 /** @var array $accounts $positions $executions $proposals $connections $brokerStatus $history $analysis $riskLimits $supportedBrokers $journalEntries $perfSummary $calibration $riskAlerts */
-$ic = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">';
+// width/height are a floor, not the design size: an inline <svg> that has a
+// viewBox but no size renders at the browser's default replaced-element box
+// (~150-300px), so a wrapper that forgets its CSS size gets a giant icon.
+// CSS still wins wherever a wrapper sets one (.btn, .qa-icon, .ra-icon, …).
+$ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">';
 $ks = !empty($killSwitchActive);
 $totalEq = (float)($totalEquity ?? 0);
 $totalPnl = (float)($totalUnrealizedPnl ?? 0);
@@ -50,7 +54,8 @@ $overall = $perfSummary['overall'] ?? [];
 /* ─── Risk ──────────────────────────────────────────────────────── */
 .risk-alert{display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-radius:var(--radius-sm);margin-bottom:8px;font-size:13px}
 .risk-alert.critical{background:#fb5d6b15;border:1px solid #fb5d6b33}.risk-alert.warning{background:#f5a62315;border:1px solid #f5a62333}.risk-alert.info{background:#3b82f615;border:1px solid #3b82f633}
-.risk-alert .ra-icon{flex:none;width:20px;height:20px;margin-top:1px}
+.risk-alert .ra-icon{flex:none;width:20px;height:20px;margin-top:1px;display:flex;align-items:center;justify-content:center}
+.risk-alert .ra-icon svg{width:20px;height:20px;flex:none;display:block}
 .risk-toggle{display:flex;align-items:center;gap:10px;padding:10px 0}
 .risk-toggle label{font-size:13px;font-weight:500}
 .toggle-switch{position:relative;width:44px;height:24px;cursor:pointer}
@@ -109,6 +114,7 @@ $overall = $perfSummary['overall'] ?? [];
 .quick-action .qa-desc{font-size:10px;color:var(--dim);font-weight:400}
 /* ─── Kill switch ───────────────────────────────────────────────── */
 .ks-banner{background:var(--red);color:#fff;padding:12px 18px;border-radius:var(--radius);margin-bottom:16px;display:flex;align-items:center;gap:10px;font-size:13px;font-weight:600}
+.ks-banner svg{width:18px;height:18px;flex:none}
 /* ─── Responsive ────────────────────────────────────────────────── */
 @media(max-width:768px){.trade-form{grid-template-columns:1fr}.t-stats{grid-template-columns:1fr 1fr}.broker-grid{grid-template-columns:1fr}.chart-head{flex-direction:column;align-items:flex-start}}
 </style>
