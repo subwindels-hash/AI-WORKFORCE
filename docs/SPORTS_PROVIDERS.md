@@ -385,3 +385,14 @@ The `🎯 Odds Prediction Ticket` builder is intentionally conservative:
 * Ticket thresholds are hard floors: confidence must be at least `80%`, data quality at least `75/100`, odds must be fresh, and the combined decimal odds window is always `5.00` through `8.00` inclusive. The optimizer multiplies unrounded leg odds and rounds only the stored/displayed total.
 * The optimizer prefers stronger confidence, quality, expected value, fresh/reliable odds, lower risk, fewer unnecessary selections, and low correlation. It does not add weak selections just to reach the odds band.
 * If no verified combination satisfies those gates, the run records `NO_QUALIFIED_TICKET` with a `NO VALUE TICKET TODAY` message rather than guessing.
+
+### Pipeline endpoint aliases
+
+For the odds prediction pipeline contract, these API routes map to the implementation:
+
+* `GET /api/sports/fixtures?date=today` (also `/fixtures`) reads saved verified fixtures for the requested day.
+* `GET /api/sports/odds?fixture={fixture_id}` (also `/odds`) reads saved provider odds for that fixture/match.
+* `POST /api/sports/predict` (also `/predict`) runs the daily odds prediction ticket builder.
+* `POST /api/sports/settle` (also `/settle`) sweeps all open tickets and only settles picks with verified persisted final results.
+
+The endpoint aliases do not relax authentication, permissions, provider validation, odds freshness, or the `NO VALUE TICKET TODAY` fail-safe.

@@ -96,6 +96,29 @@ class Api_sports extends Api_controller
         ]);
     }
 
+
+    /** Spec alias: GET /fixtures?date=today returns persisted fixtures for a day. */
+    public function fixtures()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $date = (string) ($g['date'] ?? gmdate('Y-m-d'));
+        if ($date === 'today') $date = gmdate('Y-m-d');
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) return $this->jsonError('date must be YYYY-MM-DD or today');
+        $rows = $this->AIWorkforce_model->sports->listMatches(['from' => $date . 'T00:00:00+00:00', 'to' => $date . 'T23:59:59+00:00'], (int) ($g['limit'] ?: 500));
+        $fixtures = array_map(fn($m) => [
+            'fixture_id' => $m['external_id'] ?? (string) ($m['id'] ?? ''),
+            'league_id' => $m['payload']['leagueId'] ?? null,
+            'league_name' => $m['competition'] ?? null,
+            'home_team' => $m['home_team'] ?? null,
+            'away_team' => $m['away_team'] ?? null,
+            'kickoff_time' => $m['kickoff_at'] ?? null,
+            'fixture_status' => $m['payload']['sourceStatus'] ?? $m['status'] ?? null,
+            'timezone' => $m['payload']['timezone'] ?? null,
+        ], $rows);
+        $this->json(['fixtures' => $fixtures, 'source' => 'database', 'date' => $date]);
+    }
+
     public function matches()
     {
         if (!$this->requirePermission('sports.view', false)) return;
@@ -126,8 +149,17 @@ class Api_sports extends Api_controller
     {
         if (!$this->requirePermission('sports.view', false)) return;
         $g = $this->input->get(NULL, true) ?: [];
-        if (empty($g['matchId'])) return $this->jsonError('matchId is required');
-        $rows = $this->AIWorkforce_model->sports->listOdds((int) $g['matchId'], (int) ($g['limit'] ?: 50));
+        $matchId = $g['matchId'] ?? $g['fixture'] ?? $g['fixture_id'] ?? null;
+        if ($matchId === null || $matchId === '') return $this->jsonError('matchId or fixture is required');
+        if (!is_numeric($matchId)) {
+            $found = null;
+            foreach ($this->AIWorkforce_model->sports->listMatches([], 1000) as $m) {
+                if ((string) ($m['external_id'] ?? '') === (string) $matchId) { $found = $m; break; }
+            }
+            if (!$found) return $this->jsonError('fixture not found', 404);
+            $matchId = (int) $found['id'];
+        }
+        $rows = $this->AIWorkforce_model->sports->listOdds((int) $matchId, (int) ($g['limit'] ?: 50));
         $this->json(['odds' => $rows]);
     }
 
