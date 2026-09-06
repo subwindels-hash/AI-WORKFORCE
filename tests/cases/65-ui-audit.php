@@ -167,3 +167,52 @@ test('login/register/forgot forms submit to their real actions with CSRF', funct
     assert_contains('action="/forgot-password/submit"', $forgot);
     assert_contains('name="csrf_token"', $forgot);
 });
+
+test('inline icon svgs are sized twice over: intrinsic floor plus a wrapper rule', function () {
+    // An <svg> that has a viewBox but no width/height renders at the browser's
+    // default replaced-element box (~150-300px). The dashboard icon helper is
+    // emitted into many wrappers, so an icon blows up whenever one of them
+    // forgets its CSS size — that is how /app/trading shipped a shield icon the
+    // size of a panel. Guard both halves: the shared markup carries an intrinsic
+    // floor, and every icon wrapper keeps an explicit pixel size (CSS wins, so
+    // the floor never changes an icon that is already styled).
+    $css = (string) file_get_contents(FCPATH . 'assets/css/ai_workforce.css');
+    assert_contains('.btn svg { width: 18px; height: 18px; flex: none; }', $css, 'design system sizes button icons');
+    assert_contains('button svg, a.btn svg, .notice svg { max-width: 18px; max-height: 18px;', $css, 'generic cap on icons inside buttons');
+    assert_contains('.kp-card .kp-ic svg { width: 24px; height: 24px; }', $css, 'kpi card icons sized');
+    assert_contains('.empty-state svg { width: 32px; height: 32px;', $css, 'empty-state icons sized');
+
+    $views = [
+        'application/views/trading/index.php',
+        'application/views/workspace/index.php',
+        'application/views/workforce/index.php',
+        'application/views/admin/layout/header.php',
+        'application/views/agent_platform/index.php',
+        'application/views/multiplier/index.php',
+    ];
+    foreach ($views as $rel) {
+        $src = (string) file_get_contents(FCPATH . $rel);
+        assert_true($src !== '', $rel . ' is readable');
+        if (!preg_match('/\$ic\s*=\s*\'<svg/', $src)) continue;
+        assert_true(
+            (bool) preg_match('/\$ic\s*=\s*\'<svg[^>]*\swidth="\d+"[^>]*\sheight="\d+"/', $src),
+            $rel . ': $ic must carry width/height so a wrapper without a CSS rule cannot render a giant icon'
+        );
+    }
+
+    // The two /app/trading wrappers that had no svg rule at all.
+    $trading = (string) file_get_contents(FCPATH . 'application/views/trading/index.php');
+    assert_contains('.risk-alert .ra-icon svg{width:20px;height:20px', $trading, 'risk-alert icon sized 20x20');
+    assert_contains('.ks-banner svg{width:18px;height:18px', $trading, 'kill-switch banner icon sized 18x18');
+    assert_contains('.quick-action .qa-icon svg{width:18px;height:18px}', $trading, 'quick-action icon still sized');
+    foreach (['ra-icon', 'ks-banner', 'qa-icon'] as $cls) {
+        assert_true(
+            (bool) preg_match('/\.' . preg_quote($cls, '/') . '\s+svg\{[^}]*width:\s*\d+px/', $trading),
+            '.' . $cls . ' svg keeps an explicit pixel width'
+        );
+    }
+    // The chart svgs are meant to be big: they are sized by their own rules and
+    // must not be confused with icons.
+    assert_contains('.chart-svg{width:100%;height:240px', $trading, 'chart keeps its own size');
+    assert_contains('.equity-curve{width:100%;height:160px', $trading, 'equity curve keeps its own size');
+});
