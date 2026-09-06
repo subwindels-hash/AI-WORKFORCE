@@ -46,7 +46,7 @@ final class PerformanceService
                 'evaluatedPredictions' => 0, 'correctResults' => 0, 'resultAccuracy' => null,
                 'correctScores' => 0, 'exactScoreAccuracy' => null, 'averageConfidence' => null,
                 'brier' => null, 'ece' => null, 'logLoss' => null, 'averageDataQuality' => null,
-                'averageGoalError' => null, 'byModel' => [],
+                'averageGoalError' => null, 'byCategory' => [], 'byModel' => [],
                 // The flag the console reads to confirm an empty history is not a gate:
                 // settlement never disables forecasting.
                 'gatesPredictions' => false,
@@ -57,15 +57,37 @@ final class PerformanceService
         }
         $samples = $this->repo->listCalibrationSamples($filter + ['limit' => 5000]);
         $confidences = []; $hits = []; $goalErrors = [];
+        $byCategory = ['A' => ['evaluated' => 0, 'correct' => 0, 'scores' => 0], 'B' => ['evaluated' => 0, 'correct' => 0, 'scores' => 0], 'C' => ['evaluated' => 0, 'correct' => 0, 'scores' => 0], 'UNCLASSIFIED' => ['evaluated' => 0, 'correct' => 0, 'scores' => 0]];
+        $categoryConfidence = ['A' => [], 'B' => [], 'C' => [], 'UNCLASSIFIED' => []];
         foreach ($samples as $sample) {
             if (is_numeric($sample['probability_home'] ?? null) && is_numeric($sample['probability_draw'] ?? null) && is_numeric($sample['probability_away'] ?? null)
                 && in_array((string) ($sample['actual_result'] ?? ''), ['HOME', 'DRAW', 'AWAY'], true)) {
                 $probabilities = ['home' => (float) $sample['probability_home'], 'draw' => (float) $sample['probability_draw'], 'away' => (float) $sample['probability_away']];
                 $outcome = strtolower((string) $sample['actual_result']);
                 $confidences[] = max($probabilities);
-                $hits[] = self::argmax($probabilities) === $outcome ? 1 : 0;
+                $hit = self::argmax($probabilities) === $outcome;
+                $hits[] = $hit ? 1 : 0;
+                $bucket = isset($sample['category']) && in_array(strtoupper((string) $sample['category']), ['A', 'B', 'C'], true)
+                    ? strtoupper((string) $sample['category']) : 'UNCLASSIFIED';
+                $byCategory[$bucket]['evaluated']++;
+                if ($hit) $byCategory[$bucket]['correct']++;
+                if ((int) ($sample['correct_exact_score'] ?? 0) === 1) $byCategory[$bucket]['scores']++;
+                $categoryConfidence[$bucket][] = max($probabilities);
             }
             if (is_numeric($sample['absolute_goal_error'] ?? null)) $goalErrors[] = (float) $sample['absolute_goal_error'];
+        }
+        $categoryReport = [];
+        foreach ($byCategory as $key => $figures) {
+            if ($figures['evaluated'] === 0) continue;   // an empty category reports nothing
+            $categoryReport[] = [
+                'category' => $key,
+                'evaluated' => $figures['evaluated'],
+                'correct' => $figures['correct'],
+                'accuracy' => round($figures['correct'] / $figures['evaluated'], 5),
+                'correctScores' => $figures['scores'],
+                'exactScoreAccuracy' => round($figures['scores'] / $figures['evaluated'], 5),
+                'averageConfidence' => $categoryConfidence[$key] === [] ? null : round(100 * (array_sum($categoryConfidence[$key]) / count($categoryConfidence[$key])), 2),
+            ];
         }
         $calibration = CalibrationService::reliability($confidences, $hits);
         $correctResults = (int) ($aggregate['correctResults'] ?? 0);
@@ -87,6 +109,7 @@ final class PerformanceService
             'averageDataQuality' => $aggregate['averageDataQuality'] ?? null,
             'averageGoalError' => $goalErrors === [] ? null : round(array_sum($goalErrors) / count($goalErrors), 3),
             'calibrationSampleCount' => count($confidences),
+            'byCategory' => $categoryReport,
             'byModel' => $this->byModel($from, $to),
             'gatesPredictions' => false,
             'message' => null,

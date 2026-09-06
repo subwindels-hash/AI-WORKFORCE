@@ -32,7 +32,10 @@ class Football extends App_Controller
         // `refresh=1` rebuilds the board from the rows already stored. It never
         // pulls the provider: that stays an explicit, permission-checked action.
         $data['refresh'] = !empty($get['refresh']);
-        $data['dashboard'] = $this->platform->football->dashboard($date, $data['refresh']);
+        $rawCategory = strtoupper(trim((string) ($get['category'] ?? '')));
+        $category = in_array($rawCategory, \AIWorkforce\Football\CategoryClassifier::KEYS, true) ? $rawCategory : null;
+        $data['category'] = $category;
+        $data['dashboard'] = $this->platform->football->dashboard($date, $data['refresh'], $category);
         $this->render('football/index', $data);
     }
 
@@ -53,6 +56,29 @@ class Football extends App_Controller
             $this->flash('notice', 'Showing the stored live state. A live-score refresh needs sports.manage.');
         }
         redirect('/football');
+    }
+
+    /**
+     * The Odds Prediction Ticket: the day's analyzed matches in the structured
+     * ticket layout, with the A/B/C filter. Same stored rows as the board —
+     * a different reading of them, not a second source of numbers.
+     */
+    public function ticket()
+    {
+        $data = $this->base('Odds Prediction Ticket', 'football');
+        $get = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        $date = \AIWorkforce\Football\RequestParams::date($get, 'date', gmdate('Y-m-d'), $notes);
+        if ($notes !== []) $data['notice'] = trim(implode(' ', array_filter([(string) ($data['notice'] ?? ''), ...$notes])));
+        $data['date'] = $date;
+        $data['yesterday'] = gmdate('Y-m-d', strtotime($date . ' -1 day'));
+        $data['tomorrow'] = gmdate('Y-m-d', strtotime($date . ' +1 day'));
+        $category = null;
+        $rawCategory = strtoupper(trim((string) ($get['category'] ?? '')));
+        if (in_array($rawCategory, \AIWorkforce\Football\CategoryClassifier::KEYS, true)) $category = $rawCategory;
+        $data['category'] = $category;
+        $data['ticket'] = $this->platform->football->ticket()->ticket($date, $category);
+        $this->render('football/ticket', $data);
     }
 
     /** One fixture: stored facts, features, data quality and the prediction. */
@@ -82,6 +108,7 @@ class Football extends App_Controller
     public function sync()
     {
         if ($this->input->method(true) !== 'POST') { redirect('/football'); return; }
+        if (!$this->moduleMustBeEnabled('sync')) return;
         if (!$this->requireFootballPermission('sports.manage', 'sync')) return;
         @set_time_limit(180);
         $supplied = $this->input->post('date');
@@ -120,6 +147,7 @@ class Football extends App_Controller
     public function predict()
     {
         if ($this->input->method(true) !== 'POST') { redirect('/football'); return; }
+        if (!$this->moduleMustBeEnabled('board rebuild')) return;
         if (!$this->requireFootballPermission('sports.manage', 'board rebuild')) return;
         $supplied = $this->input->post('date');
         // Rebuilding writes prediction rows for the date it is given, so an
@@ -149,6 +177,7 @@ class Football extends App_Controller
     public function settle()
     {
         if ($this->input->method(true) !== 'POST') { redirect('/football'); return; }
+        if (!$this->moduleMustBeEnabled('settlement')) return;
         if (!$this->requireFootballPermission('sports.settle', 'settlement')) return;
         try {
             $result = $this->platform->football->cron()->run('settle', null, true);
@@ -164,6 +193,7 @@ class Football extends App_Controller
     public function calibrate()
     {
         if ($this->input->method(true) !== 'POST') { redirect('/football/models'); return; }
+        if (!$this->moduleMustBeEnabled('calibration')) return;
         if (!$this->requireFootballPermission('sports.manage', 'calibration')) return;
         try {
             $result = $this->platform->football->calibrate(null, $this->actor());
@@ -179,6 +209,7 @@ class Football extends App_Controller
     public function decide(string $id)
     {
         if ($this->input->method(true) !== 'POST') { redirect('/football/models'); return; }
+        if (!$this->moduleMustBeEnabled('model approval')) return;
         if (!$this->requireFootballPermission('sports.approve', 'model approval')) return;
         if (!ctype_digit($id)) { redirect('/football/models'); return; }
         $modelVersionId = (int) $id;
@@ -271,8 +302,22 @@ class Football extends App_Controller
             'title' => $title, 'active' => $active,
             'csrfToken' => (string) $this->session->userdata('csrf_token'),
             'caps' => $this->footballCaps(),
+            'moduleDisabled' => !$this->platform->football->config()->enabled(),
             'notice' => $this->flashGet('notice'), 'error' => $this->flashGet('error'),
         ];
+    }
+
+    /**
+     * A disabled module stops its mutations: the operator asked for the module
+     * off, so a stray POST must not fetch fixtures or write predictions.
+     * Returns true when the action may proceed.
+     */
+    private function moduleMustBeEnabled(string $action): bool
+    {
+        if ($this->platform->football->config()->enabled()) return true;
+        $this->flash('error', "Refused: the football module is disabled in the admin settings — the {$action} action was not performed. Enable it under Admin → Football first.");
+        redirect('/football');
+        return false;
     }
 
     private function render(string $view, array $data): void

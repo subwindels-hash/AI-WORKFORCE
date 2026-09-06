@@ -737,6 +737,7 @@ CREATE TABLE IF NOT EXISTS football_match_predictions (
   kickoff_at VARCHAR(32) NOT NULL,
   status_at_prediction VARCHAR(24) NOT NULL DEFAULT 'SCHEDULED',
   predicted_result VARCHAR(24) NOT NULL,
+  category VARCHAR(2) NULL,
   predicted_home_score INT NULL,
   predicted_away_score INT NULL,
   probability_home DECIMAL(8,6) NULL,
@@ -789,6 +790,7 @@ CREATE TABLE IF NOT EXISTS football_prediction_settlements (
   actual_away_score INT NULL,
   actual_result VARCHAR(24) NOT NULL,
   predicted_result VARCHAR(24) NOT NULL,
+  category VARCHAR(2) NULL,
   predicted_home_score INT NULL,
   predicted_away_score INT NULL,
   probability_home DECIMAL(8,6) NULL,
@@ -809,6 +811,25 @@ CREATE TABLE IF NOT EXISTS football_prediction_settlements (
   UNIQUE KEY uq_football_settlement_prediction (prediction_id),
   INDEX idx_football_settlement_fixture (fixture_id),
   INDEX idx_football_settlement_settled (settled_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- The A/B/C classification rules. One row per category; the edge / draw
+-- thresholds live in `parameters` as JSON so an admin change is an audited row
+-- update (updated_by), never an implicit code default. The classifier reads
+-- these rows first and falls back to the configured defaults only when the
+-- table is empty (fresh installs seed it).
+CREATE TABLE IF NOT EXISTS football_category_rules (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  category_key VARCHAR(2) NOT NULL,
+  label VARCHAR(80) NOT NULL,
+  description VARCHAR(255) NULL,
+  rule_type VARCHAR(24) NOT NULL,
+  parameters TEXT NULL,
+  enabled TINYINT(1) NOT NULL DEFAULT 1,
+  created_at VARCHAR(32) NOT NULL,
+  updated_at VARCHAR(32) NOT NULL,
+  updated_by VARCHAR(64) NULL,
+  UNIQUE KEY uq_football_category_rule (category_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS football_model_performance (

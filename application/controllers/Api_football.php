@@ -179,6 +179,44 @@ class Api_football extends Api_controller
         $this->json($payload);
     }
 
+    /**
+     * The Odds Prediction Ticket payload (spec §6): the day's stored
+     * predictions in ticket order, with the A/B/C filter and league scope.
+     * Reads stored rows only — the same entries the console ticket renders.
+     */
+    public function ticket()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        $date = \AIWorkforce\Football\RequestParams::date($g, 'date', gmdate('Y-m-d'), $notes);
+        $category = null;
+        $rawCategory = strtoupper(trim((string) ($g['category'] ?? '')));
+        if (in_array($rawCategory, \AIWorkforce\Football\CategoryClassifier::KEYS, true)) $category = $rawCategory;
+        $payload = $this->football()->ticket()->ticket($date, $category);
+        $payload['request'] = ['date' => $date, 'category' => $category, 'notes' => array_values($notes)];
+        $this->json($payload);
+    }
+
+    /**
+     * Backtest the engine over stored finished matches in a window (spec §11).
+     * Read-only: it runs the prediction path with persistence off and grades
+     * the results against the stored final scores. sports.manage because it
+     * re-runs the full analysis pass over historical rows.
+     */
+    public function backtest()
+    {
+        if (!$this->requirePermission('sports.manage')) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        $limit = \AIWorkforce\Football\RequestParams::int($g, 'limit', 200, 1, 500, $notes);
+        $from = \AIWorkforce\Football\RequestParams::optionalDate($g, 'from', $notes) ?? gmdate('Y-m-01');
+        $to = \AIWorkforce\Football\RequestParams::optionalDate($g, 'to', $notes) ?? gmdate('Y-m-d');
+        $report = $this->football()->backtest($from, $to, $limit);
+        $report['request'] = ['from' => $from, 'to' => $to, 'limit' => $limit, 'notes' => array_values($notes)];
+        $this->json($report);
+    }
+
     // -------------------------------------------------------------- performance
 
     /**

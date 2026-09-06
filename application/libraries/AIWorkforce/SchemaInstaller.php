@@ -46,6 +46,7 @@ final class SchemaInstaller
         'football_team_statistics', 'football_fixture_statistics', 'football_head_to_head',
         'football_model_versions', 'football_calibration_versions', 'football_match_predictions',
         'football_score_probabilities', 'football_prediction_settlements',
+        'football_category_rules',
         'football_model_performance', 'football_provider_sync_logs',
         'languages', 'user_language_profiles', 'language_assessments', 'learning_paths',
         'learning_modules', 'lesson_attempts', 'study_sessions', 'language_progress',
@@ -190,6 +191,16 @@ final class SchemaInstaller
             // Football: the daily provider-request counter is only trusted for the
             // day it was written, so a ceiling cannot leak across midnight.
             $pick('ALTER TABLE football_providers ADD COLUMN requests_used_date TEXT', 'ALTER TABLE football_providers ADD COLUMN requests_used_date DATE NULL', 'ALTER TABLE football_providers ADD COLUMN IF NOT EXISTS requests_used_date DATE'),
+            // Football A/B/C classification: the stored category on each
+            // prediction (written by the classifier) and on each settlement
+            // (copied forward so category performance can be graded).
+            $pick('ALTER TABLE football_match_predictions ADD COLUMN category TEXT', 'ALTER TABLE football_match_predictions ADD COLUMN category VARCHAR(2) NULL', 'ALTER TABLE football_match_predictions ADD COLUMN IF NOT EXISTS category VARCHAR(2)'),
+            $pick('ALTER TABLE football_prediction_settlements ADD COLUMN category TEXT', 'ALTER TABLE football_prediction_settlements ADD COLUMN category VARCHAR(2) NULL', 'ALTER TABLE football_prediction_settlements ADD COLUMN IF NOT EXISTS category VARCHAR(2)'),
+            $pick(
+                'CREATE TABLE IF NOT EXISTS football_category_rules (id INTEGER PRIMARY KEY AUTOINCREMENT, category_key TEXT NOT NULL, label TEXT NOT NULL, description TEXT, rule_type TEXT NOT NULL, parameters TEXT, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by TEXT, UNIQUE(category_key))',
+                'CREATE TABLE IF NOT EXISTS football_category_rules (id INT AUTO_INCREMENT PRIMARY KEY, category_key VARCHAR(2) NOT NULL, label VARCHAR(80) NOT NULL, description VARCHAR(255) NULL, rule_type VARCHAR(24) NOT NULL, parameters TEXT NULL, enabled TINYINT(1) NOT NULL DEFAULT 1, created_at VARCHAR(32) NOT NULL, updated_at VARCHAR(32) NOT NULL, updated_by VARCHAR(64) NULL, UNIQUE KEY uq_football_category_rule (category_key)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4',
+                'CREATE TABLE IF NOT EXISTS football_category_rules (id SERIAL PRIMARY KEY, category_key VARCHAR(2) NOT NULL, label VARCHAR(80) NOT NULL, description VARCHAR(255) NULL, rule_type VARCHAR(24) NOT NULL, parameters TEXT NULL, enabled SMALLINT NOT NULL DEFAULT 1, created_at VARCHAR(32) NOT NULL, updated_at VARCHAR(32) NOT NULL, updated_by VARCHAR(64) NULL, CONSTRAINT uq_football_category_rule UNIQUE (category_key))',
+            ),
             $pick('ALTER TABLE leads ADD COLUMN email TEXT', 'ALTER TABLE leads ADD COLUMN email VARCHAR(255) NULL', 'ALTER TABLE leads ADD COLUMN IF NOT EXISTS email VARCHAR(255)'),
             $pick('ALTER TABLE leads ADD COLUMN job_title TEXT', 'ALTER TABLE leads ADD COLUMN job_title VARCHAR(255) NULL', 'ALTER TABLE leads ADD COLUMN IF NOT EXISTS job_title VARCHAR(255)'),
             $pick('ALTER TABLE leads ADD COLUMN company_name TEXT', 'ALTER TABLE leads ADD COLUMN company_name VARCHAR(255) NULL', 'ALTER TABLE leads ADD COLUMN IF NOT EXISTS company_name VARCHAR(255)'),

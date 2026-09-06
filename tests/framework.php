@@ -738,6 +738,7 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
     public array $predictions = [];
     public array $scoreProbabilities = [];
     public array $settlements = [];
+    public array $categoryRules = [];
     public array $performance = [];
     public array $syncRuns = [];
     public int $autoId = 0;
@@ -824,6 +825,51 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
     {
         return $this->find($this->competitions, fn(array $r) => (int) $r['provider_id'] === $providerId && $r['external_id'] === $externalId
             && ($season === null || ($r['season'] ?? null) === $season));
+    }
+
+    public function listCompetitions(int $limit = 500): array
+    {
+        $rows = array_map(function (array $r) {
+            $provider = $this->find($this->providers, fn(array $p) => (int) ($p['id'] ?? 0) === (int) ($r['provider_id'] ?? 0));
+            $r['provider_code'] = $provider['provider_code'] ?? null;
+            return $r;
+        }, $this->competitions);
+        usort($rows, fn(array $a, array $b) => strcmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? '')));
+        return array_slice($rows, 0, max(1, min(2000, $limit)));
+    }
+
+    public function listCategoryRules(): array
+    {
+        $rows = $this->categoryRules;
+        usort($rows, fn(array $a, array $b) => strcmp((string) ($a['category_key'] ?? ''), (string) ($b['category_key'] ?? '')));
+        return $rows;
+    }
+
+    public function saveCategoryRule(string $categoryKey, array $row): array
+    {
+        $key = strtoupper(trim($categoryKey));
+        if (!in_array($key, ['A', 'B', 'C'], true)) throw new \InvalidArgumentException("unknown football category key: {$key}");
+        $data = [
+            'label' => (string) ($row['label'] ?? ''),
+            'description' => $row['description'] ?? null,
+            'rule_type' => (string) ($row['ruleType'] ?? $row['rule_type'] ?? 'MANUAL'),
+            'parameters' => is_string($row['parameters'] ?? null) ? $row['parameters'] : ($row['parameters'] ?? []),
+            'enabled' => empty($row['enabled']) ? 0 : 1,
+            'updated_at' => gmdate('c'),
+            'updated_by' => $row['updatedBy'] ?? $row['updated_by'] ?? null,
+        ];
+        if ($data['label'] === '') throw new \InvalidArgumentException("category {$key} requires a label");
+        $existing = $this->find($this->categoryRules, fn(array $r) => (string) ($r['category_key'] ?? '') === $key);
+        if ($existing !== null) {
+            foreach ($this->categoryRules as &$r) { if ((string) $r['category_key'] === $key) $r = array_merge($r, $data); }
+            unset($r);
+            $this->writes[] = 'category_rule:update:' . $key;
+            return $this->find($this->categoryRules, fn(array $r) => (string) ($r['category_key'] ?? '') === $key) ?? $existing;
+        }
+        $stored = array_merge(['id' => $this->id(), 'category_key' => $key, 'created_at' => gmdate('c')], $data);
+        $this->categoryRules[] = $stored;
+        $this->writes[] = 'category_rule:create:' . $key;
+        return $stored;
     }
 
     public function saveTeam(int $providerId, array $row): array
@@ -1174,6 +1220,7 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
             if (!empty($filter['eligibility']) && (string) ($row['eligibility'] ?? '') !== (string) $filter['eligibility']) return false;
             if (!empty($filter['modelVersionId']) && (int) ($row['model_version_id'] ?? 0) !== (int) $filter['modelVersionId']) return false;
             if (!empty($filter['settlementState']) && (string) ($row['settlement_state'] ?? '') !== (string) $filter['settlementState']) return false;
+            if (isset($filter['category']) && (string) $filter['category'] !== '' && (string) ($row['category'] ?? '') !== strtoupper((string) $filter['category'])) return false;
             if (!empty($filter['date']) && !str_starts_with((string) ($row['kickoff_at'] ?? ''), (string) $filter['date'])) return false;
             if (!empty($filter['from']) && (string) ($row['generated_at'] ?? '') < (string) $filter['from']) return false;
             if (!empty($filter['to']) && (string) ($row['generated_at'] ?? '') > (string) $filter['to']) return false;

@@ -63,6 +63,12 @@ final class SettlementService
                 'actual_away_score' => $away,
                 'actual_result' => $actualResult,
                 'predicted_result' => (string) ($prediction['predicted_result'] ?? ''),
+                // The category is graded as part of performance: which bucket
+                // (A/B/C) were the hits and misses in. Rows written before the
+                // column existed settle with a null category and grade as
+                // UNCLASSIFIED in the report — never dropped from the counts.
+                'category' => isset($prediction['category']) && strtoupper(trim((string) $prediction['category'])) !== ''
+                    ? strtoupper(trim((string) $prediction['category'])) : null,
                 'predicted_home_score' => $prediction['predicted_home_score'],
                 'predicted_away_score' => $prediction['predicted_away_score'],
                 'probability_home' => $prediction['probability_home'],

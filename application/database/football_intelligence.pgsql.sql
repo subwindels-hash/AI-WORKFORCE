@@ -248,6 +248,7 @@ CREATE TABLE IF NOT EXISTS "football_match_predictions" (
   "kickoff_at" VARCHAR(32) NOT NULL,
   "status_at_prediction" VARCHAR(24) NOT NULL DEFAULT 'SCHEDULED',
   "predicted_result" VARCHAR(24) NOT NULL,
+  "category" VARCHAR(2) NULL,
   "predicted_home_score" INTEGER NULL,
   "predicted_away_score" INTEGER NULL,
   "probability_home" DECIMAL(8,6) NULL,
@@ -278,6 +279,7 @@ CREATE TABLE IF NOT EXISTS "football_match_predictions" (
 CREATE INDEX IF NOT EXISTS "idx_football_prediction_generated" ON "football_match_predictions" ("generated_at");
 CREATE INDEX IF NOT EXISTS "idx_football_prediction_settle" ON "football_match_predictions" ("settlement_state", "generated_at");
 CREATE INDEX IF NOT EXISTS "idx_football_prediction_model" ON "football_match_predictions" ("model_version_id", "settlement_state");
+CREATE INDEX IF NOT EXISTS "idx_football_prediction_category" ON "football_match_predictions" ("category", "generated_at");
 CREATE TABLE IF NOT EXISTS "football_score_probabilities" (
   "id" BIGSERIAL PRIMARY KEY,
   "prediction_id" VARCHAR(40) NOT NULL,
@@ -298,6 +300,7 @@ CREATE TABLE IF NOT EXISTS "football_prediction_settlements" (
   "actual_away_score" INTEGER NULL,
   "actual_result" VARCHAR(24) NOT NULL,
   "predicted_result" VARCHAR(24) NOT NULL,
+  "category" VARCHAR(2) NULL,
   "predicted_home_score" INTEGER NULL,
   "predicted_away_score" INTEGER NULL,
   "probability_home" DECIMAL(8,6) NULL,
@@ -319,6 +322,20 @@ CREATE TABLE IF NOT EXISTS "football_prediction_settlements" (
 );
 CREATE INDEX IF NOT EXISTS "idx_football_settlement_fixture" ON "football_prediction_settlements" ("fixture_id");
 CREATE INDEX IF NOT EXISTS "idx_football_settlement_settled" ON "football_prediction_settlements" ("settled_at");
+-- A/B/C classification rules (one row per category; parameters as JSON).
+CREATE TABLE IF NOT EXISTS "football_category_rules" (
+  "id" SERIAL PRIMARY KEY,
+  "category_key" VARCHAR(2) NOT NULL,
+  "label" VARCHAR(80) NOT NULL,
+  "description" VARCHAR(255) NULL,
+  "rule_type" VARCHAR(24) NOT NULL,
+  "parameters" TEXT NULL,
+  "enabled" SMALLINT NOT NULL DEFAULT 1,
+  "created_at" VARCHAR(32) NOT NULL,
+  "updated_at" VARCHAR(32) NOT NULL,
+  "updated_by" VARCHAR(64) NULL,
+  CONSTRAINT "uq_football_category_rule" UNIQUE ("category_key")
+);
 CREATE TABLE IF NOT EXISTS "football_model_performance" (
   "id" BIGSERIAL PRIMARY KEY,
   "model_version_id" INTEGER NULL,

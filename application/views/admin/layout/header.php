@@ -112,6 +112,9 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
   <?php if (admin_can('admin.settings.manage')): ?>
   <a href="/admin/cron" class="<?= $active === 'cron' ? 'active' : '' ?>"><?= $ic ?><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>Cron Jobs</span></a>
   <?php endif; ?>
+  <?php if (admin_can('admin.settings.manage')): ?>
+  <a href="/admin/football" class="<?= $active === 'football' ? 'active' : '' ?>"><?= $ic ?><circle cx="12" cy="12" r="9"/><path d="M12 7.5 8.2 10l1.4 4.4h4.8L15.8 10z"/><path d="M12 3v4.5M4.8 8.5l3.4 1.5M19.2 8.5l-3.4 1.5M6.6 19.2l3-3M17.4 19.2l-3-3"/></svg><span>Football Prediction</span></a>
+  <?php endif; ?>
   <?php if (admin_can('admin.admins.manage')): ?>
   <a href="/admin/admins" class="<?= $active === 'admins' ? 'active' : '' ?>"><?= $ic ?><path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5z"/></svg><span>Admin Accounts</span></a>
   <?php endif; ?>

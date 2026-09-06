@@ -827,6 +827,250 @@ class Admin extends App_Controller
         redirect('/admin/settings#' . $category);
     }
 
+    /**
+     * Football Intelligence administration: module switch, provider
+     * credentials status, league scope, A/B/C classification rules, model
+     * settings, auto-prediction, sync status, history and model performance.
+     * The page renders the EFFECTIVE configuration (admin-saved values over
+     * the environment over the defaults) so the panel can never display a
+     * number the engine is not actually using.
+     */
+    public function football()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        $football = $this->platform->football;
+        // Flatten the adminView() row list into the short names the view reads.
+        $knobKeys = [
+            'WINDELS_FOOTBALL_ENABLED' => 'enabled',
+            'WINDELS_FOOTBALL_AUTO_PREDICT' => 'autoPredict',
+            'WINDELS_FOOTBALL_CATEGORY_EDGE_PCT' => 'categoryEdgePct',
+            'WINDELS_FOOTBALL_CATEGORY_DRAW_PCT' => 'categoryDrawPct',
+            'WINDELS_FOOTBALL_MAX_GOALS' => 'modelMaxGoals',
+            'WINDELS_FOOTBALL_DC_RHO' => 'modelDcRho',
+            'WINDELS_FOOTBALL_MARKET_BLEND' => 'modelMarketBlend',
+            'WINDELS_FOOTBALL_H2H_MAX_WEIGHT' => 'modelH2hMaxWeight',
+            'WINDELS_FOOTBALL_MIN_CALIBRATION_SAMPLES' => 'modelMinCalibrationSamples',
+            'WINDELS_FOOTBALL_ANALYSIS_LIMIT' => 'modelAnalysisLimit',
+        ];
+        $adminKnobs = [];
+        foreach ((array) $football->config()->adminView() as $row) {
+            if (is_array($row) && isset($knobKeys[$row['key']])) $adminKnobs[$knobKeys[$row['key']]] = $row['value'];
+        }
+        $data = $this->base('Football Prediction Module', 'football');
+        $data['football'] = [
+            'enabled' => $football->config()->enabled(),
+            'demoMode' => $football->config()->demoMode(),
+            'adminKnobs' => $adminKnobs,
+            'leagueScope' => $football->config()->leagueScope(),
+            'competitions' => $this->footballCompetitions(),
+            'providerStatus' => $football->providerStatus(),
+            'credentials' => $this->footballCredentialStatus(),
+            'categoryRules' => $football->categoryRules((string) $actor['id']),
+            'performance' => $football->performance()->report(30),
+            'history' => $football->history(10),
+            'model' => $football->modelSummary(),
+            'syncRuns' => $this->platform->model->football->listSyncRuns(null, 8),
+            'counts' => [
+                'fixtures' => count($this->platform->model->football->listFixtures([], 2000)),
+                'predictions' => count($this->platform->model->football->listPredictions([], 2000)),
+            ],
+        ];
+        $backtest = $this->session->flashdata('football_backtest');
+        $data['football']['lastBacktest'] = is_array($backtest) ? $backtest : null;
+        $this->render('admin/football', $data);
+    }
+
+    /** Persist the football module settings (admin.settings.manage + CSRF). */
+    public function football_save()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/football'); return; }
+        $post = $this->input->post() ?: [];
+        $db = $this->AIWorkforce_model->db;
+        try {
+            $settings = [
+                'WINDELS_FOOTBALL_ENABLED' => isset($post['football_enabled']) ? '1' : '0',
+                'WINDELS_FOOTBALL_AUTO_PREDICT' => isset($post['football_auto_predict']) ? '1' : '0',
+                'WINDELS_FOOTBALL_CATEGORY_EDGE_PCT' => $this->footballClamp((string) ($post['category_edge_pct'] ?? ''), 0.0, 50.0, '5.0'),
+                'WINDELS_FOOTBALL_CATEGORY_DRAW_PCT' => $this->footballClamp((string) ($post['category_draw_pct'] ?? ''), 5.0, 90.0, '30.0'),
+                'WINDELS_FOOTBALL_MAX_GOALS' => (string) $this->footballInt((string) ($post['model_max_goals'] ?? ''), 4, 12, 8),
+                'WINDELS_FOOTBALL_DC_RHO' => $this->footballClamp((string) ($post['model_dc_rho'] ?? ''), -0.25, 0.25, '-0.06'),
+                'WINDELS_FOOTBALL_MARKET_BLEND' => $this->footballClamp((string) ($post['model_market_blend'] ?? ''), 0.0, 0.6, '0.35'),
+                'WINDELS_FOOTBALL_H2H_MAX_WEIGHT' => $this->footballClamp((string) ($post['model_h2h_max_weight'] ?? ''), 0.0, 0.25, '0.12'),
+                'WINDELS_FOOTBALL_MIN_CALIBRATION_SAMPLES' => (string) $this->footballInt((string) ($post['model_min_calibration_samples'] ?? ''), 10, 10000, 50),
+                'WINDELS_FOOTBALL_ANALYSIS_LIMIT' => (string) $this->footballInt((string) ($post['model_analysis_limit'] ?? ''), 1, 500, 120),
+                'WINDELS_FOOTBALL_LEAGUE_SCOPE' => json_encode(array_values(array_filter(
+                    array_map('strval', (array) ($post['football_leagues'] ?? [])),
+                    static fn(string $v): bool => trim($v) !== ''
+                ))),
+            ];
+            foreach ($settings as $key => $value) {
+                $existing = $db->get_where('platform_settings', ['k' => $key], 1)->row_array();
+                $row = ['k' => $key, 'v' => (string) $value, 'category' => 'football', 'updated_at' => gmdate('c'), 'updated_by' => (int) $actor['id']];
+                if ($existing) $db->where('k', $key)->update('platform_settings', $row);
+                else $db->insert('platform_settings', $row);
+            }
+            $this->platform->football->saveCategoryRules([
+                'edgePct' => (float) $settings['WINDELS_FOOTBALL_CATEGORY_EDGE_PCT'],
+                'drawSignificantPct' => (float) $settings['WINDELS_FOOTBALL_CATEGORY_DRAW_PCT'],
+                'labels' => [
+                    'A' => trim((string) ($post['category_label_a'] ?? '')) ?: 'HOME ADVANTAGE',
+                    'B' => trim((string) ($post['category_label_b'] ?? '')) ?: 'BALANCED / COMPETITIVE',
+                    'C' => trim((string) ($post['category_label_c'] ?? '')) ?: 'AWAY ADVANTAGE',
+                ],
+                'enabled' => ['A' => isset($post['category_enabled_a']), 'B' => isset($post['category_enabled_b']), 'C' => isset($post['category_enabled_c'])],
+            ], (string) $actor['id']);
+            $this->portal->log($actor, 'FOOTBALL_SETTINGS_SAVED', 'ok', ['type' => 'football', 'id' => 'module', 'label' => 'Football Prediction Module'], [
+                'enabled' => $settings['WINDELS_FOOTBALL_ENABLED'], 'autoPredict' => $settings['WINDELS_FOOTBALL_AUTO_PREDICT'],
+                'edgePct' => $settings['WINDELS_FOOTBALL_CATEGORY_EDGE_PCT'], 'drawPct' => $settings['WINDELS_FOOTBALL_CATEGORY_DRAW_PCT'],
+                'leagues' => json_decode($settings['WINDELS_FOOTBALL_LEAGUE_SCOPE'], true),
+            ], $this->ip());
+            $this->flash('notice', 'Football settings saved. They take effect from the next request (saved values override the environment).');
+        } catch (Throwable $e) {
+            log_message('error', 'football_save failed: ' . $e->getMessage());
+            $this->flash('error', $e instanceof InvalidArgumentException ? $e->getMessage() : 'Unable to save the football settings. Please try again.');
+        }
+        redirect('/admin/football');
+    }
+
+    /** Rebuild today's board from stored data (no provider request). */
+    public function football_recalculate()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/football'); return; }
+        try {
+            $result = $this->platform->football->predictions()->predictDay(gmdate('Y-m-d'));
+            $this->portal->log($actor, 'FOOTBALL_RECALCULATED', 'ok', ['type' => 'football', 'id' => gmdate('Y-m-d'), 'label' => 'Board rebuild'], $result, $this->ip());
+            $this->flash('notice', sprintf('Board rebuilt from stored data: %d fixture(s) analyzed — %d qualified, %d limited, %d rejected.%s',
+                (int) ($result['analyzed'] ?? 0), (int) ($result['qualified'] ?? 0), (int) ($result['limited'] ?? 0), (int) ($result['rejected'] ?? 0),
+                !empty($result['reason']) ? ' ' . $result['reason'] : ''));
+        } catch (Throwable $e) {
+            $this->flash('error', 'Recalculation refused: ' . $e->getMessage());
+        }
+        redirect('/admin/football');
+    }
+
+    /** Pull fixtures for a date from the connected provider. */
+    public function football_sync()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/football'); return; }
+        $date = trim((string) $this->input->post('date'));
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $date, $m) !== 1 || !checkdate((int) $m[2], (int) $m[3], (int) $m[1])) {
+            $this->flash('error', 'Sync refused: date must be a real YYYY-MM-DD calendar date.');
+            redirect('/admin/football');
+            return;
+        }
+        @set_time_limit(180);
+        try {
+            $result = $this->platform->football->syncDate($date);
+            $count = (int) ($result['processed'] ?? 0);
+            $this->portal->log($actor, 'FOOTBALL_SYNC_REQUESTED', $count > 0 ? 'ok' : 'error', ['type' => 'football', 'id' => $date, 'label' => 'Provider sync'], $result, $this->ip());
+            $this->flash($count > 0 ? 'notice' : 'error', $count > 0
+                ? sprintf('Sync complete for %s: %d fixture(s) processed, %d provider request(s).', $date, $count, (int) ($result['requests'] ?? 0))
+                : ($result['reason'] === 'FOOTBALL_PROVIDER_NOT_CONFIGURED'
+                    ? 'Sync refused: the football data provider is not connected. Configure a verified data source first — nothing is fetched and nothing is invented.'
+                    : sprintf('Sync for %s stored nothing: %s', $date, (string) (($result['errors'][0] ?? $result['reason'] ?? 'the provider reported no fixtures for this date')))));
+        } catch (Throwable $e) {
+            $this->flash('error', 'Sync refused: ' . $e->getMessage());
+        }
+        redirect('/admin/football');
+    }
+
+    /** Run a backtest over stored historical matches (read-only). */
+    public function football_backtest()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/football'); return; }
+        $from = trim((string) $this->input->post('from'));
+        $to = trim((string) $this->input->post('to'));
+        $validate = function (string $v, string $fallback) use ($actor): string {
+            if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $v, $m) === 1 && checkdate((int) $m[2], (int) $m[3], (int) $m[1])) return $v;
+            throw new InvalidArgumentException('Backtest window dates must be real YYYY-MM-DD calendar dates (got: ' . substr($v, 0, 24) . ').');
+        };
+        try {
+            $from = $validate($from, gmdate('Y-m-01'));
+            $to = $validate($to, gmdate('Y-m-d'));
+            $report = $this->platform->football->backtest($from, $to, 300);
+            $this->portal->log($actor, 'FOOTBALL_BACKTEST_RUN', 'ok', ['type' => 'football', 'id' => $from . '..' . $to, 'label' => 'Backtest window'], [
+                'evaluated' => $report['evaluated'] ?? 0, 'resultAccuracy' => $report['resultAccuracy'] ?? null,
+                'exactScoreAccuracy' => $report['exactScoreAccuracy'] ?? null,
+            ], $this->ip());
+            $this->session->set_flashdata('football_backtest', array_intersect_key($report, array_flip([
+                'state', 'from', 'to', 'evaluated', 'correctResults', 'resultAccuracy', 'correctScores', 'exactScoreAccuracy',
+                'byCategory', 'averageConfidence', 'averageDataQuality', 'brier', 'ece', 'mce', 'skipped', 'skippedReasons', 'caveat', 'model', 'generatedAt',
+            ])));
+            $this->flash('notice', $report['state'] === 'MEASURED'
+                ? sprintf('Backtest complete: %d match(es) evaluated over %s…%s.', (int) ($report['evaluated'] ?? 0), $from, $to)
+                : (string) ($report['message'] ?? 'No finished fixtures in the window.'));
+        } catch (Throwable $e) {
+            $this->flash('error', 'Backtest refused: ' . $e->getMessage());
+        }
+        redirect('/admin/football');
+    }
+
+    /** @return list<array<string,mixed>> stored competitions with provider code */
+    private function footballCompetitions(): array
+    {
+        try {
+            return $this->platform->model->football->listCompetitions(500);
+        } catch (Throwable $e) {
+            log_message('error', 'football listCompetitions failed: ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    /** Which credential source each supported football vendor has. No secrets are echoed. */
+    private function footballCredentialStatus(): array
+    {
+        $vendors = [
+            ['id' => 'api-football', 'name' => 'API-FOOTBALL (api-sports.io)', 'env' => 'WINDELS_API_FOOTBALL_KEY'],
+            ['id' => 'thesportsdb', 'name' => 'TheSportsDB', 'env' => 'WINDELS_THESPORTSDB_KEY'],
+            ['id' => 'sportmonks', 'name' => 'SportMonks', 'env' => 'WINDELS_SPORTMONKS_TOKEN'],
+        ];
+        $rows = [];
+        foreach ($vendors as $vendor) {
+            $key = getenv($vendor['env']);
+            $rows[] = [
+                'id' => $vendor['id'], 'name' => $vendor['name'], 'env' => $vendor['env'],
+                'envConfigured' => is_string($key) && trim($key) !== '',
+            ];
+        }
+        // The central Admin → API store may carry a sports provider row too.
+        try {
+            $dashboard = \AIWorkforce\ApiProviders::dashboard($this->AIWorkforce_model->db);
+            $storeRows = [];
+            foreach ((array) $dashboard as $service) {
+                if (!is_array($service) || (string) ($service['service'] ?? '') !== 'sports') continue;
+                foreach ((array) ($service['providers'] ?? []) as $item) {
+                    if (!is_array($item)) continue;
+                    $status = !empty($item['enabled'])
+                        ? ((int) ($item['last_test_ok'] ?? -1) === 1 ? 'Connected' : ((int) ($item['last_test_ok'] ?? -1) === 0 ? 'Connection failed' : 'Configured'))
+                        : 'Disabled';
+                    $storeRows[] = ['label' => (string) ($item['label'] ?? ''), 'status' => $status, 'driver' => (string) ($item['driver'] ?? '')];
+                }
+            }
+            $rows[] = ['id' => 'admin-store', 'name' => 'Admin → API store (sports service)', 'env' => null,
+                'envConfigured' => $storeRows !== [], 'storeRows' => $storeRows];
+        } catch (Throwable $e) { /* the store is optional */ }
+        return $rows;
+    }
+
+    private function footballClamp(string $value, float $min, float $max, string $fallback): string
+    {
+        $value = trim($value);
+        if (!is_numeric($value)) throw new InvalidArgumentException('A numeric value is required where "' . $value . '" was sent.');
+        $number = max($min, min($max, (float) $value));
+        return (string) $number;
+    }
+
+    private function footballInt(string $value, int $min, int $max, int $fallback): int
+    {
+        $value = trim($value);
+        if (!is_numeric($value)) throw new InvalidArgumentException('A whole number is required where "' . $value . '" was sent.');
+        return max($min, min($max, (int) round((float) $value)));
+    }
+
     public function test_email()
     {
         $actor = $this->gate('admin.settings.manage'); if (!$actor) return;

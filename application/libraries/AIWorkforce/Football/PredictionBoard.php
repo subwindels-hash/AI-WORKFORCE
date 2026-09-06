@@ -16,21 +16,37 @@ final class PredictionBoard
     public const EMPTY_QUALIFIERS = 'No fixtures currently satisfy the required prediction and data-quality thresholds.';
     public const NO_PROVIDER = 'Football data provider not connected. Live fixtures and predictions are unavailable until a verified data source is configured.';
 
+    private ?CategoryClassifier $categories = null;
+
     public function __construct(
         private FootballRepository $repo,
         private PredictionService $predictions,
         private ModelRegistry $models,
         private FootballConfiguration $config,
+        private ?CategoryClassifier $categoriesParam = null,
     ) {}
 
+    /** The facade passes its repo-wired classifier so stored A/B/C rules apply. */
+    public function categories(): CategoryClassifier
+    {
+        return $this->categories ??= $this->categoriesParam ?? new CategoryClassifier($this->config);
+    }
+
     /**
+     * `categoryFilter` keeps only the cards of one A/B/C category (the ticket's
+     * filter chips); null shows everything. The filter narrows the display —
+     * the unfiltered `categorySummary` is always returned so the chips can
+     * show what each choice would contain.
+     *
      * @return array{heading:string, date:string, dateLabel:string, status:string, state:string,
      *               summary:array<string,int>, categories:list<array>, emptyReason:?string,
-     *               message:?string, model:array, performance:array, generatedAt:string}
+     *               message:?string, model:array, performance:array, generatedAt:string,
+     *               categoryFilter:?string, categorySummary:array<string,int>}
      */
-    public function forDate(string $date, bool $refresh = false): array
+    public function forDate(string $date, bool $refresh = false, ?string $categoryFilter = null): array
     {
         $date = $this->validDate($date);
+        $filterKey = $categoryFilter === null ? null : (in_array(strtoupper($categoryFilter), CategoryClassifier::KEYS, true) ? strtoupper($categoryFilter) : null);
         if ($refresh) {
             $this->predictions->predictDay($date);
         }
@@ -39,13 +55,17 @@ final class PredictionBoard
         $model = $this->models->usable();
         $cards = [];
         $counts = ['fixtures' => count($fixtures), 'analyzed' => count($rows), 'qualified' => 0, 'limited' => 0, 'rejected' => 0];
+        $categorySummary = ['A' => 0, 'B' => 0, 'C' => 0, 'UNCLASSIFIED' => 0];
         foreach ($rows as $row) {
             $fixture = $this->repo->findFixtureById((int) $row['fixture_id']) ?? [];
             $band = (string) ($row['data_quality_band'] ?? QualityBand::REJECTED);
             if ($band === QualityBand::QUALIFIED) $counts['qualified']++;
             elseif ($band === QualityBand::LIMITED) $counts['limited']++;
             else $counts['rejected']++;
-            $cards[] = $this->card($row, $fixture, $model);
+            $card = $this->card($row, $fixture, $model);
+            $categorySummary[$card['category'] ?? 'UNCLASSIFIED'] = ($categorySummary[$card['category'] ?? 'UNCLASSIFIED'] ?? 0) + 1;
+            if ($filterKey !== null && ($card['category'] ?? null) !== $filterKey) continue;
+            $cards[] = $card;
         }
         usort($cards, static fn(array $a, array $b) => [$b['confidence'], $b['dataQuality']['score']] <=> [$a['confidence'], $a['dataQuality']['score']]);
         $tiers = $this->config->confidenceTiers();
@@ -72,7 +92,15 @@ final class PredictionBoard
         $qualified = count($categories[0]['items']) + count($categories[1]['items']) + count($categories[2]['items']);
         $emptyReason = null;
         $message = null;
-        if ($fixtures === []) {
+        if ($filterKey !== null) {
+            // A category filter that matches nothing is its own state: it must
+            // not be reported as "no predictions stored" when other categories
+            // are populated.
+            if ($cards === []) {
+                $emptyReason = 'NONE_IN_CATEGORY';
+                $message = 'No prediction for ' . $date . ' carries category ' . $filterKey . ' under the current classification rules. Other categories may still be populated.';
+            }
+        } elseif ($fixtures === []) {
             $emptyReason = 'NO_FIXTURES_STORED';
             $message = 'No fixture has been stored for ' . $date . '. This is a data-availability state, not a prediction result: the module will not name matches it has not received.';
         } elseif ($cards === []) {
@@ -89,6 +117,8 @@ final class PredictionBoard
             'status' => $cards === [] ? DataState::UNAVAILABLE : 'OK',
             'state' => $emptyReason ?? 'POPULATED',
             'summary' => $counts,
+            'categoryFilter' => $filterKey,
+            'categorySummary' => $categorySummary,
             'categories' => $categories,
             'cards' => $cards,
             'emptyReason' => $emptyReason,
@@ -139,9 +169,18 @@ final class PredictionBoard
             }
         }
         $calibrated = (string) ($prediction['calibration_state'] ?? CalibrationService::PENDING) === CalibrationService::CALIBRATED;
+        $classifier = $this->categories();
+        $storedCategory = isset($prediction['category']) && strtoupper(trim((string) $prediction['category'])) !== ''
+            ? strtoupper(trim((string) $prediction['category'])) : null;
+        $category = in_array($storedCategory, CategoryClassifier::KEYS, true)
+            ? ['key' => $storedCategory, 'label' => $classifier->label($storedCategory), 'derived' => false]
+            : $classifier->forStoredRow($prediction);
         return [
             'predictionId' => (string) ($prediction['id'] ?? ''),
             'fixtureId' => (int) ($fixture['id'] ?? $prediction['fixture_id'] ?? 0),
+            'category' => $category['key'] ?? null,
+            'categoryLabel' => (string) ($category['label'] ?? 'UNCLASSIFIED'),
+            'categoryDerived' => (bool) ($category['derived'] ?? false),
             'externalId' => (string) ($fixture['external_id'] ?? ''),
             'competition' => (string) ($fixture['competition'] ?? DataState::UNAVAILABLE),
             'country' => $fixture['country'] ?? null,
@@ -167,6 +206,14 @@ final class PredictionBoard
             'confidenceBasis' => (string) ($prediction['confidence_basis'] ?? 'RAW'),
             'confidenceLabel' => $confidence === null ? DataState::UNAVAILABLE
                 : ($calibrated ? number_format($confidence, 1) . '%' : number_format($confidence, 1) . '% (uncalibrated)'),
+            // Per-side expected goals as the prediction run measured them
+            // (read back from the feature snapshot — never recomputed here, so
+            // the ticket and the stored prediction can never drift apart).
+            'expectedGoals' => [
+                'home' => $snapshot['expectedGoals']['home'] ?? null,
+                'away' => $snapshot['expectedGoals']['away'] ?? null,
+                'method' => $snapshot['expectedGoals']['method'] ?? $snapshot['xgMethod'] ?? null,
+            ],
             'tier' => $tierLabel,
             'highConfidence' => $band === QualityBand::QUALIFIED && $calibrated && $confidence !== null && $confidence >= (float) ($tiers[0]['min'] ?? 80) ? 'HIGH_CONFIDENCE' : null,
             'expectedTotalGoals' => $prediction['expected_total_goals'] ?? null,

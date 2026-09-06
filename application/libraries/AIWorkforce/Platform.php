@@ -125,11 +125,31 @@ class Platform
         );
         // Football Intelligence shares the sports provider registry (one
         // credential layer, one health history) and its own repository, model
-        // registry and settlement ledger.
+        // registry and settlement ledger. Its configuration reads the
+        // admin-panel overrides from platform_settings (category 'football',
+        // keyed by the same environment name each flag would use) with
+        // precedence: test overrides > admin-saved > environment > default.
+        $footballSettings = null;
+        $footballSettingsSource = static function (string $key) use ($model, &$footballSettings): ?string {
+            if ($footballSettings === null) {
+                $footballSettings = [];
+                try {
+                    $rows = $model->db->where('category', 'football')->get('platform_settings')->result_array();
+                    foreach ($rows as $row) {
+                        $footballSettings[(string) $row['k']] = (string) $row['v'];
+                    }
+                } catch (\Throwable $e) {
+                    $footballSettings = [];   // a missing table must not break football
+                }
+            }
+            $value = $footballSettings[$key] ?? null;
+            return $value === null || $value === '' ? null : $value;
+        };
         $this->football = new \AIWorkforce\Football\FootballIntelligence(
             $model->football,
             $this->sports->providers,
-            $model->audit
+            $model->audit,
+            new \AIWorkforce\Football\FootballConfiguration([], $footballSettingsSource)
         );
         // Lottery provider selection (first configured wins):
         //   1. LoteriasAPI (loteriasapi.com) — real EuroMillions results feed

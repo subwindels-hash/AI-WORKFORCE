@@ -350,6 +350,107 @@ test('football: rendered console shows populated and empty states without warnin
     assert_true(!str_contains($modelsHtml, "TODAY'S FOOTBALL PREDICTIONS"), 'the models screen does not repeat the board');
 });
 
+test('football: the ticket and admin screens render their real payloads without warnings', function () {
+    if (!function_exists('get_instance')) {
+        assert_true(true, 'CI-only: markup rendering is covered by e2e outside CI');
+        return;
+    }
+    $ci = ci();
+    $render = static function (string $page, array $data) use ($ci): string {
+        ob_start();
+        $ci->load->view('layout/header', $data);
+        $ci->load->view($page, $data);
+        $ci->load->view('layout/footer');
+        return (string) ob_get_clean();
+    };
+    $base = ['title' => 'Odds Prediction Ticket', 'active' => 'football', 'notice' => null, 'error' => null,
+        'caps' => [], 'csrfToken' => 'test-token'];
+
+    // ── The Odds Prediction Ticket: a populated day, then its empty state ──
+    // Fixed 10:00/11:00 UTC kickoffs so the scenario cannot straddle a date
+    // boundary at any real test time.
+    $day = gmdate('Y-m-d', time() + 3 * 86400);
+    $baseTs = \DateTime::createFromFormat('Y-m-d H:i:s', $day . ' 10:00:00', new \DateTimeZone('UTC'))->getTimestamp();
+    [, , $module] = fx_fb_harness([
+        fx_fb_row('fx-tk-ui-1', gmdate('c', $baseTs + 10 * 3600), 'Brighton', 'Burnley', '30', '40'),
+        fx_fb_row('fx-tk-ui-2', gmdate('c', $baseTs + 11 * 3600), 'Manchester City', 'Everton', '10', '20'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $ticket = $module->ticket()->ticket($day);
+    assert_equals('POPULATED', $ticket['state'], 'two stored predictions feed the ticket');
+    $ticketBase = array_merge($base, [
+        'date' => $day, 'category' => null, 'moduleDisabled' => false,
+        'yesterday' => gmdate('Y-m-d', strtotime($day . ' -1 day')),
+        'tomorrow' => gmdate('Y-m-d', strtotime($day . ' +1 day')),
+    ]);
+    $html = $render('football/ticket', array_merge($ticketBase, ['ticket' => $ticket]));
+    assert_contains('WINDELS ODDS PREDICTION TICKET', $html, 'the ticket heading renders');
+    foreach (['Brighton', 'Burnley', 'Manchester City', 'Everton'] as $team) {
+        assert_contains($team, $html, 'the rendered ticket names ' . $team);
+    }
+    assert_equals(2, substr_count($html, '>ENTRY</div>'), 'one entry block per stored prediction');
+    assert_true(substr_count($html, 'guarantee') >= 1, 'the no-guarantee disclaimer renders');
+    assert_true(!str_contains($html, 'Undefined array key'), 'no PHP warnings in the ticket page');
+    assert_true(!str_contains($html, 'Warning:</b>'), 'no warnings at all');
+
+    $emptyDay = gmdate('Y-m-d', strtotime($day . ' +3 days'));
+    $empty = $render('football/ticket', array_merge($ticketBase, ['ticket' => $module->ticket()->ticket($emptyDay)]));
+    assert_contains('NO FIXTURES STORED', $empty, 'the empty state renders under its name');
+    assert_equals(0, substr_count($empty, '>ENTRY</div>'), 'and it carries no entries');
+
+    // ── The admin screen: the effective-configuration form over the real platform ──
+    \AIWorkforce\SchemaInstaller::ensure(platform()->model->db);
+    $f = platform()->football;
+    $knobKeys = [
+        'WINDELS_FOOTBALL_ENABLED' => 'enabled',
+        'WINDELS_FOOTBALL_AUTO_PREDICT' => 'autoPredict',
+        'WINDELS_FOOTBALL_CATEGORY_EDGE_PCT' => 'categoryEdgePct',
+        'WINDELS_FOOTBALL_CATEGORY_DRAW_PCT' => 'categoryDrawPct',
+        'WINDELS_FOOTBALL_MAX_GOALS' => 'modelMaxGoals',
+        'WINDELS_FOOTBALL_DC_RHO' => 'modelDcRho',
+        'WINDELS_FOOTBALL_MARKET_BLEND' => 'modelMarketBlend',
+        'WINDELS_FOOTBALL_H2H_MAX_WEIGHT' => 'modelH2hMaxWeight',
+        'WINDELS_FOOTBALL_MIN_CALIBRATION_SAMPLES' => 'modelMinCalibrationSamples',
+        'WINDELS_FOOTBALL_ANALYSIS_LIMIT' => 'modelAnalysisLimit',
+    ];
+    $adminKnobs = [];
+    foreach ((array) $f->config()->adminView() as $row) {
+        if (is_array($row) && isset($knobKeys[$row['key']])) $adminKnobs[$knobKeys[$row['key']]] = $row['value'];
+    }
+    $football = [
+        'enabled' => $f->config()->enabled(),
+        'demoMode' => $f->config()->demoMode(),
+        'adminKnobs' => $adminKnobs,
+        'leagueScope' => $f->config()->leagueScope(),
+        'competitions' => platform()->model->football->listCompetitions() ?: [],
+        'providerStatus' => $f->providerStatus(),
+        'credentials' => [],
+        'categoryRules' => $f->categoryRules('test'),
+        'performance' => $f->performance()->report(30),
+        'history' => $f->history(10),
+        'model' => $f->modelSummary(),
+        'syncRuns' => platform()->model->football->listSyncRuns(null, 8) ?: [],
+        'counts' => ['fixtures' => 0, 'predictions' => 0],
+        'lastBacktest' => null,
+    ];
+    $adminHtml = $render('admin/football', array_merge($base, ['football' => $football]));
+    assert_contains('Football Prediction Module', $adminHtml, 'the admin heading renders');
+    assert_contains('Category rules (A / B / C)', $adminHtml, 'the A/B/C rule panel renders');
+    assert_contains('Backtest over stored history', $adminHtml, 'the backtest panel renders');
+    assert_contains('Supported leagues', $adminHtml, 'the league scope panel renders');
+    foreach (['A', 'B', 'C'] as $key) {
+        assert_contains('category_label_' . strtolower($key), $adminHtml, "the form carries the editable label for category {$key}");
+    }
+    assert_equals(
+        substr_count($adminHtml, 'method="post"'),
+        substr_count($adminHtml, 'name="csrf_token"'),
+        'every form on the admin screen carries the CSRF token'
+    );
+    assert_true(!str_contains($adminHtml, 'Undefined array key'), 'no PHP warnings on the admin screen');
+    assert_true(!str_contains($adminHtml, 'Warning:</b>'), 'no warnings at all');
+});
+
 /**
  * The schema is part of the surface a user sees: if one DDL source is missing a
  * column the code writes, the install that uses it fails only in production
@@ -420,7 +521,7 @@ test('football: every schema source declares the same tables and columns', funct
     $sqlite = fx_fb_ddl_tables(fx_fb_ddl('sqlite'));
     $prod = fx_fb_ddl_tables(fx_fb_ddl('prod'));
     $expected = [
-        'football_calibration_versions', 'football_competitions', 'football_fixture_statistics', 'football_fixtures',
+        'football_calibration_versions', 'football_category_rules', 'football_competitions', 'football_fixture_statistics', 'football_fixtures',
         'football_head_to_head', 'football_match_predictions', 'football_model_performance', 'football_model_versions',
         'football_prediction_settlements', 'football_provider_sync_logs', 'football_providers',
         'football_score_probabilities', 'football_teams', 'football_team_statistics',
@@ -429,7 +530,7 @@ test('football: every schema source declares the same tables and columns', funct
     foreach (['mysql' => $mysql, 'sqlite' => $sqlite, 'production.sql' => $prod] as $label => $tables) {
         $names = array_keys($tables);
         sort($names);
-        assert_equals($expected, $names, $label . ' declares exactly the fourteen football entities');
+        assert_equals($expected, $names, $label . ' declares exactly the fifteen football entities');
         foreach ($tables as $table => $columns) {
             assert_true(count($columns) >= 3, $label . ':' . $table . ' is not a stub');
         }

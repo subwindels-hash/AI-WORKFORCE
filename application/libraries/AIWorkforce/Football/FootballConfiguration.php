@@ -18,8 +18,40 @@ namespace AIWorkforce\Football;
  */
 final class FootballConfiguration
 {
-    /** @param array<string,mixed> $overrides */
-    public function __construct(private array $overrides = []) {}
+    /**
+     * @param array<string,mixed> $overrides per-key test pins, always win
+     * @param callable(string):string|null $settingsSource operator-saved
+     *        overrides from the admin panel (platform_settings, category
+     *        'football'), keyed by the SAME environment name the flag would
+     *        otherwise be read from. Precedence: overrides > settings source
+     *        > environment > default — so an admin save behaves exactly like
+     *        exporting the value into the environment, and an environment
+     *        value the operator never touched in the panel still wins over
+     *        the built-in default.
+     */
+    /** @var array<string,mixed> */
+    private $overrides = [];
+
+    /** @var (callable(string):?string)|null */
+    private $settingsSource = null;
+
+    public function __construct(array $overrides = [], $settingsSource = null)
+    {
+        $this->overrides = $overrides;
+        $this->settingsSource = $settingsSource;
+    }
+
+    /** The operator-saved value for one environment name, or null when unset. */
+    private function saved(string $name): ?string
+    {
+        if ($this->settingsSource === null) return null;
+        try {
+            $value = (string) ($this->settingsSource)($name);
+        } catch (\Throwable $e) {
+            return null;   // a broken settings store must never take the engine down
+        }
+        return $value === '' ? null : $value;
+    }
 
     public function enabled(): bool
     {
@@ -230,19 +262,136 @@ final class FootballConfiguration
     private function num(string $name, int|float $default): int|float
     {
         if (array_key_exists($name, $this->overrides)) return $this->overrides[$name];
+        $saved = $this->saved($name);
+        if ($saved !== null && is_numeric($saved)) return $saved + 0;
         $value = getenv($name);
         return is_numeric($value) ? $value + 0 : $default;
     }
 
-    /** Overrides win over the environment so a test can pin a flag per case. */
+    /** Plain-text setting with the same precedence as num()/flag(). */
+    private function str(string $name, string $default): string
+    {
+        if (array_key_exists($name, $this->overrides)) return (string) $this->overrides[$name];
+        $saved = $this->saved($name);
+        if ($saved !== null) return $saved;
+        $value = getenv($name);
+        return $value === false || $value === '' ? $default : (string) $value;
+    }
+
+    /** Overrides win over saved values and the environment so a test can pin a flag per case. */
     private function flag(string $name, bool $default): bool
     {
         if (array_key_exists($name, $this->overrides)) {
             $value = $this->overrides[$name];
             return is_bool($value) ? $value : in_array(strtolower(trim((string) $value)), ['1', 'true', 'yes', 'on'], true);
         }
+        $saved = $this->saved($name);
+        if ($saved !== null) return in_array(strtolower(trim($saved)), ['1', 'true', 'yes', 'on'], true);
         $value = getenv($name);
         if ($value === false || $value === '') return $default;
         return in_array(strtolower(trim((string) $value)), ['1', 'true', 'yes', 'on'], true);
+    }
+
+    // ── A/B/C classification + admin-panel knobs ─────────────────────────────
+
+    /**
+     * Minimum margin (percentage points) between the two winning probabilities
+     * for a match to count as a home/away advantage instead of balanced. The
+     * admin panel persists this under the same environment name.
+     */
+    public function categoryEdgePct(): float
+    {
+        return max(0.0, min(50.0, (float) $this->num('WINDELS_FOOTBALL_CATEGORY_EDGE_PCT', 5.0)));
+    }
+
+    /**
+     * A draw probability at or above this line is "significant" and forces the
+     * balanced category even when one side leads on raw points.
+     */
+    public function categoryDrawSignificantPct(): float
+    {
+        return max(5.0, min(90.0, (float) $this->num('WINDELS_FOOTBALL_CATEGORY_DRAW_PCT', 30.0)));
+    }
+
+    /** Automatic prediction runs (cron `predict` job) can be switched off. */
+    public function autoPredictEnabled(): bool
+    {
+        return $this->flag('WINDELS_FOOTBALL_AUTO_PREDICT', true);
+    }
+
+    /**
+     * League scope: a JSON list of competition identities ("provider|externalId"
+     * or a bare externalId) the module should analyse. Empty = every stored
+     * league. Persisted by the admin panel under the same environment name.
+     *
+     * @return list<string>
+     */
+    public function leagueScope(): array
+    {
+        $raw = trim($this->str('WINDELS_FOOTBALL_LEAGUE_SCOPE', ''));
+        if ($raw === '') return [];
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) return [];
+        $out = [];
+        foreach ($decoded as $item) {
+            $item = trim((string) $item);
+            if ($item !== '') $out[] = $item;
+        }
+        return array_values(array_unique($out));
+    }
+
+    /**
+     * Does one fixture fall inside the configured league scope? An empty scope
+     * admits everything; an entry matches on "provider|externalId", on the
+     * bare externalId, or as a case-insensitive competition name.
+     */
+    public function inLeagueScope(?string $providerCode, ?string $competitionExternalId, ?string $competitionName): bool
+    {
+        $scope = $this->leagueScope();
+        if ($scope === []) return true;
+        $identity = $providerCode !== null && $providerCode !== ''
+            ? $providerCode . '|' . (string) ($competitionExternalId ?? '')
+            : null;
+        foreach ($scope as $entry) {
+            if ($competitionExternalId !== null && $competitionExternalId !== '' && $entry === (string) $competitionExternalId) return true;
+            if ($identity !== null && $entry === $identity) return true;
+            if ($competitionName !== null && $competitionName !== '' && strcasecmp($entry, (string) $competitionName) === 0) return true;
+        }
+        return false;
+    }
+
+    /**
+     * The admin-panel view of every knob this module honours: the environment
+     * name (the storage key), the built-in default, and the value currently in
+     * effect after overrides, saved settings and the environment are combined.
+     * Rendering the panel from this list — instead of hard-coded field values —
+     * is what keeps the form and the engine from drifting apart.
+     *
+     * @return list<array{key:string, label:string, type:string, default:mixed, value:mixed, hint:string}>
+     */
+    public function adminView(): array
+    {
+        return [
+            ['key' => 'WINDELS_FOOTBALL_ENABLED', 'label' => 'Football Prediction Module', 'type' => 'bool',
+                'default' => true, 'value' => $this->enabled(), 'hint' => 'Master switch. When off, the console and ticket show the disabled state and scheduled jobs do nothing.'],
+            ['key' => 'WINDELS_FOOTBALL_AUTO_PREDICT', 'label' => 'Automatic predictions', 'type' => 'bool',
+                'default' => true, 'value' => $this->autoPredictEnabled(), 'hint' => 'The scheduled predict job rebuilds the board from stored data. Manual rebuilds always work.'],
+            ['key' => 'WINDELS_FOOTBALL_CATEGORY_EDGE_PCT', 'label' => 'Category A/C edge margin (%)', 'type' => 'number',
+                'default' => 5.0, 'value' => $this->categoryEdgePct(), 'hint' => 'Minimum margin between the two winning probabilities for Category A (home) or C (away). Below it, the match is Category B.'],
+            ['key' => 'WINDELS_FOOTBALL_CATEGORY_DRAW_PCT', 'label' => 'Significant draw probability (%)', 'type' => 'number',
+                'default' => 30.0, 'value' => $this->categoryDrawSignificantPct(), 'hint' => 'A draw probability at or above this line forces Category B (balanced / competitive).'],
+            ['key' => 'WINDELS_FOOTBALL_MAX_GOALS', 'label' => 'Score grid width (goals per team)', 'type' => 'int',
+                'default' => 8, 'value' => $this->maxGoals(), 'hint' => 'The scoreline matrix covers 0…N per side. 8 covers >99.9% of real football scores. Changing it creates a new model version.'],
+            ['key' => 'WINDELS_FOOTBALL_DC_RHO', 'label' => 'Dixon–Coles rho (ρ)', 'type' => 'number',
+                'default' => -0.06, 'value' => $this->dixonColesRho(), 'hint' => 'Low-score correlation. Negative favours draws and low-scoring ties. Changing it creates a new model version.'],
+            ['key' => 'WINDELS_FOOTBALL_MARKET_BLEND', 'label' => 'Market blend weight', 'type' => 'number',
+                'default' => 0.35, 'value' => $this->marketBlendWeight(), 'hint' => 'How much of the final probability comes from a stored market price, when one exists.'],
+            ['key' => 'WINDELS_FOOTBALL_H2H_MAX_WEIGHT', 'label' => 'Head-to-head max weight', 'type' => 'number',
+                'default' => 0.12, 'value' => $this->headToHeadMaxWeight(), 'hint' => 'Maximum share of the model input a head-to-head sample may carry.'],
+            ['key' => 'WINDELS_FOOTBALL_MIN_CALIBRATION_SAMPLES', 'label' => 'Minimum calibration samples', 'type' => 'int',
+                'default' => 50, 'value' => $this->minCalibrationSamples(), 'hint' => 'Settled predictions required before a calibration may be fitted.'],
+            ['key' => 'WINDELS_FOOTBALL_ANALYSIS_LIMIT', 'label' => 'Analysis limit (fixtures per pass)', 'type' => 'int',
+                'default' => 120, 'value' => $this->analysisLimit(), 'hint' => 'How many fixtures one analysis pass may evaluate.'],
+        ];
     }
 }

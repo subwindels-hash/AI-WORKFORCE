@@ -150,7 +150,7 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
       e.preventDefault();
       var dateInput = document.getElementById('api-generate-date');
       var date = dateInput ? dateInput.value : new Date().toISOString().slice(0,10);
-      var csrf = document.querySelector('meta[name="csrf-token"]')?.content || document.querySelector('input[name="csrf_token"]')?.value || '';
+      var csrf = document.querySelector('meta[name="csrf-token"]')?.content || document.querySelector('input[name=csrf_token]')?.value || '';
       apiBtn.disabled = true;
       var orig = apiBtn.textContent;
       apiBtn.textContent = '⏳ Generating...';

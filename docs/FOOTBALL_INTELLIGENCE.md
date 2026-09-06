@@ -44,12 +44,15 @@ each panel exists exactly once in the product.
 | `ScoreProbabilityModel.php` | Poisson / Dixon–Coles scoreline grid, outcome marginals, clean-sheet and failed-to-score rates, grid coverage |
 | `OutcomePredictor.php` | probabilities, most likely scoreline, alternatives, confidence ceiling, evidence rows, reasons |
 | `CalibrationService.php` | temperature scaling fitted from settled predictions only; `CALIBRATION_PENDING` otherwise |
+| `CategoryClassifier.php` | labels each probability triple A (home advantage) / B (balanced) / C (away advantage) from the admin-stored rule rows; incomplete triples are `UNCLASSIFIED`, never guessed |
 | `ModelRegistry.php` | lifecycle states, transition guards, registration from the deployed fingerprint |
-| `PredictionService.php` | prediction storage, the §output contract, the post-kickoff freeze |
+| `PredictionService.php` | prediction storage, the §output contract, the post-kickoff freeze; stores the category with the row |
 | `PredictionBoard.php` | the daily board: summary counts, confidence categories, match cards |
+| `TicketService.php` | the Odds Prediction Ticket read model: kickoff-ordered entries, category and league-scope filters, per-state empty messages |
 | `LiveMatchService.php` | in-play board and `LIVE` estimate rows, never rewriting the pre-match row |
 | `SettlementService.php` | grading on `FINISHED`, voiding on postponement, idempotent sweeps |
-| `PerformanceService.php` | 30-day metrics from stored settlements, snapshots, per-model evaluation |
+| `PerformanceService.php` | 30-day metrics from stored settlements, snapshots, per-model and per-category evaluation |
+| `BacktestService.php` | re-scores stored `FINISHED` matches through the same prediction path with `persist=false`; writes nothing to the ledger; reports a caveat, not a clean out-of-sample test |
 | `FootballDiagnostics.php` | the admin state block (`NOT_CONFIGURED`, `UNAVAILABLE`, `WAITING_FOR_DATA`, …) |
 | `RefreshPolicy.php` | per-job cadence: interval, backoff, deferral, work-exists and budget gates |
 | `FootballCronService.php` | the nine scheduled jobs, each under an idempotent execution key |
@@ -64,7 +67,11 @@ Schema: `application/database/football_intelligence.{mysql,sqlite}.sql`, mirrore
 `football_fixture_statistics`, `football_head_to_head`, `football_model_versions`,
 `football_calibration_versions`, `football_match_predictions`,
 `football_score_probabilities`, `football_prediction_settlements`,
-`football_model_performance`, `football_provider_sync_logs`. A database created
+`football_model_performance`, `football_provider_sync_logs`,
+`football_category_rules`. `football_match_predictions` and
+`football_prediction_settlements` both carry a `category` column (A/B/C), and the
+rule rows let the admin panel edit the thresholds and labels that
+`CategoryClassifier` reads. A database created
 before these tables existed gets them from `SchemaInstaller::ensure()` at boot; new
 columns arrive through its idempotent ALTER list.
 
@@ -188,7 +195,9 @@ Stored per version: `model_id`, `model_name`, `model_version`, `algorithm`,
     "result": "HOME",
     "predictedScore": { "home": 2, "away": 0 },
     "probabilities": { "home": 0.71, "draw": 0.19, "away": 0.10 },
-    "confidence": 71.4
+    "confidence": 71.4,
+    "category": { "key": "A", "label": "HOME ADVANTAGE", "derived": false,
+                   "edgePct": 5.0, "drawSignificantPct": 30.0 }
   },
   "dataQuality": { "score": 94, "status": "QUALIFIED" },
   "model": { "version": "v1+9f3c2a71", "calibrationVersion": "CALIBRATION_PENDING" },
@@ -200,6 +209,15 @@ Stored per version: `model_id`, `model_name`, `model_version`, `algorithm`,
 Values come from the stored row, so what an endpoint returns always matches what
 settlement will later be judged against. `model.calibrationVersion` is the literal
 `CALIBRATION_PENDING` until an operator-approved calibration exists.
+
+`prediction.category` is the A/B/C label of the stored probability triple: **A**
+home advantage, **B** balanced / competitive, **C** away advantage. It is decided
+by `CategoryClassifier` from two thresholds the admin panel can edit
+(`edgePct`, the minimum win-probability margin for an advantage, and
+`drawSignificantPct`, the draw probability that forces the balanced bucket).
+Incomplete probabilities yield no key — a category is a label of what the model
+measured, never an additional claim, and no category, confidence or scoreline is
+ever presented as a guarantee.
 
 ## Endpoints
 
@@ -218,6 +236,8 @@ GET /api/football/matches/:id/analysis
 GET /api/football/matches/:id/prediction
 GET /api/football/predictions/today      ?date=&refresh=1
 GET /api/football/predictions/history  ?limit=&modelVersionId=
+GET /api/football/ticket               ?date=&category=A|B|C   the Odds Prediction Ticket
+GET /api/football/backtest             ?from=&to=&limit=200    read-only re-score of stored history
 GET /api/football/performance            ?days=30&modelVersionId=
 GET /api/football/models                  lifecycle summary + every stored version
 GET /api/football/models/active
@@ -341,6 +361,10 @@ WINDELS_FOOTBALL_DC_RHO=-0.06                Dixon–Coles low-score adjustment 
 WINDELS_FOOTBALL_MARKET_BLEND=0.35           weight for market-implied probabilities (0 disables)
 WINDELS_FOOTBALL_SCORE_ROW_MIN=0.01          smallest scoreline row worth storing (0.001..0.05)
 WINDELS_FOOTBALL_H2H_MAX_WEIGHT=0.12         largest contribution head-to-head may ever make (0..0.25)
+WINDELS_FOOTBALL_AUTO_PREDICT=true           the cron `predict` job's switch (also on the admin panel)
+WINDELS_FOOTBALL_CATEGORY_EDGE_PCT=5         A/B/C: minimum win-probability margin (points) for an advantage (0..50)
+WINDELS_FOOTBALL_CATEGORY_DRAW_PCT=30        A/B/C: draw probability that forces the balanced bucket (5..90)
+WINDELS_FOOTBALL_LEAGUE_SCOPE=[]             JSON list of "provider|externalId", bare externalId or league name; empty = every stored league
 WINDELS_FOOTBALL_MAX_AGE_<BUCKET>=seconds    freshness window, one per bucket the module reads:
                                              fixtures / results / live feed the data-quality
                                              freshness component; h2h (1095 d) is the age after
@@ -359,7 +383,7 @@ simulated rows.
 ## Testing
 
 ```
-php index.php tools tests            # includes tests/cases/101…107-football-*.php
+php index.php tools tests            # includes tests/cases/101…116-football-*.php
 ```
 
 The football cases run on `tests/football_support.php`: an in-memory repository, a
@@ -377,7 +401,7 @@ where a module can quietly become a lie: `105` parses `tools/rbac.php` and rejec
 any permission code or role label the football screens tell an operator to ask for
 that the seed does not actually define, and it parses all three schema sources
 (`football_intelligence.mysql.sql`, `football_intelligence.sqlite.sql`,
-`database/production.sql`) to require the same fourteen tables with the same columns
+`database/production.sql`) to require the same fifteen tables with the same columns
 in the same order — a column added for one dialect only would break exactly one
 install, the production one. `102` likewise proves that the documented freshness
 windows are the ones the model consults, by moving the head-to-head decay with
@@ -395,3 +419,19 @@ cannot read must be dropped with a note rather than returned as an empty feed, a
 sync or board rebuild given an unreadable date refuses instead of quietly doing
 something to a different day — which, for a refresh, means billing quota for a day
 nobody asked for.
+
+`113` pins the A/B/C classifier and its configuration: each category is arithmetic
+on a stored probability triple (edge margin, significant-draw line), incomplete
+probabilities are `UNCLASSIFIED`, a disabled category never labels a match, stored
+rule rows beat configured defaults, a broken rule store degrades to the defaults
+instead of throwing, and the admin panel's saved values reach the engine through
+the same precedence as the environment. `114` holds the Odds Prediction Ticket to
+its read-model contract: kickoff ordering (not a confidence leaderboard), the full
+per-entry layout, category and league-scope filters that count what they hide
+rather than inventing it, and named empty states. `115` proves the backtest
+re-scores the window through the real prediction path while writing nothing to the
+prediction, settlement or calibration ledgers, refuses an empty or scoreless window,
+and ships its own out-of-sample caveat. `116` follows the admin path end to end:
+rule seeding, a saved threshold changing the stored category of the very next
+prediction, and the category surviving settlement, the by-category performance
+report and the calibration sample.

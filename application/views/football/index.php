@@ -66,7 +66,7 @@ $kickoffLabel = static fn(?string $iso): string => $iso === null || $iso === '' 
       <a class="btn small" href="/football?date=<?= e((string) ($date ?? gmdate('Y-m-d'))) ?>&refresh=1">Re-analyze stored data</a>
       <a class="btn small" href="/football/live">Live view</a>
       <a class="btn small" href="/football/models">Models &amp; calibration</a>
-      <a class="btn small" href="/sports" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700">🎯 Odds Prediction Ticket →</a>
+      <a class="btn small" href="/football/ticket?date=<?= e((string) ($date ?? gmdate('Y-m-d'))) ?>" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700">🎯 Odds Prediction Ticket →</a>
     </div>
   </div>
 </div>
@@ -79,6 +79,29 @@ $kickoffLabel = static fn(?string $iso): string => $iso === null || $iso === '' 
 <?php if (!empty($diag['message'])): ?>
   <div class="notice warnbox"><b>Football data provider not connected.</b> Live fixtures and predictions are unavailable until a verified data source is configured. Nothing below is invented to fill the gap.</div>
 <?php endif; ?>
+<?php if (!empty($moduleDisabled)): ?>
+  <div class="notice err"><b>Football module disabled in the admin settings.</b> The views below are read-only over stored rows — fixture sync, board rebuilds, settlements and the scheduled sweeps are not running until the module is re-enabled under Admin → Football.</div>
+<?php endif; ?>
+<?php
+// A/B/C filter chips. The board's categorySummary always carries every bucket,
+// so a filter can show "0 today" instead of a blank page.
+$catSummary = $board['categorySummary'] ?? ['A' => 0, 'B' => 0, 'C' => 0, 'UNCLASSIFIED' => 0];
+$catChip = static fn(string $key): string => match ($key) { 'A' => 'b-violet', 'C' => 'b-green', default => 'b-amber', };
+$catTitle = static fn(string $key): string => match ($key) { 'A' => 'Home Advantage', 'C' => 'Away Advantage', default => 'Balanced / Competitive', };
+?>
+<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 0">
+  <span class="dim" style="font-size:12px">Category:</span>
+  <a class="chip <?= empty($category) ? 'chip-on' : '' ?>" href="/football?date=<?= e($date) ?>">All<?= $category ? ' (clear filter)' : '' ?></a>
+  <?php foreach (['A', 'B', 'C'] as $key): ?>
+    <a class="chip <?= $category === $key ? 'chip-on' : '' ?>" href="/football?date=<?= e($date) ?>&category=<?= $key ?>" title="<?= e($catTitle($key)) ?> — the classification rules are configured in the admin panel">
+      <span class="badge <?= $catChip($key) ?>" style="margin-right:4px"><?= $key ?></span><?= e($catTitle($key)) ?>
+      <span class="mono" style="font-size:11px;margin-left:4px"><?= (int) ($catSummary[$key] ?? 0) ?></span>
+    </a>
+  <?php endforeach; ?>
+  <?php if (!empty($catSummary['UNCLASSIFIED'])): ?>
+    <span class="dim" style="font-size:11px" title="Stored predictions whose data quality was too low to classify">· unclassified: <?= (int) $catSummary['UNCLASSIFIED'] ?></span>
+  <?php endif; ?>
+</div>
 
 <div class="grid cols-main">
   <div class="stack">
@@ -101,8 +124,10 @@ $kickoffLabel = static fn(?string $iso): string => $iso === null || $iso === '' 
         <?php if (!empty($board['model']['note'])): ?>
           <div class="notice warnbox" style="margin-top:10px"><b><?= e((string) ($board['model']['state'] ?? 'MODEL')) ?></b> — <?= e((string) $board['model']['note']) ?></div>
         <?php endif; ?>
-        <?php if (($board['state'] ?? '') === 'NO_FIXTURES_STORED' || ($board['state'] ?? '') === 'NO_PREDICTIONS_STORED'): ?>
-          <p class="dim" style="margin-top:12px"><?= e((string) ($board['message'] ?? '')) ?></p>
+        <?php if (in_array(($board['state'] ?? ''), ['NO_FIXTURES_STORED', 'NO_PREDICTIONS_STORED', 'NONE_IN_CATEGORY'], true)): ?>
+          <p class="dim" style="margin-top:12px"><?= e((string) ($board['message'] ?? '')) ?>
+            <?php if (($board['state'] ?? '') === 'NONE_IN_CATEGORY'): ?><a class="btn small" style="margin-left:8px" href="/football?date=<?= e($date) ?>">Show all categories</a><?php endif; ?>
+          </p>
         <?php endif; ?>
 
         <?php foreach ($board['categories'] ?? [] as $category): ?>
@@ -143,6 +168,11 @@ $kickoffLabel = static fn(?string $iso): string => $iso === null || $iso === '' 
                         <?php if (!empty($card['score'])): ?><span class="badge b-violet">live <?= (int) $card['score']['home'] ?>–<?= (int) $card['score']['away'] ?></span><?php endif; ?>
                         <?php if (!empty($card['highConfidence'])): ?><span class="badge b-green"><?= e((string) $card['highConfidence']) ?></span><?php endif; ?>
                         <span class="badge <?= $bandClass((string) ($card['band'] ?? '')) ?>"><?= e((string) ($card['band'] ?? 'REJECTED')) ?> · <?= (int) ($card['dataQuality']['score'] ?? 0) ?>/100</span>
+                        <?php if (!empty($card['category'])): ?>
+                          <span class="badge <?= $catChip((string) $card['category']) ?>" title="<?= e((string) ($card['categoryLabel'] ?? '')) ?><?= !empty($card['categoryDerived']) ? ' · re-classified from stored probabilities' : '' ?>">
+                            <?= e((string) $card['category']) ?> — <?= e((string) ($card['categoryLabel'] ?? '')) ?>
+                          </span>
+                        <?php endif; ?>
                       </div>
                       <div style="margin-top:10px">
                         <div class="meter">
@@ -371,6 +401,30 @@ $kickoffLabel = static fn(?string $iso): string => $iso === null || $iso === '' 
         <?php endif; ?>
         <?php if (!empty($perf['note'])): ?>
           <p class="dim" style="font-size:11px;margin-top:6px"><?= e((string) $perf['note']) ?></p>
+        <?php endif; ?>
+        <?php if (!empty($perf['byCategory'])): ?>
+          <table class="tbl" style="margin-top:10px">
+            <thead><tr><th>Category</th><th class="num">Evaluated</th><th class="num">Result acc.</th><th class="num">Exact-score acc.</th><th class="num">Avg confidence</th></tr></thead>
+            <tbody>
+              <?php foreach ($perf['byCategory'] as $row): ?>
+                <?php $catKey = (string) ($row['category'] ?? ''); ?>
+                <tr>
+                  <td>
+                    <?php if ($catKey === 'UNCLASSIFIED'): ?>
+                      <span class="dim">UNCLASSIFIED</span>
+                    <?php else: ?>
+                      <span class="badge <?= $catChip($catKey) ?>"><?= $catKey ?> — <?= e($catTitle($catKey)) ?></span>
+                    <?php endif; ?>
+                  </td>
+                  <td class="num"><?= (int) ($row['evaluated'] ?? 0) ?></td>
+                  <td class="num"><?= $percent($row['accuracy'] ?? null) ?></td>
+                  <td class="num"><?= $percent($row['exactScoreAccuracy'] ?? null, 2) ?></td>
+                  <td class="num mono"><?= $row['averageConfidence'] === null ? '—' : number_format((float) $row['averageConfidence'], 1) . '%' ?></td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+          <p class="dim" style="font-size:11px;margin-top:6px">Category performance grades which buckets the engine reads best. Unsettled predictions are not in these counts.</p>
         <?php endif; ?>
         <?php if (!empty($perf['byModel'])): ?>
           <table class="tbl" style="margin-top:10px">

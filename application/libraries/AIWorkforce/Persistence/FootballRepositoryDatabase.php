@@ -126,6 +126,15 @@ class FootballRepositoryDatabase implements FootballRepository
         return $row ? $this->decode($row) : null;
     }
 
+    public function listCompetitions(int $limit = 500): array
+    {
+        $this->db->select('c.*, p.provider_code', false);
+        $this->db->from('football_competitions c');
+        $this->db->join('football_providers p', 'p.id = c.provider_id', 'left');
+        $rows = $this->db->order_by('c.name', 'ASC')->limit(min(2000, max(1, $limit)))->get()->result_array();
+        return array_map(fn(array $r) => $this->decode($r), $rows);
+    }
+
     public function saveTeam(int $providerId, array $row): array
     {
         $externalId = (string) ($row['externalId'] ?? $row['external_id'] ?? '');
@@ -538,7 +547,7 @@ class FootballRepositoryDatabase implements FootballRepository
         $data = self::only($row, [
             'fixture_id', 'provider_id', 'model_version_id', 'calibration_version_id', 'calibration_state',
             'prediction_kind', 'supersedes_prediction_id', 'generated_at', 'kickoff_at', 'status_at_prediction',
-            'predicted_result', 'predicted_home_score', 'predicted_away_score', 'probability_home', 'probability_draw',
+            'predicted_result', 'category', 'predicted_home_score', 'predicted_away_score', 'probability_home', 'probability_draw',
             'probability_away', 'raw_home', 'raw_draw', 'raw_away', 'expected_total_goals', 'confidence',
             'confidence_basis', 'data_quality_score', 'data_quality_band', 'quality_components', 'feature_snapshot',
             'probabilities_matrix', 'alternative_scores', 'reason', 'evidence', 'outcome', 'eligibility',
@@ -577,6 +586,7 @@ class FootballRepositoryDatabase implements FootballRepository
         if (!empty($filter['eligibility'])) $this->db->where('eligibility', (string) $filter['eligibility']);
         if (!empty($filter['modelVersionId'])) $this->db->where('model_version_id', (int) $filter['modelVersionId']);
         if (!empty($filter['settlementState'])) $this->db->where('settlement_state', (string) $filter['settlementState']);
+        if (isset($filter['category']) && (string) $filter['category'] !== '') $this->db->where('category', strtoupper((string) $filter['category']));
         if (!empty($filter['date'])) {
             $date = (string) $filter['date'];
             $this->db->where('kickoff_at >=', $date . 'T00:00:00+00:00');
@@ -618,6 +628,39 @@ class FootballRepositoryDatabase implements FootballRepository
         return $rows;
     }
 
+    // ── A/B/C classification rules ───────────────────────────────────────────
+
+    public function listCategoryRules(): array
+    {
+        $rows = $this->db->order_by('category_key', 'ASC')->get('football_category_rules')->result_array();
+        return array_map(fn(array $r) => $this->decode($r), $rows);
+    }
+
+    public function saveCategoryRule(string $categoryKey, array $row): array
+    {
+        $key = strtoupper(trim($categoryKey));
+        if (!in_array($key, ['A', 'B', 'C'], true)) throw new \InvalidArgumentException("unknown football category key: {$key}");
+        $parameters = $row['parameters'] ?? [];
+        if (!is_string($parameters)) $parameters = json_encode($parameters ?: new \stdClass());
+        $data = [
+            'label' => (string) ($row['label'] ?? ''),
+            'description' => self::nullableString($row['description'] ?? null),
+            'rule_type' => (string) ($row['ruleType'] ?? $row['rule_type'] ?? 'MANUAL'),
+            'parameters' => $parameters,
+            'enabled' => empty($row['enabled']) ? 0 : 1,
+            'updated_at' => gmdate('c'),
+            'updated_by' => self::nullableString($row['updatedBy'] ?? $row['updated_by'] ?? null),
+        ];
+        if ($data['label'] === '') throw new \InvalidArgumentException("category {$key} requires a label");
+        $existing = $this->db->get_where('football_category_rules', ['category_key' => $key], 1)->row_array();
+        if ($existing) {
+            $this->db->where('id', (int) $existing['id'])->update('football_category_rules', $data);
+            return $this->decode(array_merge($existing, $data));
+        }
+        $this->db->insert('football_category_rules', array_merge(['category_key' => $key, 'created_at' => gmdate('c')], $data));
+        return $this->decode(array_merge($data, ['category_key' => $key, 'id' => (int) $this->db->insert_id()]));
+    }
+
     // ── settlements + performance ─────────────────────────────────────────────
 
     public function saveSettlement(array $row): array
@@ -628,7 +671,7 @@ class FootballRepositoryDatabase implements FootballRepository
         if ($existing) return ['row' => $this->decode($existing), 'created' => false];
         $data = self::only($row, [
             'prediction_id', 'fixture_id', 'actual_home_score', 'actual_away_score', 'actual_result', 'predicted_result',
-            'predicted_home_score', 'predicted_away_score', 'probability_home', 'probability_draw', 'probability_away',
+            'category', 'predicted_home_score', 'predicted_away_score', 'probability_home', 'probability_draw', 'probability_away',
             'confidence', 'data_quality_score', 'model_version_id', 'calibration_version_id', 'correct_result',
             'correct_exact_score', 'brier', 'log_loss', 'absolute_goal_error', 'result_source', 'settled_at',
         ]);
@@ -687,7 +730,7 @@ class FootballRepositoryDatabase implements FootballRepository
 
     public function listCalibrationSamples(array $filter = []): array
     {
-        $select = 's.prediction_id, s.fixture_id, s.actual_home_score, s.actual_away_score, s.actual_result, '
+        $select = 's.prediction_id, s.fixture_id, s.actual_home_score, s.actual_away_score, s.actual_result, s.category, '
             . 's.correct_result, s.correct_exact_score, s.brier, s.log_loss, s.confidence AS settled_confidence, '
             . 's.data_quality_score, s.model_version_id, s.calibration_version_id, s.settled_at, '
             . 'p.raw_home, p.raw_draw, p.raw_away, p.probability_home, p.probability_draw, p.probability_away, '

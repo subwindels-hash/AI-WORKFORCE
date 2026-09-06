@@ -28,7 +28,14 @@ final class PredictionService
         private ModelRegistry $models,
         private FootballConfiguration $config,
         private ?AuditRepository $audit = null,
+        private ?CategoryClassifier $categories = null,
     ) {}
+
+    /** Classifier used to fill in the category of rows written before the column existed. */
+    public function categories(): CategoryClassifier
+    {
+        return $this->categories ??= new CategoryClassifier($this->config);
+    }
 
     /**
      * Predict one stored fixture and (when allowed) store the result.
@@ -95,6 +102,7 @@ final class PredictionService
             'kickoff_at' => (string) ($fixture['kickoff_at'] ?? gmdate('c')),
             'status_at_prediction' => (string) ($fixture['status'] ?? 'SCHEDULED'),
             'predicted_result' => (string) $payload['result'],
+            'category' => $payload['category']['key'] ?? null,
             'predicted_home_score' => (int) $payload['predictedScore']['home'],
             'predicted_away_score' => (int) $payload['predictedScore']['away'],
             'probability_home' => $payload['probabilities']['home'],
@@ -168,6 +176,10 @@ final class PredictionService
             'matchState' => (string) ($fixture['match_state'] ?? 'PRE_MATCH'),
             'score' => (isset($fixture['home_score'], $fixture['away_score']))
                 ? ['home' => (int) $fixture['home_score'], 'away' => (int) $fixture['away_score'], 'minute' => $fixture['minute'] ?? null] : null,
+            // A/B/C: the stored label wins; rows written before the column
+            // existed are re-classified from their stored probabilities so the
+            // ticket never shows a blank category for a complete prediction.
+            'category' => $this->categoryForRow($prediction),
             'prediction' => [
                 'result' => (string) ($prediction['predicted_result'] ?? ''),
                 'predictedScore' => ['home' => $prediction['predicted_home_score'], 'away' => $prediction['predicted_away_score']],
@@ -205,11 +217,20 @@ final class PredictionService
         $filter = ['date' => $date];
         if ($providerId !== null) $filter['providerId'] = (int) $providerId;
         $fixtures = $this->repo->listFixtures($filter, max(1, $this->config->analysisLimit()));
+        // The admin-configured league scope narrows WHICH stored fixtures get a
+        // prediction. It is a scope, not a data source: matches outside the
+        // scope are still stored, still listed on the board's fixture panel and
+        // simply not predicted — counted as skippedScope, never silently dropped.
+        $inScope = array_filter($fixtures, fn(array $fixture) => $this->config->inLeagueScope(
+            $fixture['provider_code'] ?? null,
+            $fixture['competition_external_id'] ?? null,
+            $fixture['competition'] ?? null
+        ));
         $out = ['status' => 'COMPLETED', 'date' => $date, 'fixtures' => count($fixtures), 'analyzed' => 0, 'qualified' => 0, 'limited' => 0, 'rejected' => 0,
             // Fixtures whose pre-match slot had already closed are tallied apart,
             // so "we did not predict it in time" is never mistaken for "the data
             // was too thin to predict".
-            'frozen' => 0, 'predictions' => [], 'errors' => []];
+            'frozen' => 0, 'skippedScope' => count($fixtures) - count($inScope), 'predictions' => [], 'errors' => []];
         $model = $this->models->usable();
         $out['model'] = ['state' => $model['state'], 'label' => $model['label'], 'version' => $model['model']['model_version'] ?? null, 'reason' => $model['reason']];
         if ($fixtures === []) {
@@ -217,7 +238,12 @@ final class PredictionService
             $out['reason'] = 'No fixture for ' . $date . ' is stored. The provider has not been reached for this date, so no prediction is produced.';
             return $out;
         }
-        foreach ($fixtures as $fixture) {
+        if ($inScope === []) {
+            $out['status'] = 'OUT_OF_SCOPE';
+            $out['reason'] = 'Stored fixtures exist for ' . $date . ' but none falls inside the configured league scope, so no prediction is produced. Widen the scope in the admin settings to include this league.';
+            return $out;
+        }
+        foreach ($inScope as $fixture) {
             $kind = self::KIND_PRE_MATCH;
             try {
                 $payload = $this->predict($fixture, true, $kind);
@@ -283,6 +309,20 @@ final class PredictionService
         if ($modelVersionId <= 0) return DataState::UNAVAILABLE;
         $row = $this->repo->findModelVersion($modelVersionId);
         return $row === null ? DataState::UNAVAILABLE : (string) ($row['model_version'] ?? DataState::UNAVAILABLE);
+    }
+
+    /**
+     * @return array{key:?string, label:string, reason:string, edgePct:float, drawSignificantPct:float, derived:bool}
+     */
+    private function categoryForRow(array $prediction): array
+    {
+        $stored = isset($prediction['category']) ? strtoupper(trim((string) $prediction['category'])) : '';
+        if (in_array($stored, CategoryClassifier::KEYS, true)) {
+            $classifier = $this->categories();
+            return ['key' => $stored, 'label' => $classifier->label($stored), 'reason' => 'Stored with the prediction.',
+                'edgePct' => $classifier->rules()['edgePct'], 'drawSignificantPct' => $classifier->rules()['drawSignificantPct'], 'derived' => false];
+        }
+        return $this->categories()->forStoredRow($prediction);
     }
 
     private static function compactTeam(array $team): array

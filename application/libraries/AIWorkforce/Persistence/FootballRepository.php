@@ -35,6 +35,12 @@ interface FootballRepository
     public function saveCompetition(int $providerId, array $row): array;
     /** @return array<string,mixed>|null */
     public function findCompetition(int $providerId, string $externalId, ?string $season = null): ?array;
+    /**
+     * Every stored competition, with the provider code joined in — the admin
+     * league picker lists what the provider has actually delivered.
+     * @return array<int,array<string,mixed>>
+     */
+    public function listCompetitions(int $limit = 500): array;
     /** @return array<string,mixed> */
     public function saveTeam(int $providerId, array $row): array;
     /** @return array<string,mixed>|null */
@@ -107,8 +113,20 @@ interface FootballRepository
     /** @return array<string,mixed>|null */
     public function findPrediction(string $id): ?array;
     /** Filter keys: fixtureId, date, from, to, kind, eligibility, modelVersionId,
-     *  settlementState. @return array<int,array<string,mixed>> */
+     *  settlementState, category. @return array<int,array<string,mixed>> */
     public function listPredictions(array $filter = [], int $limit = 500): array;
+
+    // ── A/B/C classification rules ──────────────────────────────────────────
+    /**
+     * The stored category rule rows, one per key (A/B/C). Empty on a fresh
+     * database — the classifier falls back to configured defaults and the
+     * admin surface seeds the rows on first save.
+     * @return array<int,array<string,mixed>>
+     */
+    public function listCategoryRules(): array;
+    /** Upsert keyed by category_key; `parameters` is stored as JSON. */
+    /** @param array<string,mixed> $row */
+    public function saveCategoryRule(string $categoryKey, array $row): array;
     /** Replaces the score grid of a NOT-yet-settled prediction. */
     public function saveScoreProbabilities(string $predictionId, array $rows): void;
     /** @return array<int,array<string,mixed>> */

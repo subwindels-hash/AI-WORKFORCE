@@ -56,7 +56,7 @@ final class FootballCronService
         // audit row per idle minute would drown the log — a job that ran records
         // its own sync-log row (and a failure emits FOOTBALL_JOB_FAILED above), so
         // nothing is lost by staying quiet when every job reported SKIPPED.
-        $quiet = ['SKIPPED', 'NOTHING_TO_SETTLE', 'DUPLICATE_SKIPPED', 'NO_FIXTURES', 'NO_DATA'];
+        $quiet = ['SKIPPED', 'NOTHING_TO_SETTLE', 'DUPLICATE_SKIPPED', 'NO_FIXTURES', 'NO_DATA', 'DISABLED'];
         $worked = array_filter(
             array_diff_key($summary, ['schedule' => 1]),
             static fn($state) => !is_array($state) || !in_array((string) ($state['status'] ?? 'SKIPPED'), $quiet, true)
@@ -73,6 +73,12 @@ final class FootballCronService
     {
         $date ??= gmdate('Y-m-d');
         if (!in_array($job, self::JOBS, true)) throw new \InvalidArgumentException('unknown football job: ' . $job);
+        // The admin master switch: a disabled module does no scheduled work of
+        // any kind (no provider sweeps, no predictions, no settlements) and
+        // says so explicitly instead of idling into SKIPPED.
+        if (!$this->football->config()->enabled()) {
+            return ['status' => 'DISABLED', 'job' => $job, 'reason' => 'The football module is disabled in the admin settings.'];
+        }
         if (!$force) {
             $evaluation = $this->football->refresh()->evaluate('football-' . $job);
             if (!$evaluation['due']) {
@@ -161,6 +167,10 @@ final class FootballCronService
     /** Today + tomorrow's not-yet-kicked-off fixtures get a stored prediction. */
     private function jobPredict(string $date): array
     {
+        if (!$this->football->config()->autoPredictEnabled()) {
+            return ['status' => 'DISABLED', 'processed' => 0, 'created' => 0, 'updated' => 0, 'requests' => 0,
+                'reason' => 'Automatic predictions are disabled in the admin settings. Manual board rebuilds are unaffected.', 'errors' => []];
+        }
         $today = $this->football->predictions()->predictDay($date);
         $tomorrow = $this->football->predictions()->predictDay(gmdate('Y-m-d', strtotime($date . ' +1 day')));
         return [

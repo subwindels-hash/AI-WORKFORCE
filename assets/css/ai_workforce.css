@@ -461,6 +461,10 @@ img {
 .b-violet { background: #8b5cf61f; color: var(--violet); border-color: #8b5cf644; }
 .b-gray { background: #64748b1f; color: var(--muted); border-color: #64748b44; }
 .badge.big { font-size: 16px; padding: 6px 12px; border-radius: 8px; }
+/* Filter chips (football A/B/C board filter and similar row filters). */
+.chip { display: inline-flex; align-items: center; padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--ink-2); background: var(--bg-soft, #f6f8fb); border: 1px solid var(--line); text-decoration: none; transition: all .12s ease; }
+.chip:hover { border-color: var(--violet); color: var(--violet); }
+.chip-on { background: #8b5cf61f; border-color: var(--violet); color: var(--violet); font-weight: 700; }
 
 /* ---------- Buttons ---------- */
 .btn {

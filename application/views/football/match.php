@@ -83,7 +83,18 @@ $score = static fn(mixed $row, string $side): string => is_array($row) && isset(
           </table>
           <table class="tbl" style="margin-top:10px">
             <tbody>
-              <tr><td class="dim" style="width:150px">Expected total goals</td><td class="mono"><?= $dash($p['expectedTotalGoals'] ?? null, 2) ?></td></tr>
+              <?php $cat = $contract['category'] ?? null; ?>
+              <tr><td class="dim" style="width:150px">Category</td><td>
+                <?php if (empty($cat['key'])): ?>
+                  <span class="dim">UNCLASSIFIED</span>
+                <?php else: ?>
+                  <span class="badge <?= $cat['key'] === 'A' ? 'b-violet' : ($cat['key'] === 'C' ? 'b-green' : 'b-amber') ?>">
+                    <?= e($cat['key']) ?> — <?= e((string) ($cat['label'] ?? '')) ?>
+                  </span>
+                  <?php if (!empty($cat['derived'])): ?><span class="dim" style="font-size:11px">re-classified from stored probabilities</span><?php endif; ?>
+                <?php endif; ?>
+              </td></tr>
+              <tr><td class="dim">Expected total goals</td><td class="mono"><?= $dash($p['expectedTotalGoals'] ?? null, 2) ?></td></tr>
               <tr><td class="dim">Alternative scores</td><td class="mono">
                 <?php $alts = (array) ($contract['alternativeScores'] ?? []); ?>
                 <?php if ($alts === []): ?><span class="dim">—</span><?php endif; ?>

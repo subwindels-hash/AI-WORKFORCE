@@ -85,6 +85,13 @@ $route['admin/cron/save'] = 'admin/cron_save';
 $route['admin/cron/run/(:any)'] = 'admin/cron_run/$1';
 $route['admin/cron/secret'] = 'admin/cron_secret';
 
+// ---- Football Intelligence administration ----
+$route['admin/football'] = 'admin/football';
+$route['admin/football/save'] = 'admin/football_save';
+$route['admin/football/recalculate'] = 'admin/football_recalculate';
+$route['admin/football/sync'] = 'admin/football_sync';
+$route['admin/football/backtest'] = 'admin/football_backtest';
+
 // ---- Admin Inbox (contact messages + email templates) ----
 $route['admin/inbox'] = 'admin/inbox';
 $route['admin/inbox/templates'] = 'admin/inbox_templates';
@@ -244,6 +251,7 @@ $route['api/sports/correlation'] = 'api_sports/correlation_monitor';
 
 // Football Intelligence — console (§10/§11/§16)
 $route['football'] = 'football';
+$route['football/ticket'] = 'football/ticket';
 $route['football/match/(:num)'] = 'football/match/$1';
 $route['football/live'] = 'football/live';
 $route['football/models'] = 'football/models';
@@ -266,6 +274,8 @@ $route['api/football/matches/(:num)/analysis'] = 'api_football/analysis/$1';
 $route['api/football/matches/(:num)/prediction'] = 'api_football/prediction/$1';
 $route['api/football/predictions/today'] = 'api_football/predictions_today';
 $route['api/football/predictions/history'] = 'api_football/predictions_history';
+$route['api/football/ticket'] = 'api_football/ticket';
+$route['api/football/backtest'] = 'api_football/backtest';
 $route['api/football/performance'] = 'api_football/performance';
 $route['api/football/models'] = 'api_football/models';
 $route['api/football/models/active'] = 'api_football/models_active';

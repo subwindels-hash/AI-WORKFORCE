@@ -24,7 +24,19 @@ final class OutcomePredictor
         private ScoreProbabilityModel $scores,
         private CalibrationService $calibration,
         private FootballConfiguration $config,
+        private ?CategoryClassifier $categories = null,
     ) {}
+
+    /**
+     * The classifier the payload is labelled with. The facade passes its own
+     * repo-wired instance so the stored A/B/C rule rows apply at prediction
+     * time; a directly constructed predictor falls back to configured
+     * defaults.
+     */
+    public function categories(): CategoryClassifier
+    {
+        return $this->categories ?? new CategoryClassifier($this->config);
+    }
 
     /**
      * @param array{teams:array,competition:?array,headToHead:array,dataQuality:array,coverage:array,provenance:array,fixture:array} $features
@@ -109,6 +121,9 @@ final class OutcomePredictor
             'fixtureDatabaseId' => (int) ($features['fixture']['id'] ?? 0),
             'result' => strtoupper($argmax),
             'resultLabel' => self::label(strtoupper($argmax), $features['teams'] ?? []),
+            // Labelled from the DISPLAYED probabilities (the same numbers the
+            // ticket prints), with the stored A/B/C rules applied.
+            'category' => $this->categories()->classify($calibrated['probabilities']),
             'predictedScore' => $predictedScore,
             'predictedScoreProbability' => $topScore['probability'],
             'alternativeScores' => array_values(array_filter(

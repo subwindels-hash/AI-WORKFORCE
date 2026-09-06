@@ -26,7 +26,10 @@ final class FootballIntelligence
     private ?OutcomePredictor $predictor = null;
     private ?CalibrationService $calibration = null;
     private ?ModelRegistry $models = null;
+    private ?CategoryClassifier $categories = null;
     private ?PredictionService $predictions = null;
+    private ?TicketService $ticket = null;
+    private ?BacktestService $backtest = null;
     private ?LiveMatchService $live = null;
     private ?SettlementService $settlements = null;
     private ?PerformanceService $performance = null;
@@ -105,7 +108,17 @@ final class FootballIntelligence
 
     public function predictor(): OutcomePredictor
     {
-        return $this->predictor ??= new OutcomePredictor($this->expectedGoals(), $this->scores(), $this->calibration(), $this->config);
+        return $this->predictor ??= new OutcomePredictor($this->expectedGoals(), $this->scores(), $this->calibration(), $this->config, $this->categories());
+    }
+
+    /**
+     * The single A/B/C classifier the whole module shares. It reads the stored
+     * rule rows on every rules() call (cheap: three rows), so an admin save is
+     * visible to the next classification without any restart or cache flush.
+     */
+    public function categories(): CategoryClassifier
+    {
+        return $this->categories ??= new CategoryClassifier($this->config, fn() => $this->repo->listCategoryRules());
     }
 
     public function models(): ModelRegistry
@@ -115,7 +128,28 @@ final class FootballIntelligence
 
     public function predictions(): PredictionService
     {
-        return $this->predictions ??= new PredictionService($this->repo, $this->features(), $this->predictor(), $this->models(), $this->config, $this->audit);
+        return $this->predictions ??= new PredictionService($this->repo, $this->features(), $this->predictor(), $this->models(), $this->config, $this->audit, $this->categories());
+    }
+
+    /** The Odds Prediction Ticket read model (stored predictions only). */
+    public function ticket(): TicketService
+    {
+        return $this->ticket ??= new TicketService($this->repo, $this->board(), $this->models(), $this->config);
+    }
+
+    /** Historical backtesting over stored finished matches (writes nothing). */
+    public function backtestEngine(): BacktestService
+    {
+        return $this->backtest ??= new BacktestService($this->repo, $this->features(), $this->predictor(), $this->models(), $this->config);
+    }
+
+    /**
+     * Run a backtest over a stored window. The report is a measurement of the
+     * engine on historical matches, with the data-currency caveat attached.
+     */
+    public function backtest(string $from, string $to, int $limit = 200): array
+    {
+        return $this->backtestEngine()->run($from, $to, $limit);
     }
 
     public function live(): LiveMatchService
@@ -135,7 +169,7 @@ final class FootballIntelligence
 
     public function board(): PredictionBoard
     {
-        return $this->board ??= new PredictionBoard($this->repo, $this->predictions(), $this->models(), $this->config);
+        return $this->board ??= new PredictionBoard($this->repo, $this->predictions(), $this->models(), $this->config, $this->categories());
     }
 
     public function refresh(): RefreshPolicy
@@ -166,13 +200,13 @@ final class FootballIntelligence
      *
      * @return array<string,mixed>
      */
-    public function dashboard(?string $date = null, bool $refresh = false): array
+    public function dashboard(?string $date = null, bool $refresh = false, ?string $categoryFilter = null): array
     {
         $date = $date ?? gmdate('Y-m-d');
         $diagnostics = $this->diagnostics()->snapshot();
         return [
             'date' => $date,
-            'board' => $this->board()->forDate($date, $refresh),
+            'board' => $this->board()->forDate($date, $refresh, $categoryFilter),
             'diagnostics' => $diagnostics,
             'performance' => $this->performance()->report(30),
             'live' => $this->live()->board(false),
@@ -336,6 +370,10 @@ final class FootballIntelligence
                     'dataQuality' => $row['data_quality_score'] ?? null,
                     'modelVersionId' => $row['model_version_id'] ?? null, 'calibrationVersionId' => $row['calibration_version_id'] ?? null],
                 'actual' => ['score' => ['home' => $row['actual_home_score'], 'away' => $row['actual_away_score']], 'result' => (string) ($row['actual_result'] ?? ''), 'source' => (string) ($row['result_source'] ?? 'PROVIDER')],
+                // The category is graded with the settlement, so the history
+                // (and the admin view) can show which bucket each hit/miss was in.
+                'category' => isset($row['category']) && strtoupper(trim((string) $row['category'])) !== ''
+                    ? strtoupper(trim((string) $row['category'])) : null,
                 'correctResult' => $row['correct_result'] === null ? null : (int) $row['correct_result'] === 1,
                 'correctExactScore' => $row['correct_exact_score'] === null ? null : (int) $row['correct_exact_score'] === 1,
                 'brier' => $row['brier'] ?? null, 'logLoss' => $row['log_loss'] ?? null, 'absoluteGoalError' => $row['absolute_goal_error'] ?? null,
@@ -353,6 +391,57 @@ final class FootballIntelligence
     }
 
     // ── write paths ───────────────────────────────────────────────────────────
+
+    /**
+     * The A/B/C rule rows, seeded with the configured defaults on a fresh
+     * database so the admin surface always has editable rows to work with.
+     *
+     * @return array{rows:list<array<string,mixed>>, seeded:bool, effective:array}
+     */
+    public function categoryRules(?string $actor = null): array
+    {
+        $existing = $this->repo->listCategoryRules();
+        $seeded = false;
+        if ($existing === []) {
+            foreach ($this->categories()->defaultRuleRows() as $row) {
+                $this->repo->saveCategoryRule((string) $row['category_key'], $row + ['updatedBy' => $actor ?? 'system']);
+                $seeded = true;
+            }
+            $existing = $this->repo->listCategoryRules();
+            $this->audit?->emit('FOOTBALL_CATEGORY_RULES_SEEDED', 'Football A/B/C classification rules seeded from configured defaults', ['actor' => $actor ?? 'system'], $actor ?? 'system');
+        }
+        return ['rows' => $existing, 'seeded' => $seeded, 'effective' => $this->categories()->rules()];
+    }
+
+    /**
+     * Persist the admin-edited classification rules. `$edgePct` and
+     * `$drawSignificantPct` are written into every row's parameters (they are
+     * shared thresholds), and each row keeps its own label/description/enabled
+     * state. Returns the effective rule set the next classification will use.
+     *
+     * @param array{edgePct:float, drawSignificantPct:float, labels:array<string,string>, descriptions?:array<string,string>, enabled?:array<string,bool>} $rules
+     */
+    public function saveCategoryRules(array $rules, string $actor): array
+    {
+        $edge = max(0.0, min(50.0, (float) ($rules['edgePct'] ?? $this->config->categoryEdgePct())));
+        $draw = max(5.0, min(90.0, (float) ($rules['drawSignificantPct'] ?? $this->config->categoryDrawSignificantPct())));
+        $defaults = $this->categories()->defaultRuleRows();
+        foreach ($defaults as $default) {
+            $key = (string) $default['category_key'];
+            $this->repo->saveCategoryRule($key, [
+                'label' => trim((string) ($rules['labels'][$key] ?? $default['label'])),
+                'description' => $rules['descriptions'][$key] ?? $default['description'],
+                'ruleType' => $default['rule_type'],
+                'parameters' => ['edgePct' => $edge, 'drawSignificantPct' => $draw],
+                'enabled' => $rules['enabled'][$key] ?? true,
+                'updatedBy' => $actor,
+            ]);
+        }
+        $this->audit?->emit('FOOTBALL_CATEGORY_RULES_SAVED', 'Football A/B/C classification rules saved (edge ' . number_format($edge, 1) . '%, draw line ' . number_format($draw, 1) . '%)', [
+            'edgePct' => $edge, 'drawSignificantPct' => $draw, 'labels' => $rules['labels'] ?? [],
+        ], $actor);
+        return $this->categories()->rules();
+    }
 
     /**
      * Operator-triggered sync for a date. The request budget is deliberately
