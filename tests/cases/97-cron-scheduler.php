@@ -45,10 +45,11 @@ test('cron runDue runs enabled + due jobs and records last runs', function () {
     $result = $scheduler->runDue(function (string $id) use (&$ran) {
         return function () use ($id, &$ran) { $ran[] = $id; return ['summary' => $id . ' ok']; };
     });
-    // Registry order: the football sweep sits with the other domain sweeps, and
+    // Registry order: the football sweep sits with the other domain sweeps, the
+    // Automatic Kill Switch scan joins them as a trading-protection job, and
     // each job's own interval (not the sweep's tick) decides when it does work.
-    assert_equals(['ops', 'sports', 'sports-live', 'football', 'lottery'], $ran);
-    foreach (['ops', 'sports', 'sports-live', 'football', 'lottery'] as $id) {
+    assert_equals(['ops', 'sports', 'sports-live', 'football', 'protection', 'lottery'], $ran);
+    foreach (['ops', 'sports', 'sports-live', 'football', 'protection', 'lottery'] as $id) {
         assert_true($result[$id]['ran']);
         assert_equals('COMPLETED', $result[$id]['status']);
         $last = $scheduler->lastRun($id);
@@ -92,7 +93,7 @@ test('cron runDue isolates failures and marks partial sweeps honestly', function
             return [];
         };
     });
-    assert_equals(['ops', 'sports', 'sports-live', 'football', 'lottery'], $ran, 'one failure does not abort the sweep');
+    assert_equals(['ops', 'sports', 'sports-live', 'football', 'protection', 'lottery'], $ran, 'one failure does not abort the sweep');
     assert_equals('FAILED', $result['sports']['status']);
     assert_contains('provider down', $result['sports']['error']);
     assert_equals('COMPLETED', $result['ops']['status']);

@@ -583,6 +583,18 @@ final class AutomaticProtection
                 $policy,
                 (int) ($previous['clearScans'] ?? 0)
             );
+
+            // The boot state is deliberately unverified (never assume safe), so
+            // the very first scan starts from a blocking state. Confirmation
+            // scans exist to stop a real breach from flapping back to trading,
+            // so they do NOT apply to that first look: one clean read of every
+            // monitor is the best information available, and making the first
+            // orders wait for a second scan would only add latency — the
+            // operator would be told "conditions are clear" while being
+            // refused for another minute.
+            if ($next === self::RECOVERY && !empty($previous['unverified'])) {
+                $next = self::RESUMED;
+            }
         }
 
         $status = [

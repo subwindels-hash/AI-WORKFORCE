@@ -144,7 +144,7 @@ class ExecutionSupervisor
         if ($age > $freshLimit) {
             return $reject('data-freshness', "quote is {$age}s old (limit {$freshLimit}s for {$intent['marketClass']}) — data is stale");
         }
-        $pass('data-freshness', "quote age {$age}s (limit {$freshLimit}s), " . ($quote['delayed'] ? 'DELAYED' : 'live'));
+        $pass('data-freshness', "quote age {$age}s (limit {$freshLimit}s), " . (!empty($quote['delayed']) ? 'DELAYED' : 'live'));
 
         // 7 — duplicate orders (one net position per symbol, broker-wide)
         try {
