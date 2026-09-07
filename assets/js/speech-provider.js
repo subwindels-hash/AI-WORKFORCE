@@ -181,7 +181,9 @@ class SpeechProvider {
   }
 
   stop() {
-    if (this.synth) this.synth.cancel();
+    if (this.synth) {
+      try { this.synth.cancel(); } catch (e) { /* ignore */ }
+    }
     this._utter = null;
     this.stopListening();
   }
@@ -201,7 +203,9 @@ class SpeechProvider {
       this._listenRestartTimer = null;
     }
     if (this._rec) {
-      try { this._rec.onend = null; this._rec.stop(); } catch (e) { /* ignore */ }
+      try { this._rec.onend = null; } catch (e) { /* ignore */ }
+      try { this._rec.stop(); } catch (e) { /* ignore */ }
+      try { this._rec.abort(); } catch (e) { /* ignore */ }
       this._rec = null;
     }
     this._listenUserStop = false;
@@ -297,7 +301,9 @@ class SpeechProvider {
       this._listenRestartTimer = null;
     }
     if (this._rec) {
+      try { this._rec.onend = null; } catch (e) { /* ignore */ }
       try { this._rec.stop(); } catch (e) { /* already stopped */ }
+      try { this._rec.abort(); } catch (e) { /* abort */ }
       this._rec = null;
     }
     this._recording = false;
@@ -322,7 +328,11 @@ class SpeechProvider {
       button.classList.remove('is-recording');
       button.setAttribute('aria-pressed', 'false');
       button.textContent = idle;
-      if (stopBtn) stopBtn.disabled = true;
+      if (stopBtn) {
+        stopBtn.disabled = true;
+        stopBtn.hidden = true;
+        stopBtn.style.display = 'none';
+      }
     };
     const setRec = () => {
       button.classList.add('is-recording');
@@ -331,6 +341,7 @@ class SpeechProvider {
       if (stopBtn) {
         stopBtn.hidden = false;
         stopBtn.disabled = false;
+        stopBtn.style.display = '';
       }
     };
 
@@ -340,7 +351,11 @@ class SpeechProvider {
         button.disabled = true;
         button.title = 'Voice input is not available in this browser.';
       }
-      if (stopBtn) stopBtn.hidden = true;
+      if (stopBtn) {
+        stopBtn.hidden = true;
+        stopBtn.disabled = true;
+        stopBtn.style.display = 'none';
+      }
       return;
     }
 
@@ -399,6 +414,8 @@ class SpeechProvider {
     if (stopBtn) {
       stopBtn.type = 'button';
       stopBtn.disabled = true;
+      stopBtn.hidden = true;
+      stopBtn.style.display = 'none';
       stopBtn.addEventListener('click', function (ev) {
         ev.preventDefault();
         self.stopListening();

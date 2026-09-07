@@ -6,7 +6,8 @@ use AIWorkforce\Providers\SpeechToTextProvider;
 /**
  * Extracts safe, grounded context from a user-uploaded workforce attachment so
  * a specialist agent can analyse the file without mixing chats or inventing
- * content. Text documents are read directly; audio is transcribed through the
+ * content. Text documents are read directly; images are parsed for metadata,
+ * dimensions, EXIF and embedded/OCR text; audio is transcribed through the
  * configured STT provider; video is transcribed by extracting its audio track
  * first when ffmpeg is available.
  */
@@ -23,6 +24,11 @@ final class WorkforceFileAnalyzer
 
     /** @var array<int,string> */
     private const DOCUMENT_EXTENSIONS = ['pdf', 'docx'];
+
+    /** @var array<int,string> */
+    private const IMAGE_EXTENSIONS = [
+        'jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'svg', 'tiff', 'tif', 'ico', 'heic', 'heif'
+    ];
 
     /** @var array<int,string> */
     private const AUDIO_EXTENSIONS = ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'oga', 'flac', 'opus', 'webm'];
@@ -58,6 +64,9 @@ final class WorkforceFileAnalyzer
             } elseif ($uploaded['extension'] === 'pdf') {
                 $extracted = $this->extractPdfText($uploaded['tmp']);
             }
+        } elseif ($kind === 'image') {
+            $extracted = $this->extractImageDetails($uploaded['tmp'], $uploaded['extension'], $uploaded['mime'], $uploaded['name']);
+            $source = 'image';
         } elseif ($kind === 'audio') {
             $transcript = $this->transcribeAudio($uploaded['tmp'], $uploaded['name'], $uploaded['mime']);
             $extracted = (string) ($transcript['text'] ?? '');
@@ -82,6 +91,7 @@ final class WorkforceFileAnalyzer
                 'audio' => 'No speech was detected in that audio file. Try a clearer recording or a supported spoken-audio file.',
                 'video' => 'No spoken audio was extracted from that video. Try a video with clear speech or upload the audio track directly.',
                 'document' => 'No readable text could be extracted from that document. Try DOCX/TXT, or ask an administrator to enable PDF text extraction utilities.',
+                'image' => 'The uploaded image could not be processed or contained no readable image metadata.',
                 default => 'That file did not contain readable text for analysis.',
             });
         }
@@ -89,8 +99,8 @@ final class WorkforceFileAnalyzer
         $fullLength = mb_strlen($normalized);
         $excerpt = $this->excerpt($normalized, self::MAX_EXCERPT_CHARS);
         $truncated = mb_strlen($excerpt) < $fullLength;
-        $kindLabel = $kind === 'document' ? 'document' : $kind;
-        $sourceLabel = $source === 'transcript' ? 'transcript' : 'text';
+        $kindLabel = $kind === 'document' ? 'document' : ($kind === 'image' ? 'image' : $kind);
+        $sourceLabel = $source === 'transcript' ? 'transcript' : ($source === 'image' ? 'image metadata & content' : 'text');
         $contextMessage = sprintf(
             'Attached file "%s" (%s, %s, %s). Extracted %s%s: %s',
             $attachment['name'],
@@ -152,7 +162,7 @@ final class WorkforceFileAnalyzer
         $mime = $this->sniffMime($tmp);
         $kind = $this->classify($extension, $mime);
         if ($kind === 'unsupported') {
-            throw new \RuntimeException('This file type is not supported yet. Upload TXT, MD, CSV, JSON, DOCX, PDF, MP3, WAV, M4A, OGG, MP4, MOV, AVI, MKV or WEBM.');
+            throw new \RuntimeException('This file type is not supported yet. Upload TXT, MD, CSV, JSON, DOCX, PDF, JPG, PNG, WEBP, GIF, BMP, SVG, TIFF, MP3, WAV, M4A, OGG, MP4, MOV, AVI, MKV or WEBM.');
         }
         return ['name' => $name, 'tmp' => $tmp, 'size' => $size, 'mime' => $mime, 'extension' => $extension];
     }
@@ -176,6 +186,7 @@ final class WorkforceFileAnalyzer
         $mime = strtolower($mime);
         if (in_array($extension, self::TEXT_EXTENSIONS, true)) return 'text';
         if (in_array($extension, self::DOCUMENT_EXTENSIONS, true)) return 'document';
+        if (in_array($extension, self::IMAGE_EXTENSIONS, true) || str_starts_with($mime, 'image/')) return 'image';
         if (in_array($extension, self::AUDIO_EXTENSIONS, true) || str_starts_with($mime, 'audio/')) return 'audio';
         if (in_array($extension, self::VIDEO_EXTENSIONS, true) || str_starts_with($mime, 'video/')) return 'video';
         return 'unsupported';
@@ -234,6 +245,116 @@ final class WorkforceFileAnalyzer
             throw new \RuntimeException('No readable text was extracted from that PDF. It may be image-only or protected.');
         }
         return $out;
+    }
+
+    /**
+     * Extracts rich metadata, EXIF, structural text (SVG), and OCR content from an uploaded image.
+     */
+    private function extractImageDetails(string $path, string $extension, string $mime, string $name): string
+    {
+        $lines = [];
+        $lines[] = "Image File: {$name}";
+        $lines[] = "File Format: " . strtoupper($extension ?: 'image') . ($mime ? " ({$mime})" : '');
+
+        // SVG vector graphic handling
+        if ($extension === 'svg' || $mime === 'image/svg+xml') {
+            $svgContent = @file_get_contents($path);
+            if ($svgContent !== false) {
+                $lines[] = "Graphic Type: Scalable Vector Graphics (SVG)";
+                $svgText = [];
+                if (preg_match_all('#<(?:text|tspan|title|desc)[^>]*>(.*?)</(?:text|tspan|title|desc)>#is', $svgContent, $matches)) {
+                    foreach ($matches[1] as $match) {
+                        $clean = trim(strip_tags($match));
+                        $clean = html_entity_decode($clean, ENT_QUOTES | ENT_XML1, 'UTF-8');
+                        if ($clean !== '') $svgText[] = $clean;
+                    }
+                }
+                if (!empty($svgText)) {
+                    $lines[] = "SVG Text Content:\n" . implode("\n", array_unique($svgText));
+                }
+                if (preg_match('#viewBox=["\']([^"\']+)["\']#i', $svgContent, $vb)) {
+                    $lines[] = "ViewBox: " . trim($vb[1]);
+                }
+                if (preg_match('#width=["\']([^"\']+)["\']#i', $svgContent, $w)) {
+                    $lines[] = "Width attribute: " . trim($w[1]);
+                }
+                if (preg_match('#height=["\']([^"\']+)["\']#i', $svgContent, $h)) {
+                    $lines[] = "Height attribute: " . trim($h[1]);
+                }
+            }
+        } else {
+            // Raster image handling
+            $imgInfo = @getimagesize($path);
+            if (is_array($imgInfo)) {
+                $width = (int) ($imgInfo[0] ?? 0);
+                $height = (int) ($imgInfo[1] ?? 0);
+                if ($width > 0 && $height > 0) {
+                    $orientation = $width > $height ? 'Landscape' : ($height > $width ? 'Portrait' : 'Square');
+                    $gcd = $this->calculateGcd($width, $height);
+                    $aspectRatio = ($gcd > 0) ? ($width / $gcd) . ':' . ($height / $gcd) : "{$width}:{$height}";
+                    $lines[] = "Dimensions: {$width} x {$height} pixels ({$orientation}, Aspect Ratio: {$aspectRatio})";
+                }
+                if (!empty($imgInfo['bits'])) {
+                    $lines[] = "Color Depth: {$imgInfo['bits']} bits";
+                }
+                if (!empty($imgInfo['channels'])) {
+                    $channels = $imgInfo['channels'] === 3 ? 'RGB' : ($imgInfo['channels'] === 4 ? 'CMYK' : $imgInfo['channels'] . ' channels');
+                    $lines[] = "Color Model: {$channels}";
+                }
+            }
+
+            // EXIF metadata extraction
+            if (function_exists('exif_read_data') && in_array($extension, ['jpg', 'jpeg', 'tiff', 'tif', 'webp'], true)) {
+                $exif = @exif_read_data($path, null, true);
+                if (is_array($exif)) {
+                    $meta = [];
+                    foreach (['IFD0', 'EXIF', 'COMPUTED'] as $section) {
+                        if (!isset($exif[$section]) || !is_array($exif[$section])) continue;
+                        foreach ($exif[$section] as $k => $v) {
+                            if (is_string($v) || is_numeric($v)) {
+                                $kLower = strtolower((string)$k);
+                                if (in_array($kLower, ['make', 'model', 'datetimeoriginal', 'software', 'artist', 'copyright', 'imagedescription', 'exposuretime', 'fnumber', 'isospeedratings', 'focallength'], true)) {
+                                    $cleanVal = trim((string) $v);
+                                    if ($cleanVal !== '') $meta[$k] = $cleanVal;
+                                }
+                            }
+                        }
+                    }
+                    if (!empty($meta)) {
+                        $metaLines = [];
+                        foreach ($meta as $k => $v) {
+                            $metaLines[] = "  - {$k}: {$v}";
+                        }
+                        $lines[] = "Image Metadata / EXIF:\n" . implode("\n", $metaLines);
+                    }
+                }
+            }
+
+            // OCR extraction if tesseract utility is present
+            if ($this->commandExists('tesseract')) {
+                try {
+                    $ocrOut = $this->runCommand('tesseract ' . escapeshellarg($path) . ' stdout --oem 1 -l eng 2>/dev/null');
+                    $cleanOcr = trim($ocrOut);
+                    if ($cleanOcr !== '') {
+                        $lines[] = "Extracted Text (OCR):\n" . $cleanOcr;
+                    }
+                } catch (\Throwable $e) {
+                    // OCR is best-effort
+                }
+            }
+        }
+
+        return implode("\n", $lines);
+    }
+
+    private function calculateGcd(int $a, int $b): int
+    {
+        while ($b !== 0) {
+            $t = $b;
+            $b = $a % $b;
+            $a = $t;
+        }
+        return $a;
     }
 
     /** @return array{path:string,warnings:array<int,string>} */

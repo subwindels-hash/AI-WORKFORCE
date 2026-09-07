@@ -140,22 +140,45 @@
 
   root.addEventListener('click', function (ev) {
     var btn = ev.target.closest('[data-listen]');
-    if (!btn || !speech) return;
+    if (!btn) return;
     ev.preventDefault();
     var text = btn.getAttribute('data-listen');
     if (!text) return;
-    if (speech.isSpeaking() && btn.classList.contains('is-playing')) {
-      speech.stop();
-      btn.classList.remove('is-playing');
-      btn.textContent = '🔊 Listen';
+    var currentSpeech = window.windelsSpeech || (window.SpeechProvider ? new window.SpeechProvider() : null);
+
+    if (btn.classList.contains('is-playing') || (currentSpeech && currentSpeech.isSpeaking()) || (window.speechSynthesis && window.speechSynthesis.speaking)) {
+      if (currentSpeech && typeof currentSpeech.stop === 'function') currentSpeech.stop();
+      if ('speechSynthesis' in window) {
+        try { window.speechSynthesis.cancel(); } catch (_) {}
+      }
+      root.querySelectorAll('[data-listen]').forEach(function (b) {
+        b.classList.remove('is-playing');
+        b.textContent = '🔊 Listen';
+      });
       return;
     }
+
+    root.querySelectorAll('[data-listen]').forEach(function (b) {
+      b.classList.remove('is-playing');
+      b.textContent = '🔊 Listen';
+    });
+
     btn.classList.add('is-playing');
     btn.textContent = '⏹ Stop';
-    speech.textToSpeech(text, {
-      locale: 'en-GB',
-      onEnd: function () { btn.classList.remove('is-playing'); btn.textContent = '🔊 Listen'; },
-      onError: function () { btn.classList.remove('is-playing'); btn.textContent = '🔊 Listen'; }
-    });
+
+    if (currentSpeech) {
+      currentSpeech.textToSpeech(text, {
+        locale: 'en-GB',
+        onEnd: function () { btn.classList.remove('is-playing'); btn.textContent = '🔊 Listen'; },
+        onError: function () { btn.classList.remove('is-playing'); btn.textContent = '🔊 Listen'; }
+      });
+    } else if ('speechSynthesis' in window) {
+      try { window.speechSynthesis.cancel(); } catch (_) {}
+      var utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'en-GB';
+      utter.onend = function () { btn.classList.remove('is-playing'); btn.textContent = '🔊 Listen'; };
+      utter.onerror = function () { btn.classList.remove('is-playing'); btn.textContent = '🔊 Listen'; };
+      window.speechSynthesis.speak(utter);
+    }
   });
 }());
