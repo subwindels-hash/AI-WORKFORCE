@@ -89,6 +89,76 @@ function ai_workforce_protection_status(): array
  * @param array<string,mixed> $status
  * @return array{icon:string,label:string,tone:string,blocking:bool}
  */
+/**
+ * Risk-policy fields for an MT4/MT5 override form (§9).
+ *
+ * Every field is OPTIONAL: a blank value means "inherit", so an account or a
+ * deployment only pins the values that genuinely differ from the platform
+ * policy and keeps tracking the wider scope for everything else. The platform
+ * value is shown as the placeholder so the administrator can see what they are
+ * overriding.
+ *
+ * @param array $current  the override being edited (dailyLoss.percentLimit …)
+ * @param array $platform the platform policy, used for the placeholders
+ */
+function ai_workforce_ea_policy_fields(array $current = [], array $platform = []): string
+{
+    $percent = static function (mixed $value): string {
+        if ($value === null || $value === '' || !is_numeric($value)) return '';
+        return number_format(\AIWorkforce\TradingProtection\ProtectionPolicy::toPercent($value), 2, '.', '');
+    };
+    $num = static function (mixed $value): string {
+        return ($value === null || $value === '' || !is_numeric($value)) ? '' : (string) (float) $value;
+    };
+    $int = static function (mixed $value): string {
+        return ($value === null || $value === '' || !is_numeric($value)) ? '' : (string) (int) $value;
+    };
+    $tri = static function (string $name, mixed $value, string $label): string {
+        $on  = ($value === true)  ? ' selected' : '';
+        $off = ($value === false) ? ' selected' : '';
+        return sprintf(
+            '<label>%s<select name="%s"><option value="">Inherit</option>'
+            . '<option value="1"%s>On</option><option value="0"%s>Off</option></select></label>',
+            e($label), e($name), $on, $off
+        );
+    };
+
+    $daily   = (array) ($current['dailyLoss'] ?? []);
+    $dd      = (array) ($current['drawdown'] ?? []);
+    $spread  = (array) ($current['spread'] ?? []);
+    $slip    = (array) ($current['slippage'] ?? []);
+    $news    = (array) ($current['news'] ?? []);
+    $emerg   = (array) ($current['emergency'] ?? []);
+    $pDaily  = (array) ($platform['dailyLoss'] ?? []);
+    $pDd     = (array) ($platform['drawdown'] ?? []);
+    $pSpread = (array) ($platform['spread'] ?? []);
+    $pSlip   = (array) ($platform['slippage'] ?? []);
+    $pNews   = (array) ($platform['news'] ?? []);
+    $pEmerg  = (array) ($platform['emergency'] ?? []);
+
+    $fields = [
+        sprintf('<label>Daily loss %%<input name="ov_loss_pct" type="number" min="0" max="50" step="0.1" placeholder="%s" value="%s"></label>',
+            e($percent($pDaily['percentLimit'] ?? 0.03)), e($percent($daily['percentLimit'] ?? null))),
+        sprintf('<label>Daily loss (fixed)<input name="ov_loss_fixed" type="number" min="0" step="1" placeholder="%s" value="%s"></label>',
+            e($num($pDaily['fixedLimitUsd'] ?? null)), e($num($daily['fixedLimitUsd'] ?? null))),
+        sprintf('<label>Max drawdown %%<input name="ov_dd_pct" type="number" min="0" max="90" step="0.1" placeholder="%s" value="%s"></label>',
+            e($percent($pDd['percentLimit'] ?? 0.10)), e($percent($dd['percentLimit'] ?? null))),
+        sprintf('<label>Max spread (points)<input name="ov_spread_points" type="number" min="0" step="0.5" placeholder="%s" value="%s"></label>',
+            e($num($pSpread['maxPoints'] ?? 30)), e($num($spread['maxPoints'] ?? null))),
+        sprintf('<label>Max slippage (points)<input name="ov_slip_points" type="number" min="0" step="0.5" placeholder="%s" value="%s"></label>',
+            e($num($pSlip['maxPoints'] ?? 10)), e($num($slip['maxPoints'] ?? null))),
+        $tri('ov_news_enabled', $news['enabled'] ?? null, 'News protection'),
+        sprintf('<label>News minutes before<input name="ov_news_before" type="number" min="0" max="240" placeholder="%s" value="%s"></label>',
+            e($int($pNews['minutesBefore'] ?? 5)), e($int($news['minutesBefore'] ?? null))),
+        sprintf('<label>News minutes after<input name="ov_news_after" type="number" min="0" max="480" placeholder="%s" value="%s"></label>',
+            e($int($pNews['minutesAfter'] ?? 30)), e($int($news['minutesAfter'] ?? null))),
+        $tri('ov_emergency_close', $emerg['closePositionsOnKill'] ?? null, 'Close positions on kill'),
+        $tri('ov_emergency_cancel', $emerg['cancelPendingOrdersOnKill'] ?? null, 'Cancel pending on kill'),
+    ];
+
+    return '<div class="grid two">' . implode('', $fields) . '</div>';
+}
+
 function ai_workforce_protection_chip(array $status): array
 {
     $state = (string) ($status['state'] ?? 'NORMAL');

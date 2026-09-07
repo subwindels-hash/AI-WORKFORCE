@@ -233,6 +233,66 @@ class Api_system extends Api_controller
         ]);
     }
 
+    /**
+     * POST — override the risk policy for one deployment (administrators only,
+     * CSRF). Body: {eaId, policy:{dailyLoss:{…}, drawdown:{…}, spread:{…},
+     * slippage:{…}, news:{…}, emergency:{…}}}. Only the paths present are
+     * stored; everything else keeps inheriting the account and platform
+     * policy. Send an empty `policy` to clear the override.
+     */
+    public function protection_ea_policy()
+    {
+        $user = $this->refreshIdentityPermissions();
+        if (!is_array($user) || !$this->platform->identity->can($user, 'admin.settings.manage')) {
+            return $this->jsonError('forbidden — administrator permission required', 403);
+        }
+        $token = $this->input->get_request_header('X-CSRF-Token');
+        if (!is_string($token) || !hash_equals((string) $this->session->userdata('csrf_token'), $token)) {
+            return $this->jsonError('invalid CSRF token', 403);
+        }
+        $body = $this->jsonBody() ?: [];
+        $id = trim((string) ($body['eaId'] ?? ''));
+        if ($id === '') return $this->jsonError('eaId is required', 422);
+        try {
+            $override = $this->platform->eaProtection->setPolicyOverride($id, is_array($body['policy'] ?? null) ? $body['policy'] : []);
+        } catch (\Throwable $e) {
+            return $this->jsonError($e->getMessage(), 422);
+        }
+        $this->platform->eaProtection->evaluateAll();
+        $this->json(['ok' => true, 'eaId' => $id, 'override' => $override, 'ea' => $this->platform->eaProtection->status()]);
+    }
+
+    /**
+     * POST — override the risk policy for one terminal account (§9).
+     * Body: {accountKey:"mt5:5123456", policy:{…}} or {accountKey, remove:true}.
+     */
+    public function protection_ea_account()
+    {
+        $user = $this->refreshIdentityPermissions();
+        if (!is_array($user) || !$this->platform->identity->can($user, 'admin.settings.manage')) {
+            return $this->jsonError('forbidden — administrator permission required', 403);
+        }
+        $token = $this->input->get_request_header('X-CSRF-Token');
+        if (!is_string($token) || !hash_equals((string) $this->session->userdata('csrf_token'), $token)) {
+            return $this->jsonError('invalid CSRF token', 403);
+        }
+        $body = $this->jsonBody() ?: [];
+        $key = trim((string) ($body['accountKey'] ?? ''));
+        if ($key === '') return $this->jsonError('accountKey is required (e.g. mt5:5123456)', 422);
+        try {
+            if (!empty($body['remove'])) {
+                $this->platform->eaProtection->removeAccountOverride($key);
+                $override = [];
+            } else {
+                $override = $this->platform->eaProtection->setAccountOverride($key, is_array($body['policy'] ?? null) ? $body['policy'] : []);
+            }
+        } catch (\Throwable $e) {
+            return $this->jsonError($e->getMessage(), 422);
+        }
+        $this->platform->eaProtection->evaluateAll();
+        $this->json(['ok' => true, 'accountKey' => $key, 'override' => $override, 'ea' => $this->platform->eaProtection->status()]);
+    }
+
     /** GET — the current decision for one deployment (used by the bridge and by operators). */
     public function protection_ea_decision($id = '')
     {

@@ -221,11 +221,84 @@ $chip = ai_workforce_protection_chip($protection);
   </div>
 </div>
 
+<div class="panel" style="margin-bottom:14px">
+  <h3>Per-account policy overrides (§9)</h3>
+  <div class="body" style="padding-top:12px">
+    <p class="dim" style="margin:0 0 10px">An override pinned here applies to <b>every Expert Advisor on that terminal account</b>. A deployment can still override it further below. <b>Blank fields inherit</b> the wider scope, so an account only pins what actually differs from the platform policy.</p>
+
+    <?php if (empty($ea['accounts'])): ?>
+      <p class="dim" style="margin:0 0 10px">No account overrides configured — every account uses the platform policy above.</p>
+    <?php else: ?>
+      <table class="table">
+        <thead><tr><th>Account</th><th>Overridden values</th><th>Deployments</th><th></th></tr></thead>
+        <tbody>
+          <?php foreach ($ea['accounts'] as $a): ?>
+            <tr>
+              <td class="mono"><?= e((string) $a['key']) ?></td>
+              <td class="mono" style="font-size:12px"><?= e(implode(', ', array_keys((array) $a['override']))) ?></td>
+              <td class="dim" style="font-size:12px"><?= e(implode(', ', (array) ($a['deployments'] ?? [])) ?: '— none reporting yet —') ?></td>
+              <td>
+                <form method="post" action="/admin/protection/ea/account">
+                  <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+                  <input type="hidden" name="account_key" value="<?= e((string) $a['key']) ?>">
+                  <input type="hidden" name="remove" value="1">
+                  <button class="btn small danger" type="submit">Remove</button>
+                </form>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    <?php endif; ?>
+
+    <details style="margin-top:12px">
+      <summary style="cursor:pointer">Add or replace an account override</summary>
+      <form method="post" action="/admin/protection/ea/account" style="margin-top:10px">
+        <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+        <label>Account key (terminal:account)
+          <input name="account_key" placeholder="mt5:5123456" list="ea-account-keys" required>
+        </label>
+        <datalist id="ea-account-keys">
+          <?php foreach (($ea['deployments'] ?? []) as $d): if (($d['accountKey'] ?? '') === '') continue; ?>
+            <option value="<?= e((string) $d['accountKey']) ?>"><?= e((string) $d['name']) ?></option>
+          <?php endforeach; ?>
+        </datalist>
+        <?= ai_workforce_ea_policy_fields([], $p) ?>
+        <button class="btn small" type="submit" style="margin-top:10px">Save account override</button>
+      </form>
+    </details>
+  </div>
+</div>
+
 <?php foreach (($ea['deployments'] ?? []) as $d): ?>
   <details class="panel" style="margin-bottom:14px">
     <summary style="cursor:pointer"><h3 style="display:inline-block">Per-EA limits — <?= e((string) $d['name']) ?></h3></summary>
     <div class="body" style="padding-top:12px">
       <p class="dim" style="margin:0 0 10px">Terminal-side limits only. The risk policy above (news, daily loss, drawdown, spread, slippage) is shared — an EA cannot be given more room than the platform allows.</p>
+
+      <details style="margin-bottom:12px">
+        <summary style="cursor:pointer">Risk policy for this Expert Advisor (blank = inherit)</summary>
+        <p class="dim" style="margin:10px 0">Narrowest scope: what is set here beats the account override, which beats the platform policy. Blank fields inherit. The values that currently govern this deployment are shown below.</p>
+        <ul class="dim" style="font-size:12px;margin:0 0 10px">
+          <li>Daily loss <?= e(number_format((float) ($d['policy']['dailyLossPercent'] ?? 0), 2)) ?>%<?= ($d['policy']['dailyLossFixedUsd'] ?? null) !== null ? ' · fixed ' . e((string) $d['policy']['dailyLossFixedUsd']) : '' ?></li>
+          <li>Drawdown <?= e(number_format((float) ($d['policy']['drawdownPercent'] ?? 0), 2)) ?>% · spread <?= e((string) ($d['policy']['maxSpreadPoints'] ?? 0)) ?> pts · slippage <?= e((string) ($d['policy']['maxSlippagePoints'] ?? 0)) ?> pts</li>
+          <li>News <?= !empty($d['policy']['newsEnabled']) ? e((string) ($d['policy']['newsMinutesBefore'] ?? 0)) . ' min before / ' . e((string) ($d['policy']['newsMinutesAfter'] ?? 0)) . ' min after' : 'off' ?></li>
+        </ul>
+        <form method="post" action="/admin/protection/ea/policy">
+          <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+          <input type="hidden" name="ea_id" value="<?= e((string) $d['id']) ?>">
+          <?= ai_workforce_ea_policy_fields((array) ($d['policyOverride'] ?? []), $p) ?>
+          <button class="btn small" type="submit" style="margin-top:10px">Save policy override</button>
+        </form>
+        <?php if (!empty($d['policyOverride'])): ?>
+          <form method="post" action="/admin/protection/ea/policy" style="margin-top:8px">
+            <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+            <input type="hidden" name="ea_id" value="<?= e((string) $d['id']) ?>">
+            <button class="btn small danger" type="submit">Clear this Expert Advisor's overrides</button>
+          </form>
+        <?php endif; ?>
+      </details>
+
       <form method="post" action="/admin/protection/ea/limits">
         <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
         <input type="hidden" name="ea_id" value="<?= e((string) $d['id']) ?>">

@@ -930,6 +930,114 @@ class Admin extends App_Controller
         redirect('/admin/protection');
     }
 
+    /**
+     * §9 — override the risk policy for one terminal account. Blank fields
+     * inherit the platform policy, so an account only pins what differs: a
+     * later change to the platform policy still reaches the account.
+     * Keys look like "mt5:5123456".
+     */
+    public function protection_ea_account()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/protection'); return; }
+
+        $key = trim((string) $this->input->post('account_key'));
+        $remove = $this->input->post('remove') === '1';
+        try {
+            if ($remove) {
+                $this->platform->eaProtection->removeAccountOverride($key);
+                $this->flash('notice', 'Account override removed — it inherits the platform policy again.');
+            } else {
+                $patch = $this->eaPolicyPatchFromPost();
+                if ($patch === []) {
+                    $this->flash('notice', 'Nothing overridden: every field was left blank, so the account keeps inheriting the platform policy.');
+                } else {
+                    $saved = $this->platform->eaProtection->setAccountOverride($key, $patch);
+                    $this->platform->eaProtection->evaluateAll();
+                    $this->flash('notice', sprintf('Account %s now overrides %d policy value(s).', $key, count($saved)));
+                }
+            }
+            $this->portal->log($actor, 'EA_ACCOUNT_POLICY_OVERRIDE', 'ok', [
+                'type' => 'protection', 'id' => 'ea-account:' . $key, 'label' => 'Expert Advisor account policy (' . $key . ')',
+            ], ['accountKey' => $key, 'removed' => $remove], $this->ip());
+        } catch (\Throwable $e) {
+            $this->flash('error', 'Account override not saved: ' . $e->getMessage());
+        }
+        redirect('/admin/protection');
+    }
+
+    /**
+     * §9 — override the risk policy for one deployment. Narrowest scope: a
+     * deployment override beats its account's override, which beats the
+     * platform policy. Blank fields inherit from the wider scope.
+     */
+    public function protection_ea_policy()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/protection'); return; }
+
+        $id = trim((string) $this->input->post('ea_id'));
+        try {
+            $patch = $this->eaPolicyPatchFromPost();
+            $saved = $this->platform->eaProtection->setPolicyOverride($id, $patch);
+            $this->platform->eaProtection->evaluateAll();
+            $this->portal->log($actor, 'EA_PROTECTION_POLICY_OVERRIDE', 'ok', [
+                'type' => 'protection', 'id' => 'ea-policy:' . $id, 'label' => 'Expert Advisor policy (' . $id . ')',
+            ], ['eaId' => $id, 'override' => $saved], $this->ip());
+            $this->flash('notice', $patch === []
+                ? 'Overrides cleared — this Expert Advisor inherits its account policy again.'
+                : sprintf('%d policy value(s) overridden for this Expert Advisor.', count($saved)));
+        } catch (\Throwable $e) {
+            $this->flash('error', 'Policy override not saved: ' . $e->getMessage());
+        }
+        redirect('/admin/protection');
+    }
+
+    /**
+     * Risk-policy fields for an override form. BLANK MEANS INHERIT: only the
+     * fields the administrator filled in are stored, so the rest keep tracking
+     * the wider scope.
+     *
+     * @return array<string,mixed>
+     */
+    private function eaPolicyPatchFromPost(): array
+    {
+        $patch = [];
+        $percent = static fn(mixed $value): ?float => (is_string($value) && trim($value) === '') ? null : \AIWorkforce\TradingProtection\ProtectionPolicy::fromPercent($value);
+        $number = static fn(mixed $value): ?float => (is_string($value) && trim($value) === '') ? null : (float) $value;
+        $integer = static fn(mixed $value): ?int => (is_string($value) && trim($value) === '') ? null : (int) $value;
+
+        $daily = array_filter([
+            'percentLimit' => $percent($this->input->post('ov_loss_pct')),
+            'fixedLimitUsd' => $number($this->input->post('ov_loss_fixed')),
+        ], static fn($v): bool => $v !== null);
+        if ($daily !== []) $patch['dailyLoss'] = $daily;
+
+        $dd = array_filter(['percentLimit' => $percent($this->input->post('ov_dd_pct'))], static fn($v): bool => $v !== null);
+        if ($dd !== []) $patch['drawdown'] = $dd;
+
+        $spread = array_filter(['maxPoints' => $number($this->input->post('ov_spread_points'))], static fn($v): bool => $v !== null);
+        if ($spread !== []) $patch['spread'] = $spread;
+
+        $slip = array_filter(['maxPoints' => $number($this->input->post('ov_slip_points'))], static fn($v): bool => $v !== null);
+        if ($slip !== []) $patch['slippage'] = $slip;
+
+        $news = array_filter([
+            'enabled' => ($this->input->post('ov_news_enabled') === '' || $this->input->post('ov_news_enabled') === null) ? null : ($this->input->post('ov_news_enabled') === '1'),
+            'minutesBefore' => $integer($this->input->post('ov_news_before')),
+            'minutesAfter' => $integer($this->input->post('ov_news_after')),
+        ], static fn($v): bool => $v !== null);
+        if ($news !== []) $patch['news'] = $news;
+
+        $emergency = array_filter([
+            'closePositionsOnKill' => ($this->input->post('ov_emergency_close') === '' || $this->input->post('ov_emergency_close') === null) ? null : ($this->input->post('ov_emergency_close') === '1'),
+            'cancelPendingOrdersOnKill' => ($this->input->post('ov_emergency_cancel') === '' || $this->input->post('ov_emergency_cancel') === null) ? null : ($this->input->post('ov_emergency_cancel') === '1'),
+        ], static fn($v): bool => $v !== null);
+        if ($emergency !== []) $patch['emergency'] = $emergency;
+
+        return $patch;
+    }
+
     /** §10 — stop protecting a deployment that no longer exists. */
     public function protection_ea_remove()
     {

@@ -407,6 +407,10 @@ class EaDecisionIn(BaseModel):
     allowNewTrades: bool = False
     closePositions: bool = False
     cancelPendingOrders: bool = False
+    # The effective policy for this deployment (platform ← account ← EA
+    # overrides), already converted to the units the terminal speaks:
+    # percentages, points and minutes.
+    policy: dict[str, Any] = Field(default_factory=dict)
 
 
 class EaDecisionsIn(BaseModel):
@@ -419,16 +423,25 @@ def decision_to_text(decision: dict[str, Any]) -> str:
     Keys are stable and documented in mt4-mt5/README.md ("Decision format").
     """
     reason = " ".join(str(decision.get("reason", "")).split())
-    return (
-        f"eaId={decision.get('eaId', '')}\n"
-        f"state={decision.get('state', 'AUTOMATIC_PAUSED')}\n"
-        f"code={decision.get('code', '') or ''}\n"
-        f"reason={reason}\n"
-        f"allowNewTrades={'1' if decision.get('allowNewTrades') else '0'}\n"
-        f"closePositions={'1' if decision.get('closePositions') else '0'}\n"
-        f"cancelPendingOrders={'1' if decision.get('cancelPendingOrders') else '0'}\n"
-        f"evaluatedAt={decision.get('evaluatedAt', '') or ''}\n"
-    )
+    lines = [
+        f"eaId={decision.get('eaId', '')}",
+        f"state={decision.get('state', 'AUTOMATIC_PAUSED')}",
+        f"code={decision.get('code', '') or ''}",
+        f"reason={reason}",
+        f"allowNewTrades={'1' if decision.get('allowNewTrades') else '0'}",
+        f"closePositions={'1' if decision.get('closePositions') else '0'}",
+        f"cancelPendingOrders={'1' if decision.get('cancelPendingOrders') else '0'}",
+        f"evaluatedAt={decision.get('evaluatedAt', '') or ''}",
+    ]
+    # Effective policy for this deployment. An EA is told the numbers that
+    # govern it, so an override set on the platform reaches the terminal
+    # instead of living only in the platform's audit trail.
+    for key, value in (decision.get("policy") or {}).items():
+        if value is None:
+            continue
+        rendered = "1" if value is True else ("0" if value is False else str(value))
+        lines.append(f"policy.{key}={rendered}")
+    return "\n".join(lines) + "\n"
 
 
 @app.get("/v1/ea/health")

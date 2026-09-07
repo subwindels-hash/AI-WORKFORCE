@@ -295,3 +295,84 @@ def test_ea_health_reports_counts(client):
     http.post("/v1/ea/heartbeat", headers=auth(client), json=heartbeat())
     body = http.get("/v1/ea/health", headers=auth(client)).json()
     assert body["ok"] is True and body["heartbeats"] == 1 and body["decisions"] == 0
+
+
+def test_ea_decision_text_carries_the_effective_policy():
+    """An override set on the platform reaches the terminal (§9).
+
+    The decision is plain KEY=VALUE because MQL has no JSON parser; the policy
+    block rides along on the same lines so an EA obeys the numbers that were
+    actually resolved for it — platform ← account ← EA — not its own inputs.
+    """
+    decision = {
+        "eaId": "5123456-EURUSD-900001-TradeManager",
+        "state": "NORMAL",
+        "reason": "all clear",
+        "allowNewTrades": True,
+        "closePositions": False,
+        "cancelPendingOrders": False,
+        "evaluatedAt": "2026-09-07T10:00:00Z",
+        "policy": {
+            "dailyLossPercent": 1.5,
+            "dailyLossFixedUsd": 400.0,
+            "drawdownPercent": 5.0,
+            "maxSpreadPoints": 12.0,
+            "maxSlippagePoints": 4.0,
+            "newsEnabled": False,
+            "newsMinutesBefore": 5,
+            "newsMinutesAfter": 30,
+            "closePositionsOnKill": True,
+            "cancelPendingOrdersOnKill": True,
+            "dailyLossFixedUsd_unset": None,
+        },
+    }
+    text = bridge.decision_to_text(decision)
+    assert "policy.dailyLossPercent=1.5" in text
+    assert "policy.dailyLossFixedUsd=400.0" in text
+    assert "policy.drawdownPercent=5.0" in text
+    assert "policy.maxSpreadPoints=12.0" in text
+    assert "policy.maxSlippagePoints=4.0" in text
+    assert "policy.newsEnabled=0" in text
+    assert "policy.newsMinutesBefore=5" in text
+    assert "policy.newsMinutesAfter=30" in text
+    assert "policy.closePositionsOnKill=1" in text
+    assert "policy.cancelPendingOrdersOnKill=1" in text
+    # A value the platform did not resolve is omitted rather than sent as "None".
+    assert "None" not in text
+    # The plain decision keys are untouched.
+    for line in ("state=NORMAL", "allowNewTrades=1", "closePositions=0", "cancelPendingOrders=0"):
+        assert line in text
+
+
+def test_ea_decision_without_a_policy_stays_unchanged():
+    """A decision with no policy block still produces the historical format."""
+    text = bridge.decision_to_text({
+        "eaId": "5123456-EURUSD-900001-TradeManager",
+        "state": "AUTOMATIC_PAUSED",
+        "reason": "spread",
+        "allowNewTrades": False,
+    })
+    assert "policy." not in text
+    assert text.startswith("eaId=5123456-EURUSD-900001-TradeManager\n")
+    assert "state=AUTOMATIC_PAUSED\n" in text
+    assert text.endswith("\n")
+
+
+def test_ea_decision_accepts_a_policy_from_the_platform():
+    """The API accepts the policy object the platform sends with a decision."""
+    http, _ = client
+    http.post("/v1/ea/heartbeat", headers=auth(client), json=heartbeat())
+    ea_id = "5123456-EURUSD-900001-TradeManager"
+    decision = {
+        "eaId": ea_id,
+        "state": "NORMAL",
+        "reason": "",
+        "allowNewTrades": True,
+        "policy": {"dailyLossPercent": 2.0, "maxSpreadPoints": 8.0, "newsEnabled": True},
+    }
+    response = http.post("/v1/ea/decisions", headers=auth(client), json=[decision])
+    assert response.status_code == 200 and response.json()["count"] == 1
+    text = http.get(f"/v1/ea/decision/{ea_id}", headers=auth(client)).text
+    assert "policy.dailyLossPercent=2.0" in text
+    assert "policy.maxSpreadPoints=8.0" in text
+    assert "policy.newsEnabled=1" in text

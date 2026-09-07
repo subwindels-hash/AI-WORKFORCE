@@ -124,7 +124,13 @@ final class EaProtection
         $this->audit->emit('EA_PROTECTION_UNREGISTERED', sprintf('Expert Advisor %s is no longer protected', $id), ['eaId' => $id], 'system');
     }
 
-    /** Per-deployment policy override (merged over the platform policy). */
+    /**
+     * Terminal-side limits for one deployment (heartbeat timeout, margin floor,
+     * tick age…). These are not risk limits — they describe how the platform
+     * judges the terminal's own reporting. Risk limits are overridden with
+     * setPolicyOverride(), which writes into the same deployment row under a
+     * different key so the two never collide.
+     */
     public function setOverride(string $id, array $patch): array
     {
         $state = $this->state->load();
@@ -137,6 +143,162 @@ final class EaProtection
         $this->state->save($state);
         $this->audit->emit('EA_PROTECTION_LIMITS_UPDATED', sprintf('Protection limits overridden for Expert Advisor %s', $id), ['eaId' => $id, 'limits' => $limits], 'system');
         return $limits;
+    }
+
+    // ─── Risk policy overrides (§9: applied per account and per EA) ───
+
+    /**
+     * The account key a deployment belongs to: "mt5:5123456".
+     *
+     * Two EAs on the same terminal account inherit the same account override,
+     * which is what makes per-account configuration worth having — configure
+     * the account once and every EA on it follows, unless it has its own.
+     */
+    public function accountKeyFor(array $deployment): string
+    {
+        $terminal = strtolower((string) ($deployment['terminal'] ?? 'MT5'));
+        $account = trim((string) ($deployment['account'] ?? ''));
+        if (!in_array($terminal, ['mt4', 'mt5'], true)) $terminal = 'mt5';
+        return $account === '' ? '' : $terminal . ':' . $account;
+    }
+
+    /** @return array<string,array<string,mixed>> every account override, keyed by account key. */
+    public function accountOverrides(): array
+    {
+        $state = $this->state->load();
+        return (array) ($state[self::STATE_KEY]['accountOverrides'] ?? []);
+    }
+
+    /**
+     * Override the risk policy for one terminal account (§9).
+     *
+     * Only the paths present in $patch are stored, so a later change to the
+     * platform policy still reaches everything the account did not override.
+     * Values are validated and clamped exactly as the platform's own form is.
+     */
+    public function setAccountOverride(string $key, array $patch): array
+    {
+        $key = $this->normalizeAccountKey($key);
+        if ($key === '') throw new \InvalidArgumentException('an account override needs a terminal:account key, e.g. mt5:5123456');
+
+        $clean = $this->cleanPolicyPatch($patch);
+        $state = $this->state->load();
+        $previous = (array) ($state[self::STATE_KEY]['accountOverrides'][$key] ?? []);
+        if ($clean === []) unset($state[self::STATE_KEY]['accountOverrides'][$key]);
+        else $state[self::STATE_KEY]['accountOverrides'][$key] = $clean;
+        $this->state->save($state);
+
+        $this->audit->emit('EA_ACCOUNT_POLICY_OVERRIDE', sprintf('Risk policy overridden for account %s (%d value(s)); deployments on it now use their own limits', $key, count($clean)),
+            ['accountKey' => $key, 'previous' => $previous, 'override' => $clean], 'system');
+        return $clean;
+    }
+
+    /** Drop an account override — the account inherits the platform policy again. */
+    public function removeAccountOverride(string $key): void
+    {
+        $key = $this->normalizeAccountKey($key);
+        $state = $this->state->load();
+        if (!isset($state[self::STATE_KEY]['accountOverrides'][$key])) return;
+        $previous = (array) $state[self::STATE_KEY]['accountOverrides'][$key];
+        unset($state[self::STATE_KEY]['accountOverrides'][$key]);
+        $this->state->save($state);
+        $this->audit->emit('EA_ACCOUNT_POLICY_RESET', sprintf('Risk policy override removed for account %s — it inherits the platform policy again', $key),
+            ['accountKey' => $key, 'previous' => $previous], 'system');
+    }
+
+    /**
+     * Override the risk policy for one deployment (§9). A deployment override
+     * is the narrowest scope, so it wins over its account's override, which in
+     * turn wins over the platform policy.
+     */
+    public function setPolicyOverride(string $id, array $patch): array
+    {
+        $state = $this->state->load();
+        if (!isset($state[self::STATE_KEY]['deployments'][$id])) {
+            throw new \InvalidArgumentException("unknown Expert Advisor deployment: {$id}");
+        }
+        $clean = $this->cleanPolicyPatch($patch);
+        $previous = (array) ($state[self::STATE_KEY]['deployments'][$id]['policy'] ?? []);
+        if ($clean === []) unset($state[self::STATE_KEY]['deployments'][$id]['policy']);
+        else $state[self::STATE_KEY]['deployments'][$id]['policy'] = $clean;
+        $state[self::STATE_KEY]['deployments'][$id]['updatedAt'] = gmdate('c');
+        $this->state->save($state);
+
+        $this->audit->emit('EA_PROTECTION_POLICY_OVERRIDE', sprintf('Risk policy overridden for Expert Advisor %s (%d value(s))', $id, count($clean)),
+            ['eaId' => $id, 'previous' => $previous, 'override' => $clean], 'system');
+        return $clean;
+    }
+
+    /**
+     * The policy that actually governs a deployment:
+     * platform policy ← account override ← deployment override.
+     *
+     * Every layer goes through ProtectionPolicy::normalize(), so an override
+     * can tighten or relax a threshold but it can never smuggle in a value the
+     * platform would reject (out of range, wrong type, unknown key).
+     */
+    public function effectivePolicy(array $deployment): array
+    {
+        $state = $this->state->load();
+        $platform = ProtectionPolicy::normalize(null, (array) ($state[AutomaticProtection::STATE_KEY]['policy'] ?? []));
+
+        $key = $this->accountKeyFor($deployment);
+        $accountPatch = $key !== '' ? (array) ($state[self::STATE_KEY]['accountOverrides'][$key] ?? []) : [];
+        $deploymentPatch = (array) ($deployment['policy'] ?? []);
+
+        return ProtectionPolicy::normalize($deploymentPatch, ProtectionPolicy::normalize($accountPatch, $platform));
+    }
+
+    /** The narrow summary operators and terminals see (percentages, not fractions). */
+    private function policySummary(array $policy): array
+    {
+        return [
+            'dailyLossPercent' => ProtectionPolicy::toPercent($policy['dailyLoss']['percentLimit'] ?? null),
+            'dailyLossFixedUsd' => $policy['dailyLoss']['fixedLimitUsd'] ?? null,
+            'drawdownPercent' => ProtectionPolicy::toPercent($policy['drawdown']['percentLimit'] ?? null),
+            'maxSpreadPoints' => (float) ($policy['spread']['maxPoints'] ?? 0.0),
+            'maxSlippagePoints' => (float) ($policy['slippage']['maxPoints'] ?? 0.0),
+            'newsEnabled' => (bool) ($policy['news']['enabled'] ?? false),
+            'newsMinutesBefore' => (int) ($policy['news']['minutesBefore'] ?? 0),
+            'newsMinutesAfter' => (int) ($policy['news']['minutesAfter'] ?? 0),
+            'closePositionsOnKill' => !empty($policy['emergency']['closePositionsOnKill']),
+            'cancelPendingOrdersOnKill' => !empty($policy['emergency']['cancelPendingOrdersOnKill']),
+        ];
+    }
+
+    private function normalizeAccountKey(string $key): string
+    {
+        $key = strtolower(trim($key));
+        $key = preg_replace('/[^a-z0-9:._-]/', '', $key) ?? '';
+        return $key;
+    }
+
+    /**
+     * Keep only the paths the administrator actually set, with the value the
+     * policy layer validated (clamped, cast, unknown keys dropped). Storing the
+     * whole normalised policy would freeze today's platform defaults into the
+     * override and stop future policy changes from reaching the deployment.
+     */
+    private function cleanPolicyPatch(array $patch): array
+    {
+        if ($patch === []) return [];
+        $normalized = ProtectionPolicy::normalize($patch);
+        return $this->pickPaths($patch, $normalized);
+    }
+
+    private function pickPaths(array $patch, array $normalized): array
+    {
+        $out = [];
+        foreach ($patch as $key => $value) {
+            if (!array_key_exists($key, $normalized)) continue;   // unknown key — ignored
+            if (is_array($value) && is_array($normalized[$key])) {
+                $nested = $this->pickPaths($value, $normalized[$key]);
+                if ($nested !== []) $out[$key] = $nested;
+                continue;
+            }
+            $out[$key] = $normalized[$key];
+        }
+        return $out;
     }
 
     // ─── Heartbeats ──────────────────────────────────────────────────
@@ -202,12 +364,13 @@ final class EaProtection
      */
     public function evaluateAll(): array
     {
-        $state = $this->state->load();
-        $policy = ProtectionPolicy::normalize(null, (array) ($state[AutomaticProtection::STATE_KEY]['policy'] ?? []));
         $decisions = [];
 
+        // Each deployment is evaluated against ITS OWN effective policy
+        // (platform ← account ← deployment), not one shared snapshot.
         foreach ($this->deployments() as $id => $deployment) {
-            $decisions[$id] = $this->evaluateOne((string) $id, (array) $deployment, $policy);
+            $deployment = (array) $deployment;
+            $decisions[$id] = $this->evaluateOne((string) $id, $deployment, $this->effectivePolicy($deployment));
         }
 
         $state = $this->state->load();
@@ -224,8 +387,9 @@ final class EaProtection
      *
      * @return array<string,mixed> the decision the EA must obey
      */
-    public function evaluateOne(string $id, array $deployment, array $policy): array
+    public function evaluateOne(string $id, array $deployment, ?array $policy = null): array
     {
+        $policy = $policy ?? $this->effectivePolicy($deployment);
         $limits = $this->normalizeLimits([], (array) ($deployment['limits'] ?? []));
         $heartbeat = $this->heartbeat($id);
         $previous = $this->decision($id);
@@ -506,6 +670,10 @@ final class EaProtection
         $published = [
             'eaId' => $id,
             'name' => (string) ($deployment['name'] ?? $id),
+            // What actually governed this decision (§9 + §13): the operator and
+            // the terminal both see the numbers that applied, not the defaults.
+            'accountKey' => $this->accountKeyFor($deployment),
+            'policy' => $this->policySummary($policy),
             'state' => $decision['state'],
             'code' => $decision['code'] ?? null,
             'reason' => $decision['reason'] ?? '',
@@ -577,16 +745,31 @@ final class EaProtection
                 'heartbeatAgeSeconds' => $decision['heartbeatAgeSeconds'] ?? null,
                 'conditions' => $decision['conditions'] ?? [],
                 'limits' => $this->normalizeLimits([], (array) ($deployment['limits'] ?? [])),
+                'accountKey' => $this->accountKeyFor((array) $deployment),
+                'policyOverride' => (array) ($deployment['policy'] ?? []),
+                'policy' => $decision['policy'] ?? $this->policySummary($this->effectivePolicy((array) $deployment)),
             ];
         }
 
         usort($rows, fn(array $a, array $b): int => ($b['blocking'] <=> $a['blocking']) ?: ($a['name'] <=> $b['name']));
 
         $state = $this->state->load();
+        // Account overrides, annotated with the deployments they govern.
+        $accounts = [];
+        foreach ($this->accountOverrides() as $key => $override) {
+            $used = array_values(array_map(
+                fn(array $r): string => (string) $r['id'],
+                array_filter($rows, fn(array $r): bool => ($r['accountKey'] ?? '') === $key)
+            ));
+            $accounts[] = ['key' => (string) $key, 'override' => (array) $override, 'deployments' => $used];
+        }
+        usort($accounts, fn(array $a, array $b): int => $a['key'] <=> $b['key']);
+
         return [
             'deployments' => $rows,
             'total' => count($rows),
             'blocked' => count(array_filter($rows, fn(array $r): bool => $r['blocking'])),
+            'accounts' => $accounts,
             'evaluatedAt' => $state[self::STATE_KEY]['evaluatedAt'] ?? null,
         ];
     }

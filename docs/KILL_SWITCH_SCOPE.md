@@ -192,6 +192,44 @@ The economic calendar is an ordinary managed service: add an **Economic
 Calendar** feed under Admin → API like any other provider, and its events drive
 news protection. No vendor is hard-coded and no licence ships with the platform.
 
+### Per-account and per-EA overrides
+
+The values above are the platform policy — the widest scope. Two narrower
+scopes override them, so a strict prop-firm account and a relaxed demo account
+can run side by side under one platform policy:
+
+| Scope | Key | Set at | Wins over |
+| --- | --- | --- | --- |
+| Platform policy | — | `/admin/protection` | nothing (the base) |
+| Account | `mt5:5123456` | *Per-account policy overrides* | the platform policy |
+| Deployment (EA) | `eaId` | *Risk policy for this Expert Advisor* | the account override |
+
+* **Blank inherits.** An override stores only the fields that were filled in,
+  so everything else keeps tracking the wider scope, including later changes to
+  the platform policy.
+* **Validation is identical.** Overrides go through the same
+  `ProtectionPolicy::normalize()` as the platform form: out-of-range values are
+  clamped, unknown keys are dropped. An override can tighten or relax a
+  threshold but it cannot invent an invalid one.
+* **The terminal is told.** Every decision carries the resolved numbers
+  (`policy.*`), and the EA obeys them instead of its own inputs, so the
+  override is enforced inside the terminal and not only in the platform's
+  verdict. Until the first decision arrives, the EA's inputs apply.
+* **Widening does not release a kill.** If an account is already in
+  `AUTOMATIC_KILL`, relaxing its limit starts `RECOVERY` — trading resumes only
+  after the configured number of clear scans (§7).
+* **Scope note.** A terminal account is a first-class object only where the
+  platform knows one, which today means the MT4/MT5 Expert Advisor deployments
+  that report `terminal` + `account`. Those deployments are evaluated per
+  deployment against their own resolved policy; the platform engine's own
+  portfolio-level scan (paper accounts, broker connectors) uses the platform
+  policy, and the resolver (`EaProtection::effectivePolicy()`) is public so it
+  can be applied there the moment an account-scoped scan is added.
+* Every change is audited (`EA_ACCOUNT_POLICY_OVERRIDE`,
+  `EA_PROTECTION_POLICY_OVERRIDE`, `EA_ACCOUNT_POLICY_RESET`) with the
+  previous value, and the decision records which policy governed it, so §13
+  always shows the numbers that were in force.
+
 ## Audit trail (§13)
 
 Every transition is written to `audit_logs` with the previous state, the new
@@ -216,6 +254,10 @@ notification at the matching severity:
   (`X-EA-Token`, `AI_WORKFORCE_EA_TOKEN`) and answers with the decision.
 * `GET /api/system/protection/ea/{eaId}` → one deployment's decision.
 * `POST /api/system/protection/ea/limits` → per-deployment limits (admin, CSRF).
+* `POST /api/system/protection/ea/policy` → per-deployment risk-policy override
+  (admin, CSRF); an empty `policy` clears it.
+* `POST /api/system/protection/ea/account` → per-account risk-policy override
+  (`accountKey`, admin, CSRF); `remove: true` clears it.
 * There is deliberately **no** endpoint that engages or releases the switch.
 
 ## MT4/MT5 Expert Advisors (§10)

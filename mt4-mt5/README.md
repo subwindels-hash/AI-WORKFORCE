@@ -159,11 +159,55 @@ allowNewTrades=0
 closePositions=0
 cancelPendingOrders=0
 evaluatedAt=2026-09-07T10:30:00Z
+policy.dailyLossPercent=3.00
+policy.dailyLossFixedUsd=100
+policy.drawdownPercent=10.00
+policy.maxSpreadPoints=30
+policy.maxSlippagePoints=10
+policy.newsEnabled=1
+policy.newsMinutesBefore=5
+policy.newsMinutesAfter=30
+policy.closePositionsOnKill=0
+policy.cancelPendingOrdersOnKill=0
 ```
 
 `state` uses the platform's names: `NORMAL`, `WARNING`, `AUTOMATIC_PAUSED`,
 `AUTOMATIC_KILL`, `RECOVERY`, `RESUMED`. Anything unrecognised is treated as
 `AUTOMATIC_PAUSED` — an unknown state blocks, it never permits.
+
+### The `policy.*` lines: the limits that actually govern this EA (§9)
+
+The platform resolves a policy per deployment — **platform policy ← account
+override ← deployment override** — and sends the result with every decision.
+The EA obeys those numbers instead of its own inputs, so an override set in the
+admin console reaches the terminal rather than living only in the platform's
+audit trail.
+
+| Decision key | Overrides input | Units |
+| --- | --- | --- |
+| `policy.dailyLossPercent` | `InpDailyLossPercent` | percent (`3.00` = 3%) |
+| `policy.dailyLossFixedUsd` | `InpDailyLossFixedUsd` | account currency |
+| `policy.drawdownPercent` | `InpMaxDrawdownPercent` | percent |
+| `policy.maxSpreadPoints` | `InpMaxSpreadPoints` | MT4/MT5 points |
+| `policy.maxSlippagePoints` | `InpMaxSlippagePoints` | MT4/MT5 points |
+| `policy.newsEnabled` | — (0 skips the local news window) | 0/1 |
+| `policy.newsMinutesBefore` / `After` | `InpNewsMinutes*` | minutes |
+| `policy.closePositionsOnKill` | `InpClosePositionsOnKill` | 0/1 |
+| `policy.cancelPendingOrdersOnKill` | `InpCancelPendingOnKill` | 0/1 |
+
+Two rules keep this safe:
+
+* **Until the first decision arrives, the inputs apply.** Every `policy.*` value
+  starts at `-1` ("not published"), so a terminal that has never heard from the
+  platform is still protected by whatever the operator typed into the EA.
+* **A platform decision can only tighten, never release.** The decision's own
+  `closePositions=1` / `cancelPendingOrders=1` still force the emergency
+  actions even when the policy says off, and blocking new trades is never
+  optional.
+
+The effective values are logged once per decision
+(`effective policy: loss 3.00%/… in EaProtection`), so the terminal's log shows
+which numbers applied.
 
 An EA that requires a fresh platform decision sets
 `InpRequirePlatformDecision = true`; it then refuses to trade whenever the
@@ -171,6 +215,20 @@ decision is missing or older than `InpDecisionMaxAgeSeconds`. That is the
 strictest reading of §12 and is **off by default**, because a terminal on a
 flaky link would otherwise stop trading every time the platform is briefly
 unreachable — the local engine is the one that must keep working.
+
+## Per-account and per-EA configuration on the platform
+
+*Admin → Protection → Expert Advisors* has two override layers:
+
+* **Account** (`mt5:5123456`) — applies to every EA reporting on that terminal
+  account. Configure a prop-firm account once and all of its EAs follow.
+* **Deployment** (one `eaId`) — the narrowest scope, wins over the account.
+
+Blank fields **inherit** the wider scope, so an override only pins what differs
+and keeps tracking the platform policy for everything else. Values are
+validated and clamped exactly like the platform form, in percent / points /
+minutes. `tools/check_mql.php` fails if a policy value the platform publishes
+is not read by both terminal flavours.
 
 ## News events in the terminal
 

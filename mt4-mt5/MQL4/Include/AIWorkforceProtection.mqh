@@ -88,6 +88,18 @@ int      g_closedPositions    = 0;
 int      g_cancelledOrders    = 0;
 
 int      g_platformState      = -1;
+// Effective policy published by the platform (platform ← account ← EA).
+// -1 means "not published yet"; the local input is used instead.
+double   g_pDailyLossPercent  = -1.0;
+double   g_pDailyLossFixed    = -1.0;
+double   g_pDrawdownPercent   = -1.0;
+double   g_pMaxSpreadPoints   = -1.0;
+double   g_pMaxSlippagePoints = -1.0;
+int      g_pNewsMinutesBefore = -1;
+int      g_pNewsMinutesAfter  = -1;
+int      g_pNewsEnabled       = -1;      // -1 inherit (on), 0 off, 1 on
+int      g_pCloseOnKill       = -1;      // -1 inherit, 0 off, 1 on
+int      g_pCancelOnKill      = -1;      // -1 inherit, 0 off, 1 on
 string   g_platformCode       = "";
 string   g_platformReason     = "";
 bool     g_platformAllow      = true;
@@ -232,12 +244,14 @@ int AIWF_EvaluateLocal()
 
    // 6 — spread (§5)
    double spreadPoints = (tick.ask > 0.0) ? (tick.ask - tick.bid) / AIWF_PointSize(symbol) : 0.0;
-   if(InpMaxSpreadPoints > 0.0 && spreadPoints > InpMaxSpreadPoints)
-      return(AIWF_Set(AIWF_PAUSED, "EA_SPREAD_EXCEEDED", StringFormat("Spread %.1f points exceeds the %.1f point limit.", spreadPoints, InpMaxSpreadPoints)));
+   double maxSpread = AIWF_LimitMaxSpreadPoints();
+   if(maxSpread > 0.0 && spreadPoints > maxSpread)
+      return(AIWF_Set(AIWF_PAUSED, "EA_SPREAD_EXCEEDED", StringFormat("Spread %.1f points exceeds the %.1f point limit.", spreadPoints, maxSpread)));
 
    // 7 — slippage (§6)
-   if(InpMaxSlippagePoints > 0.0 && g_slippagePoints > InpMaxSlippagePoints)
-      return(AIWF_Set(AIWF_PAUSED, "EA_SLIPPAGE_EXCEEDED", StringFormat("Last slippage %.1f points exceeds the %.1f point limit.", g_slippagePoints, InpMaxSlippagePoints)));
+   double maxSlippage = AIWF_LimitMaxSlippagePoints();
+   if(maxSlippage > 0.0 && g_slippagePoints > maxSlippage)
+      return(AIWF_Set(AIWF_PAUSED, "EA_SLIPPAGE_EXCEEDED", StringFormat("Last slippage %.1f points exceeds the %.1f point limit.", g_slippagePoints, maxSlippage)));
 
    // 8 — repeated order failures
    if(InpMaxOrderFailures > 0 && g_orderFailures >= InpMaxOrderFailures)
@@ -252,49 +266,59 @@ int AIWF_EvaluateLocal()
    double loss = -AIWF_DailyPnl();
    if(loss > 0.0)
      {
+      double limitPercent = AIWF_LimitDailyLossPercent();
+      double limitFixed   = AIWF_LimitDailyLossFixed();
       double lossPct = AIWF_Equity() > 0.0 ? loss / AIWF_Equity() * 100.0 : 0.0;
-      bool percentBreach = (InpDailyLossPercent > 0.0 && lossPct >= InpDailyLossPercent);
-      bool fixedBreach   = (InpDailyLossFixedUsd > 0.0 && loss >= InpDailyLossFixedUsd);
+      bool percentBreach = (limitPercent > 0.0 && lossPct >= limitPercent);
+      bool fixedBreach   = (limitFixed > 0.0 && loss >= limitFixed);
       if(percentBreach || fixedBreach)
         {
          if(fixedBreach)
-            return(AIWF_Set(AIWF_KILL, "EA_DAILY_LOSS_LIMIT", StringFormat("Daily loss %.2f reached the fixed limit of %.2f.", loss, InpDailyLossFixedUsd)));
-         return(AIWF_Set(AIWF_KILL, "EA_DAILY_LOSS_LIMIT", StringFormat("Daily loss reached %.2f%% of equity (limit %.2f%%).", lossPct, InpDailyLossPercent)));
+            return(AIWF_Set(AIWF_KILL, "EA_DAILY_LOSS_LIMIT", StringFormat("Daily loss %.2f reached the fixed limit of %.2f.", loss, limitFixed)));
+         return(AIWF_Set(AIWF_KILL, "EA_DAILY_LOSS_LIMIT", StringFormat("Daily loss reached %.2f%% of equity (limit %.2f%%).", lossPct, limitPercent)));
         }
       double nearest = 0.0;
-      if(InpDailyLossPercent > 0.0) nearest = lossPct / InpDailyLossPercent;
-      if(InpDailyLossFixedUsd > 0.0) nearest = MathMax(nearest, loss / InpDailyLossFixedUsd);
+      if(limitPercent > 0.0) nearest = lossPct / limitPercent;
+      if(limitFixed > 0.0) nearest = MathMax(nearest, loss / limitFixed);
       if(nearest >= 0.8)
          AIWF_Set(AIWF_WARNING, "EA_DAILY_LOSS_APPROACHING", StringFormat("Daily loss at %.0f%% of the configured limit.", MathMin(100.0, nearest * 100.0)));
      }
 
    // 11 — drawdown (§3)
    double drawdown = AIWF_DrawdownPercent();
-   if(InpMaxDrawdownPercent > 0.0 && drawdown > 0.0)
+   double drawdownLimit = AIWF_LimitDrawdownPercent();
+   if(drawdownLimit > 0.0 && drawdown > 0.0)
      {
-      if(drawdown >= InpMaxDrawdownPercent)
-         return(AIWF_Set(AIWF_KILL, "EA_MAX_DRAWDOWN", StringFormat("Drawdown %.2f%% reached the %.2f%% limit.", drawdown, InpMaxDrawdownPercent)));
-      if((drawdown / InpMaxDrawdownPercent) >= 0.8)
-         AIWF_Set(AIWF_WARNING, "EA_DRAWDOWN_APPROACHING", StringFormat("Drawdown at %.0f%% of the configured maximum.", MathMin(100.0, drawdown / InpMaxDrawdownPercent * 100.0)));
+      if(drawdown >= drawdownLimit)
+         return(AIWF_Set(AIWF_KILL, "EA_MAX_DRAWDOWN", StringFormat("Drawdown %.2f%% reached the %.2f%% limit.", drawdown, drawdownLimit)));
+      if((drawdown / drawdownLimit) >= 0.8)
+         AIWF_Set(AIWF_WARNING, "EA_DRAWDOWN_APPROACHING", StringFormat("Drawdown at %.0f%% of the configured maximum.", MathMin(100.0, drawdown / drawdownLimit * 100.0)));
      }
 
    // 13 — news window (§1). A list that is configured but cannot be read is a
    // feed failure, not an empty calendar: a typo must not silently disable
    // news protection, so it pauses (§12, the platform's onFeedFailure default).
-   double minutes = AIWF_MinutesToNextEvent();
-   if(InpNewsEvents != "" && g_newsParsedCount == 0)
-      return(AIWF_Set(AIWF_PAUSED, "EA_NEWS_FEED_UNAVAILABLE",
-             "The configured news event list could not be read, so an event cannot be ruled out."));
-   if(minutes != EMPTY_VALUE)
+   // Skipped when the platform switched news protection off for this
+   // account or deployment — the operator's inputs are not the last word (§9).
+   if(AIWF_LimitNewsEnabled())
      {
-      if(minutes <= (double)InpNewsMinutesBefore && minutes >= -(double)InpNewsMinutesAfter)
+      double minutes = AIWF_MinutesToNextEvent();
+      if(InpNewsEvents != "" && g_newsParsedCount == 0)
+         return(AIWF_Set(AIWF_PAUSED, "EA_NEWS_FEED_UNAVAILABLE",
+                "The configured news event list could not be read, so an event cannot be ruled out."));
+      if(minutes != EMPTY_VALUE)
         {
-         if(minutes >= 0.0)
-            return(AIWF_Set(AIWF_PAUSED, "EA_NEWS_EVENT", StringFormat("High-impact event in %.0f minute(s).", MathCeil(minutes))));
-         return(AIWF_Set(AIWF_PAUSED, "EA_NEWS_EVENT", StringFormat("High-impact event %.0f minute(s) ago.", MathAbs(minutes))));
+         int newsBefore = AIWF_LimitNewsMinutesBefore();
+         int newsAfter  = AIWF_LimitNewsMinutesAfter();
+         if(minutes <= (double)newsBefore && minutes >= -(double)newsAfter)
+           {
+            if(minutes >= 0.0)
+               return(AIWF_Set(AIWF_PAUSED, "EA_NEWS_EVENT", StringFormat("High-impact event in %.0f minute(s).", MathCeil(minutes))));
+            return(AIWF_Set(AIWF_PAUSED, "EA_NEWS_EVENT", StringFormat("High-impact event %.0f minute(s) ago.", MathAbs(minutes))));
+           }
+         if(minutes > (double)newsBefore && minutes <= (double)(newsBefore + 15))
+            AIWF_Set(AIWF_WARNING, "EA_NEWS_APPROACHING", StringFormat("High-impact event in %.0f minute(s).", MathCeil(minutes)));
         }
-      if(minutes > (double)InpNewsMinutesBefore && minutes <= (double)(InpNewsMinutesBefore + 15))
-         AIWF_Set(AIWF_WARNING, "EA_NEWS_APPROACHING", StringFormat("High-impact event in %.0f minute(s).", MathCeil(minutes)));
      }
 
    if(g_code == "EA_DAILY_LOSS_APPROACHING" || g_code == "EA_DRAWDOWN_APPROACHING" || g_code == "EA_NEWS_APPROACHING")
@@ -358,8 +382,8 @@ void AIWF_ApplyState(const int target)
 // ─── Emergency actions (opt-in) ────────────────────────────────────
 void AIWF_EmergencyActions()
   {
-   bool doClose  = InpClosePositionsOnKill || g_platformClose;
-   bool doCancel = InpCancelPendingOnKill  || g_platformCancel;
+   bool doClose  = AIWF_LimitCloseOnKill()  || g_platformClose;
+   bool doCancel = AIWF_LimitCancelOnKill() || g_platformCancel;
 
    for(int i = OrdersTotal() - 1; i >= 0; i--)
      {
@@ -501,7 +525,31 @@ void AIWF_ApplyDecision(const string text)
       else if(key == "allowNewTrades")      g_platformAllow  = (value == "1" || value == "true");
       else if(key == "closePositions")      g_platformClose  = (value == "1" || value == "true");
       else if(key == "cancelPendingOrders") g_platformCancel = (value == "1" || value == "true");
+      else if(key == "policy.dailyLossPercent")   g_pDailyLossPercent  = StringToDouble(value);
+      else if(key == "policy.dailyLossFixedUsd")  g_pDailyLossFixed    = StringToDouble(value);
+      else if(key == "policy.drawdownPercent")    g_pDrawdownPercent   = StringToDouble(value);
+      else if(key == "policy.maxSpreadPoints")    g_pMaxSpreadPoints   = StringToDouble(value);
+      else if(key == "policy.maxSlippagePoints")  g_pMaxSlippagePoints = StringToDouble(value);
+      else if(key == "policy.newsMinutesBefore")  g_pNewsMinutesBefore = (int)StringToInteger(value);
+      else if(key == "policy.newsMinutesAfter")   g_pNewsMinutesAfter  = (int)StringToInteger(value);
+      else if(key == "policy.newsEnabled")        g_pNewsEnabled       = (value == "1" || value == "true") ? 1 : 0;
+      else if(key == "policy.closePositionsOnKill")    g_pCloseOnKill  = (value == "1" || value == "true") ? 1 : 0;
+      else if(key == "policy.cancelPendingOrdersOnKill") g_pCancelOnKill = (value == "1" || value == "true") ? 1 : 0;
      }
+   // §13 — the terminal's log must show which numbers applied. Printed once
+   // per decision that carries a policy block, not on every tick.
+   if(any && (g_pDailyLossPercent >= 0.0 || g_pMaxSpreadPoints >= 0.0))
+      Print("AI WORKFORCE: effective policy — loss ",
+            DoubleToString(AIWF_LimitDailyLossPercent(), 2), "%",
+            (AIWF_LimitDailyLossFixed() > 0.0 ? " / " + DoubleToString(AIWF_LimitDailyLossFixed(), 2) : ""),
+            ", drawdown ", DoubleToString(AIWF_LimitDrawdownPercent(), 2), "%",
+            ", spread <= ", DoubleToString(AIWF_LimitMaxSpreadPoints(), 1), " pts",
+            ", slippage <= ", DoubleToString(AIWF_LimitMaxSlippagePoints(), 1), " pts",
+            ", news ", (AIWF_LimitNewsEnabled() ? "on (" : "off ("),
+            IntegerToString(AIWF_LimitNewsMinutesBefore()), "m before / ",
+            IntegerToString(AIWF_LimitNewsMinutesAfter()), "m after)",
+            ", on kill: close ", (AIWF_LimitCloseOnKill() ? "yes" : "no"),
+            ", cancel ", (AIWF_LimitCancelOnKill() ? "yes" : "no"));
    if(any) g_platformDecisionAt = TimeCurrent();
   }
 
@@ -532,6 +580,25 @@ void AIWF_SendHeartbeat()
    if(code != -1)
       AIWF_ApplyDecision(CharArrayToString(result, 0, WHOLE_ARRAY));
   }
+
+// ─── Effective limits (platform override wins, local input otherwise) ────────
+// The platform publishes the policy that governs this deployment (§9: per
+// account and per EA). Until it arrives the EA's own inputs apply, so the
+// terminal is protected from its very first tick.
+double AIWF_LimitDailyLossPercent()   { return(g_pDailyLossPercent  >= 0.0 ? g_pDailyLossPercent  : InpDailyLossPercent); }
+double AIWF_LimitDailyLossFixed()     { return(g_pDailyLossFixed    >= 0.0 ? g_pDailyLossFixed    : InpDailyLossFixedUsd); }
+double AIWF_LimitDrawdownPercent()    { return(g_pDrawdownPercent   >= 0.0 ? g_pDrawdownPercent   : InpMaxDrawdownPercent); }
+double AIWF_LimitMaxSpreadPoints()    { return(g_pMaxSpreadPoints   >= 0.0 ? g_pMaxSpreadPoints   : InpMaxSpreadPoints); }
+double AIWF_LimitMaxSlippagePoints()  { return(g_pMaxSlippagePoints >= 0.0 ? g_pMaxSlippagePoints : InpMaxSlippagePoints); }
+int    AIWF_LimitNewsMinutesBefore()  { return(g_pNewsMinutesBefore >= 0   ? g_pNewsMinutesBefore : InpNewsMinutesBefore); }
+int    AIWF_LimitNewsMinutesAfter()   { return(g_pNewsMinutesAfter  >= 0   ? g_pNewsMinutesAfter  : InpNewsMinutesAfter); }
+// News has no local on/off input: the terminal protects around every event it
+// knows about, so "inherit" means on. Only the platform can switch it off.
+bool   AIWF_LimitNewsEnabled()        { return(g_pNewsEnabled != 0); }
+// Emergency actions: the platform's policy wins over the local opt-in, and the
+// decision's own flags (a kill that demands closing) win over both.
+bool   AIWF_LimitCloseOnKill()        { return(g_pCloseOnKill  == 1 ? true  : (g_pCloseOnKill  == 0 ? false : InpClosePositionsOnKill)); }
+bool   AIWF_LimitCancelOnKill()       { return(g_pCancelOnKill == 1 ? true  : (g_pCancelOnKill == 0 ? false : InpCancelPendingOnKill)); }
 
 // ─── Order bookkeeping ─────────────────────────────────────────────
 void AIWF_RecordOrderResult(const bool success, const double slippagePoints = 0.0)

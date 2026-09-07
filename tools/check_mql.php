@@ -342,6 +342,44 @@ if (!is_file($bridgePath)) {
     }
 }
 
+// ─── 7 — effective policy (platform → bridge → terminal) ──────────
+echo "\n7 — policy override contract\n";
+$policyKeys = [];
+if (isset($engine)) {
+    $summary = mql_block($engine, 'private function policySummary(');
+    if ($summary === '') {
+        mql_fail($failures, 'cannot locate policySummary() in EaProtection.php');
+    } else {
+        preg_match_all("/'([a-zA-Z][a-zA-Z0-9_]*)'\s*=>/", $summary, $pm);
+        $policyKeys = array_values(array_unique($pm[1] ?? []));
+    }
+}
+if ($policyKeys === []) {
+    mql_fail($failures, 'no policy keys discovered — the override contract is not checked');
+} else {
+    foreach (['MQL5/Include/AIWorkforceProtection.mqh', 'MQL4/Include/AIWorkforceProtection.mqh'] as $lib) {
+        if (!isset($sources[$lib])) continue;
+        $missing = [];
+        foreach ($policyKeys as $key) {
+            if (strpos($sources[$lib], '"policy.' . $key . '"') === false) $missing[] = $key;
+        }
+        if ($missing !== []) {
+            mql_fail($failures, mql_label($lib) . ' does not read policy key(s): ' . implode(', ', $missing));
+            continue;
+        }
+        mql_ok($checks, mql_label($lib) . ' obeys all ' . count($policyKeys) . ' policy overrides from the platform');
+    }
+
+    // The bridge forwards whatever the platform publishes; pin the loop that
+    // does it so deleting the block fails the check instead of silently
+    // dropping every override on the way to the terminal.
+    if (isset($bridge) && strpos($bridge, 'decision.get("policy")') === false) {
+        mql_fail($failures, 'the bridge no longer forwards the effective policy to the terminal');
+    } else {
+        mql_ok($checks, 'bridge forwards the effective policy with every decision');
+    }
+}
+
 // ─── Result ────────────────────────────────────────────────────────
 echo "\n";
 if ($failures !== []) {
