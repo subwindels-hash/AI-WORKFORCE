@@ -31,7 +31,14 @@ class Api_sports extends Api_controller
     public function dashboard()
     {
         if (!$this->requirePermission('sports.view', false)) return;
-        $this->json($this->platform->sports->dashboard());
+        $g = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        $date = \AIWorkforce\Football\RequestParams::date($g, 'date', gmdate('Y-m-d'), $notes);
+        $payload = $this->platform->sports->dashboard($date);
+        // What the endpoint actually did with the query string. Without this a
+        // typo'd parameter is indistinguishable from a deliberate one.
+        $payload['request'] = ['date' => $date, 'notes' => array_values($notes)];
+        $this->json($payload);
     }
 
     public function performance()

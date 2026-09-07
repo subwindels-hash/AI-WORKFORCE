@@ -46,7 +46,17 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
 // operator diagnostics (sports.manage). A read-only user sees only whether
 // data is available — never which vendor, key tier or endpoint is behind it.
 $operator = !empty($caps['sync']);
-$ticketDateIso = (string) ($today['date'] ?? gmdate('Y-m-d'));
+// The day being viewed (?date=YYYY-MM-DD, default today). The controller
+// validates it; the fallbacks keep direct renders (tests, embeds) working when
+// the navigation variables are absent.
+$viewDateIso = (string) ($date ?? $today['date'] ?? gmdate('Y-m-d'));
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $viewDateIso)) $viewDateIso = gmdate('Y-m-d');
+$viewYesterday = (string) ($yesterday ?? gmdate('Y-m-d', strtotime($viewDateIso . ' -1 day')));
+$viewTomorrow = (string) ($tomorrow ?? gmdate('Y-m-d', strtotime($viewDateIso . ' +1 day')));
+$viewIsToday = (bool) ($isToday ?? ($viewDateIso === gmdate('Y-m-d')));
+// Ticket generation defaults to the day being viewed; the input stays editable
+// so any other day can still be generated for.
+$ticketDateIso = $viewDateIso;
 $ticketDateTs = strtotime($ticketDateIso);
 $ticketDateShown = gmdate('m/d/Y', $ticketDateTs !== false ? $ticketDateTs : time());
 // Match date + time as one UTC stamp (`YYYY-MM-DD HH:MM`) from the stored
@@ -61,6 +71,18 @@ $kickoffStamp = static function (mixed $iso): string {
   <div>
     <h2>Sports Intelligence — odds prediction ticket engine</h2>
     <p>Daily odds prediction tickets from stored fixtures and provider odds. Each ticket does what odds analysis needs to do: compare the offered price with the model probability, calculate expected value, check confidence/risk/correlation, and keep a settlement trail — no bookmaker bet is placed.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px">
+      <form method="get" action="/sports" style="display:flex;gap:6px;align-items:center">
+        <label for="sports-view-date" style="font-size:12px;font-weight:700">Viewing date (UTC):</label>
+        <input type="date" id="sports-view-date" name="date" value="<?= e($viewDateIso) ?>" onchange="this.form.submit()" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px" title="Viewing date (UTC)">
+        <noscript><button class="btn small" type="submit">View</button></noscript>
+        <span class="mono" style="font-size:12px;font-weight:700" title="Viewing date"><?= e($ticketDateShown) ?></span>
+      </form>
+      <a class="btn small" href="/sports?date=<?= e($viewYesterday) ?>">← Prev day</a>
+      <?php if (!$viewIsToday): ?><a class="btn small" href="/sports">Today</a><?php endif; ?>
+      <a class="btn small" href="/sports?date=<?= e($viewTomorrow) ?>">Next day →</a>
+    </div>
+    <p class="dim" style="font-size:11px;margin-top:6px">The viewing date changes the fixtures, predictions and daily ticket below — pick any day to inspect it. Live scores always show current play.</p>
     <?php if (!empty($caps['sync'])): ?>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px">
         <form method="post" action="/sports/sync" onsubmit="return confirm('Pull fresh fixtures, odds and results from the configured providers now?')">
@@ -69,8 +91,7 @@ $kickoffStamp = static function (mixed $iso): string {
         </form>
         <form method="post" action="/sports/generate-ticket" style="display:flex;gap:6px;align-items:center" onsubmit="return confirm('Generate odds prediction ticket for the selected date from stored fixtures & odds? This runs the AI odds prediction ticket engine (value, probability, confidence, risk, correlation) and creates a reviewable odds prediction ticket.')">
           <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
-          <input type="date" name="date" value="<?= e($ticketDateIso) ?>" aria-label="<?= e($ticketDateShown) ?>" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px" title="Ticket date (UTC) <?= e($ticketDateShown) ?>">
-          <span class="mono" style="font-size:12px;font-weight:700"><?= e($ticketDateShown) ?></span>
+          <input type="date" name="date" value="<?= e($ticketDateIso) ?>" aria-label="Ticket date (UTC)" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px" title="Ticket date (UTC)">
           <button class="btn small" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700;letter-spacing:0.02em">
             🎯 Odds Prediction Ticket
           </button>
@@ -80,7 +101,6 @@ $kickoffStamp = static function (mixed $iso): string {
     <?php else: ?>
       <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="btn small" disabled title="Requires the sports.manage permission">Sync now</button>
-        <span class="mono" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px;font-weight:700" title="Ticket date (UTC)"><?= e($ticketDateShown) ?></span>
         <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">🎯 Odds Prediction Ticket</button>
       </div>
       <p class="dim" style="font-size:11px;margin-top:6px">Your account is read-only here (sports.view). Ask an administrator to assign the <b>Sports administrator</b> role — the console picks the new permission up on your next page load, no sign-out needed.</p>
@@ -109,7 +129,7 @@ $kickoffStamp = static function (mixed $iso): string {
 <div class="grid cols-main">
   <div class="stack">
     <div class="panel">
-      <h3>Today's intelligence — <?= e((string) ($today['date'] ?? gmdate('Y-m-d'))) ?></h3>
+      <h3><?= $viewIsToday ? "Today's intelligence" : 'Intelligence' ?> — <?= e((string) ($today['date'] ?? $viewDateIso)) ?></h3>
       <div class="body" style="padding-top:12px">
         <div class="stat-grid">
           <div class="stat"><div class="k">Scheduled</div><div class="v"><?= (int) ($today['upcomingCount'] ?? 0) ?></div></div>
@@ -146,7 +166,7 @@ $kickoffStamp = static function (mixed $iso): string {
             </table>
           </div>
         <?php else: ?>
-          <p class="dim" style="margin-top:12px">No scheduled fixtures stored for today.</p>
+          <p class="dim" style="margin-top:12px">No scheduled fixtures stored for <?= $viewIsToday ? 'today' : e($viewDateIso) ?>.</p>
         <?php endif; ?>
       </div>
     </div>
@@ -185,7 +205,7 @@ $kickoffStamp = static function (mixed $iso): string {
     </div>
 
     <div class="panel">
-      <h3>30-day odds prediction ticket performance (stored settlements only)</h3>
+      <h3>30-day odds prediction ticket performance (stored settlements only)<?= $viewIsToday ? '' : ' — ending ' . e($viewDateIso) ?></h3>
       <div class="body" style="padding-top:12px">
         <?php if (!empty($perf['demoBanner'])): ?><div class="notice warnbox"><?= e((string) $perf['demoBanner']) ?></div><?php endif; ?>
         <div class="stat-grid">
@@ -305,14 +325,14 @@ $kickoffStamp = static function (mixed $iso): string {
     <?php endif; ?>
 
     <div class="panel">
-      <h3>Today's odds prediction ticket</h3>
+      <h3><?= $viewIsToday ? "Today's odds prediction ticket" : 'Odds prediction ticket — ' . e($viewDateIso) ?></h3>
       <div class="body" style="padding-top:12px">
         <?php $daily = $engine['today'] ?? null; ?>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
           <?php if (!empty($caps['sync'])): ?>
-            <form method="post" action="/sports/generate-ticket" style="display:flex;gap:6px;align-items:center" onsubmit="return confirm('Generate odds prediction ticket for today from stored data?')">
+            <form method="post" action="/sports/generate-ticket" style="display:flex;gap:6px;align-items:center" onsubmit="return confirm('Generate odds prediction ticket for <?= e($viewDateIso) ?> from stored data?')">
               <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
-              <input type="hidden" name="date" value="<?= e((string) ($today['date'] ?? gmdate('Y-m-d'))) ?>">
+              <input type="hidden" name="date" value="<?= e($ticketDateIso) ?>">
               <button class="btn small" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700">
                 🎯 Odds Prediction Ticket
               </button>
@@ -344,7 +364,7 @@ $kickoffStamp = static function (mixed $iso): string {
           <p class="dim" style="margin:0 0 8px"><b>Sports data was unavailable</b> for this run — this is a data outage, not a day without qualifying games. No odds prediction ticket is fabricated; one will be built once the data feed recovers.</p>
           <?php endif; ?>
         <?php elseif ($daily === null || $ticket === null): ?>
-          <p class="dim"><?= $daily !== null ? e((string) ($daily['message'] ?? 'No odds prediction ticket today.')) : 'No daily run recorded for today yet. Select 🎯 Odds Prediction Ticket to build one from stored fixtures & odds.' ?></p>
+          <p class="dim"><?= $daily !== null ? e((string) ($daily['message'] ?? 'No odds prediction ticket for ' . $viewDateIso . '.')) : 'No daily run recorded for ' . e($viewDateIso) . ' yet. Select 🎯 Odds Prediction Ticket to build one from stored fixtures & odds.' ?></p>
         <?php else: ?>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
             <span class="badge <?= (string) ($daily['status'] ?? '') === 'PENDING_USER_APPROVAL' ? 'b-violet' : 'b-green' ?>"><?= e((string) ($daily['status'] ?? '')) ?></span>
