@@ -38,7 +38,9 @@ void OnTick()
    if(!InpAllowEntries) return;
    if(!AIWF_AllowNewTrades())
      {
-      Print("AI WORKFORCE: entry refused — ", AIWF_BlockReason());
+      // Counted and reported with the heartbeat (§13): a refused entry is a
+      // protection event, not a silent no-op.
+      AIWF_RecordBlockedOrder();
       return;
      }
    if(AIWF_SpreadPoints() > InpMaxSpreadPoints) return;

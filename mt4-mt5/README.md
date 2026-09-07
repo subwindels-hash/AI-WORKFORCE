@@ -73,6 +73,7 @@ Evaluated on every tick, in this order — the first blocking condition decides:
 | 11 | Drawdown from the equity high-water mark | ≥ 10% | KILL |
 | 12 | Margin level below floor | < 150% | PAUSE |
 | 13 | High-impact news window | 5 before / 30 after | PAUSE |
+| 13b | News list configured but **unreadable** (typo, wrong format) | — | PAUSE |
 | 14 | Platform decision missing or stale | > 180 s | PAUSE (only when `InpRequirePlatformDecision`) |
 
 A **point** is the terminal's `SYMBOL_POINT`, not a pip: 30 points is 3 pips on
@@ -128,6 +129,12 @@ Every `InpHeartbeatSeconds` the EA posts what it sees:
 }
 ```
 
+`actions` counts what protection did since the EA started: positions closed and
+pending orders cancelled by the emergency policy, and entries refused by the
+gate (`AIWF_RecordBlockedOrder()`). `metrics.priceMovePercent` is the last
+tick's move, reset every tick, so a stale spike cannot pin the account in a
+pause.
+
 The `eaId` is `account-symbol-magic-EA name`, so two copies of the same EA on
 two accounts are two deployments.
 
@@ -176,14 +183,44 @@ in the terminal's own timezone:
 ```
 
 Leave it empty and no local window is enforced (the EA says so in the log); the
-platform's calendar still applies whenever the EA is reporting. When the EA
+platform's calendar still applies whenever the EA is reporting. Set it but get
+the format wrong and the EA **pauses** with `EA_NEWS_FEED_UNAVAILABLE` — a typo
+must not silently switch news protection off (§12). When the EA
 knows about a window, it also sends `news.minutesToNextHighImpact` so the
 platform can pause it from the platform side too.
+
+## Verifying the sources without MetaEditor
+
+MetaEditor runs on Windows and needs a terminal, so the MQL cannot be compiled
+here. What *can* silently break is drift: a condition added to the PHP engine,
+or a field renamed, leaving an EA quietly enforcing yesterday's rules.
+`tools/check_mql.php` pins the contract between the three languages:
+
+```bash
+php tools/check_mql.php          # exit 0 = clean, 1 = drift
+```
+
+It reads the condition codes out of `EaProtection::conditions()` and the
+heartbeat fields out of `EaProtection::normalizeHeartbeat()` — both derived
+from the code, not from a hand-written list — and checks that:
+
+1. every source is balanced (braces, parentheses, brackets; strings and
+   comments ignored);
+2. both libraries expose the API the EAs call (20 entry points);
+3. **every** condition the platform can raise is implemented in both terminals
+   (16 today) — add one to PHP and this fails until the EAs catch up;
+4. every order-sending function asks `AIWF_AllowNewTrades()` first, and every
+   EA that can refuse an entry records it with `AIWF_RecordBlockedOrder()`;
+5. every heartbeat field the platform ingests is produced by both libraries;
+6. every decision key the MQL parses is written by the Python bridge.
+
+It is dependency-free — no CodeIgniter, no database, no MQL toolchain.
 
 ## Status
 
 **Implemented and unit-tested on the platform side
-(`tests/cases/119-expert-advisor-protection.php`, 21 cases). The MQL sources
+(`tests/cases/119-expert-advisor-protection.php`, 21 cases) and contract-checked
+against the engine by `php tools/check_mql.php` (27 checks). The MQL sources
 are NOT compiled or run against a live terminal in this repository** — that
 needs MetaEditor on Windows and a demo account. Before trusting them with
 money: compile each EA, watch the chart comment show `🟢 NORMAL`, attach to a

@@ -81,6 +81,11 @@ int      g_orderFailures      = 0;
 double   g_slippagePoints     = 0.0;
 datetime g_lastTickTime       = 0;
 double   g_lastPrice          = 0.0;
+double   g_lastMovePercent    = 0.0;
+int      g_newsParsedCount    = 0;
+int      g_blockedOrders      = 0;
+int      g_closedPositions    = 0;
+int      g_cancelledOrders    = 0;
 
 int      g_platformState      = -1;
 string   g_platformCode       = "";
@@ -163,10 +168,12 @@ double AIWF_MinutesToNextEvent()
    int n = StringSplit(InpNewsEvents, ';', parts);
    double best = EMPTY_VALUE;
    datetime now = TimeCurrent();
+   g_newsParsedCount = 0;
    for(int i = 0; i < n; i++)
      {
       datetime when = StringToTime(parts[i]);
       if(when <= 0) continue;
+      g_newsParsedCount++;
       double minutes = (double)(when - now) / 60.0;
       if(best == EMPTY_VALUE || MathAbs(minutes) < MathAbs(best)) best = minutes;
      }
@@ -211,9 +218,13 @@ int AIWF_EvaluateLocal()
    double price = (tick.bid > 0.0 ? tick.bid : 0.0);
    if(price <= 0.0)
       return(AIWF_Set(AIWF_PAUSED, "EA_ABNORMAL_PRICE", "The feed reported a non-positive price."));
+   // Reported with the heartbeat so the platform sees the same spike; it is
+   // reset every tick, so a stale spike cannot pin the account in a pause.
+   g_lastMovePercent = 0.0;
    if(InpAbnormalPriceMovePercent > 0.0 && g_lastPrice > 0.0)
      {
       double move = MathAbs(price - g_lastPrice) / g_lastPrice * 100.0;
+      g_lastMovePercent = move;
       if(move > InpAbnormalPriceMovePercent)
          return(AIWF_Set(AIWF_PAUSED, "EA_ABNORMAL_PRICE", StringFormat("Price moved %.2f%% in one tick (limit %.2f%%).", move, InpAbnormalPriceMovePercent)));
      }
@@ -267,8 +278,13 @@ int AIWF_EvaluateLocal()
          AIWF_Set(AIWF_WARNING, "EA_DRAWDOWN_APPROACHING", StringFormat("Drawdown at %.0f%% of the configured maximum.", MathMin(100.0, drawdown / InpMaxDrawdownPercent * 100.0)));
      }
 
-   // 13 — news window (§1)
+   // 13 — news window (§1). A list that is configured but cannot be read is a
+   // feed failure, not an empty calendar: a typo must not silently disable
+   // news protection, so it pauses (§12, the platform's onFeedFailure default).
    double minutes = AIWF_MinutesToNextEvent();
+   if(InpNewsEvents != "" && g_newsParsedCount == 0)
+      return(AIWF_Set(AIWF_PAUSED, "EA_NEWS_FEED_UNAVAILABLE",
+             "The configured news event list could not be read, so an event cannot be ruled out."));
    if(minutes != EMPTY_VALUE)
      {
       if(minutes <= (double)InpNewsMinutesBefore && minutes >= -(double)InpNewsMinutesAfter)
@@ -356,6 +372,7 @@ void AIWF_EmergencyActions()
          if(doCancel)
            {
             bool cancelled = OrderDelete(OrderTicket(), clrNONE);
+            if(cancelled) g_cancelledOrders++;
             AIWF_RecordOrderResult(cancelled, 0.0);
             if(!cancelled)
                Print("AI WORKFORCE: could not cancel pending order #", OrderTicket(), " (", GetLastError(), ")");
@@ -368,6 +385,7 @@ void AIWF_EmergencyActions()
          RefreshRates();
          double closePrice = (type == OP_BUY) ? MarketInfo(OrderSymbol(), MODE_BID) : MarketInfo(OrderSymbol(), MODE_ASK);
          bool closed = OrderClose(OrderTicket(), OrderLots(), closePrice, (int)InpMaxSlippagePoints, clrNONE);
+         if(closed) g_closedPositions++;
          AIWF_RecordOrderResult(closed, 0.0);
          if(!closed)
             Print("AI WORKFORCE: could not close position #", OrderTicket(), " (", GetLastError(), ")");
@@ -438,19 +456,20 @@ string AIWF_HeartbeatJson()
       "\"symbol\":\"%s\",\"magic\":%d,\"version\":\"1.0.0\",\"at\":\"%s\",\"atTs\":%d,"
       "\"metrics\":{\"equity\":%.2f,\"balance\":%.2f,\"dailyPnl\":%.2f,\"drawdownPct\":%.2f,\"peakEquity\":%.2f,"
       "\"openPositions\":%d,\"pendingOrders\":%d,\"marginLevelPct\":%.2f,\"freeMargin\":%.2f,"
-      "\"spreadPoints\":%.2f,\"slippagePoints\":%.2f,\"orderFailures\":%d,\"symbol\":\"%s\"},"
+      "\"spreadPoints\":%.2f,\"slippagePoints\":%.2f,\"priceMovePercent\":%.2f,\"orderFailures\":%d,\"symbol\":\"%s\"},"
       "\"connection\":{\"terminal\":%s,\"broker\":%s,\"dataFeed\":%s,\"lastTickAgeSeconds\":%d},"
       "\"news\":{\"configured\":%s,\"ok\":true,\"minutesToNextHighImpact\":%s},"
-      "\"actions\":{\"closedPositions\":0,\"cancelledOrders\":0,\"blockedOrders\":0}"
+      "\"actions\":{\"closedPositions\":%d,\"cancelledOrders\":%d,\"blockedOrders\":%d}"
       "}",
       AIWF_EaId(), MQLInfoString(MQL_PROGRAM_NAME), AccountInfoInteger(ACCOUNT_LOGIN), AIWF_Company(),
       symbol, InpMagic, AIWF_NowIso(), (int)TimeCurrent(),
       AIWF_Equity(), AIWF_Balance(), AIWF_DailyPnl(), AIWF_DrawdownPercent(), g_peakEquity,
       AIWF_CountPositions(symbol, InpMagic), AIWF_CountPending(symbol, InpMagic), AIWF_MarginLevel(),
-      AccountInfoDouble(ACCOUNT_MARGIN_FREE), spread, g_slippagePoints, g_orderFailures, symbol,
+      AccountInfoDouble(ACCOUNT_MARGIN_FREE), spread, g_slippagePoints, g_lastMovePercent, g_orderFailures, symbol,
       (IsConnected() ? "true" : "false"), (IsTradeAllowed() ? "true" : "false"),
       (haveTick ? "true" : "false"), tickAge,
-      (InpNewsEvents == "" ? "false" : "true"), AIWF_JsonMinutes()));
+      (InpNewsEvents == "" ? "false" : "true"), AIWF_JsonMinutes(),
+      g_closedPositions, g_cancelledOrders, g_blockedOrders));
   }
 
 int AIWF_StateFromName(const string name)
@@ -621,6 +640,13 @@ void AIWF_DrawStatus()
       else text += StringFormat("\nPlatform decision: %d s old", (int)(TimeCurrent() - g_platformDecisionAt));
      }
    Comment(text);
+  }
+
+/** Call when the EA refuses an entry because protection is active (§13). */
+void AIWF_RecordBlockedOrder()
+  {
+   g_blockedOrders++;
+   Print("AI WORKFORCE: entry refused — ", AIWF_BlockReason());
   }
 
 int      AIWF_State()      { return(g_state); }
