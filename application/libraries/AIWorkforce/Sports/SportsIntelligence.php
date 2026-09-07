@@ -369,14 +369,37 @@ class SportsIntelligence
         ];
     }
 
-    /** Dashboard aggregation (spec §37) — everything from stored data. */
-    public function dashboard(): array
+    /**
+     * The UTC day a dashboard call reports. A day that is not a real calendar
+     * date is never rolled over into a neighbouring one (2026-02-30 must not
+     * silently become a March day): it falls back to today, and the console /
+     * API layers say so instead of answering a different day quietly.
+     */
+    private static function resolveDay(?string $date): string
+    {
+        if ($date !== null && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) === 1) {
+            $parsed = \DateTimeImmutable::createFromFormat('Y-m-d', $date);
+            if ($parsed !== false && $parsed->format('Y-m-d') === $date) return $date;
+        }
+        return gmdate('Y-m-d');
+    }
+
+    /**
+     * Dashboard aggregation (spec §37) — everything from stored data.
+     *
+     * @param string|null $date UTC day (YYYY-MM-DD) the console is viewing.
+     *        Null (or anything that is not a real calendar date) reports today,
+     *        so existing callers keep working unchanged. The payload keeps its
+     *        historic `todayIntelligence` / `today` key names for backward
+     *        compatibility — the `date` inside them is the day actually reported.
+     */
+    public function dashboard(?string $date = null): array
     {
         $status = $this->status();
         $config = $status['configuration'];
-        $today = gmdate('Y-m-d');
-        $dayEnd = $today . 'T23:59:59+00:00';
-        $dayStart = $today . 'T00:00:00+00:00';
+        $day = self::resolveDay($date);
+        $dayEnd = $day . 'T23:59:59+00:00';
+        $dayStart = $day . 'T00:00:00+00:00';
         $upcoming = $this->repository->listMatches(['status' => 'SCHEDULED', 'from' => $dayStart, 'to' => $dayEnd], 50);
         // Live rows carry their last observed minute/score (payload.live) so
         // the console can render the live board server-side; the browser then
@@ -390,7 +413,7 @@ class SportsIntelligence
         $todayPredictions = $this->repository->listPredictions(['from' => $dayStart, 'to' => $dayEnd], 500);
         $qualified = array_values(array_filter($todayPredictions, fn($p) => ($p['decision'] ?? '') === 'PREDICTION_READY'));
         $rejected = array_values(array_filter($todayPredictions, fn($p) => ($p['decision'] ?? '') !== 'PREDICTION_READY'));
-        $daily = $this->repository->findDailyTicket($today);
+        $daily = $this->repository->findDailyTicket($day);
         $ticket = $daily['ticket_id'] ? $this->repository->findTicket((string) $daily['ticket_id']) : null;
         $confidenceValues = array_values(array_filter(array_map(fn($p) => is_numeric($p['confidence']) ? (float) $p['confidence'] : null, $todayPredictions)));
         $riskDist = ['LOW' => 0, 'MEDIUM' => 0, 'HIGH' => 0, 'REJECTED' => 0];
@@ -398,7 +421,9 @@ class SportsIntelligence
             $r = $p['risk'] ?? 'REJECTED';
             $riskDist[$r] = ($riskDist[$r] ?? 0) + 1;
         }
-        $perf = $this->performanceReport(['from' => gmdate('Y-m-d', strtotime($today . ' -29 days')) . 'T00:00:00+00:00', 'to' => $dayEnd]);
+        // Trailing 30-day window ending on the viewed day, so a past day shows
+        // the performance known at that point rather than today's.
+        $perf = $this->performanceReport(['from' => gmdate('Y-m-d', strtotime($day . ' -29 days')) . 'T00:00:00+00:00', 'to' => $dayEnd]);
         $models = $this->modelPerformance->listModels();
         $calibrations = $this->repository->listCalibrations(null, 'APPROVED', 10);
         $lastSyncs = array_slice($this->repository->listJobRuns(null, 30), 0, 8);
@@ -414,7 +439,7 @@ class SportsIntelligence
                 'readiness' => $status['readiness'], 'predictionEngine' => $status['predictionEngine'],
             ],
             'todayIntelligence' => [
-                'date' => $today,
+                'date' => $day,
                 'upcomingCount' => count($upcoming),
                 'upcoming' => $upcoming,
                 'live' => $live,

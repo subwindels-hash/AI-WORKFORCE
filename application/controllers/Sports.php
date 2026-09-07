@@ -18,7 +18,18 @@ class Sports extends App_Controller
     public function index()
     {
         $data = $this->base('Sports Intelligence', 'sports');
-        $data['dashboard'] = $this->platform->sports->dashboard();
+        $get = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        // The day the console reports (?date=YYYY-MM-DD, default today). A
+        // typo'd date must not be answered with a silently different day: the
+        // page shows the fallback day, and says that is what it did and why.
+        $date = \AIWorkforce\Football\RequestParams::date($get, 'date', gmdate('Y-m-d'), $notes);
+        if ($notes !== []) $data['notice'] = trim(implode(' ', array_filter([(string) ($data['notice'] ?? ''), ...$notes])));
+        $data['date'] = $date;
+        $data['yesterday'] = gmdate('Y-m-d', strtotime($date . ' -1 day'));
+        $data['tomorrow'] = gmdate('Y-m-d', strtotime($date . ' +1 day'));
+        $data['isToday'] = ($date === gmdate('Y-m-d'));
+        $data['dashboard'] = $this->platform->sports->dashboard($date);
         $this->render('sports/index', $data);
     }
 
@@ -131,7 +142,7 @@ class Sports extends App_Controller
             foreach ((array) ($result['providerStatuses'] ?? []) as $pid => $st) $ledger[] = $pid . ': ' . $st;
             $this->flash('error', sprintf('NO TICKET for %s — STATUS: DATA_UNAVAILABLE. All configured sports-data providers failed (%s). Matches evaluated: 0, predictions generated: 0. Fix or wait for the providers (see Data feed), then run again — the day stays retryable.',
                 $date, $ledger ? implode('; ', $ledger) : 'no detail'));
-            redirect('/sports');
+            redirect('/sports?date=' . $date);
             return;
         }
         // No record qualified — still a valid outcome (spec §3)
@@ -148,7 +159,8 @@ class Sports extends App_Controller
         } else {
             $this->flash('error', $msg);
         }
-        redirect('/sports');
+        // Land back on the day that was generated for, not on today.
+        redirect('/sports?date=' . $date);
     }
 
     /**
