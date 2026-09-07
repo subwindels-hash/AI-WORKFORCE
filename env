@@ -1,0 +1,338 @@
+# =============================================================================
+# WINDELS AI WORKFORCE — complete environment file
+# Copy/edit this as the site-root .env (cPanel File Manager or local).
+# Replace REPLACE_ME_* values before production. Keep VP_ENCRYPTION_KEY and
+# VP_AUTH_SECRET if you already have a live install.
+# Regenerated 2026-09-05: all existing values preserved; missing keys the
+# codebase reads were appended with safe (disabled/empty) defaults.
+# =============================================================================
+# ---- App --------------------------------------------------------------------
+CI_ENV=production
+VP_BASE_URL=https://windelsai.com/
+AI_WORKFORCE_BASE_URL=https://windelsai.com/
+# ---- Database (cPanel MySQL / MariaDB) --------------------------------------
+VP_DB_DRIVER=mysqli
+VP_DB_HOST=localhost
+VP_DB_PORT=3306
+VP_DB_NAME=windyohq_ai
+VP_DB_USER=windyohq_ai
+VP_DB_PASS=_B0FD!0}d)0AX~{~
+# Aliases used by tools/install.php if VP_DB_* is unset
+AI_WORKFORCE_DB_DRIVER=mysqli
+AI_WORKFORCE_DB_HOST=localhost
+AI_WORKFORCE_DB_PORT=3306
+AI_WORKFORCE_DB_NAME=windyohq_ai
+AI_WORKFORCE_DB_USER=windyohq_ai
+AI_WORKFORCE_DB_PASS=_B0FD!0}d)0AX~{~
+AI_WORKFORCE_DB_DEBUG=0
+# Multiplier Intelligence database (uses same DB; tables auto-created)
+# Schema file: application/database/multiplier_intelligence.sql
+MULTIPLIER_DB_NAME=windyohq_ai
+MULTIPLIER_DB_USER=windyohq_ai
+MULTIPLIER_DB_PASS=_B0FD!0}d)0AX~{~
+# Offline sqlite (used by the WASM/dev bridge; ignored when VP_DB_DRIVER=mysqli)
+AI_WORKFORCE_SQLITE_PATH=application/data/ai_workforce.sqlite
+# ---- Secrets (do not rotate on a live install unless you re-encrypt data) ---
+VP_ENCRYPTION_KEY=86552d819dedaf99b557bf975da287d19d748085ca0ba1f34542755004be874c
+VP_AUTH_SECRET=4c9748a7100cad5fd245669c3df9c996759e2542186f05124a0ae65034185b08
+AI_WORKFORCE_ENCRYPTION_KEY=86552d819dedaf99b557bf975da287d19d748085ca0ba1f34542755004be874c
+# Broker-token encryption. WARNING: leave blank on a live install that already
+# stores broker connections — setting these changes the encryption key and
+# previously stored tokens will no longer decrypt. Only set on a fresh install.
+AI_WORKFORCE_APP_KEY=
+AI_WORKFORCE_BROKER_TOKEN_KEY=
+# ---- Sessions / cookies -----------------------------------------------------
+AI_WORKFORCE_SESSION_DRIVER=files
+VP_SESSION_COOKIE=ai_workforce_session
+VP_SESSION_PATH=
+AI_WORKFORCE_SESSION_PATH=
+VP_COOKIE_SECURE=1
+AI_WORKFORCE_COOKIE_SECURE=1
+# ---- SEO --------------------------------------------------------------------
+VP_SITE_NAME=WINDELS AI WORKFORCE
+VP_SITE_DESCRIPTION=Evidence-first AI intelligence for trading, sports, language learning, lottery research, crash game analytics and lead discovery.
+VP_SITE_KEYWORDS=AI intelligence,trading intelligence,lead discovery,sports intelligence,language learning,EuroMillions,multiplier intelligence,aviator,crash game analytics
+VP_SITE_TITLE_SUFFIX= · AI Workforce
+VP_ROBOTS=index,follow
+VP_OG_IMAGE=https://windelsai.com/assets/images/ai_workforce-mark.png
+VP_THEME_COLOR=#07090e
+VP_ANNOUNCEMENT=
+# ---- Public AI website assistant (leave disabled for the built-in guide) ----
+AI_CHAT_ENABLED=0
+AI_CHAT_API_URL=
+AI_CHAT_API_KEY=
+AI_CHAT_MODEL=
+# =============================================================================
+# CLOUDFLARE AI AGENT PLATFORM
+# Powers: LLM routing, MCP tools, agent orchestration, workflows, sessions
+# Docs: docs/CLOUDFLARE_AGENT_PLATFORM.md
+# =============================================================================
+# Primary LLM provider (Cloudflare Workers AI)
+# Get credentials at: https://dash.cloudflare.com/ -> Workers & Pages -> AI
+LLM_DRIVER=cloudflare_workers_ai
+LLM_CLOUDFLARE_ACCOUNT_ID=REPLACE_ME_CLOUDFLARE_ACCOUNT_ID
+LLM_CLOUDFLARE_API_TOKEN=REPLACE_ME_CLOUDFLARE_API_TOKEN
+LLM_CLOUDFLARE_BASE_URL=https://api.cloudflare.com/client/v4/accounts
+LLM_CLOUDFLARE_DEFAULT_MODEL=@cf/meta/llama-3.1-8b-instruct
+LLM_CLOUDFLARE_FALLBACK_MODEL=@cf/mistral/mistral-7b-instruct-v0.2
+# Optional: OpenAI-compatible fallback (if you want a second LLM provider)
+# LLM_OPENAI_COMPAT_BASE_URL=https://api.openai.com/v1
+# LLM_OPENAI_COMPAT_API_KEY=REPLACE_ME_OPENAI_API_KEY
+# LLM_OPENAI_COMPAT_MODEL=gpt-4o-mini
+# Language AI provider (used for language learning TTS/STT)
+LANGUAGE_AI_DRIVER=cloudflare_workers_ai
+LANGUAGE_AI_ACCOUNT_ID=REPLACE_ME_CLOUDFLARE_ACCOUNT_ID
+LANGUAGE_AI_API_TOKEN=REPLACE_ME_CLOUDFLARE_API_TOKEN
+# Cloudflare AI features
+CLOUDFLARE_AGENTS_ENABLED=1
+CLOUDFLARE_MCP_TOOLS_ENABLED=1
+CLOUDFLARE_WORKFLOWS_ENABLED=1
+CLOUDFLARE_TTS_ENABLED=1
+CLOUDFLARE_STT_ENABLED=1
+CLOUDFLARE_PRONUNCIATION_ENABLED=1
+# Multiplier Intelligence + LLM Enhancement
+# When enabled, predictions blend 70% statistical / 30% LLM reasoning
+MULTIPLIER_LLM_ENHANCEMENT_ENABLED=1
+MULTIPLIER_LLM_MODEL=@cf/meta/llama-3.1-8b-instruct
+MULTIPLIER_LLM_MAX_TOKENS=400
+MULTIPLIER_LLM_TEMPERATURE=0.3
+# AI Agent observability
+CLOUDFLARE_OBSERVABILITY_ENABLED=1
+CLOUDFLARE_AUDIT_LOG_ENABLED=1
+# =============================================================================
+# SPORTS INTELLIGENCE — NATIVE PROVIDERS
+# Real-time sports data for prediction enrichment
+# Docs: docs/SPORTS_PROVIDER_INTEGRATION.md
+# =============================================================================
+WINDELS_SPORTS_ENABLED=1
+WINDELS_SPORTS_MODE=PRODUCTION
+WINDELS_SPORTS_SANDBOX=0
+WINDELS_SPORTS_HTTP_TIMEOUT=10
+# ---- api-football.com (900+ football leagues) -------------------------------
+# Sign up: https://www.api-football.com/
+# Free tier: 100 requests/day
+# Paid: $9.99/month (10k requests)
+WINDELS_API_FOOTBALL_KEY=05cde5a1f6a99d56cda0f50ba281f70d
+WINDELS_API_FOOTBALL_BASE_URL=https://v3.football.api-sports.io
+# ---- thesportsdb.com (multi-sport, no odds) ---------------------------------
+# Sign up: https://www.thesportsdb.com/
+# Free tier available (limited)
+# Patreon: $3/month for full access
+WINDELS_THESPORTSDB_KEY=REPLACE_ME_THESPORTSDB_KEY
+WINDELS_THESPORTSDB_BASE_URL=https://www.thesportsdb.com/api/v1/json
+# ---- sportmonks.com (1000+ leagues, odds add-on) ----------------------------
+# Sign up: https://www.sportmonks.com/
+# Trial available
+# Starter: $29/month
+WINDELS_SPORTMONKS_TOKEN=DvOJ59jQaozyFq7rnj0AzGodJpSwNLXQ7JfHfL6qr5oDgOG5pvoGlYulBFSr
+WINDELS_SPORTMONKS_BASE_URL=https://api.sportmonks.com/v3/football
+# Generic HTTP fallback (optional; not required if native providers configured)
+WINDELS_SPORTS_HTTP_BASE_URL=https://api.sportmonks.com/v3/football
+WINDELS_SPORTS_HTTP_TOKEN=DvOJ59jQaozyFq7rnj0AzGodJpSwNLXQ7JfHfL6qr5oDgOG5pvoGlYulBFSr
+WINDELS_SPORTS_HTTP_ID=
+# =============================================================================
+# MULTIPLIER INTELLIGENCE — CRASH GAME ANALYTICS
+# 9 specialist AI agents + provider abstraction + sports enrichment
+# Docs: docs/MULTIPLIER_INTELLIGENCE.md
+# =============================================================================
+# Enable the Multiplier Intelligence module
+MULTIPLIER_ENABLED=1
+# Active provider: simulation | aviator | aviator_demo
+MULTIPLIER_ACTIVE_PROVIDER=simulation
+# Simulation provider settings
+MULTIPLIER_SIMULATION_HOUSE_EDGE=0.02
+MULTIPLIER_SIMULATION_HISTORY_SIZE=200
+# Aviator provider settings (when using real Aviator game)
+MULTIPLIER_AVIATOR_HOUSE_EDGE=0.03
+MULTIPLIER_AVIATOR_API_KEY=REPLACE_ME_AVIATOR_API_KEY
+MULTIPLIER_AVIATOR_BASE_URL=
+MULTIPLIER_AVIATOR_ENABLED=0
+# Live crash-history feed (blank = Bustabit public feed default)
+WINDELS_CRASH_PROVIDER=
+WINDELS_CRASH_HISTORY_URL=
+WINDELS_CRASH_API_KEY=
+# Signal generation
+MULTIPLIER_SIGNAL_INTERVAL=30
+MULTIPLIER_MAX_SIGNALS_PER_HOUR=120
+# Sports enrichment (uses sports providers above)
+# Adjusts predictions based on betting market sentiment (max ±15%)
+MULTIPLIER_SPORTS_ENRICHMENT_ENABLED=1
+MULTIPLIER_SPORTS_ENRICHMENT_WEIGHT=0.15
+# Accuracy tracking
+MULTIPLIER_ACCURACY_TRACKING_ENABLED=1
+MULTIPLIER_ACCURACY_WINDOW=100
+# UI / disclaimers
+MULTIPLIER_REQUIRE_DISCLAIMER=1
+MULTIPLIER_ALLOW_ANONYMOUS=0
+# =============================================================================
+# SMTP / outbound mail (cPanel mailbox) ----------------------------------
+VP_SMTP_ENABLED=1
+VP_SMTP_HOST=server301.web-hosting.com
+VP_SMTP_PORT=465
+VP_SMTP_CRYPTO=ssl
+VP_SMTP_USER=support@windelsai.com
+VP_SMTP_PASS=Accessco29270@
+VP_SMTP_TIMEOUT=10
+VP_MAIL_FROM=support@windelsai.com
+VP_MAIL_FROM_NAME=WINDELS AI WORKFORCE
+VP_MAIL_REPLY_TO=support@windelsai.com
+VP_MAIL_TYPE=html
+# ---- Contact page -----------------------------------------------------------
+VP_CONTACT_EMAIL=support@windelsai.com
+VP_CONTACT_PHONE=+234 803 260 3032
+VP_CONTACT_ADDRESS=4C46+V7X, Tai Solarin Ave, Gwarinpa Estate
+VP_CONTACT_CITY=FCT, Abuja, Nigeria, 900108
+VP_CONTACT_LAT=9.05785
+VP_CONTACT_LON=7.49508
+VP_CONTACT_MAP_ZOOM=12
+VP_CONTACT_TO=
+# ---- Lead Discovery keys (blank = provider disabled) ------------------------
+GOOGLE_PLACES_API_KEY=
+APOLLO_API_KEY=L7JaU_0hzpZ5BLQY9wLzxQ
+APOLLO_IO_API_KEY=L7JaU_0hzpZ5BLQY9wLzxQ
+APOLLO_API_BASE=https://api.apollo.io/api/
+APOLLO_IO_API_BASE=https://api.apollo.io/api/
+# ---- Lead outreach mail (blank = messages saved as drafts, nothing sent) ----
+OUTREACH_FROM_EMAIL=
+OUTREACH_FROM_NAME=
+RESEND_API_KEY=
+POSTMARK_SERVER_TOKEN=
+# ---- Broker / market-data provider endpoints (blank = not registered) -------
+ALPACA_API_BASE=
+ALPACA_API_KEY=
+ALPACA_API_SECRET=
+ALPACA_EQUITIES_ENABLED=0
+OANDA_API_BASE=
+OANDA_API_KEY=
+OANDA_TOKEN=
+OANDA_ACCOUNT_ID=
+IBKR_ENABLED=0
+IBKR_API_BASE=
+BYBIT_API_BASE=
+OKX_API_BASE=
+COINBASE_API_BASE=
+KRAKEN_API_BASE=
+# ---- Public delayed Yahoo chart (not licensed; not used for live orders) ----
+AI_WORKFORCE_YAHOO_CHART_ENABLED=1
+AI_WORKFORCE_YAHOO_CHART_URL=https://query1.finance.yahoo.com
+# ---- Public market-data bases -----------------------------------------------
+BINANCE_API_BASE=https://api.binance.com
+FRANKFURTER_API_BASE=https://api.frankfurter.dev
+# ---- Licensed market-data adapters (disabled until a real contract exists) --
+AI_WORKFORCE_STOCK_DATA_URL=
+AI_WORKFORCE_STOCK_DATA_TOKEN=
+AI_WORKFORCE_STOCK_DATA_LICENSE=
+AI_WORKFORCE_STOCK_DATA_SYMBOLS=
+AI_WORKFORCE_STOCK_DATA_ENABLED=0
+AI_WORKFORCE_STOCK_DATA_DELAYED=1
+AI_WORKFORCE_STOCK_DATA_HEALTH_URL=
+AI_WORKFORCE_ETF_DATA_URL=
+AI_WORKFORCE_ETF_DATA_TOKEN=
+AI_WORKFORCE_ETF_DATA_LICENSE=
+AI_WORKFORCE_ETF_DATA_SYMBOLS=
+AI_WORKFORCE_ETF_DATA_ENABLED=0
+AI_WORKFORCE_ETF_DATA_DELAYED=1
+AI_WORKFORCE_ETF_DATA_HEALTH_URL=
+AI_WORKFORCE_FUTURES_DATA_URL=
+AI_WORKFORCE_FUTURES_DATA_TOKEN=
+AI_WORKFORCE_FUTURES_DATA_LICENSE=
+AI_WORKFORCE_FUTURES_DATA_SYMBOLS=
+AI_WORKFORCE_FUTURES_DATA_ENABLED=0
+AI_WORKFORCE_FUTURES_DATA_DELAYED=1
+AI_WORKFORCE_FUTURES_DATA_HEALTH_URL=
+AI_WORKFORCE_OPTIONS_DATA_URL=
+AI_WORKFORCE_OPTIONS_DATA_TOKEN=
+AI_WORKFORCE_OPTIONS_DATA_LICENSE=
+AI_WORKFORCE_OPTIONS_DATA_SYMBOLS=
+AI_WORKFORCE_OPTIONS_DATA_ENABLED=0
+AI_WORKFORCE_OPTIONS_DATA_DELAYED=1
+AI_WORKFORCE_OPTIONS_DATA_HEALTH_URL=
+# ---- Official EuroMillions feed (disabled until licensed) -------------------
+WINDELS_LOTTERY_OFFICIAL_ENABLED=0
+WINDELS_LOTTERY_OFFICIAL_URL=
+WINDELS_LOTTERY_OFFICIAL_HEALTH_URL=
+WINDELS_LOTTERY_OFFICIAL_JACKPOT_URL=
+WINDELS_LOTTERY_OFFICIAL_TOKEN=
+WINDELS_LOTTERY_OFFICIAL_LICENSE=
+WINDELS_LOTTERY_OFFICIAL_SOURCE=
+WINDELS_LOTTERY_SANDBOX=0
+# ---- MT5 bridge (Phase 4) ---------------------------------------------------
+AI_WORKFORCE_MT5_BRIDGE_URL=
+AI_WORKFORCE_MT5_BRIDGE_TOKEN=
+AI_WORKFORCE_MT5_BRIDGE_ENABLED=0
+AI_WORKFORCE_MT5_TRADING_ENABLED=0
+AI_WORKFORCE_MT5_LIVE_ALLOWED=0
+AI_WORKFORCE_SIM_BRIDGE_PORT=
+# ---- Trading connectors (all disabled; never set TRADING_ENABLED until tested)
+AI_WORKFORCE_MT4_BRIDGE_URL=
+AI_WORKFORCE_MT4_BRIDGE_TOKEN=
+AI_WORKFORCE_MT4_BRIDGE_ENABLED=0
+AI_WORKFORCE_MT4_BRIDGE_TRADING_ENABLED=0
+AI_WORKFORCE_MT4_BRIDGE_LIVE_ALLOWED=0
+AI_WORKFORCE_BINANCE_CONNECTOR_URL=
+AI_WORKFORCE_BINANCE_CONNECTOR_TOKEN=
+AI_WORKFORCE_BINANCE_CONNECTOR_ENABLED=0
+AI_WORKFORCE_BINANCE_CONNECTOR_TRADING_ENABLED=0
+AI_WORKFORCE_BINANCE_CONNECTOR_LIVE_ALLOWED=0
+AI_WORKFORCE_BYBIT_CONNECTOR_URL=
+AI_WORKFORCE_BYBIT_CONNECTOR_TOKEN=
+AI_WORKFORCE_BYBIT_CONNECTOR_ENABLED=0
+AI_WORKFORCE_BYBIT_CONNECTOR_TRADING_ENABLED=0
+AI_WORKFORCE_BYBIT_CONNECTOR_LIVE_ALLOWED=0
+AI_WORKFORCE_OKX_CONNECTOR_URL=
+AI_WORKFORCE_OKX_CONNECTOR_TOKEN=
+AI_WORKFORCE_OKX_CONNECTOR_ENABLED=0
+AI_WORKFORCE_OKX_CONNECTOR_TRADING_ENABLED=0
+AI_WORKFORCE_OKX_CONNECTOR_LIVE_ALLOWED=0
+AI_WORKFORCE_COINBASE_CONNECTOR_URL=
+AI_WORKFORCE_COINBASE_CONNECTOR_TOKEN=
+AI_WORKFORCE_COINBASE_CONNECTOR_ENABLED=0
+AI_WORKFORCE_COINBASE_CONNECTOR_TRADING_ENABLED=0
+AI_WORKFORCE_COINBASE_CONNECTOR_LIVE_ALLOWED=0
+AI_WORKFORCE_KRAKEN_CONNECTOR_URL=
+AI_WORKFORCE_KRAKEN_CONNECTOR_TOKEN=
+AI_WORKFORCE_KRAKEN_CONNECTOR_ENABLED=0
+AI_WORKFORCE_KRAKEN_CONNECTOR_TRADING_ENABLED=0
+AI_WORKFORCE_KRAKEN_CONNECTOR_LIVE_ALLOWED=0
+AI_WORKFORCE_IB_CONNECTOR_URL=
+AI_WORKFORCE_IB_CONNECTOR_TOKEN=
+AI_WORKFORCE_IB_CONNECTOR_ENABLED=0
+AI_WORKFORCE_IB_CONNECTOR_TRADING_ENABLED=0
+AI_WORKFORCE_IB_CONNECTOR_LIVE_ALLOWED=0
+AI_WORKFORCE_ALPACA_CONNECTOR_URL=
+AI_WORKFORCE_ALPACA_CONNECTOR_TOKEN=
+AI_WORKFORCE_ALPACA_CONNECTOR_ENABLED=0
+AI_WORKFORCE_ALPACA_CONNECTOR_TRADING_ENABLED=0
+AI_WORKFORCE_ALPACA_CONNECTOR_LIVE_ALLOWED=0
+AI_WORKFORCE_OANDA_CONNECTOR_URL=
+AI_WORKFORCE_OANDA_CONNECTOR_TOKEN=
+AI_WORKFORCE_OANDA_CONNECTOR_ENABLED=0
+AI_WORKFORCE_OANDA_CONNECTOR_TRADING_ENABLED=0
+AI_WORKFORCE_OANDA_CONNECTOR_LIVE_ALLOWED=0
+# ---- Safety / ops -----------------------------------------------------------
+AI_WORKFORCE_DISABLE_REAL_PROVIDERS=0
+AI_WORKFORCE_ALLOW_SYNTHETIC_PAPER=0
+AI_WORKFORCE_ALLOW_HTTP_TOOLS=0
+# Demo login hint (dev previews only — NEVER set on production: the values
+# render on the sign-in page)
+AI_WORKFORCE_DEMO_ADMIN_EMAIL=
+AI_WORKFORCE_DEMO_ADMIN_PASSWORD=
+AI_WORKFORCE_BOOTSTRAP_ADMIN_EMAIL=admin@windelsai.com
+AI_WORKFORCE_BOOTSTRAP_ADMIN_PASSWORD=Accessco29270@
+AI_WORKFORCE_BOOTSTRAP_ADMIN_NAME=Bright
+AI_WORKFORCE_TEST_FILTER=
+# ---- Standalone Lead Discovery (Next.js + API; not required for cPanel PHP) --
+NEXT_PUBLIC_SITE_NAME=Scout Lead Intelligence
+NEXT_PUBLIC_SITE_TITLE=Scout Lead Intelligence
+NEXT_PUBLIC_SITE_DESCRIPTION=Discover, organize, and prioritize real business leads.
+NEXT_PUBLIC_SITE_URL=https://windelsai.com/
+NEXT_PUBLIC_SITE_KEYWORDS=lead discovery,sales intelligence,business leads,lead pipeline
+NEXT_PUBLIC_SITE_OG_IMAGE=/images/scout-logo.png
+NEXT_PUBLIC_ROBOTS=index,follow
+DATABASE_URL=postgres://lead_user:REPLACE_ME_POSTGRES_PASSWORD@localhost:5432/lead_discovery
+REDIS_URL=redis://localhost:6379
+LEAD_JWT_SECRET=ed2f4c36fd67a74e073c9cba46d3f8c8e5370a7286f66bec45a1299c11c88eb7
+CORS_ORIGINS=http://localhost:3000
+HOST=0.0.0.0
+PORT=3001
+LEAD_API_INTERNAL_URL=http://127.0.0.1:3001
