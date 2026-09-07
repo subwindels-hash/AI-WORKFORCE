@@ -40,45 +40,32 @@ class Admin extends App_Controller
             $data['signup'] = \AIWorkforce\SignupProtection::fromPortal($this->portal)->status();
             $data['signup']['registrationEnabled'] = $this->portal->setting('registration_enabled', '1') === '1';
         } catch (\Throwable $e) { $data['signup'] = null; }
-        // Initialize Cloudflare agent runtime if configured
-        $cloudflareRuntime = null;
+        // Get agent platform status (unified platform)
+        $platformStatus = [];
         try {
-            $llmConfig = \AIWorkforce\ApiProviders::activeConfig('llm');
-            if ($llmConfig && ($llmConfig['driver'] ?? '') === 'cloudflare_workers_ai') {
-                $cloudflareRuntime = new \AIWorkforce\CloudflareAgentRuntime([
-                    'account_id' => $llmConfig['account_id'] ?? '',
-                    'token' => $llmConfig['secrets']['token'] ?? '',
-                    'gateway' => $llmConfig['extra']['gateway'] ?? null,
-                ]);
-            }
-        } catch (\Throwable $e) {
-            // Cloudflare not configured
-        }
-
-        // Get Cloudflare platform status (new unified platform)
-        $cfPlatformStatus = [];
-        try {
-            $cfPlatformStatus = $this->platform->cloudflare->status();
+            $platformStatus = $this->platform->cloudflare->status();
         } catch (\Throwable $e) {
             // Platform not yet initialized
         }
+
+        $llmStatus = \AIWorkforce\ApiProviders::publicStatus('llm');
         
         $data['agentRuntime'] = [
-            'cloudflareConfigured' => \AIWorkforce\ApiProviders::publicStatus('llm')['configured'],
-            'cloudflareRuntime' => $cloudflareRuntime ? $cloudflareRuntime->status() : null,
-            'platformStatus' => $cfPlatformStatus,
-            'registeredAgents' => $cloudflareRuntime ? array_keys($cloudflareRuntime->agents()) : array_keys($this->platform->agents->agents()),
-            'registeredTools' => $cloudflareRuntime ? array_keys($cloudflareRuntime->tools()) : [],
-            'toolPolicy' => 'Approval required for broker.submitTrade and lottery.purchaseTicket',
+            'openaiConfigured' => $llmStatus['configured'],
+            'llmDriver' => $llmStatus['driver'],
+            'platformStatus' => $platformStatus,
+            'registeredAgents' => array_keys($this->platform->agents->agents()),
             'availableServices' => [
-                'text_generation' => 'Llama 3.1 (8B/70B), Mistral, Gemma, Phi-2 via Workers AI',
-                'embeddings' => 'BGE Base/Large for semantic search and RAG',
-                'image_generation' => 'Stable Diffusion XL, Dreamshaper',
-                'speech_recognition' => 'Whisper and Whisper Large v3',
-                'translation' => 'M2M100 — 100+ languages',
-                'summarization' => 'BART text summarization',
-                'classification' => 'Sentiment and zero-shot classification',
-                'object_detection' => 'DETR ResNet-50 for computer vision',
+                'text_generation' => 'GPT models via OpenAI-compatible API',
+                'structured_output' => 'JSON-schema and JSON-object modes',
+                'embeddings' => 'text-embedding via OpenAI-compatible API',
+                'image_generation' => 'DALL·E / gpt-image via OpenAI API',
+                'speech_recognition' => 'Whisper via OpenAI API',
+                'text_to_speech' => 'TTS via OpenAI API',
+                'moderation' => 'omni-moderation via OpenAI API',
+                'translation' => 'OpenAI-compatible chat',
+                'summarization' => 'OpenAI-compatible chat',
+                'classification' => 'OpenAI-compatible chat',
             ],
             'platformComponents' => [
                 'Model Router' => 'Multi-provider failover with rate limiting and cost tracking',

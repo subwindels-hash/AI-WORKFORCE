@@ -4,7 +4,7 @@ This project keeps the existing PHP application as the business/control plane:
 users, authentication, RBAC, billing, application data, broker authorization,
 approvals and audit logs remain authoritative here. Cloudflare Agents is an
 optional intelligence/runtime plane for durable agent sessions, WebSockets,
-scheduling, Workflows, MCP, Browser, Sandbox, Workers AI and AI Gateway.
+scheduling, Workflows, MCP, Browser, Sandbox, and model routing.
 
 ## Current boundary
 
@@ -42,6 +42,6 @@ return an approval-required response. The existing backend must approve and
 execute those actions. Agent state must contain session/task state only, not the
 application database or plaintext provider secrets.
 
-Cloudflare credentials are configured through the existing Super Admin → API
-provider dashboard. Cloudflare Workers AI can be selected for LLM, language AI,
-and translation, with encrypted tokens and primary/fallback roles.
+AI credentials are configured through the existing Super Admin → API provider
+dashboard. An OpenAI-compatible provider can be selected for LLM, language AI,
+STT, TTS and translation, with encrypted tokens and primary/fallback roles.

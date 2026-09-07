@@ -5,7 +5,6 @@ namespace AIWorkforce\Providers;
  * Text-to-Speech Provider
  * 
  * Provider-agnostic TTS abstraction supporting:
- * - Cloudflare Workers AI
  * - OpenAI TTS API
  * - Browser Speech Synthesis (client-side)
  * - Other TTS providers
@@ -17,7 +16,7 @@ class TextToSpeechProvider
     
     public function __construct(array $config)
     {
-        $this->driver = $config['driver'] ?? 'cloudflare_workers_ai';
+        $this->driver = $config['driver'] ?? 'openai_compatible';
         $this->config = $config;
     }
     
@@ -38,25 +37,9 @@ class TextToSpeechProvider
     {
         $text = self::speakableText($text);
         return match($this->driver) {
-            'cloudflare_workers_ai' => $this->synthesizeWithCloudflare($text, $voice, $language),
             'openai_compatible' => $this->synthesizeWithOpenAI($text, $voice, $language),
             default => ['error' => 'Unsupported TTS driver: ' . $this->driver]
         };
-    }
-    
-    private function synthesizeWithCloudflare(string $text, ?string $voice, ?string $language): array
-    {
-        // Note: Cloudflare Workers AI doesn't have a native TTS model yet
-        // This would use an external TTS service or a custom Worker
-        // For now, return a placeholder indicating browser TTS should be used
-        
-        return [
-            'status' => 'USE_BROWSER_TTS',
-            'message' => 'Cloudflare Workers AI does not yet support TTS. Use browser SpeechSynthesis API.',
-            'text' => $text,
-            'voice' => $voice,
-            'language' => $language,
-        ];
     }
     
     private function synthesizeWithOpenAI(string $text, ?string $voice, ?string $language): array

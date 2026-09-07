@@ -1,12 +1,13 @@
 <?php
 defined('BASEPATH') or exit('No direct script access allowed');
-/** Controlled application gateway to the Cloudflare agent runtime. */
+/** Controlled application gateway to the AI agent platform. */
 class Api_agents extends Api_controller
 {
     public function status()
     {
         if (!$this->requirePermission('admin.analytics.view', false)) return;
         $agents = $this->platform->agents->agents();
+        $llm = \AIWorkforce\ApiProviders::publicStatus('llm');
         $agentList = [];
         foreach ($agents as $name => $agent) {
             $agentList[$name] = [
@@ -19,51 +20,11 @@ class Api_agents extends Api_controller
         }
         $this->json([
             'agents' => $agentList,
-            'cloudflare' => \AIWorkforce\ApiProviders::publicStatus('llm'),
-            'provider' => 'cloudflare_workers_ai',
+            'llm' => $llm,
+            'provider' => $llm['driver'],
             'models' => class_exists(\AIWorkforce\Agents\EnhancedCloudflareAgent::class)
                 ? \AIWorkforce\Agents\EnhancedCloudflareAgent::allRoleModels()
                 : [],
-        ]);
-    }
-
-    public function cloudflare_status()
-    {
-        if (!$this->requirePermission('admin.analytics.view', false)) return;
-        $cfg = \AIWorkforce\ApiProviders::resolve('llm');
-        if (!is_array($cfg) || ($cfg['driver'] ?? '') !== 'cloudflare_workers_ai') {
-            $this->json(['configured' => false, 'driver' => $cfg['driver'] ?? 'none']);
-            return;
-        }
-
-        // Test Cloudflare connectivity
-        $provider = new \AIWorkforce\Providers\CloudflareProvider([
-            'account_id' => $cfg['account_id'] ?? '',
-            'token' => $cfg['secrets']['token'] ?? '',
-            'gateway' => $cfg['extra']['gateway'] ?? null,
-            'base_url' => $cfg['base_url'] ?? '',
-            'timeout' => 15,
-        ]);
-
-        $status = $provider->status();
-        $testResult = null;
-        if ($provider->isConfigured()) {
-            $start = microtime(true);
-            $test = $provider->generateText('Hello, respond with one word.', ['max_tokens' => 10]);
-            $latency = round((microtime(true) - $start) * 1000);
-            $testResult = [
-                'ok' => $test && !isset($test['error']),
-                'latencyMs' => $latency,
-                'response' => isset($test['error']) ? null : mb_substr($test['result']['response'] ?? $test['response'] ?? '', 0, 100),
-                'error' => $test['error'] ?? null,
-            ];
-        }
-
-        $this->json([
-            'configured' => true,
-            'provider' => $status,
-            'test' => $testResult,
-            'availableModels' => $provider->getAvailableModels(),
         ]);
     }
 

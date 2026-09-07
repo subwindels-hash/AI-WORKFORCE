@@ -16,8 +16,8 @@ The Multiplier Intelligence module is fully integrated with the Cloudflare AI Ag
 │  │ AgentOrchestrator│  │  McpToolRegistry │  │     ModelRouter         │  │
 │  │ (Agent dispatch) │  │  (Tool gateway)  │  │  (LLM model gateway)   │  │
 │  │                  │  │                  │  │                         │  │
-│  │ • MarketAnalyst  │  │ • crypto.*       │  │ • Cloudflare Workers AI │  │
-│  │ • RiskManager    │  │ • forex.*        │  │ • OpenAI Compatible     │  │
+│  │ • MarketAnalyst  │  │ • crypto.*       │  │ • OpenAI Compatible     │  │
+│  │ • RiskManager    │  │ • forex.*        │  │ • Failover & retries    │  │
 │  │ • SignalGen      │  │ • sports.*       │  │ • Multi-model failover  │  │
 │  │ • PatternDetect  │  │ • lottery.*      │  │ • Rate limiting         │  │
 │  │ • DataAggregator │  │ • broker.*       │  │ • Usage tracking        │  │
@@ -98,7 +98,7 @@ All 6 multiplier tools are now available in `McpToolRegistry` under the `multipl
 | `multiplier.analyzeRound` | Run specific agent analysis |
 
 **Who can use these tools:**
-- ANY Cloudflare agent can call these tools
+- ANY platform agent can call these tools
 - LLM agents can use them for function calling
 - Workflow engine can orchestrate them
 - Cross-module collaboration (e.g., sports agent + multiplier agent)
@@ -212,7 +212,7 @@ $signal = $integration->generateEnhancedSignal();
 // Result includes:
 // - Statistical prediction from 9 agents
 // - Sports enrichment (if available)
-// - LLM enhancement (if Cloudflare configured)
+// - LLM enhancement (if an AI provider is configured)
 ```
 
 ### Example 2: Dispatch Multiplier Agent via CommunicationBus
@@ -290,8 +290,8 @@ $analysis = $platform->modelRouter()->complete([
                            ▼
 ┌──────────────┐     ┌──────────────────────────────┐     ┌─────────────────┐
 │ Simulation   │     │ MultiplierIntelligenceEngine │     │  ModelRouter    │
-│ Provider     │────▶│                              │────▶│  (Cloudflare    │
-│              │     │ 9 Specialist Agents          │     │   Workers AI)   │
+│ Provider     │────▶│                              │────▶│  (OpenAI        │
+│              │     │ 9 Specialist Agents          │     │  Compatible)    │
 │ • Rounds     │     │ • Historical                 │     │                 │
 │ • Multipliers│     │ • Pattern                    │     │ • LLM reasoning │
 │ • History    │     │ • Probability                │     │ • Enhancement   │

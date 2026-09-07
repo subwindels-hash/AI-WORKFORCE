@@ -326,7 +326,6 @@ $route['api/lottery/sync'] = 'api_lottery/sync';
 $route['api/system/features'] = 'api_system/features';
 $route['api/agents/status'] = 'api_agents/status';
 $route['api/agents/dispatch'] = 'api_agents/dispatch';
-$route['api/agents/cloudflare_status'] = 'api_agents/cloudflare_status';
 
 // Agent Platform API
 $route['api/agent-platform/execute'] = 'api_agent_platform/execute';

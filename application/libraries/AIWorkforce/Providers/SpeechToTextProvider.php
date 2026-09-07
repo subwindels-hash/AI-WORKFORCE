@@ -5,7 +5,6 @@ namespace AIWorkforce\Providers;
  * Speech-to-Text Provider
  * 
  * Provider-agnostic STT abstraction supporting:
- * - Cloudflare Workers AI (Whisper)
  * - OpenAI Whisper API
  * - Browser Web Speech API (client-side)
  * - Other STT providers
@@ -17,7 +16,7 @@ class SpeechToTextProvider
     
     public function __construct(array $config)
     {
-        $this->driver = $config['driver'] ?? 'cloudflare_workers_ai';
+        $this->driver = $config['driver'] ?? 'openai_compatible';
         $this->config = $config;
     }
     
@@ -31,28 +30,9 @@ class SpeechToTextProvider
     public function transcribe(string $audioData, ?string $language = null): array
     {
         return match($this->driver) {
-            'cloudflare_workers_ai' => $this->transcribeWithCloudflare($audioData, $language),
             'openai_compatible' => $this->transcribeWithOpenAI($audioData, $language),
             default => ['error' => 'Unsupported STT driver: ' . $this->driver]
         };
-    }
-    
-    private function transcribeWithCloudflare(string $audioData, ?string $language): array
-    {
-        $provider = new CloudflareProvider($this->config);
-        $result = $provider->transcribeAudio($audioData, '@cf/openai/whisper');
-        
-        if (isset($result['error'])) {
-            return $result;
-        }
-        
-        return [
-            'text' => $result['result']['text'] ?? $result['text'] ?? '',
-            'language' => $language ?? 'auto',
-            'confidence' => $result['result']['confidence'] ?? 1.0,
-            'provider' => 'cloudflare_workers_ai',
-            'model' => '@cf/openai/whisper',
-        ];
     }
     
     private function transcribeWithOpenAI(string $audioData, ?string $language): array
@@ -109,7 +89,6 @@ class SpeechToTextProvider
     public function isConfigured(): bool
     {
         return match($this->driver) {
-            'cloudflare_workers_ai' => !empty($this->config['account_id']) && !empty($this->config['token']),
             'openai_compatible' => !empty($this->config['secrets']['api_key']),
             default => false
         };
