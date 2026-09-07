@@ -59,6 +59,7 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **Python MT5 bridge service** (`python-services/mt5-bridge`, FastAPI + MetaTrader5, demo-only default) | **IMPLEMENTED** (contract unit-tested; requires deployment on a Windows MT5 host) |
 | **Portfolio Risk Monitor**: HIGH_EXPOSURE, EXCESSIVE_LEVERAGE, CORRELATED_POSITIONS, MAX_DRAWDOWN_WARNING, DAILY_LOSS_WARNING, BROKER_DISCONNECTED | **TESTED** |
 | **Automatic Kill Switch** (no manual switch exists): news, daily loss (percentage + fixed), max drawdown, connectivity, stale data, order failures, spread and slippage protection; 7 automatic states with self-recovery; scoped to order-bound broker/trading surfaces — market data and non-trading modules never gated; audit trail, ANALYSIS_ONLY default | **TESTED** |
+| **MT4/MT5 Expert Advisor protection (§10)** (`mt4-mt5/`): Trade Manager, Equity Protector, News Filter and Automatic Risk Manager EAs for MT5 and MT4, built on a shared library that enforces the same 14 conditions inside the terminal and gates every order; heartbeats and decisions exchanged through the MT5 bridge, platform policy authoritative, stricter-of-the-two wins | **IMPLEMENTED** (platform side TESTED via `tests/cases/119`; MQL sources not yet compiled against a live terminal) |
 | **RBAC on the trading API**: trading.view / trading.control / trading.execute (+ CSRF); approval decisions record the deciding operator | **TESTED** |
 | **Notifications**: risk alerts, approval requests, execution outcomes, broker disconnects, automatic kill-switch transitions — deduped until acknowledged | **TESTED** |
 | **Admin-sent notifications** (`/admin/notifications` → send panel): one member or every active account, per-recipient read state, audited as NOTIFICATION_SENT | **TESTED** |
@@ -181,6 +182,8 @@ application/
   database/                     schema.mysql.sql (canonical) + schema.sqlite.sql (dev)
 python-services/mt5-bridge/     Phase 4 bridge: FastAPI + MetaTrader5 service,
                                 contract-tested with a simulated terminal
+mt4-mt5/                        MT5 + MT4 Expert Advisors and the shared
+                                protection library (Automatic Kill Switch §10)
   helpers/ai_workforce_helper.php      view-safe platform-state access
 tests/                          framework.php + cases/*.php (63 case files, 351 tests, incl. full UI audit `65-ui-audit.php`)
 tools/install.php               schema installer (mysqli or sqlite by driver)
@@ -276,6 +279,7 @@ approved symbols) → 11 human approval (HUMAN_APPROVAL mode) → 12 place order
   `* * * * * php /path/index.php tools cron`
   Executes the portfolio risk scan (with broker transition detection), the
   **Automatic Kill Switch** scan (news, daily loss, drawdown, connectivity,
+  Expert Advisor heartbeats through the MT5 bridge,
   data freshness, order failures, spread, slippage, recovery), expires
   undecided proposals after `proposalExpiryMinutes` (default 240, spec §5
   invalidation) and audits a `CRON_RUN` summary. The protection scan also runs
@@ -586,7 +590,7 @@ rather than reporting a mysterious all-synthetic registry.
 `/api/auth/{login,me,logout}` · `/api/notifications[/read-all|/:id/read]`
 `/api/system/{status,features,protection,protection/policy}` · `/api/events` · `/api/trading/{mode,synthetic-paper}`
 `/api/trading/limits[/update]` · `/api/trading/propose` · `/api/trading/execute` · `/api/trading/:id/{approve,route}`
-`/api/execution/{preflight,proposals,executions}` · `/api/portfolio/risk-scan` · `/api/brokers` · `/api/brokers/mt5/{account,quote}`
+`/api/execution/{preflight,proposals,executions}` · `/api/portfolio/risk-scan` · `/api/brokers` · `/api/brokers/mt5/{account,quote}` · `/api/system/protection/ea[/{eaId},/limits]`
 `/api/market-data/{candles,quote,providers,live,refresh}` · `/api/analysis/{run,history}` · `/api/agents/consensus`
 `/api/strategies[/:id[/status]]` · `/api/backtesting/{run,results[/:id]}`
 `/api/accounts[/create|/:id|/:id/order|/:id/positions|/:id/positions/:pid/close|/:id/tick|/:id/deploy|/:id/deployments]`
@@ -603,6 +607,7 @@ rather than reporting a mysterious all-synthetic registry.
 | Every trade auditable | `audit_logs` table + UI trail; every order/position/journal row is linked |
 | Risk Engine veto power | `RiskEngine::evaluate()` sits in every order path |
 | Automatic Kill Switch blocks orders | No manual switch exists: `TradingProtection\AutomaticProtection` derives the state every minute from news, daily loss, drawdown, connectivity, data freshness, order failures, spread and slippage, and drives the gate itself. Checked first in `submitOrder()`, in the supervisor pipeline (step 1) and re-verified at routing time. **Scoped:** it gates the execution supervisor, broker orders, paper orders and automation envelopes only — market data keeps streaming and non-trading modules are never gated ([`docs/KILL_SWITCH_SCOPE.md`](docs/KILL_SWITCH_SCOPE.md)) |
+| Expert Advisors cannot bypass the kill switch | MT4/MT5 EAs enforce the same policy locally (14 conditions evaluated on every tick, `AIWF_AllowNewTrades()` gates every order) and additionally obey the decision the platform publishes through the bridge; the stricter of the two wins, and an EA that stops reporting is paused rather than trusted ([`mt4-mt5/README.md`](mt4-mt5/README.md)) |
 
 ## Unfinished-module scaffolds
 

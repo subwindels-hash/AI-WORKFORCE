@@ -181,6 +181,81 @@ $chip = ai_workforce_protection_chip($protection);
   <button class="btn primary" type="submit">Save policy</button>
 </form>
 
+<div class="panel" style="margin-bottom:14px">
+  <h3>10 — MT4 / MT5 Expert Advisors</h3>
+  <div class="body" style="padding-top:12px">
+    <p class="dim" style="margin:0 0 10px">Expert Advisors install from <span class="mono">mt4-mt5/</span> and report to the platform through the MT5 bridge. Each deployment is evaluated against the policy above and receives a decision it must obey. An EA enforces the same rules locally, so protection keeps working even if the platform is unreachable.</p>
+
+    <?php if (empty($eaBridge['configured'])): ?>
+      <div class="notice warnbox">No EA bridge configured. Set <span class="mono">AI_WORKFORCE_MT5_BRIDGE_URL</span> and <span class="mono">AI_WORKFORCE_MT5_BRIDGE_TOKEN</span> so the platform can pull heartbeats and publish decisions; without them the EAs still enforce the configured limits locally inside the terminal.</div>
+    <?php else: ?>
+      <form method="post" action="/admin/protection/ea/sync" style="margin-bottom:12px">
+        <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+        <button class="btn small" type="submit">Sync Expert Advisors now</button>
+      </form>
+    <?php endif; ?>
+
+    <?php if (empty($ea['deployments'])): ?>
+      <p class="dim" style="margin:0">No Expert Advisor has reported yet. Deployments appear here automatically on their first heartbeat (or on the first sync above).</p>
+    <?php else: ?>
+      <table class="table">
+        <thead>
+          <tr><th>Expert Advisor</th><th>Terminal</th><th>Account</th><th>State</th><th>Reason</th><th>Last heartbeat</th><th>New trades</th></tr>
+        </thead>
+        <tbody>
+          <?php foreach ($ea['deployments'] as $d): $c = ai_workforce_protection_chip(['state' => $d['state']]); ?>
+            <tr>
+              <td><b><?= e((string) $d['name']) ?></b><br><span class="dim mono" style="font-size:12px"><?= e((string) $d['id']) ?></span></td>
+              <td><?= e((string) $d['terminal']) ?><?= $d['symbol'] !== '' ? ' · ' . e((string) $d['symbol']) : '' ?></td>
+              <td class="mono"><?= e((string) ($d['account'] !== '' ? $d['account'] : '—')) ?><?= $d['broker'] !== '' ? '<br><span class="dim">' . e((string) $d['broker']) . '</span>' : '' ?></td>
+              <td><span class="statuspill <?= $c['tone'] === 'ok' ? '' : 'warn' ?>"><i class="pill-dot"></i><?= e($c['icon'] . ' ' . str_replace('AUTOMATIC_', '', (string) $d['state'])) ?></span></td>
+              <td style="max-width:320px"><?= e((string) $d['reason']) ?></td>
+              <td class="mono" style="font-size:12px"><?= e((string) ($d['heartbeatAt'] ?? 'never')) ?><?= $d['heartbeatAgeSeconds'] !== null ? '<br><span class="dim">' . (int) $d['heartbeatAgeSeconds'] . 's ago</span>' : '' ?></td>
+              <td><?= $d['allowNewTrades'] ? 'Allowed' : '<b>BLOCKED</b>' ?></td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+      <p class="dim" style="margin:10px 0 0"><?= (int) ($ea['blocked'] ?? 0) ?> of <?= (int) ($ea['total'] ?? 0) ?> deployment(s) blocked. Last evaluated: <?= e((string) ($ea['evaluatedAt'] ?? 'never')) ?>.</p>
+    <?php endif; ?>
+  </div>
+</div>
+
+<?php foreach (($ea['deployments'] ?? []) as $d): ?>
+  <details class="panel" style="margin-bottom:14px">
+    <summary style="cursor:pointer"><h3 style="display:inline-block">Per-EA limits — <?= e((string) $d['name']) ?></h3></summary>
+    <div class="body" style="padding-top:12px">
+      <p class="dim" style="margin:0 0 10px">Terminal-side limits only. The risk policy above (news, daily loss, drawdown, spread, slippage) is shared — an EA cannot be given more room than the platform allows.</p>
+      <form method="post" action="/admin/protection/ea/limits">
+        <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+        <input type="hidden" name="ea_id" value="<?= e((string) $d['id']) ?>">
+        <div class="grid two">
+          <label class="choice"><input type="checkbox" name="ea_enabled" value="1" <?= !empty($d['limits']['enabled']) ? 'checked' : '' ?>> Protection enabled for this EA</label>
+          <label>Heartbeat timeout (seconds)
+            <input name="ea_heartbeat_timeout" type="number" min="10" max="3600" value="<?= e((string) ($d['limits']['heartbeatTimeoutSeconds'] ?? 120)) ?>">
+          </label>
+          <label>Margin level floor (%)
+            <input name="ea_margin_floor" type="number" min="0" max="100000" step="0.1" value="<?= e((string) ($d['limits']['marginLevelFloorPercent'] ?? 150)) ?>">
+          </label>
+          <label>Max tick age (seconds)
+            <input name="ea_tick_age" type="number" min="1" max="3600" value="<?= e((string) ($d['limits']['maxTickAgeSeconds'] ?? 60)) ?>">
+          </label>
+          <label>Abnormal price move (%)
+            <input name="ea_price_move" type="number" min="0" max="1000" step="0.1" value="<?= e((string) ($d['limits']['abnormalPriceMovePercent'] ?? 5)) ?>">
+          </label>
+          <label class="choice"><input type="checkbox" name="ea_require_decision" value="1" <?= !empty($d['limits']['requirePlatformDecision']) ? 'checked' : '' ?>> Require a fresh platform decision (block when unreachable)</label>
+        </div>
+        <button class="btn small" type="submit" style="margin-top:10px">Save limits for <?= e((string) $d['name']) ?></button>
+      </form>
+      <form method="post" action="/admin/protection/ea/remove" style="margin-top:10px" onsubmit="return confirm('Stop protecting this Expert Advisor deployment?');">
+        <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+        <input type="hidden" name="ea_id" value="<?= e((string) $d['id']) ?>">
+        <button class="btn small danger" type="submit">Remove deployment</button>
+      </form>
+    </div>
+  </details>
+<?php endforeach; ?>
+
 <form method="post" action="/admin/protection/reset-peak" style="margin-top:14px" onsubmit="return confirm('Reset the drawdown high-water mark to current equity?');">
   <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
   <button class="btn small" type="submit">Reset drawdown high-water mark</button>

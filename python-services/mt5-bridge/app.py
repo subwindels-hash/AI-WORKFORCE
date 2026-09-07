@@ -26,7 +26,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 BRIDGE_VERSION = "1.0.0"
@@ -356,3 +356,154 @@ def close_position(ticket: int, authorization: str = Header(default="")) -> dict
     if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
         return {"ok": False, "error": f"close failed: {getattr(result, 'retcode', 'none')} {getattr(result, 'comment', '')}"}
     return {"ok": True, "data": {"ticket": ticket, "price": float(result.price), "profit": float(position.profit)}}
+
+# ─── Expert Advisor protection (AI Workforce Automatic Kill Switch, §10) ──────
+#
+# Expert Advisors run inside MT4/MT5 and cannot call the PHP platform directly
+# (the terminal host sits behind the operator's firewall). They talk to THIS
+# service instead, and the platform polls it:
+#
+#   EA  ──POST /v1/ea/heartbeat────►  bridge  ──GET /v1/ea/heartbeats──► platform
+#   EA  ──GET  /v1/ea/decision/{id}─►  bridge  ◄──POST /v1/ea/decisions── platform
+#
+# Heartbeats are the EA's report of what it sees (equity, drawdown, spread,
+# connection, failures…). Decisions are the platform's answer: the state the EA
+# must obey and whether it may open new trades.
+#
+# Storage is in-memory and deliberately small: one latest heartbeat and one
+# latest decision per EA, capped at EA_MAX_TRACKED deployments. Nothing here is
+# persisted — a bridge restart simply means the EAs re-report on their next tick.
+
+EA_MAX_TRACKED = int(os.environ.get("MT5_EA_MAX_TRACKED", "200"))
+_EA_HEARTBEATS: dict[str, dict[str, Any]] = {}
+_EA_DECISIONS: dict[str, dict[str, Any]] = {}
+
+
+class EaHeartbeat(BaseModel):
+    """What an EA reports. Unknown keys are ignored; the platform validates."""
+
+    eaId: str = Field(..., min_length=1, max_length=128)
+    name: str = ""
+    terminal: str = "MT5"
+    account: str = ""
+    broker: str = ""
+    symbol: str = ""
+    magic: int = 0
+    version: str = ""
+    at: Optional[str] = None
+    atTs: Optional[int] = None
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    connection: dict[str, Any] = Field(default_factory=dict)
+    news: dict[str, Any] = Field(default_factory=dict)
+    actions: dict[str, Any] = Field(default_factory=dict)
+
+
+class EaDecisionIn(BaseModel):
+    """One decision as published by the platform (EaProtection::publish())."""
+
+    eaId: str = Field(..., min_length=1, max_length=128)
+    state: str
+    reason: str = ""
+    allowNewTrades: bool = False
+    closePositions: bool = False
+    cancelPendingOrders: bool = False
+
+
+class EaDecisionsIn(BaseModel):
+    decisions: list[EaDecisionIn] = Field(default_factory=list)
+
+
+def decision_to_text(decision: dict[str, Any]) -> str:
+    """Flat KEY=VALUE lines — MQL has no JSON parser, so the EA reads text.
+
+    Keys are stable and documented in mt4-mt5/README.md ("Decision format").
+    """
+    reason = " ".join(str(decision.get("reason", "")).split())
+    return (
+        f"eaId={decision.get('eaId', '')}\n"
+        f"state={decision.get('state', 'AUTOMATIC_PAUSED')}\n"
+        f"code={decision.get('code', '') or ''}\n"
+        f"reason={reason}\n"
+        f"allowNewTrades={'1' if decision.get('allowNewTrades') else '0'}\n"
+        f"closePositions={'1' if decision.get('closePositions') else '0'}\n"
+        f"cancelPendingOrders={'1' if decision.get('cancelPendingOrders') else '0'}\n"
+        f"evaluatedAt={decision.get('evaluatedAt', '') or ''}\n"
+    )
+
+
+@app.get("/v1/ea/health")
+def ea_health(authorization: str = Header(default="")) -> dict:
+    require_token(authorization)
+    return {
+        "ok": True,
+        "heartbeats": len(_EA_HEARTBEATS),
+        "decisions": len(_EA_DECISIONS),
+        "maxTracked": EA_MAX_TRACKED,
+    }
+
+
+@app.post("/v1/ea/heartbeat")
+def ea_heartbeat(heartbeat: EaHeartbeat, authorization: str = Header(default="")) -> dict:
+    """An EA posts what it sees. Called from MQL with WebRequest (see mt4-mt5/)."""
+    require_token(authorization)
+    ea_id = heartbeat.eaId.strip()
+    if not ea_id:
+        raise HTTPException(status_code=400, detail="eaId is required")
+    if ea_id not in _EA_HEARTBEATS and len(_EA_HEARTBEATS) >= EA_MAX_TRACKED:
+        raise HTTPException(status_code=507, detail="too many tracked Expert Advisors")
+
+    payload = heartbeat.model_dump()
+    payload["receivedAt"] = datetime.now(timezone.utc).isoformat()
+    _EA_HEARTBEATS[ea_id] = payload
+    return {"ok": True, "eaId": ea_id, "receivedAt": payload["receivedAt"]}
+
+
+@app.get("/v1/ea/heartbeats")
+def ea_heartbeats(authorization: str = Header(default="")) -> dict:
+    """The platform pulls the latest heartbeat of every reporting EA.
+
+    The heartbeats are kept (not drained): the evaluation is idempotent and a
+    lost poll must not lose the EA's last known state.
+    """
+    require_token(authorization)
+    return {
+        "ok": True,
+        "count": len(_EA_HEARTBEATS),
+        "heartbeats": list(_EA_HEARTBEATS.values()),
+    }
+
+
+@app.post("/v1/ea/decisions")
+def ea_publish_decisions(body: EaDecisionsIn, authorization: str = Header(default="")) -> dict:
+    """The platform publishes one decision per deployment."""
+    require_token(authorization)
+    for decision in body.decisions:
+        payload = decision.model_dump()
+        payload["publishedAt"] = datetime.now(timezone.utc).isoformat()
+        _EA_DECISIONS[decision.eaId] = payload
+    return {"ok": True, "stored": len(body.decisions)}
+
+
+@app.get("/v1/ea/decisions")
+def ea_list_decisions(authorization: str = Header(default="")) -> dict:
+    """Every published decision, as JSON (operator/API use)."""
+    require_token(authorization)
+    return {"ok": True, "count": len(_EA_DECISIONS), "decisions": list(_EA_DECISIONS.values())}
+
+
+@app.get("/v1/ea/decision/{ea_id}")
+def ea_decision(ea_id: str, authorization: str = Header(default="")) -> dict:
+    """The decision for one EA, as flat text the EA can parse without JSON."""
+    require_token(authorization)
+    if ea_id not in _EA_DECISIONS:
+        raise HTTPException(status_code=404, detail=f"no decision published for {ea_id}")
+    return {"ok": True, "eaId": ea_id, "text": decision_to_text(_EA_DECISIONS[ea_id])}
+
+
+@app.get("/v1/ea/decision/{ea_id}/text", response_class=Response)
+def ea_decision_text(ea_id: str, authorization: str = Header(default="")):
+    """Plain-text decision — one round trip for MQL's WebRequest."""
+    require_token(authorization)
+    if ea_id not in _EA_DECISIONS:
+        raise HTTPException(status_code=404, detail=f"no decision published for {ea_id}")
+    return Response(content=decision_to_text(_EA_DECISIONS[ea_id]), media_type="text/plain")

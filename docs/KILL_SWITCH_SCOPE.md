@@ -210,12 +210,37 @@ notification at the matching severity:
 * `GET /api/system/protection` → read-only status + policy.
 * `GET /api/system/protection/policy` → policy (admin only).
   `POST /api/system/protection/policy` → update thresholds (admin only, CSRF).
+* `GET /api/system/protection/ea` → every Expert Advisor deployment, its state
+  and its last heartbeat (read-only). The same path accepts `POST` for a
+  heartbeat from an EA that can reach the platform directly
+  (`X-EA-Token`, `AI_WORKFORCE_EA_TOKEN`) and answers with the decision.
+* `GET /api/system/protection/ea/{eaId}` → one deployment's decision.
+* `POST /api/system/protection/ea/limits` → per-deployment limits (admin, CSRF).
 * There is deliberately **no** endpoint that engages or releases the switch.
 
 ## MT4/MT5 Expert Advisors (§10)
 
-The EA-side implementation (Trade Manager, Equity Protector, News Filter EA,
-Automatic Risk Manager) is a **follow-up pass**. The platform engine is the
-authoritative layer today: because every order path routes through it, an EA-
-placed order cannot bypass an active kill switch once the connector is wired to
-this platform.
+Expert Advisors run inside the terminal on a Windows host, so protection is
+delivered to them in two layers that cannot be switched off:
+
+1. **Local enforcement** — `mt4-mt5/` ships the four EAs (Trade Manager,
+   Equity Protector, News Filter EA, Automatic Risk Manager) and a shared
+   library for MT5 and MT4. The library evaluates the terminal's 14 conditions
+   on every tick and `AIWF_AllowNewTrades()` gates every order it sends. This
+   works with no network at all.
+2. **The platform's decision** — the EA posts a heartbeat to the bridge
+   (`POST /v1/ea/heartbeat`), the platform pulls it
+   (`GET /v1/ea/heartbeats`), evaluates it against the same administrator
+   policy and publishes a decision back (`POST /v1/ea/decisions`), which the EA
+   reads as flat text on its next tick. When the local reading and the
+   platform's decision disagree, **the stricter one wins**.
+
+Evaluated per deployment (see `mt4-mt5/README.md`): terminal and broker
+connection, market data availability, quote staleness, abnormal price moves,
+spread, slippage, repeated order failures, daily loss (percentage **and**
+fixed), maximum drawdown, margin level, the news window, and a missing or
+stale platform decision. An EA that stops reporting is paused rather than
+trusted (§12) — the default heartbeat timeout is 120 s.
+
+Neither layer is optional, and there is no manual override in either: the EAs
+display the state and the reason, nothing else.

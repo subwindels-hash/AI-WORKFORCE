@@ -793,6 +793,13 @@ class Admin extends App_Controller
         $data['protection'] = $this->platform->protection->status();
         $data['calendar'] = $this->platform->protection->calendarStatus();
         $data['defaults'] = \AIWorkforce\TradingProtection\ProtectionPolicy::DEFAULTS;
+        // §10 — MT4/MT5 Expert Advisors report through the bridge; the same
+        // policy is evaluated for each deployment and pushed back as a decision.
+        $data['ea'] = $this->platform->eaProtection->status();
+        $data['eaBridge'] = [
+            'configured' => $this->platform->eaBridge->configured(),
+            'error' => $this->platform->eaBridge->lastError(),
+        ];
         $this->render('admin/protection', $data);
     }
 
@@ -888,6 +895,69 @@ class Admin extends App_Controller
             'type' => 'protection', 'id' => 'peak', 'label' => 'Drawdown high-water mark',
         ], [], $this->ip());
         $this->flash('notice', 'Drawdown high-water mark reset.');
+        redirect('/admin/protection');
+    }
+
+    /**
+     * §10 — override the Expert Advisor limits for one deployment. These are
+     * terminal-side limits (heartbeat timeout, tick age, margin floor), not
+     * risk limits: the risk policy itself stays shared so an EA cannot be
+     * quietly given more room than the platform.
+     */
+    public function protection_ea_limits()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/protection'); return; }
+        $id = trim((string) $this->input->post('ea_id'));
+        $limits = [
+            'enabled' => $this->input->post('ea_enabled') === '1',
+            'heartbeatTimeoutSeconds' => $this->input->post('ea_heartbeat_timeout'),
+            'marginLevelFloorPercent' => $this->input->post('ea_margin_floor'),
+            'maxTickAgeSeconds' => $this->input->post('ea_tick_age'),
+            'abnormalPriceMovePercent' => $this->input->post('ea_price_move'),
+            'requirePlatformDecision' => $this->input->post('ea_require_decision') === '1',
+        ];
+        try {
+            $saved = $this->platform->eaProtection->setOverride($id, $limits);
+            $this->platform->eaProtection->evaluateAll();
+            $this->portal->log($actor, 'EA_PROTECTION_LIMITS_UPDATED', 'ok', [
+                'type' => 'protection', 'id' => 'ea:' . $id, 'label' => 'Expert Advisor limits (' . $id . ')',
+            ], ['eaId' => $id, 'limits' => $saved], $this->ip());
+            $this->flash('notice', 'Expert Advisor limits saved and re-evaluated.');
+        } catch (\Throwable $e) {
+            $this->flash('error', 'Limits not saved: ' . $e->getMessage());
+        }
+        redirect('/admin/protection');
+    }
+
+    /** §10 — stop protecting a deployment that no longer exists. */
+    public function protection_ea_remove()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/protection'); return; }
+        $id = trim((string) $this->input->post('ea_id'));
+        $this->platform->eaProtection->unregister($id);
+        $this->portal->log($actor, 'EA_PROTECTION_UNREGISTERED', 'ok', [
+            'type' => 'protection', 'id' => 'ea:' . $id, 'label' => 'Expert Advisor deployment removed (' . $id . ')',
+        ], ['eaId' => $id], $this->ip());
+        $this->flash('notice', 'Expert Advisor deployment removed.');
+        redirect('/admin/protection');
+    }
+
+    /** §10 — pull heartbeats from the bridge and publish decisions now. */
+    public function protection_ea_sync()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/protection'); return; }
+        $report = $this->platform->eaBridge->sync($this->platform->eaProtection);
+        $this->portal->log($actor, 'EA_PROTECTION_SYNC', ($report['ok'] ?? false) ? 'ok' : 'error', [
+            'type' => 'protection', 'id' => 'ea-sync', 'label' => 'Expert Advisor sync',
+        ], $report, $this->ip());
+        if (($report['skipped'] ?? false) || !($report['ok'] ?? false)) {
+            $this->flash('error', 'Sync did not complete: ' . (string) ($report['reason'] ?? 'unknown error'));
+        } else {
+            $this->flash('notice', sprintf('Synced %d heartbeat(s); %d Expert Advisor(s) blocked by policy.', (int) $report['accepted'], (int) $report['blocked']));
+        }
         redirect('/admin/protection');
     }
 

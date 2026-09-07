@@ -154,8 +154,125 @@ class Api_system extends Api_controller
         $this->json([
             'protection' => $this->platform->protection->status(),
             'policy' => $this->platform->protection->policy(),
+            // §10 — the same policy, enforced inside MT4/MT5.
+            'ea' => $this->platform->eaProtection->status(),
             'checkedAt' => gmdate('c'),
         ]);
+    }
+
+    /**
+     * Expert Advisor protection (§10).
+     *
+     *   GET  — deployment status: state, last heartbeat and reason for every
+     *          MT4/MT5 EA the platform has heard from (read-only, trading.view).
+     *   POST — a heartbeat from an EA that can reach the platform directly.
+     *          Authenticated with the shared terminal token
+     *          (X-EA-Token, AI_WORKFORCE_EA_TOKEN, falling back to the MT5
+     *          bridge token). The response is the decision the EA must obey, so
+     *          a terminal that cannot be polled still gets platform policy.
+     */
+    public function protection_ea()
+    {
+        if ($this->input->method(true) === 'POST') return $this->protection_ea_heartbeat();
+        if (!$this->requirePermission('trading.view', false)) return;
+        $this->json([
+            'ea' => $this->platform->eaProtection->status(),
+            'bridge' => [
+                'configured' => $this->platform->eaBridge->configured(),
+                'error' => $this->platform->eaBridge->lastError(),
+            ],
+            'checkedAt' => gmdate('c'),
+        ]);
+    }
+
+    /** @return array<int,string> the configured terminal tokens (never empty). */
+    private function eaTokens(): array
+    {
+        $tokens = [];
+        foreach (['AI_WORKFORCE_EA_TOKEN', 'AI_WORKFORCE_MT5_BRIDGE_TOKEN'] as $name) {
+            $value = trim((string) (getenv($name) ?: ''));
+            if ($value !== '') $tokens[] = $value;
+        }
+        return $tokens;
+    }
+
+    /** POST — ingest a heartbeat (or {heartbeats:[…]}) and return the decision(s). */
+    private function protection_ea_heartbeat()
+    {
+        $tokens = $this->eaTokens();
+        if ($tokens === []) {
+            return $this->jsonError('the Expert Advisor endpoint has no token configured — set AI_WORKFORCE_EA_TOKEN on the host', 503);
+        }
+        $presented = (string) $this->input->get_request_header('X-EA-Token', true);
+        if ($presented === '') $presented = (string) $this->input->get_request_header('Authorization', true);
+        if (str_starts_with($presented, 'Bearer ')) $presented = substr($presented, 7);
+
+        $matched = false;
+        foreach ($tokens as $token) {
+            if (hash_equals($token, $presented)) { $matched = true; break; }
+        }
+        if (!$matched) return $this->jsonError('invalid or missing X-EA-Token', 401);
+
+        $body = $this->jsonBody();
+        if (!is_array($body) || $body === []) return $this->jsonError('a heartbeat object or {heartbeats:[…]} is required', 422);
+
+        $heartbeats = isset($body['heartbeats']) && is_array($body['heartbeats']) ? $body['heartbeats'] : [$body];
+        $ingest = $this->platform->eaProtection->ingest($heartbeats);
+
+        $policy = \AIWorkforce\TradingProtection\ProtectionPolicy::normalize(null, (array) ($this->platform->model->state->load()[\AIWorkforce\TradingProtection\AutomaticProtection::STATE_KEY]['policy'] ?? []));
+        $decisions = [];
+        foreach ($ingest['ids'] as $id) {
+            $decisions[$id] = $this->platform->eaProtection->evaluateOne($id, $this->platform->eaProtection->deployments()[$id] ?? [], $policy);
+        }
+
+        $this->json([
+            'ok' => true,
+            'accepted' => $ingest['accepted'],
+            'registered' => $ingest['registered'],
+            'decisions' => array_values($decisions),
+        ]);
+    }
+
+    /** GET — the current decision for one deployment (used by the bridge and by operators). */
+    public function protection_ea_decision($id = '')
+    {
+        if (!$this->requirePermission('trading.view', false)) return;
+        $id = (string) $id;
+        $decision = $this->platform->eaProtection->decision($id);
+        $this->json([
+            'eaId' => $id,
+            'decision' => $decision,
+            'deployment' => $this->platform->eaProtection->deployments()[$id] ?? null,
+            'heartbeat' => $this->platform->eaProtection->heartbeat($id),
+            'checkedAt' => gmdate('c'),
+        ]);
+    }
+
+    /**
+     * POST — override the protection limits for one deployment (administrators
+     * only, §9 "applied consistently per account/EA"). Only the EA-specific
+     * limits are settable here; the risk policy itself is shared.
+     */
+    public function protection_ea_limits()
+    {
+        $user = $this->refreshIdentityPermissions();
+        if (!is_array($user) || !$this->platform->identity->can($user, 'admin.settings.manage')) {
+            return $this->jsonError('forbidden — administrator permission required', 403);
+        }
+        $token = $this->input->get_request_header('X-CSRF-Token');
+        if (!is_string($token) || !hash_equals((string) $this->session->userdata('csrf_token'), $token)) {
+            return $this->jsonError('invalid CSRF token', 403);
+        }
+        $body = $this->jsonBody() ?: [];
+        $id = trim((string) ($body['eaId'] ?? ''));
+        if ($id === '') return $this->jsonError('eaId is required', 422);
+        try {
+            $limits = $this->platform->eaProtection->setOverride($id, is_array($body['limits'] ?? null) ? $body['limits'] : []);
+        } catch (\Throwable $e) {
+            return $this->jsonError($e->getMessage(), 422);
+        }
+        $this->platform->eaProtection->evaluateAll();
+        $this->json(['ok' => true, 'eaId' => $id, 'limits' => $limits, 'ea' => $this->platform->eaProtection->status()]);
     }
 
     /**

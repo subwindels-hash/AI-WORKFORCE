@@ -58,11 +58,35 @@ a shared secret and quotes/accounts cross the wire.
 | POST | `/v1/orders/{ticket}/modify` | modify SL/TP (and pending price) |
 | POST | `/v1/orders/{ticket}/cancel` | cancel a pending order |
 | POST | `/v1/positions/{ticket}/close` | close a position |
+| POST | `/v1/ea/heartbeat` | an Expert Advisor posts what it sees (see `mt4-mt5/`) |
+| GET | `/v1/ea/heartbeats` | the platform pulls the latest heartbeat of every EA |
+| POST | `/v1/ea/decisions` | the platform publishes one protection decision per EA |
+| GET | `/v1/ea/decisions` | every published decision (JSON) |
+| GET | `/v1/ea/decision/{eaId}` | one decision (JSON with a `text` field) |
+| GET | `/v1/ea/decision/{eaId}/text` | one decision as flat `KEY=VALUE` lines for MQL |
+| GET | `/v1/ea/health` | how many heartbeats/decisions are being tracked |
 
 Every `/v1/*` call requires `Authorization: Bearer <MT5_BRIDGE_TOKEN>`.
 All trading endpoints refuse unless `MT5_TRADING_ENABLED=1` **and** the
 account is demo (unless `MT5_ALLOW_LIVE=1`). Every order response carries
 `{ok, data:{ticket, price, placedAt}}` or `{ok:false, error}`.
+
+### Expert Advisor protection (§10)
+
+The `/v1/ea/*` endpoints carry the Automatic Kill Switch between Expert
+Advisors running in the terminal and the PHP platform (which cannot be reached
+from the terminal):
+
+```
+EA ──POST /v1/ea/heartbeat──► bridge ──GET /v1/ea/heartbeats──► platform
+EA ──GET  /v1/ea/decision/{id}/text──► bridge ◄──POST /v1/ea/decisions── platform
+```
+
+State is in memory and bounded by `MT5_EA_MAX_TRACKED` (default 200
+deployments); a bridge restart simply means the EAs re-report on their next
+tick. These endpoints never trade: protection decisions only ever *block*
+orders, and the emergency close/cancel flags they carry are opt-in on the
+platform side.
 
 ## Tests
 

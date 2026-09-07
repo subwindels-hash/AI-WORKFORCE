@@ -29,6 +29,8 @@ use AIWorkforce\Lottery\OfficialLotteryProvider;
 use AIWorkforce\Strategies\StrategyRegistry;
 use AIWorkforce\Strategies\TradingStrategy;
 use AIWorkforce\TradingProtection\AutomaticProtection;
+use AIWorkforce\TradingProtection\EaBridgeClient;
+use AIWorkforce\TradingProtection\EaProtection;
 use AIWorkforce\TradingProtection\EconomicCalendar;
 
 /**
@@ -54,6 +56,9 @@ class Platform
     public readonly \AIWorkforce\Portfolio\PortfolioRiskMonitor $monitor;
     /** AUTOMATIC KILL SWITCH — the only kill switch in the product (no manual control exists). */
     public readonly AutomaticProtection $protection;
+    /** AUTOMATIC KILL SWITCH — MT4/MT5 Expert Advisor deployments (spec §10). */
+    public readonly EaProtection $eaProtection;
+    public readonly EaBridgeClient $eaBridge;
     public readonly \AIWorkforce\Notifications\Notifier $notifications;
     public readonly \AIWorkforce_model $model;
     public \AIWorkforce\LangLearn\LangLearnService $langlearn;
@@ -190,6 +195,11 @@ class Platform
         );
         $this->paper->protection = $this->protection;
         $this->execution->protection = $this->protection;
+
+        // Expert Advisors (§10) — the same policy, enforced inside MT4/MT5 and
+        // reconciled with the platform through the MT5 bridge.
+        $this->eaProtection = new EaProtection($model->state, $model->audit, $this->notifications);
+        $this->eaBridge = new EaBridgeClient();
 
         // ── Cloudflare AI Agent Platform ───────────────────────────
         $this->cloudflare = new \AIWorkforce\Cloudflare\AgentPlatform(

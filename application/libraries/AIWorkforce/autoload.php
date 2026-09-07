@@ -265,6 +265,8 @@ spl_autoload_register(static function (string $class) use ($ai_workforceDir): vo
     'AIWorkforce\\Timeframes' => 'Timeframes.php',
     'AIWorkforce\\TradingIntelligenceEngine' => 'TradingIntelligenceEngine.php',
     'AIWorkforce\\TradingProtection\\AutomaticProtection' => 'TradingProtection/AutomaticProtection.php',
+    'AIWorkforce\\TradingProtection\\EaBridgeClient' => 'TradingProtection/EaBridgeClient.php',
+    'AIWorkforce\\TradingProtection\\EaProtection' => 'TradingProtection/EaProtection.php',
     'AIWorkforce\\TradingProtection\\EconomicCalendar' => 'TradingProtection/EconomicCalendar.php',
     'AIWorkforce\\TradingProtection\\ProtectionPolicy' => 'TradingProtection/ProtectionPolicy.php',
     ];

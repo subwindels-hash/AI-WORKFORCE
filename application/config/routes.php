@@ -83,6 +83,9 @@ $route['admin/security'] = 'admin/security';
 $route['admin/protection'] = 'admin/protection';
 $route['admin/protection/save'] = 'admin/protection_save';
 $route['admin/protection/reset-peak'] = 'admin/protection_reset_peak';
+$route['admin/protection/ea/limits'] = 'admin/protection_ea_limits';
+$route['admin/protection/ea/remove'] = 'admin/protection_ea_remove';
+$route['admin/protection/ea/sync'] = 'admin/protection_ea_sync';
 $route['admin/cron'] = 'admin/cron';
 $route['admin/cron/save'] = 'admin/cron_save';
 $route['admin/cron/run/(:any)'] = 'admin/cron_run/$1';
@@ -327,6 +330,10 @@ $route['api/lottery/sync'] = 'api_lottery/sync';
 $route['api/system/features'] = 'api_system/features';
 $route['api/system/protection'] = 'api_system/protection';
 $route['api/system/protection/policy'] = 'api_system/protection_policy';
+// §10 — MT4/MT5 Expert Advisor protection (heartbeat in, decision out).
+$route['api/system/protection/ea/limits'] = 'api_system/protection_ea_limits';
+$route['api/system/protection/ea/(:any)'] = 'api_system/protection_ea_decision/$1';
+$route['api/system/protection/ea'] = 'api_system/protection_ea';
 $route['api/agents/status'] = 'api_agents/status';
 $route['api/agents/dispatch'] = 'api_agents/dispatch';
 

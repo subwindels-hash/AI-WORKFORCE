@@ -180,3 +180,118 @@ def test_modify_cancel_close(client, monkeypatch):
     assert r.json()["data"]["ticket"] == 5001
 
     assert http.post("/v1/positions/9999/close", headers=auth(client)).status_code == 404
+
+# ─── Expert Advisor protection (§10) ──────────────────────────────────────────
+# The EA ↔ bridge side of the Automatic Kill Switch. These cover the contract
+# only: an EA posts a heartbeat, the platform pulls it and publishes a
+# decision, and the EA reads that decision as flat text (MQL has no JSON
+# parser).
+
+def heartbeat(ea_id: str = "1234567-EURUSD-900001-TradeManager", **overrides) -> dict:
+    payload = {
+        "eaId": ea_id,
+        "name": "TradeManager",
+        "terminal": "MT5",
+        "account": "1234567",
+        "broker": "Demo Broker Ltd",
+        "symbol": "EURUSD",
+        "magic": 900001,
+        "version": "1.0.0",
+        "at": "2026-09-07T10:30:00Z",
+        "atTs": 1780000000,
+        "metrics": {"equity": 10000.0, "balance": 10000.0, "dailyPnl": -120.0,
+                    "drawdownPct": 4.5, "peakEquity": 10470.0, "openPositions": 1,
+                    "pendingOrders": 0, "marginLevelPct": 820.0, "freeMargin": 9800.0,
+                    "spreadPoints": 1.2, "slippagePoints": 0.0, "orderFailures": 0,
+                    "symbol": "EURUSD"},
+        "connection": {"terminal": True, "broker": True, "dataFeed": True, "lastTickAgeSeconds": 1},
+        "news": {"configured": False, "ok": True, "minutesToNextHighImpact": None},
+        "actions": {"closedPositions": 0, "cancelledOrders": 0, "blockedOrders": 0},
+    }
+    payload.update(overrides)
+    return payload
+
+
+@pytest.fixture(autouse=True)
+def _clear_ea_state():
+    bridge._EA_HEARTBEATS.clear()
+    bridge._EA_DECISIONS.clear()
+    yield
+    bridge._EA_HEARTBEATS.clear()
+    bridge._EA_DECISIONS.clear()
+
+
+def test_ea_endpoints_require_the_token(client):
+    http, _ = client
+    assert http.post("/v1/ea/heartbeat", json=heartbeat()).status_code == 401
+    assert http.get("/v1/ea/heartbeats").status_code == 401
+    assert http.post("/v1/ea/decisions", json={"decisions": []}).status_code == 401
+    assert http.get("/v1/ea/decision/x/text").status_code == 401
+
+
+def test_ea_heartbeat_is_stored_and_pulled_by_the_platform(client):
+    http, _ = client
+    r = http.post("/v1/ea/heartbeat", headers=auth(client), json=heartbeat())
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert r.json()["receivedAt"]
+
+    pulled = http.get("/v1/ea/heartbeats", headers=auth(client)).json()
+    assert pulled["count"] == 1
+    assert pulled["heartbeats"][0]["metrics"]["dailyPnl"] == -120.0
+
+    # A second heartbeat from the same EA replaces the first, it does not add up.
+    http.post("/v1/ea/heartbeat", headers=auth(client),
+              json=heartbeat(metrics={"dailyPnl": -400.0}))
+    pulled = http.get("/v1/ea/heartbeats", headers=auth(client)).json()
+    assert pulled["count"] == 1
+    assert pulled["heartbeats"][0]["metrics"]["dailyPnl"] == -400.0
+
+
+def test_ea_heartbeat_validates_the_payload(client):
+    http, _ = client
+    assert http.post("/v1/ea/heartbeat", headers=auth(client),
+                     json={"name": "no id"}).status_code == 422
+
+
+def test_platform_publishes_decisions_and_the_ea_reads_text(client):
+    http, _ = client
+    r = http.post("/v1/ea/decisions", headers=auth(client), json={"decisions": [
+        {"eaId": "ea-1", "state": "AUTOMATIC_KILL", "reason": "Daily loss limit reached (3.0%)",
+         "allowNewTrades": False, "closePositions": True, "cancelPendingOrders": False},
+        {"eaId": "ea-2", "state": "NORMAL", "reason": "No risk conditions detected.",
+         "allowNewTrades": True, "closePositions": False, "cancelPendingOrders": False},
+    ]})
+    assert r.json()["stored"] == 2
+
+    body = http.get("/v1/ea/decision/ea-1", headers=auth(client)).json()
+    assert body["ok"] is True
+    text = body["text"]
+    assert "state=AUTOMATIC_KILL" in text
+    assert "allowNewTrades=0" in text          # a kill never allows new trades
+    assert "closePositions=1" in text          # …and carries the opted-in action
+
+    plain = http.get("/v1/ea/decision/ea-1/text", headers=auth(client))
+    assert plain.status_code == 200
+    assert plain.headers["content-type"].startswith("text/plain")
+    lines = dict(line.split("=", 1) for line in plain.text.strip().split("\n") if "=" in line)
+    assert lines["state"] == "AUTOMATIC_KILL"
+    assert lines["reason"] == "Daily loss limit reached (3.0%)"
+
+    # Reasons are flattened onto one line: the EA parses line by line.
+    http.post("/v1/ea/decisions", headers=auth(client), json={"decisions": [
+        {"eaId": "ea-3", "state": "AUTOMATIC_PAUSED", "reason": "High-impact NFP event\nin 8 minutes"},
+    ]})
+    text = http.get("/v1/ea/decision/ea-3", headers=auth(client)).json()["text"]
+    reason_lines = [line for line in text.split("\n") if line.startswith("reason=")]
+    assert len(reason_lines) == 1, "a reason is flattened onto one line"
+    assert reason_lines[0] == "reason=High-impact NFP event in 8 minutes"
+    assert "High-impact NFP event in 8 minutes" in text
+
+    assert http.get("/v1/ea/decision/unknown-ea", headers=auth(client)).status_code == 404
+
+
+def test_ea_health_reports_counts(client):
+    http, _ = client
+    http.post("/v1/ea/heartbeat", headers=auth(client), json=heartbeat())
+    body = http.get("/v1/ea/health", headers=auth(client)).json()
+    assert body["ok"] is True and body["heartbeats"] == 1 and body["decisions"] == 0
