@@ -263,6 +263,7 @@ spl_autoload_register(static function (string $class) use ($ai_workforceDir): vo
     'AIWorkforce\\Strategies\\VersionedStrategyDecorator' => 'Strategies/BuiltinStrategies.php',
     'AIWorkforce\\Timeframes' => 'Timeframes.php',
     'AIWorkforce\\TradingIntelligenceEngine' => 'TradingIntelligenceEngine.php',
+    'AIWorkforce\\WorkforceFileAnalyzer' => 'WorkforceFileAnalyzer.php',
     'AIWorkforce\\TradingProtection\\AutomaticProtection' => 'TradingProtection/AutomaticProtection.php',
     'AIWorkforce\\TradingProtection\\EaBridgeClient' => 'TradingProtection/EaBridgeClient.php',
     'AIWorkforce\\TradingProtection\\EaProtection' => 'TradingProtection/EaProtection.php',
