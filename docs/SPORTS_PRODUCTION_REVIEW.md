@@ -22,7 +22,7 @@ credentials, no automated external execution):
 - **Audit attribution** — ticket recorded / approved / rejected / settled events carry the acting identity and reason; `decide()` and `settlePending()` always emit through the `AuditRepository`. Pinned by case 43.
 - **Environment-only credentials** — provider credentials live in env only; provider payloads are untrusted and pass normalizers; the sandbox provider is online only when `WINDELS_SPORTS_MODE=SANDBOX` **and** `WINDELS_SPORTS_SANDBOX=1`.
 - **Honest disable** — with no provider the module boots `DISABLED_NO_PROVIDER` and fabricates no fixtures, odds, predictions or tickets; demo data is always bannered (`DEMO / SANDBOX DATA`). Pinned by cases 47/50.
-- **Kill switch boot default** — platform state defaults to `killSwitch.active = true` ("orders blocked until explicitly released") — fail closed on fresh installs.
+- **Kill switch boot default** — platform state defaults to `killSwitch.active = true` ("orders blocked until explicitly released") — fail closed on fresh installs. The switch is scoped to broker + trading-intelligence surfaces, so it boots fail-closed for orders while never gating sports; see [`KILL_SWITCH_SCOPE.md`](KILL_SWITCH_SCOPE.md).
 - **No external execution** — approval never places a bet; there is no execution connector in this deployment (stated in every UI surface and every audit event).
 - **Calibration gate** — a calibration is only usable after administrator approval; until then ticket-grade decisions report `MODEL_NOT_CALIBRATED` (case 46).
 
@@ -42,22 +42,33 @@ the API path), and `base()` passes `csrfToken` to the views. All six console
 mutation forms (dashboard approve/reject/settle, tickets-console inline
 approve/reject/settle) submit the hidden field.
 
-### 2. Approval could proceed while the kill switch was ACTIVE (FIXED)
+### 2. Approval could proceed while the kill switch was ACTIVE (FIXED, then re-scoped)
 
 The paper engine blocks order placement while the kill switch is active
 (`PaperTradingEngine::submitOrder`), but the sports mutation paths ignored the
 switch — an operator could open new ticket exposure after tripping the kill
 switch.
 
-**Fix** — console `decide()` and API `decide_ticket()` now refuse (flash /
-HTTP 409) while the switch is active, reading the live persisted state.
-**Settlement is deliberately not gated** — it is the unwind/finalize path (it
-records results on already-approved tickets), mirroring
+**Original fix** — console `decide()` and API `decide_ticket()` refused (flash
+/ HTTP 409) while the switch was active, reading the live persisted state.
+
+**Re-scoped (current behaviour)** — the kill switch is now an order-bound
+safeguard for broker and trading-intelligence surfaces only
+(`AIWorkforce\KillSwitchScope`). A sports odds-prediction ticket is not an
+order-bound surface: it places no broker order and moves no money in this
+deployment, and the module repeatedly states that approval never places a bet.
+The guard was therefore removed from both approval paths, leaving RBAC
+(`sports.approve`), the session CSRF token and the audit trail as the gates.
+This also means tripping the trading kill switch no longer freezes an
+unrelated module — the original failure mode was a scope problem, not a missing
+check. **Settlement is deliberately not gated** — it is the unwind/finalize
+path (it records results on already-approved tickets), mirroring
 `PaperTradingEngine::closePosition()`, which is also not kill-switch-gated.
 
-Both fixes are pinned by case 51 (per-method source assertions so a refactor
-that drops the guard fails the suite) plus a behavioral round trip of the kill
-switch through the live platform state.
+Case 51 pins the current contract (per-method source assertions: neither
+approval path may reference the kill switch, and both still require
+`sports.approve`), plus a behavioral round trip proving an engaged switch never
+gates `sports_tickets`. Case 117 pins the scope itself.
 
 ### 3. The console handed out controls the signed-in identity could not use (FIXED)
 

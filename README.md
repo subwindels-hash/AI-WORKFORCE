@@ -24,7 +24,9 @@ risk monitoring**).
 
 > **Core principle:** AI can analyze, recommend, and automate within approved
 > rules, but it must never bypass market-data validation, risk controls,
-> execution governance, broker safeguards, or the kill switch.
+> execution governance, broker safeguards, or the kill switch (scoped to
+> broker and trading-intelligence surfaces — see
+> [`docs/KILL_SWITCH_SCOPE.md`](docs/KILL_SWITCH_SCOPE.md)).
 
 ```text
 MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INTELLIGENCE / CONSENSUS
@@ -56,7 +58,7 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **MT5 connector — full trading surface** (account/quote/candles/positions/orders/history + place/modify/cancel/close) | **TESTED** (simulated bridge; not yet verified against a real MetaTrader terminal) |
 | **Python MT5 bridge service** (`python-services/mt5-bridge`, FastAPI + MetaTrader5, demo-only default) | **IMPLEMENTED** (contract unit-tested; requires deployment on a Windows MT5 host) |
 | **Portfolio Risk Monitor**: HIGH_EXPOSURE, EXCESSIVE_LEVERAGE, CORRELATED_POSITIONS, MAX_DRAWDOWN_WARNING, DAILY_LOSS_WARNING, BROKER_DISCONNECTED | **TESTED** |
-| Kill switch, audit trail, ANALYSIS_ONLY default | **TESTED** |
+| **Kill switch scoped to broker + trading intelligence** (order-bound surfaces only; market data and non-trading modules never gated), audit trail, ANALYSIS_ONLY default | **TESTED** |
 | **RBAC on the trading API**: trading.view / trading.control / trading.execute (+ CSRF); approval decisions record the deciding operator | **TESTED** |
 | **Notifications**: risk alerts, approval requests, execution outcomes, broker disconnects, kill switch — deduped until acknowledged | **TESTED** |
 | **Admin-sent notifications** (`/admin/notifications` → send panel): one member or every active account, per-recipient read state, audited as NOTIFICATION_SENT | **TESTED** |
@@ -595,7 +597,7 @@ rather than reporting a mysterious all-synthetic registry.
 | Live trading disabled by default | Boot state: `ANALYSIS_ONLY` + kill switch ACTIVE; broker routing needs an explicitly deployed bridge + `AI_WORKFORCE_MT5_TRADING_ENABLED=1` + demo account; automated modes need a configured automation envelope |
 | Every trade auditable | `audit_logs` table + UI trail; every order/position/journal row is linked |
 | Risk Engine veto power | `RiskEngine::evaluate()` sits in every order path |
-| Kill switch blocks orders | Checked first in `submitOrder()`, in the supervisor pipeline (step 1) and re-verified at routing time |
+| Kill switch blocks orders | Checked first in `submitOrder()`, in the supervisor pipeline (step 1) and re-verified at routing time. **Scoped:** it gates the execution supervisor, broker orders, paper orders and automation envelopes only — market data keeps streaming and non-trading modules are never gated ([`docs/KILL_SWITCH_SCOPE.md`](docs/KILL_SWITCH_SCOPE.md)) |
 
 ## Unfinished-module scaffolds
 

@@ -243,6 +243,14 @@ class Trading extends App_Controller
     public function toggle_kill_switch()
     {
         if (strtoupper($this->input->server('REQUEST_METHOD')) !== 'POST') { show_404(); return; }
+        // Operator control: engaging the switch blocks every order-bound
+        // surface platform-wide, so it needs trading.control — re-read from
+        // the database rather than trusted from the session snapshot.
+        $user = $this->refreshIdentityPermissions($this->identity);
+        if (!$user || !$this->platform->identity->can($user, 'trading.control')) {
+            $this->jsonError('forbidden — engaging or releasing the kill switch requires trading.control', 403);
+            return;
+        }
         $body = $this->jsonBody() ?: [];
         $active = !empty($body['active']);
         $reason = (string) ($body['reason'] ?? ($active ? 'Engaged from My Trading' : 'Released from My Trading'));
@@ -265,7 +273,7 @@ class Trading extends App_Controller
                 'broker' => $this->input->post('broker'),
             ];
             $state = $this->platform->state();
-            if (!empty($state['killSwitch']['active'])) { $this->jsonError('Kill switch is active — all order placement is blocked.', 409); return; }
+            if (\AIWorkforce\KillSwitchScope::blocks('broker_orders', $state)) { $this->jsonError('Kill switch is active — all order placement is blocked.', 409); return; }
             $result = $this->platform->execution->propose([
                 'symbol' => strtoupper((string) ($input['symbol'] ?? '')), 'side' => $input['side'] ?? 'BUY',
                 'volume' => max(0.01, (float) ($input['volume'] ?? 0.01)),

@@ -50,10 +50,12 @@ $biasClass = static function (?string $bias): string {
       </select>
       <button class="btn small">Set</button>
     </form>
-    <?php if (!empty($status['killSwitch']['active'])): ?>
-      <form method="post" action="/kill-switch"><input type="hidden" name="active" value="0"><button class="btn small danger">Release kill switch</button></form>
-    <?php else: ?>
-      <form method="post" action="/kill-switch"><input type="hidden" name="active" value="1"><button class="btn small danger">Activate kill switch</button></form>
+    <?php if (ai_workforce_kill_switch_can_control()): ?>
+      <?php if (!empty($status['killSwitch']['active'])): ?>
+        <form method="post" action="/kill-switch"><input type="hidden" name="active" value="0"><button class="btn small danger">Release kill switch</button></form>
+      <?php else: ?>
+        <form method="post" action="/kill-switch"><input type="hidden" name="active" value="1"><button class="btn small danger">Activate kill switch</button></form>
+      <?php endif; ?>
     <?php endif; ?>
   </div>
 </div>

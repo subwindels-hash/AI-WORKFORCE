@@ -8,7 +8,6 @@ $notes = $inbox['notifications'] ?? [];
 // (~150-300px), so any wrapper that forgets its CSS rule shows a giant icon.
 // Wrapper CSS (.btn svg, .kp-ic svg, .sidebar a svg, …) still overrides this.
 $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">';
-$ks = $status['killSwitch'] ?? null;
 $mode = $status['tradingMode'] ?? null;
 ?>
 <div class="dash-hero">
@@ -17,8 +16,9 @@ $mode = $status['tradingMode'] ?? null;
     <h2>Welcome back, <?= e($first) ?></h2>
     <p>Here is the current state of your workspace. Pick a main action below, or continue from a recent activity.</p>
     <div class="dash-status">
-      <?php if (!empty($ks['active'])): ?><span class="statuspill warn"><i class="pill-dot"></i>Kill switch active</span>
-      <?php else: ?><span class="statuspill"><i class="pill-dot"></i>Mode <?= e($mode) ?></span><?php endif; ?>
+      <?php /* Kill switch is scoped to broker + trading surfaces; the
+               dashboard is not one of them, so it shows the trading mode. */ ?>
+      <span class="statuspill"><i class="pill-dot"></i>Mode <?= e($mode) ?></span>
       <span class="statuspill"><i class="pill-dot"></i><?= (int)$paperAccounts ?> paper account<?= $paperAccounts === 1 ? '' : 's' ?></span>
       <span class="statuspill"><i class="pill-dot"></i><?= (int)$languageProfiles ?> language profile<?= $languageProfiles === 1 ? '' : 's' ?></span>
     </div>

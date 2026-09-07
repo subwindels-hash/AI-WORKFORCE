@@ -64,6 +64,45 @@
   </div>
 </div>
 
+<?php /* Kill switch control — scoped to broker + trading-intelligence
+         surfaces. It lives here and on My Trading / the analysis console. */ ?>
+<div class="panel" style="margin-top:14px">
+  <h3>Kill switch <span class="statuspill <?= !empty($status['killSwitch']['active']) ? 'warn' : '' ?>"><i class="pill-dot"></i><?= !empty($status['killSwitch']['active']) ? 'ACTIVE' : 'RELEASED' ?></span></h3>
+  <div class="body" style="padding-top:12px">
+    <p class="dim" style="margin:0 0 10px">
+      Scoped to order-bound surfaces: the execution supervisor, broker orders
+      (MT5, MT4, crypto exchanges, OANDA, Alpaca, IBKR), paper orders and the
+      automation envelopes. Market data keeps streaming while it is engaged, so
+      charts, analysis and provider health stay observable. Sports, lottery,
+      language learning and lead discovery are never gated by it.
+    </p>
+    <?php if (!empty($status['killSwitch']['active'])): ?>
+      <div class="notice err" style="margin-bottom:10px">
+        <b>Engaged</b><?= !empty($status['killSwitch']['activatedAt']) ? ' at ' . e((string) $status['killSwitch']['activatedAt']) : '' ?>
+        <?= !empty($status['killSwitch']['reason']) ? ' — ' . e((string) $status['killSwitch']['reason']) : '' ?>.
+        Every order-bound surface stays blocked until it is released.
+      </div>
+    <?php endif; ?>
+    <?php if (ai_workforce_kill_switch_can_control()): ?>
+      <?php if (!empty($status['killSwitch']['active'])): ?>
+        <form method="post" action="/kill-switch">
+          <input type="hidden" name="active" value="0">
+          <input type="hidden" name="return" value="risk">
+          <button class="btn small danger" type="submit">Release kill switch</button>
+        </form>
+      <?php else: ?>
+        <form method="post" action="/kill-switch" onsubmit="return confirm('Engage the kill switch? All broker and paper orders will be blocked.');">
+          <input type="hidden" name="active" value="1">
+          <input type="hidden" name="return" value="risk">
+          <button class="btn small danger" type="submit">Engage kill switch</button>
+        </form>
+      <?php endif; ?>
+    <?php else: ?>
+      <p class="dim" style="margin:0">Engaging or releasing it requires the <span class="mono">trading.control</span> permission.</p>
+    <?php endif; ?>
+  </div>
+</div>
+
 <div class="panel" style="margin-top:14px">
   <h3>Audit trail (latest)</h3>
   <div class="body scroll" style="padding-top:12px">

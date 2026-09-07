@@ -2,6 +2,7 @@
 namespace AIWorkforce\Paper;
 
 use AIWorkforce\Backtest\Backtester;
+use AIWorkforce\KillSwitchScope;
 use AIWorkforce\Persistence\AuditRepository;
 use AIWorkforce\Persistence\JournalRepository;
 use AIWorkforce\Persistence\PaperRepository;
@@ -127,7 +128,7 @@ class PaperTradingEngine
     {
         $state = $this->stateRepo->load();
         $syntheticAllowed = !empty($state['allowSyntheticPaperData']);
-        if ($state['killSwitch']['active']) {
+        if (KillSwitchScope::blocks('paper_orders', $state)) {
             return $this->reject($accountId, $input, 'Kill switch is ACTIVE — all order placement is blocked');
         }
         if ($state['tradingMode'] !== 'PAPER_TRADING') {

@@ -491,7 +491,7 @@ class Platform
         if ($limits['updatedAt'] === null) $reasons[] = 'automation limits were never explicitly configured';
         if ($mode === 'FULLY_AUTOMATED') {
             if ($this->brokers->tradingConnector() === null) $reasons[] = 'no broker connector is READY with effective order submission';
-            if (($state['killSwitch']['active'] ?? true) === true) $reasons[] = 'kill switch is ACTIVE — release it before enabling fully-automated trading';
+            if (KillSwitchScope::blocks('automation_modes', $state)) $reasons[] = 'kill switch is ACTIVE — release it before enabling fully-automated trading';
         }
         return ['ok' => count($reasons) === 0, 'reasons' => $reasons];
     }
@@ -540,7 +540,7 @@ class Platform
         $this->model->state->save($state);
         $this->model->audit->emit($active ? 'KILL_SWITCH_ACTIVATED' : 'KILL_SWITCH_DEACTIVATED', 'Kill switch ' . ($active ? 'ACTIVATED' : 'deactivated') . ($reason ? ": {$reason}" : ''), ['reason' => $reason], 'user');
         if ($active) {
-            $this->notifications->notify('KILL_SWITCH', 'critical', 'KILL SWITCH ACTIVATED — all order placement blocked', ['reason' => $reason], 'kill-switch:active');
+            $this->notifications->notify('KILL_SWITCH', 'critical', 'KILL SWITCH ACTIVATED — broker and paper orders blocked (market data and non-trading modules unaffected)', ['reason' => $reason], 'kill-switch:active');
         }
         return $state['killSwitch'];
     }

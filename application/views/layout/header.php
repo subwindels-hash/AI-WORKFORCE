@@ -111,7 +111,10 @@ $isActive = function(array $keys) use ($active): bool {
     </div>
   </div>
   <div class="top-right">
-    <?php if ($ks && !empty($ks['active'])): ?><span class="statuspill warn"><i class="pill-dot" aria-hidden="true"></i>Kill switch on</span>
+    <?php /* Kill switch is scoped to broker + trading-intelligence surfaces:
+            it is only advertised where it actually gates something. */ ?>
+    <?php $ksShown = $ks && !empty($ks['active']) && \AIWorkforce\KillSwitchScope::uiVisible(uri_string()); ?>
+    <?php if ($ksShown): ?><span class="statuspill warn"><i class="pill-dot" aria-hidden="true"></i>Kill switch on</span>
     <?php else: ?><span class="statuspill"><i class="pill-dot" aria-hidden="true"></i>Mode <?= e($mode) ?></span><?php endif; ?>
     <a class="icon-btn" href="/notifications" title="Notifications" aria-label="Notifications" data-dashboard-link>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg>

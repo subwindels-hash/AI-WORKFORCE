@@ -347,8 +347,13 @@ $overall = $perfSummary['overall'] ?? [];
       <h3 style="margin-bottom:10px">Risk Controls</h3>
       <div class="panel"><div class="body">
         <div class="risk-toggle">
-          <label class="toggle-switch"><input type="checkbox" id="ks-toggle" <?=$ks?'checked':''?> onchange="toggleKillSwitch(this.checked)"><span class="toggle-slider"></span></label>
-          <label style="font-weight:600;color:<?=$ks?'var(--red)':'var(--text)'?>">Kill Switch <?= $ks ? '(ACTIVE)' : '' ?></label>
+          <?php if (ai_workforce_kill_switch_can_control()): ?>
+            <label class="toggle-switch"><input type="checkbox" id="ks-toggle" <?=$ks?'checked':''?> onchange="toggleKillSwitch(this.checked)"><span class="toggle-slider"></span></label>
+            <label style="font-weight:600;color:<?=$ks?'var(--red)':'var(--text)'?>">Kill Switch <?= $ks ? '(ACTIVE)' : '' ?></label>
+          <?php else: ?>
+            <label style="font-weight:600;color:<?=$ks?'var(--red)':'var(--text)'?>">Kill Switch <?= $ks ? '(ACTIVE)' : '' ?></label>
+            <p class="dim" style="margin:6px 0 0;font-size:12px">Read-only for your role — engaging or releasing it needs <span class="mono">trading.control</span>.</p>
+          <?php endif; ?>
         </div>
         <div style="border-top:1px solid var(--line);margin:10px 0;padding-top:10px">
           <div class="bc-row"><span>Max daily trades</span><b><?=e((string)($riskLimits['maxDailyTrades']??'—'))?></b></div>
