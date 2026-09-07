@@ -174,8 +174,13 @@ test('sports UI: a read-only identity is told why, instead of being handed a ref
     assert_not_contains('/sports/sync', $html, 'sync form is rendered for sports.manage only');
     assert_not_contains('/sports/' . $ticketId . '/decide', $html, 'decide form needs sports.approve');
     assert_not_contains('/sports/' . $ticketId . '/settle', $html, 'settle form needs sports.settle');
-    // The missing permission is named, so the operator knows what to ask for.
-    assert_contains('Sync now (needs sports.manage)', $html);
+    // Action labels stay clean; the missing permission is named in the title/help copy.
+    assert_contains('Sync now', $html);
+    assert_contains('🎯 Odds Prediction Ticket', $html);
+    assert_contains(gmdate('m/d/Y'), $html, 'today\'s ticket date is shown as MM/DD/YYYY');
+    assert_true(!str_contains($html, 'Sync now (needs sports.manage)'), 'sync label must not include the permission suffix');
+    assert_true(!str_contains($html, '🎯 Odds Prediction Ticket — needs sports.manage'), 'ticket label must not include the permission suffix');
+    assert_contains('Requires the sports.manage permission', $html);
     assert_contains('needs sports.approve', $html);
     assert_contains('needs sports.settle', $html);
     assert_contains('disabled', $html, 'unavailable controls are visibly disabled');

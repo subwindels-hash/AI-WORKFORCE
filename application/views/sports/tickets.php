@@ -4,6 +4,8 @@ $perf = $performance ?? [];
 // Capabilities of the signed-in identity (fresh from the database, see
 // Sports::sportsCaps). Missing capabilities render as a reason, not a button.
 $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
+$ticketDateIso = gmdate('Y-m-d');
+$ticketDateShown = gmdate('m/d/Y');
 ?>
 <div class="page-head">
   <div>
@@ -13,14 +15,16 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
       <?php if (!empty($caps['sync'])): ?>
         <form method="post" action="/sports/generate-ticket" style="display:flex;gap:6px;align-items:center" onsubmit="return confirm('Generate odds prediction ticket for today from stored fixtures & odds?')">
           <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
-          <input type="date" name="date" value="<?= e(gmdate('Y-m-d')) ?>" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px" title="Ticket date (UTC)">
+          <input type="date" name="date" value="<?= e($ticketDateIso) ?>" aria-label="<?= e($ticketDateShown) ?>" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px" title="Ticket date (UTC) <?= e($ticketDateShown) ?>">
+          <span class="mono" style="font-size:12px;font-weight:700"><?= e($ticketDateShown) ?></span>
           <button class="btn small" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700;letter-spacing:0.02em">
             🎯 Odds Prediction Ticket
           </button>
         </form>
         <a class="btn small" href="/sports">Sports Intelligence →</a>
       <?php else: ?>
-        <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">🎯 Odds Prediction Ticket — needs sports.manage</button>
+        <span class="mono" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px;font-weight:700" title="Ticket date (UTC)"><?= e($ticketDateShown) ?></span>
+        <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">🎯 Odds Prediction Ticket</button>
         <a class="btn small" href="/sports">Sports Intelligence →</a>
       <?php endif; ?>
     </div>

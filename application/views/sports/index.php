@@ -46,6 +46,9 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
 // operator diagnostics (sports.manage). A read-only user sees only whether
 // data is available — never which vendor, key tier or endpoint is behind it.
 $operator = !empty($caps['sync']);
+$ticketDateIso = (string) ($today['date'] ?? gmdate('Y-m-d'));
+$ticketDateTs = strtotime($ticketDateIso);
+$ticketDateShown = gmdate('m/d/Y', $ticketDateTs !== false ? $ticketDateTs : time());
 // Match date + time as one UTC stamp (`YYYY-MM-DD HH:MM`) from the stored
 // kickoff. A match the provider gave no kickoff for prints — : never a blank
 // cell, never 00:00, because a guessed time would read as a real one.
@@ -66,7 +69,8 @@ $kickoffStamp = static function (mixed $iso): string {
         </form>
         <form method="post" action="/sports/generate-ticket" style="display:flex;gap:6px;align-items:center" onsubmit="return confirm('Generate odds prediction ticket for the selected date from stored fixtures & odds? This runs the AI odds prediction ticket engine (value, probability, confidence, risk, correlation) and creates a reviewable odds prediction ticket.')">
           <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
-          <input type="date" name="date" value="<?= e((string) ($today['date'] ?? gmdate('Y-m-d'))) ?>" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px" title="Ticket date (UTC)">
+          <input type="date" name="date" value="<?= e($ticketDateIso) ?>" aria-label="<?= e($ticketDateShown) ?>" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px" title="Ticket date (UTC) <?= e($ticketDateShown) ?>">
+          <span class="mono" style="font-size:12px;font-weight:700"><?= e($ticketDateShown) ?></span>
           <button class="btn small" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700;letter-spacing:0.02em">
             🎯 Odds Prediction Ticket
           </button>
@@ -75,8 +79,9 @@ $kickoffStamp = static function (mixed $iso): string {
       <p class="dim" style="font-size:11px;margin-top:6px">Sync pulls fixtures/odds from providers. <b>🎯 Odds Prediction Ticket</b> turns stored odds into a reviewable ticket — market, selection, offered odds, fair probability, expected value and risk — no external call, idempotent per day/config version.</p>
     <?php else: ?>
       <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <button class="btn small" disabled title="Requires the sports.manage permission">Sync now (needs sports.manage)</button>
-        <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">🎯 Odds Prediction Ticket — needs sports.manage</button>
+        <button class="btn small" disabled title="Requires the sports.manage permission">Sync now</button>
+        <span class="mono" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px;font-weight:700" title="Ticket date (UTC)"><?= e($ticketDateShown) ?></span>
+        <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">🎯 Odds Prediction Ticket</button>
       </div>
       <p class="dim" style="font-size:11px;margin-top:6px">Your account is read-only here (sports.view). Ask an administrator to assign the <b>Sports administrator</b> role — the console picks the new permission up on your next page load, no sign-out needed.</p>
     <?php endif; ?>
