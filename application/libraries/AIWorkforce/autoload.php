@@ -3,7 +3,7 @@
  * AI Workforce domain loader.
  *
  * The old loader required every domain file on every request. That made simple
- * pages pay to parse the entire sports/trading/lottery/Cloudflare stack before
+ * pages pay to parse the entire sports/trading/lottery/Agent stack before
  * the lazy Platform container could help. Keep the few namespaced function
  * files loaded, then load classes, interfaces and traits on demand.
  */
@@ -19,12 +19,19 @@ foreach (['Strategies/BuiltinStrategies.php', 'Strategies/StrategyRegistry.php']
 spl_autoload_register(static function (string $class) use ($ai_workforceDir): void {
     static $map = [
     'AIWorkforce\\AdminPortal' => 'AdminPortal.php',
+    'AIWorkforce\\AgentPlatform\\AgentCommunicationBus' => 'AgentPlatform/AgentCommunicationBus.php',
+    'AIWorkforce\\AgentPlatform\\AgentObservability' => 'AgentPlatform/AgentObservability.php',
+    'AIWorkforce\\AgentPlatform\\AgentPlatform' => 'AgentPlatform/AgentPlatform.php',
+    'AIWorkforce\\AgentPlatform\\AgentSessionManager' => 'AgentPlatform/AgentSessionManager.php',
+    'AIWorkforce\\AgentPlatform\\McpTool' => 'AgentPlatform/McpToolRegistry.php',
+    'AIWorkforce\\AgentPlatform\\McpToolRegistry' => 'AgentPlatform/McpToolRegistry.php',
+    'AIWorkforce\\AgentPlatform\\ModelRouter' => 'AgentPlatform/ModelRouter.php',
+    'AIWorkforce\\AgentPlatform\\WorkflowEngine' => 'AgentPlatform/WorkflowEngine.php',
     'AIWorkforce\\Agents\\AgentDebate' => 'Agents/AgentDebate.php',
     'AIWorkforce\\Agents\\AgentHelperTrait' => 'Agents/AgentHelper.php',
     'AIWorkforce\\Agents\\AgentOrchestrator' => 'Agents/AgentOrchestrator.php',
-    'AIWorkforce\\Agents\\CloudflareSpecialistAgent' => 'Agents/CloudflareSpecialistAgent.php',
     'AIWorkforce\\Agents\\CryptoAgent' => 'Agents/ForexCryptoSentimentAgents.php',
-    'AIWorkforce\\Agents\\EnhancedCloudflareAgent' => 'Agents/EnhancedCloudflareAgent.php',
+    'AIWorkforce\\Agents\\EnhancedSpecialistAgent' => 'Agents/EnhancedSpecialistAgent.php',
     'AIWorkforce\\Agents\\ForexAgent' => 'Agents/ForexCryptoSentimentAgents.php',
     'AIWorkforce\\Agents\\FundamentalsAgent' => 'Agents/FundamentalsAgent.php',
     'AIWorkforce\\Agents\\MarketStructureAgent' => 'Agents/MarketStructureAgent.php',
@@ -59,15 +66,6 @@ spl_autoload_register(static function (string $class) use ($ai_workforceDir): vo
     'AIWorkforce\\CandleNormalizer' => 'CandleNormalizer.php',
     'AIWorkforce\\ChatAssistant' => 'ChatAssistant.php',
     'AIWorkforce\\CircuitBreaker' => 'CircuitBreaker.php',
-    'AIWorkforce\\Cloudflare\\AgentCommunicationBus' => 'Cloudflare/AgentCommunicationBus.php',
-    'AIWorkforce\\Cloudflare\\AgentObservability' => 'Cloudflare/AgentObservability.php',
-    'AIWorkforce\\Cloudflare\\AgentPlatform' => 'Cloudflare/AgentPlatform.php',
-    'AIWorkforce\\Cloudflare\\AgentSessionManager' => 'Cloudflare/AgentSessionManager.php',
-    'AIWorkforce\\Cloudflare\\CloudflareBrowser' => 'Cloudflare/CloudflareBrowser.php',
-    'AIWorkforce\\Cloudflare\\McpTool' => 'Cloudflare/McpToolRegistry.php',
-    'AIWorkforce\\Cloudflare\\McpToolRegistry' => 'Cloudflare/McpToolRegistry.php',
-    'AIWorkforce\\Cloudflare\\ModelRouter' => 'Cloudflare/ModelRouter.php',
-    'AIWorkforce\\Cloudflare\\WorkflowEngine' => 'Cloudflare/WorkflowEngine.php',
     'AIWorkforce\\Cron\\CronAutoRun' => 'Cron/CronAutoRun.php',
     'AIWorkforce\\Cron\\CronRunner' => 'Cron/CronRunner.php',
     'AIWorkforce\\Cron\\CronScheduler' => 'Cron/CronScheduler.php',
@@ -147,8 +145,8 @@ spl_autoload_register(static function (string $class) use ($ai_workforceDir): vo
     'AIWorkforce\\MultiplierIntelligence\\CrashProviderFactory' => 'MultiplierIntelligence/CrashProviderFactory.php',
     'AIWorkforce\\MultiplierIntelligence\\HistoricalAnalysisAgent' => 'MultiplierIntelligence/MultiplierAgents.php',
     'AIWorkforce\\MultiplierIntelligence\\LiveCrashProvider' => 'MultiplierIntelligence/LiveCrashProvider.php',
+    'AIWorkforce\\MultiplierIntelligence\\MultiplierAgentBridge' => 'MultiplierIntelligence/MultiplierAgentBridge.php',
     'AIWorkforce\\MultiplierIntelligence\\MultiplierAgentInterface' => 'MultiplierIntelligence/AbstractMultiplierAgent.php',
-    'AIWorkforce\\MultiplierIntelligence\\MultiplierCloudflareBridge' => 'MultiplierIntelligence/MultiplierCloudflareBridge.php',
     'AIWorkforce\\MultiplierIntelligence\\MultiplierIntelligenceEngine' => 'MultiplierIntelligence/MultiplierIntelligenceEngine.php',
     'AIWorkforce\\MultiplierIntelligence\\MultiplierPlatformIntegration' => 'MultiplierIntelligence/MultiplierPlatformIntegration.php',
     'AIWorkforce\\MultiplierIntelligence\\MultiplierSpecialistAgent' => 'MultiplierIntelligence/MultiplierSpecialistAgent.php',
@@ -189,6 +187,7 @@ spl_autoload_register(static function (string $class) use ($ai_workforceDir): vo
     'AIWorkforce\\Providers\\CryptoExchangeProvider' => 'Providers/CryptoExchangeProvider.php',
     'AIWorkforce\\Providers\\FrankfurterProvider' => 'Providers/FrankfurterProvider.php',
     'AIWorkforce\\Providers\\FundamentalsFeed' => 'Providers/FundamentalsFeed.php',
+    'AIWorkforce\\Providers\\GrokProvider' => 'Providers/GrokProvider.php',
     'AIWorkforce\\Providers\\IbkrProvider' => 'Providers/IbkrProvider.php',
     'AIWorkforce\\Providers\\KrakenProvider' => 'Providers/KrakenProvider.php',
     'AIWorkforce\\Providers\\LicensedAssetMarketDataProvider' => 'Providers/LicensedAssetMarketDataProvider.php',

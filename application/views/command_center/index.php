@@ -47,7 +47,16 @@
 
 @media(max-width:768px){
   .cc-grid{grid-template-columns:1fr}
-  .cc-health{flex-direction:column;text-align:center}
+  .cc-header{flex-direction:column;align-items:flex-start;gap:12px;padding:16px}
+  .cc-health{flex-direction:column;text-align:center;gap:12px;padding:16px}
+  .cc-health-bar{margin:10px 0;width:100%;margin-left:0}
+  .cc-activity-item{flex-direction:column;gap:4px}
+  .cc-activity-time,.cc-activity-module{min-width:0}
+}
+@media(max-width:480px){
+  .cc-bg{padding:12px}
+  .cc-header h1{font-size:18px}
+  .cc-health-score{font-size:36px}
 }
 </style>
 

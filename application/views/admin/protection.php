@@ -198,24 +198,26 @@ $chip = ai_workforce_protection_chip($protection);
     <?php if (empty($ea['deployments'])): ?>
       <p class="dim" style="margin:0">No Expert Advisor has reported yet. Deployments appear here automatically on their first heartbeat (or on the first sync above).</p>
     <?php else: ?>
-      <table class="table">
-        <thead>
-          <tr><th>Expert Advisor</th><th>Terminal</th><th>Account</th><th>State</th><th>Reason</th><th>Last heartbeat</th><th>New trades</th></tr>
-        </thead>
-        <tbody>
-          <?php foreach ($ea['deployments'] as $d): $c = ai_workforce_protection_chip(['state' => $d['state']]); ?>
-            <tr>
-              <td><b><?= e((string) $d['name']) ?></b><br><span class="dim mono" style="font-size:12px"><?= e((string) $d['id']) ?></span></td>
-              <td><?= e((string) $d['terminal']) ?><?= $d['symbol'] !== '' ? ' · ' . e((string) $d['symbol']) : '' ?></td>
-              <td class="mono"><?= e((string) ($d['account'] !== '' ? $d['account'] : '—')) ?><?= $d['broker'] !== '' ? '<br><span class="dim">' . e((string) $d['broker']) . '</span>' : '' ?></td>
-              <td><span class="statuspill <?= $c['tone'] === 'ok' ? '' : 'warn' ?>"><i class="pill-dot"></i><?= e($c['icon'] . ' ' . str_replace('AUTOMATIC_', '', (string) $d['state'])) ?></span></td>
-              <td style="max-width:320px"><?= e((string) $d['reason']) ?></td>
-              <td class="mono" style="font-size:12px"><?= e((string) ($d['heartbeatAt'] ?? 'never')) ?><?= $d['heartbeatAgeSeconds'] !== null ? '<br><span class="dim">' . (int) $d['heartbeatAgeSeconds'] . 's ago</span>' : '' ?></td>
-              <td><?= $d['allowNewTrades'] ? 'Allowed' : '<b>BLOCKED</b>' ?></td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr><th>Expert Advisor</th><th>Terminal</th><th>Account</th><th>State</th><th>Reason</th><th>Last heartbeat</th><th>New trades</th></tr>
+          </thead>
+          <tbody>
+            <?php foreach ($ea['deployments'] as $d): $c = ai_workforce_protection_chip(['state' => $d['state']]); ?>
+              <tr>
+                <td><b><?= e((string) $d['name']) ?></b><br><span class="dim mono" style="font-size:12px"><?= e((string) $d['id']) ?></span></td>
+                <td><?= e((string) $d['terminal']) ?><?= $d['symbol'] !== '' ? ' · ' . e((string) $d['symbol']) : '' ?></td>
+                <td class="mono"><?= e((string) ($d['account'] !== '' ? $d['account'] : '—')) ?><?= $d['broker'] !== '' ? '<br><span class="dim">' . e((string) $d['broker']) . '</span>' : '' ?></td>
+                <td><span class="statuspill <?= $c['tone'] === 'ok' ? '' : 'warn' ?>"><i class="pill-dot"></i><?= e($c['icon'] . ' ' . str_replace('AUTOMATIC_', '', (string) $d['state'])) ?></span></td>
+                <td style="max-width:320px"><?= e((string) $d['reason']) ?></td>
+                <td class="mono" style="font-size:12px"><?= e((string) ($d['heartbeatAt'] ?? 'never')) ?><?= $d['heartbeatAgeSeconds'] !== null ? '<br><span class="dim">' . (int) $d['heartbeatAgeSeconds'] . 's ago</span>' : '' ?></td>
+                <td><?= $d['allowNewTrades'] ? 'Allowed' : '<b>BLOCKED</b>' ?></td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
       <p class="dim" style="margin:10px 0 0"><?= (int) ($ea['blocked'] ?? 0) ?> of <?= (int) ($ea['total'] ?? 0) ?> deployment(s) blocked. Last evaluated: <?= e((string) ($ea['evaluatedAt'] ?? 'never')) ?>.</p>
     <?php endif; ?>
   </div>
@@ -229,26 +231,28 @@ $chip = ai_workforce_protection_chip($protection);
     <?php if (empty($ea['accounts'])): ?>
       <p class="dim" style="margin:0 0 10px">No account overrides configured — every account uses the platform policy above.</p>
     <?php else: ?>
-      <table class="table">
-        <thead><tr><th>Account</th><th>Overridden values</th><th>Deployments</th><th></th></tr></thead>
-        <tbody>
-          <?php foreach ($ea['accounts'] as $a): ?>
-            <tr>
-              <td class="mono"><?= e((string) $a['key']) ?></td>
-              <td class="mono" style="font-size:12px"><?= e(implode(', ', array_keys((array) $a['override']))) ?></td>
-              <td class="dim" style="font-size:12px"><?= e(implode(', ', (array) ($a['deployments'] ?? [])) ?: '— none reporting yet —') ?></td>
-              <td>
-                <form method="post" action="/admin/protection/ea/account">
-                  <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
-                  <input type="hidden" name="account_key" value="<?= e((string) $a['key']) ?>">
-                  <input type="hidden" name="remove" value="1">
-                  <button class="btn small danger" type="submit">Remove</button>
-                </form>
-              </td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
+      <div class="table-scroll">
+        <table class="table">
+          <thead><tr><th>Account</th><th>Overridden values</th><th>Deployments</th><th></th></tr></thead>
+          <tbody>
+            <?php foreach ($ea['accounts'] as $a): ?>
+              <tr>
+                <td class="mono"><?= e((string) $a['key']) ?></td>
+                <td class="mono" style="font-size:12px"><?= e(implode(', ', array_keys((array) $a['override']))) ?></td>
+                <td class="dim" style="font-size:12px"><?= e(implode(', ', (array) ($a['deployments'] ?? [])) ?: '— none reporting yet —') ?></td>
+                <td>
+                  <form method="post" action="/admin/protection/ea/account">
+                    <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+                    <input type="hidden" name="account_key" value="<?= e((string) $a['key']) ?>">
+                    <input type="hidden" name="remove" value="1">
+                    <button class="btn small danger" type="submit">Remove</button>
+                  </form>
+                </td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
     <?php endif; ?>
 
     <details style="margin-top:12px">

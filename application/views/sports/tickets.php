@@ -47,47 +47,49 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
       <?php if (empty($tickets)): ?>
         <p class="dim">No odds prediction tickets generated yet. Select <b>🎯 Odds Prediction Ticket</b> to build one from stored data.</p>
       <?php else: ?>
-        <table class="tbl">
-          <thead><tr><th>Ticket</th><th>Created (UTC)</th><th class="num">Odds</th><th class="num">Sel.</th><th class="num">Conf.</th><th>Risk</th><th>Approval</th><th>Settlement</th><th class="num">P/L</th><th></th></tr></thead>
-          <tbody>
-            <?php foreach ($tickets as $t): $pnl = $t['pnl'] ?? null; ?>
-              <tr>
-                <td class="mono" style="font-weight:700"><?= e((string) ($t['id'] ?? '')) ?></td>
-                <td class="mono dim"><?= e(substr((string) ($t['created_at'] ?? ''), 0, 16)) ?></td>
-                <td class="num mono"><?= e(number_format((float) ($t['total_odds'] ?? 0), 2)) ?></td>
-                <td class="num"><?= (int) ($t['selection_count'] ?? 0) ?></td>
-                <td class="num"><?= ($t['confidence'] ?? null) !== null ? e(number_format((float) $t['confidence'], 0)) : '—' ?></td>
-                <td><span class="badge <?= (string) ($t['risk'] ?? '') === 'LOW' ? 'b-green' : ((string) ($t['risk'] ?? '') === 'HIGH' ? 'b-red' : 'b-violet') ?>"><?= e((string) ($t['risk'] ?? '—')) ?></span></td>
-                <td><span class="badge b-gray"><?= e((string) ($t['approval_status'] ?? '—')) ?></span></td>
-                <td><span class="badge <?= in_array(($t['settlement_status'] ?? ''), ['WON'], true) ? 'b-green' : (in_array(($t['settlement_status'] ?? ''), ['LOST'], true) ? 'b-red' : 'b-gray') ?>"><?= e((string) ($t['settlement_status'] ?? 'PENDING')) ?></span></td>
-                <td class="num mono <?= $pnl !== null && (float) $pnl >= 0 ? 'up' : 'down' ?>"><?= $pnl !== null ? e(number_format((float) $pnl, 2)) : '—' ?></td>
-                <td class="num" style="white-space:nowrap">
-                  <?php if ((string) ($t['approval_status'] ?? '') === 'PENDING_USER_APPROVAL'): ?>
-                    <?php if (!empty($caps['approve'])): ?>
-                      <form method="post" action="/sports/<?= e((string) $t['id']) ?>/decide" style="display:inline">
-                        <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><input type="hidden" name="approve" value="1"><button class="btn small primary">approve</button>
-                      </form>
-                      <form method="post" action="/sports/<?= e((string) $t['id']) ?>/decide" style="display:inline" onsubmit="return confirm('Reject this record?')">
-                        <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><input type="hidden" name="approve" value="0"><button class="btn small danger">reject</button>
-                      </form>
-                    <?php else: ?>
-                      <span class="dim" style="font-size:10px" title="Requires the sports.approve permission">needs sports.approve</span>
+        <div class="table-scroll">
+          <table class="tbl">
+            <thead><tr><th>Ticket</th><th>Created (UTC)</th><th class="num">Odds</th><th class="num">Sel.</th><th class="num">Conf.</th><th>Risk</th><th>Approval</th><th>Settlement</th><th class="num">P/L</th><th></th></tr></thead>
+            <tbody>
+              <?php foreach ($tickets as $t): $pnl = $t['pnl'] ?? null; ?>
+                <tr>
+                  <td class="mono" style="font-weight:700"><?= e((string) ($t['id'] ?? '')) ?></td>
+                  <td class="mono dim"><?= e(substr((string) ($t['created_at'] ?? ''), 0, 16)) ?></td>
+                  <td class="num mono"><?= e(number_format((float) ($t['total_odds'] ?? 0), 2)) ?></td>
+                  <td class="num"><?= (int) ($t['selection_count'] ?? 0) ?></td>
+                  <td class="num"><?= ($t['confidence'] ?? null) !== null ? e(number_format((float) $t['confidence'], 0)) : '—' ?></td>
+                  <td><span class="badge <?= (string) ($t['risk'] ?? '') === 'LOW' ? 'b-green' : ((string) ($t['risk'] ?? '') === 'HIGH' ? 'b-red' : 'b-violet') ?>"><?= e((string) ($t['risk'] ?? '—')) ?></span></td>
+                  <td><span class="badge b-gray"><?= e((string) ($t['approval_status'] ?? '—')) ?></span></td>
+                  <td><span class="badge <?= in_array(($t['settlement_status'] ?? ''), ['WON'], true) ? 'b-green' : (in_array(($t['settlement_status'] ?? ''), ['LOST'], true) ? 'b-red' : 'b-gray') ?>"><?= e((string) ($t['settlement_status'] ?? 'PENDING')) ?></span></td>
+                  <td class="num mono <?= $pnl !== null && (float) $pnl >= 0 ? 'up' : 'down' ?>"><?= $pnl !== null ? e(number_format((float) $pnl, 2)) : '—' ?></td>
+                  <td class="num" style="white-space:nowrap">
+                    <?php if ((string) ($t['approval_status'] ?? '') === 'PENDING_USER_APPROVAL'): ?>
+                      <?php if (!empty($caps['approve'])): ?>
+                        <form method="post" action="/sports/<?= e((string) $t['id']) ?>/decide" style="display:inline">
+                          <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><input type="hidden" name="approve" value="1"><button class="btn small primary">approve</button>
+                        </form>
+                        <form method="post" action="/sports/<?= e((string) $t['id']) ?>/decide" style="display:inline" onsubmit="return confirm('Reject this record?')">
+                          <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><input type="hidden" name="approve" value="0"><button class="btn small danger">reject</button>
+                        </form>
+                      <?php else: ?>
+                        <span class="dim" style="font-size:10px" title="Requires the sports.approve permission">needs sports.approve</span>
+                      <?php endif; ?>
                     <?php endif; ?>
-                  <?php endif; ?>
-                  <?php if ((string) ($t['settlement_status'] ?? '') === 'PENDING'): ?>
-                    <?php if (!empty($caps['settle'])): ?>
-                      <form method="post" action="/sports/<?= e((string) $t['id']) ?>/settle" style="display:inline">
-                        <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><button class="btn small">settle</button>
-                      </form>
-                    <?php else: ?>
-                      <span class="dim" style="font-size:10px" title="Requires the sports.settle permission">needs sports.settle</span>
+                    <?php if ((string) ($t['settlement_status'] ?? '') === 'PENDING'): ?>
+                      <?php if (!empty($caps['settle'])): ?>
+                        <form method="post" action="/sports/<?= e((string) $t['id']) ?>/settle" style="display:inline">
+                          <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><button class="btn small">settle</button>
+                        </form>
+                      <?php else: ?>
+                        <span class="dim" style="font-size:10px" title="Requires the sports.settle permission">needs sports.settle</span>
+                      <?php endif; ?>
                     <?php endif; ?>
-                  <?php endif; ?>
-                </td>
-              </tr>
-            <?php endforeach; ?>
-          </tbody>
-        </table>
+                  </td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
       <?php endif; ?>
     </div>
   </div>

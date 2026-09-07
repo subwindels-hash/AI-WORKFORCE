@@ -84,7 +84,7 @@ $dueCount = count(array_filter($jobs, fn($j) => !empty($j['enabled']) && !empty(
 
 <section class="panel" style="margin-top:14px">
   <h3>Jobs</h3>
-  <div class="body">
+  <div class="body table-scroll">
     <table class="tbl">
       <thead><tr><th>Job</th><th>Schedule</th><th>Enabled</th><th>Last run</th><th>Next due</th><th></th></tr></thead>
       <tbody>
@@ -120,7 +120,7 @@ $dueCount = count(array_filter($jobs, fn($j) => !empty($j['enabled']) && !empty(
 <?php if (!empty($recent)): ?>
 <section class="panel" style="margin-top:14px">
   <h3>Recent cron activity</h3>
-  <div class="body">
+  <div class="body table-scroll">
     <table class="tbl">
       <thead><tr><th>When</th><th>Event</th><th>Summary</th></tr></thead>
       <tbody>

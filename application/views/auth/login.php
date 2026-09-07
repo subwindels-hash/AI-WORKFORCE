@@ -54,7 +54,7 @@ $this->load->view('auth/layout/header', ['title' => ($admin ?? false) ? 'Adminis
         </label>
 
         <div class="auth-row">
-          <label class="auth-check"><input type="checkbox" name="remember" value="1"> Remember me</label>
+          <label class="auth-check"><input type="checkbox" name="remember" value="1" checked> Remember me</label>
           <a href="/forgot-password">Forgot password?</a>
         </div>
 

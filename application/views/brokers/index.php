@@ -20,37 +20,39 @@
   <div class="body" style="padding-top:12px">
     <p class="dim" style="margin:0 0 12px">Connect your own broker account so AI Trading Intelligence can read live quotes and (after you opt in + enable demo/live gates) route approved orders through the supervised pipeline. Credentials are encrypted at rest and scoped to your account; other users never see them.</p>
     <?php if (!empty($myConnections)): ?>
-      <table class="tbl mono" style="margin-bottom:14px">
-        <thead><tr><th>Broker</th><th>Label</th><th>URL</th><th>Status</th><th>Trading</th><th>Live</th><th>Last test</th><th></th></tr></thead>
-        <tbody>
-        <?php foreach ($myConnections as $mc):
-            $bid = $mc['broker']; $meta = $supportedBrokers[$bid] ?? ['label'=>$bid]; ?>
-          <tr>
-            <td><b><?= e($meta['label']) ?></b></td>
-            <td><?= e($mc['label'] ?? '') ?></td>
-            <td class="dim"><?= e($mc['base_url']) ?></td>
-            <td>
-              <?php if (empty($mc['enabled'])): ?><span class="badge b-gray">disabled</span>
-              <?php elseif ($mc['last_test_ok'] === true): ?><span class="badge b-green">connected</span>
-              <?php elseif ($mc['last_test_ok'] === false): ?><span class="badge b-red">failed</span>
-              <?php else: ?><span class="badge b-amber">untested</span><?php endif; ?>
-            </td>
-            <td><?= !empty($mc['trading_enabled']) ? '<span class="badge b-amber">writes on</span>' : '<span class="dim">read-only</span>' ?></td>
-            <td><?= !empty($mc['live_allowed']) ? '<span class="badge b-red">live</span>' : '<span class="dim">demo</span>' ?></td>
-            <td class="dim">
-              <?php if ($mc['last_test_at']): ?>
-                <?= e($mc['last_test_at']) ?><br><span class="dim"><?= e($mc['last_test_message'] ?? '') ?></span>
-              <?php else: ?>—<?php endif; ?>
-            </td>
-            <td style="white-space:nowrap">
-              <a class="btn" href="/brokers/connect/<?= e($bid) ?>">edit</a>
-              <form method="post" action="/brokers/test/<?= e($bid) ?>" style="display:inline"><button class="btn">test</button></form>
-              <form method="post" action="/brokers/disconnect/<?= e($bid) ?>" style="display:inline" data-confirm="Disconnect <?= e($meta['label']) ?>?"><button class="btn danger">remove</button></form>
-            </td>
-          </tr>
-        <?php endforeach; ?>
-        </tbody>
-      </table>
+      <div class="table-scroll" style="margin-bottom:14px">
+        <table class="tbl mono">
+          <thead><tr><th>Broker</th><th>Label</th><th>URL</th><th>Status</th><th>Trading</th><th>Live</th><th>Last test</th><th></th></tr></thead>
+          <tbody>
+          <?php foreach ($myConnections as $mc):
+              $bid = $mc['broker']; $meta = $supportedBrokers[$bid] ?? ['label'=>$bid]; ?>
+            <tr>
+              <td><b><?= e($meta['label']) ?></b></td>
+              <td><?= e($mc['label'] ?? '') ?></td>
+              <td class="dim"><?= e($mc['base_url']) ?></td>
+              <td>
+                <?php if (empty($mc['enabled'])): ?><span class="badge b-gray">disabled</span>
+                <?php elseif ($mc['last_test_ok'] === true): ?><span class="badge b-green">connected</span>
+                <?php elseif ($mc['last_test_ok'] === false): ?><span class="badge b-red">failed</span>
+                <?php else: ?><span class="badge b-amber">untested</span><?php endif; ?>
+              </td>
+              <td><?= !empty($mc['trading_enabled']) ? '<span class="badge b-amber">writes on</span>' : '<span class="dim">read-only</span>' ?></td>
+              <td><?= !empty($mc['live_allowed']) ? '<span class="badge b-red">live</span>' : '<span class="dim">demo</span>' ?></td>
+              <td class="dim">
+                <?php if ($mc['last_test_at']): ?>
+                  <?= e($mc['last_test_at']) ?><br><span class="dim"><?= e($mc['last_test_message'] ?? '') ?></span>
+                <?php else: ?>—<?php endif; ?>
+              </td>
+              <td style="white-space:nowrap">
+                <a class="btn" href="/brokers/connect/<?= e($bid) ?>">edit</a>
+                <form method="post" action="/brokers/test/<?= e($bid) ?>" style="display:inline"><button class="btn">test</button></form>
+                <form method="post" action="/brokers/disconnect/<?= e($bid) ?>" style="display:inline" data-confirm="Disconnect <?= e($meta['label']) ?>?"><button class="btn danger">remove</button></form>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
     <?php endif; ?>
 
     <div class="grid" style="grid-template-columns:repeat(auto-fill, minmax(220px,1fr));gap:10px">
@@ -85,18 +87,20 @@
     <div class="panel">
       <h3><?= e($id) ?> <span class="badge <?= ['READY' => 'b-green', 'DOWN' => 'b-red', 'DISABLED' => 'b-gray', 'NOT_CONFIGURED' => 'b-amber'][$c['state']] ?? 'b-gray' ?>"><?= e($c['state']) ?></span></h3>
       <div class="body" style="padding-top:12px">
-        <table class="tbl mono">
-          <tr><td class="dim">message</td><td><?= e($c['message']) ?></td></tr>
-          <tr><td class="dim">configured</td><td><?= $c['configured'] ? 'yes' : 'no' ?></td></tr>
-          <?php foreach (['bridgeVersion', 'bridgeTradingEnabled', 'accountType', 'orderSubmissionEffective'] as $k): ?>
-            <?php if (isset($c[$k])): ?><tr><td class="dim"><?= e($k) ?></td><td><?= e(is_bool($c[$k]) ? ($c[$k] ? 'true' : 'false') : (string) $c[$k]) ?></td></tr><?php endif; ?>
-          <?php endforeach; ?>
-          <?php $caps = $c['capabilities'] ?? []; ?>
-          <tr><td class="dim">account read</td><td class="<?= !empty($caps['accountRead']) ? 'up' : 'down' ?>"><?= !empty($caps['accountRead']) ? 'yes' : 'no' ?></td></tr>
-          <tr><td class="dim">market data</td><td class="<?= !empty($caps['marketData']) ? 'up' : 'down' ?>"><?= !empty($caps['marketData']) ? 'yes' : 'no' ?></td></tr>
-          <tr><td class="dim">order submission</td><td class="<?= !empty($caps['orderSubmission']) ? 'up' : 'down' ?>"><?= !empty($caps['orderSubmission']) ? 'enabled' : 'disabled' ?></td></tr>
-          <tr><td class="dim">live trading</td><td class="<?= !empty($caps['liveTrading']) ? 'up' : 'down' ?>"><?= !empty($caps['liveTrading']) ? 'allowed' : 'demo only' ?></td></tr>
-        </table>
+        <div class="table-scroll">
+          <table class="tbl mono">
+            <tr><td class="dim">message</td><td><?= e($c['message']) ?></td></tr>
+            <tr><td class="dim">configured</td><td><?= $c['configured'] ? 'yes' : 'no' ?></td></tr>
+            <?php foreach (['bridgeVersion', 'bridgeTradingEnabled', 'accountType', 'orderSubmissionEffective'] as $k): ?>
+              <?php if (isset($c[$k])): ?><tr><td class="dim"><?= e($k) ?></td><td><?= e(is_bool($c[$k]) ? ($c[$k] ? 'true' : 'false') : (string) $c[$k]) ?></td></tr><?php endif; ?>
+            <?php endforeach; ?>
+            <?php $caps = $c['capabilities'] ?? []; ?>
+            <tr><td class="dim">account read</td><td class="<?= !empty($caps['accountRead']) ? 'up' : 'down' ?>"><?= !empty($caps['accountRead']) ? 'yes' : 'no' ?></td></tr>
+            <tr><td class="dim">market data</td><td class="<?= !empty($caps['marketData']) ? 'up' : 'down' ?>"><?= !empty($caps['marketData']) ? 'yes' : 'no' ?></td></tr>
+            <tr><td class="dim">order submission</td><td class="<?= !empty($caps['orderSubmission']) ? 'up' : 'down' ?>"><?= !empty($caps['orderSubmission']) ? 'enabled' : 'disabled' ?></td></tr>
+            <tr><td class="dim">live trading</td><td class="<?= !empty($caps['liveTrading']) ? 'up' : 'down' ?>"><?= !empty($caps['liveTrading']) ? 'allowed' : 'demo only' ?></td></tr>
+          </table>
+        </div>
         <?php if (!empty($caps['reason'])): ?><p class="dim" style="margin-top:8px"><?= e($caps['reason']) ?></p><?php endif; ?>
       </div>
     </div>
@@ -113,13 +117,15 @@
           <span class="mono">AI_WORKFORCE_MT5_BRIDGE_ENABLED=1</span>, <span class="mono">AI_WORKFORCE_MT5_BRIDGE_URL</span> and
           <span class="mono">AI_WORKFORCE_MT5_BRIDGE_TOKEN</span>. This page can never place an order.</p>
       <?php else: ?>
-        <table class="tbl mono">
-          <tr><td class="dim">account</td><td><?= e($account['accountId']) ?></td></tr>
-          <tr><td class="dim">currency</td><td><?= e($account['currency']) ?></td></tr>
-          <tr><td class="dim">balance / equity</td><td class="num"><?= e(number_format($account['balance'], 2)) ?> / <?= e(number_format($account['equity'], 2)) ?></td></tr>
-          <tr><td class="dim">free margin</td><td class="num"><?= e(number_format($account['freeMargin'], 2)) ?></td></tr>
-          <tr><td class="dim">as of</td><td><?= e($account['timestamp']) ?></td></tr>
-        </table>
+        <div class="table-scroll">
+          <table class="tbl mono">
+            <tr><td class="dim">account</td><td><?= e($account['accountId']) ?></td></tr>
+            <tr><td class="dim">currency</td><td><?= e($account['currency']) ?></td></tr>
+            <tr><td class="dim">balance / equity</td><td class="num"><?= e(number_format($account['balance'], 2)) ?> / <?= e(number_format($account['equity'], 2)) ?></td></tr>
+            <tr><td class="dim">free margin</td><td class="num"><?= e(number_format($account['freeMargin'], 2)) ?></td></tr>
+            <tr><td class="dim">as of</td><td><?= e($account['timestamp']) ?></td></tr>
+          </table>
+        </div>
       <?php endif; ?>
     </div>
   </div>
@@ -131,12 +137,14 @@
         <button class="btn">fetch quote</button>
       </form>
       <?php if (!empty($quote)): ?>
-        <table class="tbl mono" style="margin-top:8px">
-          <tr><td class="dim">symbol</td><td><?= e($quote['symbol']) ?></td></tr>
-          <tr><td class="dim">bid / ask</td><td class="num"><?= e(number_format($quote['bid'], 5)) ?> / <?= e(number_format($quote['ask'], 5)) ?></td></tr>
-          <tr><td class="dim">spread</td><td class="num"><?= e(number_format($quote['spread'], 5)) ?></td></tr>
-          <tr><td class="dim">timestamp</td><td><?= e($quote['timestamp']) ?></td></tr>
-        </table>
+        <div class="table-scroll" style="margin-top:8px">
+          <table class="tbl mono">
+            <tr><td class="dim">symbol</td><td><?= e($quote['symbol']) ?></td></tr>
+            <tr><td class="dim">bid / ask</td><td class="num"><?= e(number_format($quote['bid'], 5)) ?> / <?= e(number_format($quote['ask'], 5)) ?></td></tr>
+            <tr><td class="dim">spread</td><td class="num"><?= e(number_format($quote['spread'], 5)) ?></td></tr>
+            <tr><td class="dim">timestamp</td><td><?= e($quote['timestamp']) ?></td></tr>
+          </table>
+        </div>
       <?php endif; ?>
     </div>
   </div>
@@ -145,13 +153,15 @@
 <div class="panel" style="margin-top:14px">
   <h3>Not production-verified (PLANNED) — do not treat as working</h3>
   <div class="body" style="padding-top:12px">
-    <table class="tbl mono">
-      <thead><tr><th>Connector</th><th>Status</th><th>Notes</th></tr></thead>
-      <tbody>
-        <?php foreach ($planned as $p): ?>
-          <tr><td><?= e($p['name']) ?></td><td><span class="badge b-gray"><?= e($p['status']) ?></span></td><td class="dim"><?= e($p['detail']) ?></td></tr>
-        <?php endforeach; ?>
-      </tbody>
-    </table>
+    <div class="table-scroll">
+      <table class="tbl mono">
+        <thead><tr><th>Connector</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <?php foreach ($planned as $p): ?>
+            <tr><td><?= e($p['name']) ?></td><td><span class="badge b-gray"><?= e($p['status']) ?></span></td><td class="dim"><?= e($p['detail']) ?></td></tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>

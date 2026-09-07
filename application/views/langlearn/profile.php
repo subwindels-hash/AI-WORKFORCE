@@ -42,24 +42,26 @@
   <div class="panel">
     <h3><?= e(strtoupper($language['name'])) ?> <span class="dim" style="font-weight:400">(from real activity only)</span></h3>
     <div class="body" style="padding-top:12px">
-      <table class="tbl">
-        <tr><td class="dim">Current level</td><td><span class="badge big b-sky"><?= e($progress['level']) ?></span> <span class="dim" style="font-size:10px"><?= e($progress['levelSource']) ?></span></td></tr>
-        <tr><td class="dim">Progress to <?= e($progress['nextLevel'] ?? 'next level') ?></td><td><?= $progress['progressToNextLevelPct'] !== null ? e(rtrim(rtrim(number_format((float) $progress['progressToNextLevelPct'], 1), '0'), '.')) . '%' : '<span class="dim">no modules at that level yet</span>' ?></td></tr>
-        <tr><td class="dim">Vocabulary</td><td><?= (int) ($progress['vocabularyWords'] ?? 0) ?> words in your list</td></tr>
-        <?php foreach ($progress['skills'] as $skill => $s): ?>
-          <tr>
-            <td class="dim"><?= e(ucfirst($skill)) ?></td>
-            <td>
-              <?php if (!empty($s['level'])): ?><span class="badge b-green"><?= e($s['level']) ?></span><?php endif; ?>
-              <?php if ($s['pct'] !== null): ?> <?= e(rtrim(rtrim(number_format((float) $s['pct'], 1), '0'), '.')) ?>% <span class="dim" style="font-size:10px"><?= (int) ($s['attempts'] ?? 0) ?> attempts</span>
-              <?php elseif (empty($s['level'])): ?><span class="dim">— <?= e(str_replace('_', ' ', $s['source'])) ?></span><?php endif; ?>
-            </td>
-          </tr>
-        <?php endforeach; ?>
-        <tr><td class="dim">Path completion</td><td><?= $progress['pathCompletionPct'] !== null ? e(rtrim(rtrim(number_format($progress['pathCompletionPct'], 1), '0'), '.')) . '%' : '<span class="dim">no path yet</span>' ?></td></tr>
-        <tr><td class="dim">Study streak</td><td class="num"><?= (int) $progress['studyStreakDays'] ?> days · <?= (int) $progress['activeDays'] ?> active days</td></tr>
-        <tr><td class="dim">Goal</td><td><?php $g = trim((string) ($progress['goal'] ?? $profile['goal'] ?? '')); echo $g !== '' ? e($g) : '<span class="dim">not set</span>'; ?></td></tr>
-      </table>
+      <div class="table-scroll">
+        <table class="tbl">
+          <tr><td class="dim">Current level</td><td><span class="badge big b-sky"><?= e($progress['level']) ?></span> <span class="dim" style="font-size:10px"><?= e($progress['levelSource']) ?></span></td></tr>
+          <tr><td class="dim">Progress to <?= e($progress['nextLevel'] ?? 'next level') ?></td><td><?= $progress['progressToNextLevelPct'] !== null ? e(rtrim(rtrim(number_format((float) $progress['progressToNextLevelPct'], 1), '0'), '.')) . '%' : '<span class="dim">no modules at that level yet</span>' ?></td></tr>
+          <tr><td class="dim">Vocabulary</td><td><?= (int) ($progress['vocabularyWords'] ?? 0) ?> words in your list</td></tr>
+          <?php foreach ($progress['skills'] as $skill => $s): ?>
+            <tr>
+              <td class="dim"><?= e(ucfirst($skill)) ?></td>
+              <td>
+                <?php if (!empty($s['level'])): ?><span class="badge b-green"><?= e($s['level']) ?></span><?php endif; ?>
+                <?php if ($s['pct'] !== null): ?> <?= e(rtrim(rtrim(number_format((float) $s['pct'], 1), '0'), '.')) ?>% <span class="dim" style="font-size:10px"><?= (int) ($s['attempts'] ?? 0) ?> attempts</span>
+                <?php elseif (empty($s['level'])): ?><span class="dim">— <?= e(str_replace('_', ' ', $s['source'])) ?></span><?php endif; ?>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+          <tr><td class="dim">Path completion</td><td><?= $progress['pathCompletionPct'] !== null ? e(rtrim(rtrim(number_format($progress['pathCompletionPct'], 1), '0'), '.')) . '%' : '<span class="dim">no path yet</span>' ?></td></tr>
+          <tr><td class="dim">Study streak</td><td class="num"><?= (int) $progress['studyStreakDays'] ?> days · <?= (int) $progress['activeDays'] ?> active days</td></tr>
+          <tr><td class="dim">Goal</td><td><?php $g = trim((string) ($progress['goal'] ?? $profile['goal'] ?? '')); echo $g !== '' ? e($g) : '<span class="dim">not set</span>'; ?></td></tr>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -69,14 +71,16 @@
       <?php if (!empty($language['features']['adaptive_assessment'])): ?>
         <p class="dim" style="font-size:11px">Adaptive: answer well and questions get harder, struggle and they ease off. Your level is computed from your actual answers — never random. Verified ceiling for this language: <b><?= e($language['features']['assessment_ceiling']) ?></b>.</p>
         <?php if (!empty($latest) && $latest['result']): $r = $latest['result']; ?>
-          <table class="tbl" style="margin-top:8px">
-            <tr><td class="dim">Last result</td><td><span class="badge b-green"><?= e($r['overallLevel']) ?></span> <span class="dim" style="font-size:10px"><?= e(substr((string) $latest['completed_at'], 0, 16)) ?></span></td></tr>
-            <?php foreach ($r['perSkill'] as $skill => $s): ?>
-              <tr><td class="dim"><?= e($skill) ?></td><td><?= e($s['level']) ?> <span class="dim">(<?= (int) $s['correct'] ?>/<?= (int) $s['total'] ?>)</span></td></tr>
-            <?php endforeach; ?>
-            <?php if ($r['strengths']): ?><tr><td class="dim">Strengths</td><td class="up"><?= e(implode(', ', $r['strengths'])) ?></td></tr><?php endif; ?>
-            <?php if ($r['weaknesses']): ?><tr><td class="dim">Focus areas</td><td class="down"><?= e(implode(', ', $r['weaknesses'])) ?></td></tr><?php endif; ?>
-          </table>
+          <div class="table-scroll" style="margin-top:8px">
+            <table class="tbl">
+              <tr><td class="dim">Last result</td><td><span class="badge b-green"><?= e($r['overallLevel']) ?></span> <span class="dim" style="font-size:10px"><?= e(substr((string) $latest['completed_at'], 0, 16)) ?></span></td></tr>
+              <?php foreach ($r['perSkill'] as $skill => $s): ?>
+                <tr><td class="dim"><?= e($skill) ?></td><td><?= e($s['level']) ?> <span class="dim">(<?= (int) $s['correct'] ?>/<?= (int) $s['total'] ?>)</span></td></tr>
+              <?php endforeach; ?>
+              <?php if ($r['strengths']): ?><tr><td class="dim">Strengths</td><td class="up"><?= e(implode(', ', $r['strengths'])) ?></td></tr><?php endif; ?>
+              <?php if ($r['weaknesses']): ?><tr><td class="dim">Focus areas</td><td class="down"><?= e(implode(', ', $r['weaknesses'])) ?></td></tr><?php endif; ?>
+            </table>
+          </div>
         <?php endif; ?>
         <form method="post" action="/app/languages/p/<?= (int) $profile['id'] ?>/assessment/start" style="margin-top:10px">
           <button class="btn primary"><?= empty($latest) ? 'Start assessment' : 'Re-assess' ?></button>
@@ -113,25 +117,27 @@
       <form method="post" action="/app/languages/p/<?= (int) $profile['id'] ?>/path/generate"><button class="btn primary">Generate learning path</button></form>
     <?php else: ?>
       <p class="dim" style="font-size:11px">From <?= e($path['path']['from_level']) ?> toward <?= e($path['path']['target_level']) ?> — modules unlock in order; each ends with a real checkpoint quiz drawn from the item bank.</p>
-      <table class="tbl" style="margin-top:8px">
-        <thead><tr><th>#</th><th>Module</th><th>Focus</th><th>Status</th><th class="num"></th></tr></thead>
-        <tbody>
-          <?php foreach ($path['modules'] as $m): ?>
-            <tr>
-              <td class="dim"><?= (int) $m['sequence'] ?></td>
-              <td style="font-weight:600"><?= e($m['title']) ?></td>
-              <td class="dim"><?= e($m['focus_skill']) ?></td>
-              <td><span class="badge <?= ['COMPLETED' => 'b-green', 'IN_PROGRESS' => 'b-amber', 'AVAILABLE' => 'b-sky', 'LOCKED' => 'b-gray'][$m['status']] ?>"><?= e($m['status']) ?></span></td>
-              <td class="num">
-                <?php if (!in_array($m['status'], ['LOCKED', 'COMPLETED'], true)): ?>
-                  <a class="btn small primary" href="/app/languages/m/<?= e($m['id']) ?>/lesson">lesson</a>
-                  <a class="btn small" href="/app/languages/m/<?= e($m['id']) ?>/checkpoint">checkpoint</a>
-                <?php endif; ?>
-              </td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
+      <div class="table-scroll" style="margin-top:8px">
+        <table class="tbl">
+          <thead><tr><th>#</th><th>Module</th><th>Focus</th><th>Status</th><th class="num"></th></tr></thead>
+          <tbody>
+            <?php foreach ($path['modules'] as $m): ?>
+              <tr>
+                <td class="dim"><?= (int) $m['sequence'] ?></td>
+                <td style="font-weight:600"><?= e($m['title']) ?></td>
+                <td class="dim"><?= e($m['focus_skill']) ?></td>
+                <td><span class="badge <?= ['COMPLETED' => 'b-green', 'IN_PROGRESS' => 'b-amber', 'AVAILABLE' => 'b-sky', 'LOCKED' => 'b-gray'][$m['status']] ?>"><?= e($m['status']) ?></span></td>
+                <td class="num">
+                  <?php if (!in_array($m['status'], ['LOCKED', 'COMPLETED'], true)): ?>
+                    <a class="btn small primary" href="/app/languages/m/<?= e($m['id']) ?>/lesson">lesson</a>
+                    <a class="btn small" href="/app/languages/m/<?= e($m['id']) ?>/checkpoint">checkpoint</a>
+                  <?php endif; ?>
+                </td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
     <?php endif; ?>
   </div>
 </div>

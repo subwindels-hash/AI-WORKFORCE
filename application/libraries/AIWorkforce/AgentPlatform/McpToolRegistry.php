@@ -1,5 +1,5 @@
 <?php
-namespace AIWorkforce\Cloudflare;
+namespace AIWorkforce\AgentPlatform;
 
 /**
  * MCP Tool Registry — Centralized tool discovery and execution
@@ -272,11 +272,14 @@ class McpToolRegistry
             category: 'lead',
         ));
 
-        // ── Multiplier Intelligence Tools ──────────────────────────
+        // ── Multiplier Intelligence Tools ────────────────────────
         $this->register(new McpTool(
-            'multiplier.getCurrentMultiplier',
-            'Get the current live multiplier value from a crash game',
-            ['provider' => ['type' => 'string', 'default' => 'simulation', 'description' => 'Game provider (simulation, aviator)']],
+            'multiplier.getPrediction',
+            'Get current multiplier prediction with confidence and risk level',
+            [
+                'provider' => ['type' => 'string', 'default' => 'simulation', 'description' => 'Data source: bustabit, local, or simulation'],
+                'model' => ['type' => 'string', 'default' => 'MIXED-ENSEMBLE-v1', 'description' => 'Model version to use'],
+            ],
             requiresApproval: false,
             category: 'multiplier',
         ));
@@ -294,7 +297,7 @@ class McpToolRegistry
 
         $this->register(new McpTool(
             'multiplier.generateSignal',
-            'Generate an AI-powered multiplier prediction signal using 9 specialist agents (with optional LLM enhancement via Cloudflare)',
+            'Generate an AI-powered multiplier prediction signal using 9 specialist agents (with optional LLM enhancement)',
             [
                 'provider' => ['type' => 'string', 'default' => 'simulation'],
                 'model' => ['type' => 'string', 'default' => 'MIXED-ENSEMBLE-v1'],

@@ -126,8 +126,19 @@ $acc = $accuracy ?? [];
 .mi-int-pill.inactive{background:#64748b22;color:#94a3b8;border:1px solid #64748b44}
 .mi-int-pill .dot{width:6px;height:6px;border-radius:50%;background:currentColor;box-shadow:0 0 6px currentColor}
 
-@media(max-width:1200px){.mi-grid{grid-template-columns:1fr 1fr}}
-@media(max-width:768px){.mi-grid{grid-template-columns:1fr}.mi-signal-value{font-size:60px}}
+@media(max-width:1200px){.mi-grid{grid-template-columns:1fr}}
+@media(max-width:768px){
+  .mi-grid{grid-template-columns:1fr}
+  .mi-signal-value{font-size:clamp(44px, 12vw, 64px)}
+  .mi-header{flex-direction:column;align-items:flex-start;gap:12px;padding:14px 16px}
+  .mi-header h1{font-size:18px;flex-wrap:wrap}
+}
+@media(max-width:480px){
+  .mi-bg{padding:12px}
+  .mi-metrics{grid-template-columns:1fr}
+  .mi-signal-range{flex-direction:column;gap:10px}
+  .mi-stats{grid-template-columns:1fr}
+}
 </style>
 
 <div class="mi-bg">
@@ -155,7 +166,7 @@ $acc = $accuracy ?? [];
     <?php $intg = $integration ?? []; ?>
     <div class="mi-integration" title="Integration status with Windels AI Agents and Sports Intelligence">
       <?php
-        $aiAgentsActive = !empty($intg['cloudflare']['available']);
+        $aiAgentsActive = !empty($intg['ai_agents']['available']) || !empty($intg['agent_platform']['available']);
         $llmActive = !empty($intg['llm']['available']);
         $sportsActive = !empty($intg['sports']['available']);
         $regActive = !empty($intg['registered']);

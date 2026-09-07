@@ -62,25 +62,27 @@
       <div class="panel">
         <h3>Backtest history — <?= e($detail['strategy_id']) ?></h3>
         <div class="body scroll">
-          <table class="tbl mono">
-            <thead><tr><th>Date</th><th>Sym</th><th>TF</th><th class="num">Trades</th><th class="num">Return</th><th class="num">Win%</th><th class="num">PF</th><th class="num">Sharpe</th><th class="num">MaxDD</th><th>Data</th></tr></thead>
-            <tbody>
-              <?php foreach ($results as $r): $m = $r['metrics']; ?>
-                <tr>
-                  <td class="dim"><?= e(substr($r['created_at'], 0, 16)) ?></td>
-                  <td><?= e($r['request']['symbol']) ?></td>
-                  <td class="dim"><?= e($r['request']['timeframe']) ?></td>
-                  <td class="num"><?= e($m['trades']) ?></td>
-                  <td class="num <?= $m['totalReturnPct'] >= 0 ? 'up' : 'down' ?>"><?= e(number_format($m['totalReturnPct'], 2)) ?>%</td>
-                  <td class="num"><?= $m['winRate'] !== null ? e(number_format($m['winRate'] * 100, 0)) . '%' : '—' ?></td>
-                  <td class="num"><?= $m['profitFactor'] !== null ? e(number_format($m['profitFactor'], 2)) : '—' ?></td>
-                  <td class="num"><?= $m['sharpe'] !== null ? e(number_format($m['sharpe'], 2)) : '—' ?></td>
-                  <td class="num warn"><?= e(number_format($m['maxDrawdownPct'], 1)) ?>%</td>
-                  <td><?= $r['dataProvenance']['synthetic'] ? '<span class="badge b-amber" style="padding:0 5px">SIM</span>' : '<span class="badge b-green" style="padding:0 5px">LIVE</span>' ?></td>
-                </tr>
-              <?php endforeach; ?>
-            </tbody>
-          </table>
+          <div class="table-scroll">
+            <table class="tbl mono">
+              <thead><tr><th>Date</th><th>Sym</th><th>TF</th><th class="num">Trades</th><th class="num">Return</th><th class="num">Win%</th><th class="num">PF</th><th class="num">Sharpe</th><th class="num">MaxDD</th><th>Data</th></tr></thead>
+              <tbody>
+                <?php foreach ($results as $r): $m = $r['metrics']; ?>
+                  <tr>
+                    <td class="dim"><?= e(substr($r['created_at'], 0, 16)) ?></td>
+                    <td><?= e($r['request']['symbol']) ?></td>
+                    <td class="dim"><?= e($r['request']['timeframe']) ?></td>
+                    <td class="num"><?= e($m['trades']) ?></td>
+                    <td class="num <?= $m['totalReturnPct'] >= 0 ? 'up' : 'down' ?>"><?= e(number_format($m['totalReturnPct'], 2)) ?>%</td>
+                    <td class="num"><?= $m['winRate'] !== null ? e(number_format($m['winRate'] * 100, 0)) . '%' : '—' ?></td>
+                    <td class="num"><?= $m['profitFactor'] !== null ? e(number_format($m['profitFactor'], 2)) : '—' ?></td>
+                    <td class="num"><?= $m['sharpe'] !== null ? e(number_format($m['sharpe'], 2)) : '—' ?></td>
+                    <td class="num warn"><?= e(number_format($m['maxDrawdownPct'], 1)) ?>%</td>
+                    <td><?= $r['dataProvenance']['synthetic'] ? '<span class="badge b-amber" style="padding:0 5px">SIM</span>' : '<span class="badge b-green" style="padding:0 5px">LIVE</span>' ?></td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     <?php endif; ?>

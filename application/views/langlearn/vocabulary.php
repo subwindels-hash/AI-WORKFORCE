@@ -8,15 +8,17 @@
     <div class="panel">
       <h3>My vocabulary</h3>
       <div class="body" style="padding-top:12px">
-        <table class="tbl">
-          <tr><td class="dim">In list / bank</td><td><?= (int) $progress['inList'] ?> / <?= (int) $progress['bankSize'] ?></td></tr>
-          <tr><td class="dim">Learned (stage ≥ 4)</td><td class="up"><?= (int) $progress['learned'] ?></td></tr>
-          <tr><td class="dim">Learning</td><td><?= (int) $progress['learning'] ?></td></tr>
-          <tr><td class="dim">Not yet studied</td><td><?= (int) $progress['notYetStudied'] ?></td></tr>
-          <tr><td class="dim">Due now</td><td><b><?= (int) $progress['dueNow'] ?></b></td></tr>
-          <tr><td class="dim">Average familiarity</td><td><?= e((string) $progress['averageFamiliarity']) ?> / 1.0</td></tr>
-          <tr><td class="dim">Mastery</td><td><?= e((string) $progress['masteryPct']) ?>%</td></tr>
-        </table>
+        <div class="table-scroll">
+          <table class="tbl">
+            <tr><td class="dim">In list / bank</td><td><?= (int) $progress['inList'] ?> / <?= (int) $progress['bankSize'] ?></td></tr>
+            <tr><td class="dim">Learned (stage ≥ 4)</td><td class="up"><?= (int) $progress['learned'] ?></td></tr>
+            <tr><td class="dim">Learning</td><td><?= (int) $progress['learning'] ?></td></tr>
+            <tr><td class="dim">Not yet studied</td><td><?= (int) $progress['notYetStudied'] ?></td></tr>
+            <tr><td class="dim">Due now</td><td><b><?= (int) $progress['dueNow'] ?></b></td></tr>
+            <tr><td class="dim">Average familiarity</td><td><?= e((string) $progress['averageFamiliarity']) ?> / 1.0</td></tr>
+            <tr><td class="dim">Mastery</td><td><?= e((string) $progress['masteryPct']) ?>%</td></tr>
+          </table>
+        </div>
       </div>
     </div>
     <div class="panel">
@@ -40,24 +42,26 @@
       <button class="btn small">add the starter pack (first 10 words)</button>
     </form>
     <form method="post" action="/app/languages/v/<?= (int) $profileId ?>/add">
-      <table class="tbl">
-        <thead><tr><th></th><th>Word</th><th>Translation</th><th>Pronunciation</th><th>Listen</th><th>Category</th><th>Level</th><th>Stage</th><th>Next review</th></tr></thead>
-        <tbody>
-          <?php foreach ($catalog as $w): ?>
-            <tr>
-              <td><input type="checkbox" name="vocabularyIds[]" value="<?= (int) $w['id'] ?>" <?= $w['inList'] ? 'disabled checked' : '' ?> style="accent-color:#0ea5e9"></td>
-              <td style="font-weight:700"><?= e($w['word']) ?></td>
-              <td><?= e($w['translation']) ?></td>
-              <td class="dim"><?= e($w['pronunciation'] ?? '—') ?></td>
-              <td><button class="btn small" type="button" data-vocab-listen="<?= e($w['word']) ?>">🔊 Listen</button></td>
-              <td class="dim"><?= e($w['category']) ?></td>
-              <td class="dim"><?= e($w['level']) ?></td>
-              <td><?= $w['stage'] !== null ? (int) $w['stage'] : '—' ?></td>
-              <td class="dim"><?= $w['nextReviewAt'] ? e(substr((string) $w['nextReviewAt'], 0, 10)) : '—' ?></td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
+      <div class="table-scroll">
+        <table class="tbl">
+          <thead><tr><th></th><th>Word</th><th>Translation</th><th>Pronunciation</th><th>Listen</th><th>Category</th><th>Level</th><th>Stage</th><th>Next review</th></tr></thead>
+          <tbody>
+            <?php foreach ($catalog as $w): ?>
+              <tr>
+                <td><input type="checkbox" name="vocabularyIds[]" value="<?= (int) $w['id'] ?>" <?= $w['inList'] ? 'disabled checked' : '' ?> style="accent-color:#0ea5e9"></td>
+                <td style="font-weight:700"><?= e($w['word']) ?></td>
+                <td><?= e($w['translation']) ?></td>
+                <td class="dim"><?= e($w['pronunciation'] ?? '—') ?></td>
+                <td><button class="btn small" type="button" data-vocab-listen="<?= e($w['word']) ?>">🔊 Listen</button></td>
+                <td class="dim"><?= e($w['category']) ?></td>
+                <td class="dim"><?= e($w['level']) ?></td>
+                <td><?= $w['stage'] !== null ? (int) $w['stage'] : '—' ?></td>
+                <td class="dim"><?= $w['nextReviewAt'] ? e(substr((string) $w['nextReviewAt'], 0, 10)) : '—' ?></td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
       <button class="btn small primary" style="margin-top:8px">add selected words</button>
     </form>
     <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">

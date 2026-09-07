@@ -12,12 +12,12 @@ use AIWorkforce\ApiProviders;
  *
  * Supports:
  *   - Recommended model selection per agent role
- *   - OpenAI-compatible inference
+ *   - Provider-backed inference
  *   - Fallback to local knowledge when provider unavailable
  *   - Tool-aware prompting with role-specific expertise
  *   - Structured JSON output for machine-readable responses
  */
-final class EnhancedCloudflareAgent implements SpecialistAgent
+final class EnhancedSpecialistAgent implements SpecialistAgent
 {
     private string $role;
     private array $allowedTools;
@@ -69,7 +69,7 @@ final class EnhancedCloudflareAgent implements SpecialistAgent
         if (!is_array($cfg)) {
             return [
                 'status' => 'UNAVAILABLE',
-                'reason' => 'No AI provider configured. Ask an administrator to configure an OpenAI-compatible provider.',
+                'reason' => 'No AI provider configured. Ask an administrator to configure an AI provider.',
             ];
         }
 
@@ -99,7 +99,7 @@ final class EnhancedCloudflareAgent implements SpecialistAgent
 
         $messages[] = ['role' => 'user', 'content' => $instruction . "\n\nFACTS:\n" . $facts];
 
-        // Call the configured provider via the standard OpenAI-compatible client
+        // Call the configured provider via the standard client
         $answer = ApiProviders::openaiChat($cfg, $messages, 800);
 
         if ($answer === null) {

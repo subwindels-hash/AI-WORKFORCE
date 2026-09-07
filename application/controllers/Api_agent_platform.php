@@ -2,7 +2,7 @@
 defined('BASEPATH') or exit('No direct script access allowed');
 
 /**
- * Cloudflare Agent Platform API
+ * Agent Platform API
  * 
  * Provides endpoints for:
  * - Agent execution with session management
@@ -36,7 +36,7 @@ class Api_agent_platform extends Api_controller
         }
         
         try {
-            $result = $this->platform->cloudflare->executeAgent(
+            $result = $this->platform->agentPlatform->executeAgent(
                 $agent,
                 $instruction,
                 (int)$user['id'],
@@ -70,7 +70,7 @@ class Api_agent_platform extends Api_controller
         }
         
         try {
-            $result = $this->platform->cloudflare->executeTool(
+            $result = $this->platform->agentPlatform->executeTool(
                 $tool,
                 $arguments,
                 [
@@ -105,7 +105,7 @@ class Api_agent_platform extends Api_controller
         
         try {
             $options['user_id'] = (int)$user['id'];
-            $result = $this->platform->cloudflare->startWorkflow($type, $params, $options);
+            $result = $this->platform->agentPlatform->startWorkflow($type, $params, $options);
             
             $this->json($result, !empty($result['ok']) ? 201 : 500);
         } catch (\Throwable $e) {
@@ -123,7 +123,7 @@ class Api_agent_platform extends Api_controller
         if (!$user) return;
         
         try {
-            $workflow = $this->platform->cloudflare->workflowEngine()->load($id);
+            $workflow = $this->platform->agentPlatform->workflowEngine()->load($id);
             
             if (!$workflow) {
                 return $this->jsonError('Workflow not found', 404);
@@ -145,7 +145,7 @@ class Api_agent_platform extends Api_controller
         if (!$user) return;
         
         try {
-            $sessions = $this->platform->cloudflare->sessionManager()->listForUser(
+            $sessions = $this->platform->agentPlatform->sessionManager()->listForUser(
                 (int)$user['id'],
                 50
             );
@@ -165,7 +165,7 @@ class Api_agent_platform extends Api_controller
         if (!$this->requirePermission('admin.analytics.view')) return;
         
         try {
-            $dashboard = $this->platform->cloudflare->observability()->dashboard();
+            $dashboard = $this->platform->agentPlatform->observability()->dashboard();
             $this->json(['ok' => true, 'dashboard' => $dashboard]);
         } catch (\Throwable $e) {
             $this->json(['ok' => false, 'error' => $e->getMessage()], 500);
@@ -179,7 +179,7 @@ class Api_agent_platform extends Api_controller
     public function status()
     {
         try {
-            $status = $this->platform->cloudflare->status();
+            $status = $this->platform->agentPlatform->status();
             $this->json(['ok' => true, 'status' => $status]);
         } catch (\Throwable $e) {
             $this->json(['ok' => false, 'error' => $e->getMessage()], 500);
@@ -196,7 +196,7 @@ class Api_agent_platform extends Api_controller
         if (!$user) return;
         
         try {
-            $categories = $this->platform->cloudflare->toolRegistry()->categories();
+            $categories = $this->platform->agentPlatform->toolRegistry()->categories();
             $this->json(['ok' => true, 'tools' => $categories]);
         } catch (\Throwable $e) {
             $this->json(['ok' => false, 'error' => $e->getMessage()], 500);
@@ -213,7 +213,7 @@ class Api_agent_platform extends Api_controller
         if (!$user) return;
         
         try {
-            $agents = $this->platform->cloudflare->communicationBus()->discoverAgents();
+            $agents = $this->platform->agentPlatform->communicationBus()->discoverAgents();
             $this->json(['ok' => true, 'agents' => $agents]);
         } catch (\Throwable $e) {
             $this->json(['ok' => false, 'error' => $e->getMessage()], 500);

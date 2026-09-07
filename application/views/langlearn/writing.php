@@ -20,27 +20,29 @@
   <div class="panel">
     <h3>My writing + feedback (originals kept)</h3>
     <div class="body scroll" style="padding-top:12px">
-      <table class="tbl">
-        <thead><tr><th>At</th><th>Task</th><th>Original</th><th>Feedback</th><th class="num">Score</th></tr></thead>
-        <tbody>
-          <?php foreach ($history as $w): $f = $w['feedback']; ?>
-            <tr>
-              <td class="dim"><?= e(substr((string) $w['created_at'], 5, 11)) ?></td>
-              <td><?= e($f['task'] ?? $w['task_code']) ?></td>
-              <td>
-                <div><b>Original:</b> <?= e(mb_substr((string) $w['original_text'], 0, 120)) ?></div>
-                <?php if (!empty($f['correctedVersion'])): ?><div class="dim"><b>Corrected:</b> <?= e($f['correctedVersion']) ?></div><?php endif; ?>
-                <?php if (!empty($f['nativeVersion'])): ?><div class="dim"><b>More natural:</b> <?= e($f['nativeVersion']) ?></div><?php endif; ?>
-              </td>
-              <td class="dim">
-                <?php foreach (($f['elements'] ?? []) as $el): ?><?= e($el['element']) ?> <?= $el['met'] ? '✓' : '✗' ?> · <?php endforeach; ?>
-                <?php if (!empty($f['explanationOfMistakes'])): ?><div><?= e(implode(' ', $f['explanationOfMistakes'])) ?></div><?php endif; ?>
-              </td>
-              <td class="num"><?= e((string) ($f['scorePct'] ?? $w['score_pct'])) ?>%</td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
+      <div class="table-scroll">
+        <table class="tbl">
+          <thead><tr><th>At</th><th>Task</th><th>Original</th><th>Feedback</th><th class="num">Score</th></tr></thead>
+          <tbody>
+            <?php foreach ($history as $w): $f = $w['feedback']; ?>
+              <tr>
+                <td class="dim"><?= e(substr((string) $w['created_at'], 5, 11)) ?></td>
+                <td><?= e($f['task'] ?? $w['task_code']) ?></td>
+                <td>
+                  <div><b>Original:</b> <?= e(mb_substr((string) $w['original_text'], 0, 120)) ?></div>
+                  <?php if (!empty($f['correctedVersion'])): ?><div class="dim"><b>Corrected:</b> <?= e($f['correctedVersion']) ?></div><?php endif; ?>
+                  <?php if (!empty($f['nativeVersion'])): ?><div class="dim"><b>More natural:</b> <?= e($f['nativeVersion']) ?></div><?php endif; ?>
+                </td>
+                <td class="dim">
+                  <?php foreach (($f['elements'] ?? []) as $el): ?><?= e($el['element']) ?> <?= $el['met'] ? '✓' : '✗' ?> · <?php endforeach; ?>
+                  <?php if (!empty($f['explanationOfMistakes'])): ?><div><?= e(implode(' ', $f['explanationOfMistakes'])) ?></div><?php endif; ?>
+                </td>
+                <td class="num"><?= e((string) ($f['scorePct'] ?? $w['score_pct'])) ?>%</td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 <?php endif; ?>

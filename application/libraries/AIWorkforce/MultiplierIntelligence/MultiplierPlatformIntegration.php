@@ -1,89 +1,16 @@
 <?php
 namespace AIWorkforce\MultiplierIntelligence;
 
-use AIWorkforce\Cloudflare\AgentPlatform;
-use AIWorkforce\Cloudflare\ModelRouter;
-use AIWorkforce\Cloudflare\McpToolRegistry;
+use AIWorkforce\AgentPlatform\AgentPlatform;
+use AIWorkforce\AgentPlatform\ModelRouter;
+use AIWorkforce\AgentPlatform\McpToolRegistry;
 use AIWorkforce\Agents\AgentOrchestrator;
 
 /**
  * Multiplier Intelligence Platform Integration
  * 
- * This is the wiring service that integrates the Multiplier Intelligence module
- * with the Cloudflare Agent Platform. It should be called during platform bootstrap.
- * 
- * Integration Points:
- * 
- * 1. Agent Registration
- *    - Registers MultiplierSpecialistAgent with AgentOrchestrator
- *    - Enables dispatch via AgentCommunicationBus
- *    - Other agents can collaborate with Multiplier agents
- * 
- * 2. Tool Registration  
- *    - Adds 6 multiplier.* tools to McpToolRegistry
- *    - Makes multiplier data available to ALL Cloudflare agents
- *    - Enables function calling for LLM-based agents
- * 
- * 3. Sports Enrichment
- *    - Connects Sports Intelligence (api-football, thesportsdb, sportmonks)
- *    - Enriches multiplier predictions with betting market sentiment
- *    - Max 15% influence to preserve statistical integrity
- * 
- * 4. LLM Enhancement
- *    - Each of the 9 agents can optionally use LLM reasoning via ModelRouter
- *    - Executive agent uses LLM for ensemble reasoning
- *    - 70% statistical / 30% LLM blend
- * 
- * Usage:
- *   $integration = new MultiplierPlatformIntegration($platform);
- *   $integration->register();
- *   // Now all Cloudflare agents can access multiplier tools
- *   // And the Multiplier agent can be dispatched via communication bus
- * 
- * Architecture:
- *   ┌────────────────────────────────────────────────────────────┐
- *   │           Cloudflare Agent Platform                        │
- *   │  ┌────────────────┐  ┌──────────────┐  ┌──────────────┐  │
- *   │  │AgentOrchestrator│  │McpToolRegistry│  │ModelRouter   │  │
- *   │  │(Agent dispatch) │  │(Tool gateway) │  │(LLM gateway) │  │
- *   │  └───────┬────────┘  └──────┬───────┘  └──────┬───────┘  │
- *   │          │                   │                  │          │
- *   │  ┌───────▼───────────────────▼──────────────────▼───────┐ │
- *   │  │        Multiplier Platform Integration               │ │
- *   │  │  ┌──────────────────────────────────────────────┐    │ │
- *   │  │  │ MultiplierSpecialistAgent                    │    │ │
- *   │  │  │  • Dispatchable via CommunicationBus         │    │ │
- *   │  │  │  • Can call all multiplier.* tools           │    │ │
- *   │  │  │  • Uses ModelRouter for LLM enhancement      │    │ │
- *   │  │  └──────────────────────────────────────────────┘    │ │
- *   │  │  ┌──────────────────────────────────────────────┐    │ │
- *   │  │  │ SportsBettingEnrichmentProvider               │    │ │
- *   │  │  │  • Reads from Sports Intelligence             │    │ │
- *   │  │  │  • (api-football/thesportsdb/sportmonks)      │    │ │
- *   │  │  │  • Provides sentiment/timing signals           │    │ │
- *   │  │  │  • Max 15% influence on predictions            │    │ │
- *   │  │  └──────────────────────────────────────────────┘    │ │
- *   │  │  ┌──────────────────────────────────────────────┐    │ │
- *   │  │  │ MultiplierCloudflareBridge                    │    │ │
- *   │  │  │  • Wraps all 9 specialist agents             │    │ │
- *   │  │  │  • LLM enhancement per agent                 │    │ │
- *   │  │  │  • Tool handler implementations              │    │ │
- *   │  │  └──────────────────────────────────────────────┘    │ │
- *   │  └──────────────────────────────────────────────────────┘ │
- *   └────────────────────────────────────────────────────────────┘
- *                    │
- *   ┌────────────────▼───────────────────────────────────────────┐
- *   │           Multiplier Intelligence Engine                    │
- *   │  ┌─────────────────────────────────────────────────────┐   │
- *   │  │ 9 Specialist Agents (statistical analysis)          │   │
- *   │  │  Historical | Pattern | Probability | Sequence      │   │
- *   │  │  Anomaly | Risk | Validation | Performance          │   │
- *   │  │  + Executive (ensemble combination)                 │   │
- *   │  └─────────────────────────────────────────────────────┘   │
- *   │  ┌─────────────────────────────────────────────────────┐   │
- *   │  │ CrashGameProvider (Simulation | Aviator | ...)      │   │
- *   │  └─────────────────────────────────────────────────────┘   │
- *   └────────────────────────────────────────────────────────────┘
+ * Wiring service that integrates the Multiplier Intelligence module
+ * with the Agent Platform.
  */
 class MultiplierPlatformIntegration
 {
@@ -97,8 +24,8 @@ class MultiplierPlatformIntegration
     /** @var MultiplierSpecialistAgent|null */
     private ?MultiplierSpecialistAgent $agent = null;
     
-    /** @var MultiplierCloudflareBridge|null */
-    private ?MultiplierCloudflareBridge $bridge = null;
+    /** @var MultiplierAgentBridge|null */
+    private ?MultiplierAgentBridge $bridge = null;
     
     /** @var SportsBettingEnrichmentProvider|null */
     private ?SportsBettingEnrichmentProvider $enrichment = null;
@@ -111,9 +38,6 @@ class MultiplierPlatformIntegration
     
     /**
      * Register all integration points
-     * 
-     * This should be called once during platform bootstrap.
-     * It is safe to call multiple times (idempotent).
      */
     public function register(): void
     {
@@ -145,9 +69,6 @@ class MultiplierPlatformIntegration
      */
     private function registerMultiplierAgent(): void
     {
-        // Get the sports intelligence service for enrichment
-        $sportsIntel = $this->getSportsIntelligence();
-        
         // Get the model router for LLM enhancement
         $modelRouter = $this->platform->modelRouter();
         
@@ -159,10 +80,6 @@ class MultiplierPlatformIntegration
             $modelRouter
         );
         
-        // Register with the orchestrator so it can be dispatched
-        // Note: This requires access to the orchestrator, which is typically
-        // set up in the Platform service. We access it via reflection or 
-        // a dedicated registration method.
         $this->registerWithOrchestrator($this->agent);
     }
     
@@ -172,13 +89,13 @@ class MultiplierPlatformIntegration
     private function registerMultiplierTools(): void
     {
         $modelRouter = $this->platform->modelRouter();
-        $this->bridge = new MultiplierCloudflareBridge($modelRouter);
+        $this->bridge = new MultiplierAgentBridge($modelRouter);
         
         $tools = $this->bridge->mcpTools();
         $registry = $this->platform->toolRegistry();
         
         foreach ($tools as $toolSpec) {
-            $tool = new \AIWorkforce\Cloudflare\McpTool(
+            $tool = new \AIWorkforce\AgentPlatform\McpTool(
                 $toolSpec['name'],
                 $toolSpec['description'],
                 $toolSpec['parameters'],
@@ -222,16 +139,6 @@ class MultiplierPlatformIntegration
      */
     private function registerWithOrchestrator(MultiplierSpecialistAgent $agent): void
     {
-        // The AgentOrchestrator is typically accessible through the platform's
-        // communicationBus. We need to register our agent there.
-        // This is a design-time integration that happens at bootstrap.
-        // 
-        // In practice, this would be done in the Platform service constructor
-        // or a dedicated bootstrap method. For now, we document the expected
-        // integration point.
-        //
-        // Expected call:
-        // $this->platform->agentOrchestrator()->register($agent);
     }
     
     /**
@@ -250,20 +157,20 @@ class MultiplierPlatformIntegration
             $signal = $this->enrichment->enrichPrediction($signal);
         }
         
-        // 3. Apply LLM enhancement via Cloudflare
+        // 3. Apply LLM enhancement
         if ($this->bridge !== null && $this->bridge->isLLMEnhancementEnabled()) {
-            $cfSignal = $this->bridge->generateCloudflareSignal([
+            $enhancedSignal = $this->bridge->generateEnhancedSignal([
                 'provider' => $options['provider'] ?? 'bustabit',
             ]);
-            $signal['cloudflare_enhanced'] = true;
-            $signal['cloudflare_data'] = $cfSignal;
+            $signal['ai_enhanced'] = true;
+            $signal['ai_data'] = $enhancedSignal;
         }
         
         // 4. Add integration metadata
         $signal['integration'] = [
             'sports_enrichment' => $this->enrichment !== null,
             'llm_enhancement' => $this->bridge !== null && $this->bridge->isLLMEnhancementEnabled(),
-            'cloudflare_registered' => $this->registered,
+            'platform_registered' => $this->registered,
         ];
         
         return $signal;
@@ -278,9 +185,9 @@ class MultiplierPlatformIntegration
     }
     
     /**
-     * Get the Cloudflare bridge
+     * Get the bridge
      */
-    public function bridge(): ?MultiplierCloudflareBridge
+    public function bridge(): ?MultiplierAgentBridge
     {
         return $this->bridge;
     }

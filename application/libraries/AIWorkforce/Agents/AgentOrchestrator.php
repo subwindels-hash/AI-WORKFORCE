@@ -2,8 +2,8 @@
 namespace AIWorkforce\Agents;
 
 /**
- * Application-control-plane boundary for a future Cloudflare Agents runtime.
- * Cloudflare may host durable execution, sessions, workflows, MCP and tools;
+ * Application-control-plane boundary for the AI Agent runtime.
+ * Manages durable execution, sessions, workflows, MCP and tools;
  * this backend remains authoritative for identity, permissions, approvals and
  * audit. No agent receives a broker or purchase capability by default.
  */

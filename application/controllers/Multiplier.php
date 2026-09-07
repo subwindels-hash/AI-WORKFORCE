@@ -59,7 +59,7 @@ class Multiplier extends App_Controller
         $engine = $this->engine();
         $dashboard = $engine->dashboard();
         
-        // Use Cloudflare-enhanced signal if integration is available
+        // Use enhanced signal if integration is available
         $signal = $this->enhancedSignal($engine);
         
         $data['dashboard'] = $dashboard;
@@ -81,21 +81,21 @@ class Multiplier extends App_Controller
     private function integrationStatus(): array
     {
         $status = [
-            'cloudflare' => ['available' => false, 'enhanced' => false, 'agents' => 0, 'tools' => 0],
+            'ai_agents' => ['available' => false, 'enhanced' => false, 'agents' => 0, 'tools' => 0],
             'sports' => ['available' => false, 'signals' => [], 'weight' => 0.15],
             'llm' => ['available' => false, 'providers' => 0],
             'registered' => false,
         ];
         
-        // Check Cloudflare integration
+        // Check Agent Platform integration
         try {
             if (isset($this->platform->multiplierIntegration)) {
                 $integration = $this->platform->multiplierIntegration;
                 $integrationStatus = $integration->status();
-                $status['cloudflare']['available'] = $integrationStatus['bridge_available'];
-                $status['cloudflare']['enhanced'] = $integrationStatus['llm_enhancement'];
-                $status['cloudflare']['agents'] = 9;
-                $status['cloudflare']['tools'] = 6;
+                $status['ai_agents']['available'] = $integrationStatus['bridge_available'];
+                $status['ai_agents']['enhanced'] = $integrationStatus['llm_enhancement'];
+                $status['ai_agents']['agents'] = 9;
+                $status['ai_agents']['tools'] = 6;
                 $status['registered'] = $integrationStatus['registered'];
             }
         } catch (\Throwable $e) {
@@ -104,9 +104,9 @@ class Multiplier extends App_Controller
         
         // Check LLM provider
         try {
-            $modelRouter = $this->platform->cloudflare->modelRouter();
-            if ($modelRouter->configured()) {
-                $routerStatus = $modelRouter->status();
+            $modelRouter = $this->platform->agentPlatform->modelRouter();
+            $routerStatus = $modelRouter->status();
+            if ($routerStatus['configured'] ?? false) {
                 $status['llm']['available'] = true;
                 $status['llm']['providers'] = count($routerStatus['providers'] ?? []);
             }
@@ -134,7 +134,7 @@ class Multiplier extends App_Controller
     }
     
     /**
-     * Generate an enhanced signal using Cloudflare + Sports enrichment if available
+     * Generate an enhanced signal using Agent Platform + Sports enrichment if available
      */
     private function enhancedSignal(MultiplierIntelligenceEngine $engine): array
     {
@@ -150,11 +150,11 @@ class Multiplier extends App_Controller
             // Enrichment is non-critical
         }
         
-        // Mark as Cloudflare-enhanced if integration is active
+        // Mark as AI-enhanced if integration is active
         try {
             if (isset($this->platform->multiplierIntegration)) {
                 $intStatus = $this->platform->multiplierIntegration->status();
-                $signal['cloudflare_enhanced'] = $intStatus['llm_enhancement'];
+                $signal['ai_enhanced'] = $intStatus['llm_enhancement'];
                 $signal['sports_enriched'] = $intStatus['enrichment_available'];
             }
         } catch (\Throwable $e) {
@@ -190,7 +190,7 @@ class Multiplier extends App_Controller
      * 
      * Demonstrates:
      * - Multiplier Intelligence with 9 agents
-     * - Cloudflare AI enhancement (if configured)
+     * - AI enhancement (if configured)
      * - Sports Intelligence enrichment (if configured)
      * - Real-time Aviator provider data
      * - Full data flow visualization
@@ -229,8 +229,8 @@ class Multiplier extends App_Controller
                 $sportsEnrichment = $enrichment->getEnrichmentSignals();
             }
             
-            // 5. Check Cloudflare integration
-            $cloudflareStatus = [
+            // 5. Check Agent Platform integration
+            $agentStatus = [
                 'available' => false,
                 'llm_enhanced' => false,
                 'agents' => 0,
@@ -238,7 +238,7 @@ class Multiplier extends App_Controller
             ];
             if (isset($this->platform->multiplierIntegration)) {
                 $intStatus = $this->platform->multiplierIntegration->status();
-                $cloudflareStatus = [
+                $agentStatus = [
                     'available' => $intStatus['bridge_available'],
                     'llm_enhanced' => $intStatus['llm_enhancement'],
                     'agents' => 9,
@@ -275,10 +275,10 @@ class Multiplier extends App_Controller
                     'risk' => $signal['risk'] ?? 'MEDIUM',
                     'agents' => $agents,
                     'sports_enrichment' => $signal['sports_enrichment'] ?? null,
-                    'cloudflare_enhanced' => $signal['cloudflare_enhanced'] ?? false,
+                    'ai_enhanced' => $signal['ai_enhanced'] ?? false,
                 ],
                 'sports' => $sportsEnrichment,
-                'cloudflare' => $cloudflareStatus,
+                'windelsai' => $agentStatus,
                 'accuracy' => $engine->accuracyStats(100),
             ];
             
@@ -354,7 +354,7 @@ class Multiplier extends App_Controller
     }
     
     /**
-     * Verify integration with Cloudflare Agent Platform and Sports Intelligence
+     * Verify integration with Agent Platform and Sports Intelligence
      */
     public function verify_integration()
     {
@@ -380,23 +380,23 @@ class Multiplier extends App_Controller
             $results['ok'] = false;
         }
         
-        // 2. Check Cloudflare ModelRouter
+        // 2. Check ModelRouter
         try {
-            $modelRouter = $this->platform->cloudflare->modelRouter();
-            $configured = $modelRouter->configured();
+            $modelRouter = $this->platform->agentPlatform->modelRouter();
             $status = $modelRouter->status();
-            $results['checks']['cloudflare_model_router'] = [
+            $configured = $status['configured'] ?? false;
+            $results['checks']['agent_model_router'] = [
                 'status' => $configured ? 'OK' : 'NOT_CONFIGURED',
                 'providers' => $configured ? count($status['providers'] ?? []) : 0,
                 'llm_enhancement_available' => $configured,
             ];
         } catch (\Throwable $e) {
-            $results['checks']['cloudflare_model_router'] = ['status' => 'FAIL', 'error' => $e->getMessage()];
+            $results['checks']['agent_model_router'] = ['status' => 'FAIL', 'error' => $e->getMessage()];
         }
         
         // 3. Check McpToolRegistry for multiplier tools
         try {
-            $registry = $this->platform->cloudflare->toolRegistry();
+            $registry = $this->platform->agentPlatform->toolRegistry();
             $multiplierTools = $registry->list('multiplier');
             $results['checks']['mcp_multiplier_tools'] = [
                 'status' => count($multiplierTools) > 0 ? 'OK' : 'NOT_YET_REGISTERED',
@@ -408,20 +408,20 @@ class Multiplier extends App_Controller
             $results['checks']['mcp_multiplier_tools'] = ['status' => 'FAIL', 'error' => $e->getMessage()];
         }
         
-        // 4. Check MultiplierCloudflareBridge
+        // 4. Check MultiplierAgentBridge
         try {
-            $modelRouter = $this->platform->cloudflare->modelRouter();
-            $bridge = new \AIWorkforce\MultiplierIntelligence\MultiplierCloudflareBridge($modelRouter);
+            $modelRouter = $this->platform->agentPlatform->modelRouter();
+            $bridge = new \AIWorkforce\MultiplierIntelligence\MultiplierAgentBridge($modelRouter);
             $agents = $bridge->agentDescriptors();
             $tools = $bridge->mcpTools();
-            $results['checks']['cloudflare_bridge'] = [
+            $results['checks']['agent_bridge'] = [
                 'status' => 'OK',
                 'agents_available' => count($agents),
                 'tools_available' => count($tools),
                 'llm_enhancement' => $bridge->isLLMEnhancementEnabled(),
             ];
         } catch (\Throwable $e) {
-            $results['checks']['cloudflare_bridge'] = ['status' => 'FAIL', 'error' => $e->getMessage()];
+            $results['checks']['agent_bridge'] = ['status' => 'FAIL', 'error' => $e->getMessage()];
         }
         
         // 5. Check SportsBettingEnrichmentProvider
@@ -452,7 +452,7 @@ class Multiplier extends App_Controller
                 'role' => $agent->name(),
                 'tools' => count($agent->tools()),
                 'dispatchable' => true,
-                'implements' => 'SpecialistAgent (Cloudflare)',
+                'implements' => 'SpecialistAgent',
             ];
         } catch (\Throwable $e) {
             $results['checks']['specialist_agent'] = ['status' => 'FAIL', 'error' => $e->getMessage()];
@@ -460,11 +460,8 @@ class Multiplier extends App_Controller
         
         // 7. Check Platform Integration
         try {
-            // Reuse the same Sports Intelligence registry as the platform so
-            // Multiplier verification/enrichment can consume the connected
-            // Admin → API API-Football provider as well.
             $integration = new \AIWorkforce\MultiplierIntelligence\MultiplierPlatformIntegration(
-                $this->platform->cloudflare,
+                $this->platform->agentPlatform,
                 $this->platform->sports
             );
             $integration->register();
@@ -473,6 +470,18 @@ class Multiplier extends App_Controller
                 'status' => $status['registered'] ? 'OK' : 'REGISTERED_PARTIAL',
                 'registered' => $status['registered'],
                 'agent_available' => $status['agent_available'],
+                'bridge_available' => $status['bridge_available'],
+                'enrichment_available' => $status['enrichment_available'],
+                'tools_registered' => $status['tools_registered'],
+                'agents_available' => $status['agents_available'],
+            ];
+        } catch (\Throwable $e) {
+            $results['checks']['platform_integration'] = ['status' => 'FAIL', 'error' => $e->getMessage()];
+        }
+        
+        header('Content-Type: application/json');
+        echo json_encode($results, JSON_PRETTY_PRINT);
+    }
                 'bridge_available' => $status['bridge_available'],
                 'enrichment_available' => $status['enrichment_available'],
                 'llm_enhancement' => $status['llm_enhancement'],

@@ -22,7 +22,7 @@
   <div class="panel">
     <h3>Propose a trade (steps 1–11, persisted)</h3>
     <div class="body" style="padding-top:12px">
-      <form method="post" action="/execution/propose" class="mono" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
+      <form method="post" action="/execution/propose" class="mono exec-form-4">
         <input name="symbol" value="EURUSD" placeholder="SYMBOL" required>
         <select name="marketClass"><?php foreach (['forex', 'crypto', 'stock', 'etf', 'commodity', 'futures', 'options', 'indices', 'bonds'] as $c): ?><option><?= $c ?></option><?php endforeach; ?></select>
         <select name="side"><option>BUY</option><option>SELL</option></select>
@@ -43,7 +43,7 @@
   <div class="panel">
     <h3>Automation envelope (SEMI_AUTONOMOUS / FULLY_AUTOMATED)</h3>
     <div class="body" style="padding-top:12px">
-      <form method="post" action="/execution/limits" class="mono" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px">
+      <form method="post" action="/execution/limits" class="mono exec-form-2">
         <label class="dim">Max trade notional (USD)</label>
         <input name="maxTradeNotionalUsd" value="<?= e($limits['maxTradeNotionalUsd']) ?>" required>
         <label class="dim">Max daily automated trades</label>
@@ -66,7 +66,7 @@
 <div class="panel" style="margin-top:14px">
   <h3>Automated execution (<?= e($status['tradingMode']) ?>)</h3>
   <div class="body" style="padding-top:12px">
-    <form method="post" action="/execution/execute" class="mono" style="display:grid;grid-template-columns:repeat(6,1fr);gap:6px">
+    <form method="post" action="/execution/execute" class="mono exec-form-6">
       <input name="symbol" value="EURUSD" required>
       <select name="marketClass"><?php foreach (['forex', 'crypto'] as $c): ?><option><?= $c ?></option><?php endforeach; ?></select>
       <select name="side"><option>BUY</option><option>SELL</option></select>

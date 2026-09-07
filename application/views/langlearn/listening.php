@@ -49,19 +49,21 @@
   <div class="panel">
     <h3>Listening history</h3>
     <div class="body scroll" style="padding-top:12px">
-      <table class="tbl">
-        <thead><tr><th>At</th><th>Mode</th><th class="num">Score</th><th>Detail</th></tr></thead>
-        <tbody>
-          <?php foreach ($history as $h): ?>
-            <tr>
-              <td class="dim"><?= e(substr((string) $h['created_at'], 5, 14)) ?></td>
-              <td><?= e($h['mode']) ?></td>
-              <td class="num"><?= e((string) $h['score_pct']) ?>%</td>
-              <td class="dim"><?= e(mb_substr(json_encode($h['detail']), 0, 80)) ?></td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
+      <div class="table-scroll">
+        <table class="tbl">
+          <thead><tr><th>At</th><th>Mode</th><th class="num">Score</th><th>Detail</th></tr></thead>
+          <tbody>
+            <?php foreach ($history as $h): ?>
+              <tr>
+                <td class="dim"><?= e(substr((string) $h['created_at'], 5, 14)) ?></td>
+                <td><?= e($h['mode']) ?></td>
+                <td class="num"><?= e((string) $h['score_pct']) ?>%</td>
+                <td class="dim"><?= e(mb_substr(json_encode($h['detail']), 0, 80)) ?></td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 <?php endif; ?>

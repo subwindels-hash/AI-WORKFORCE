@@ -13,7 +13,11 @@
   --sky: #2f6bff;
   --brand: #2f6bff;
 }
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
 html { scroll-behavior: smooth; overflow-x: hidden; }
 body.public {
   margin: 0;
@@ -21,6 +25,8 @@ body.public {
   color: var(--ink);
   font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, Inter, sans-serif;
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  max-width: 100vw;
 }
 a { color: var(--sky); text-decoration: none; }
 a:hover { text-decoration: underline; }

@@ -1,5 +1,5 @@
 <?php
-namespace AIWorkforce\Cloudflare;
+namespace AIWorkforce\AgentPlatform;
 
 /**
  * Agent Observability — Monitoring, tracing, and analytics for the AI agent platform

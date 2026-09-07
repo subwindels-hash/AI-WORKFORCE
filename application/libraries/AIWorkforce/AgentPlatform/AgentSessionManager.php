@@ -1,5 +1,5 @@
 <?php
-namespace AIWorkforce\Cloudflare;
+namespace AIWorkforce\AgentPlatform;
 
 /**
  * Agent Session Manager — Durable sessions and state for AI agents
@@ -10,10 +10,6 @@ namespace AIWorkforce\Cloudflare;
  * - Per-agent state (context, preferences, progress)
  * - Multi-turn conversation support
  * - Session recovery after failures
- *
- * In production, sessions can be backed by Cloudflare Durable Objects
- * for globally distributed, consistent state. Locally, sessions use
- * the application database.
  */
 class AgentSessionManager
 {
@@ -271,8 +267,6 @@ class AgentSessionManager
             )");
             return;
         }
-        // SQLite and PostgreSQL share portable types; MySQL-only inline indexes
-        // are emitted as standalone CREATE INDEX IF NOT EXISTS (valid in both).
         $this->db->query("CREATE TABLE IF NOT EXISTS agent_sessions (
             id VARCHAR(64) PRIMARY KEY,
             user_id INTEGER NOT NULL,

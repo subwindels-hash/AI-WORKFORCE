@@ -1,5 +1,5 @@
 <?php
-namespace AIWorkforce\Cloudflare;
+namespace AIWorkforce\AgentPlatform;
 
 /**
  * Agent Workflow Engine — Durable workflows for long-running tasks
@@ -351,8 +351,6 @@ class WorkflowEngine
             )");
             return;
         }
-        // SQLite and PostgreSQL share portable types; MySQL-only inline indexes
-        // are emitted as standalone CREATE INDEX IF NOT EXISTS (valid in both).
         $this->db->query("CREATE TABLE IF NOT EXISTS agent_workflows (
             id VARCHAR(64) PRIMARY KEY,
             type VARCHAR(100) NOT NULL,

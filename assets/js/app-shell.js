@@ -4,6 +4,10 @@
   const STORAGE_KEY = 'windels_dashboard_history_v1';
   const AUTHENTICATED_PREFIXES = [
     '/dashboard',
+    '/command-center',
+    '/app/workforce',
+    '/workforce',
+    '/app/agent-platform',
     '/analysis',
     '/app/languages',
     '/leads',
@@ -15,10 +19,12 @@
     '/brokers',
     '/risk',
     '/sports',
+    '/lottery',
+    '/multiplier',
+    '/app/trading',
     '/notifications',
     '/account',
     '/admin',
-    '/leads',
   ];
 
   function isAuthenticatedPath(path) {

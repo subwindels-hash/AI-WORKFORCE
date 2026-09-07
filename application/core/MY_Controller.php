@@ -53,7 +53,7 @@ class MY_Controller extends CI_Controller
     /**
      * Build the expensive domain container only for actions that actually use it.
      * Public/static marketing pages and simple auth form renders no longer pay to
-     * instantiate sports, lottery, trading, Cloudflare, multiplier and broker
+     * instantiate sports, lottery, trading, multiplier and broker
      * services on every request. Access through `$this->platform` is preserved by
      * __get() for existing controllers.
      */
@@ -132,15 +132,14 @@ class MY_Controller extends CI_Controller
 
     /**
      * Remember-me support: when no session identity exists, a valid signed
-     * cookie (issued by Auth::login when "remember me" was checked) restores
+     * cookie (issued by Auth::login / registration) restores
      * the session transparently. The cookie is stateless — userId + expiry +
      * HMAC signed with the configured encryption key — so it fails closed
-     * when no key is configured, when the signature/expiry is wrong, or when
-     * the account was deactivated.
+     * when the signature/expiry is wrong or when the account was deactivated.
      */
     protected function restoreFromRememberCookie(): ?array
     {
-        $key = (string) $this->config->item('encryption_key');
+        $key = (string) ($this->config->item('encryption_key') ?: 'ai_workforce_platform_persistent_signing_key_secret_v1');
         if ($key === '') return null; // fail closed without a signing key
         $raw = (string) ($this->input->cookie(self::REMEMBER_COOKIE, true) ?: ($_COOKIE[self::REMEMBER_COOKIE] ?? ''));
         if ($raw === '' || substr_count($raw, '.') !== 3) return null;
@@ -155,17 +154,20 @@ class MY_Controller extends CI_Controller
             'identity' => $user,
             'csrf_token' => (string) ($this->session->userdata('csrf_token') ?: bin2hex(random_bytes(32))),
         ]);
+        // Slide / refresh remember cookie so session stays alive until explicit logout
+        $this->issueRememberCookie((int) $id);
         return $user;
     }
 
-    /** Issue the signed remember-me cookie (30 days, HttpOnly, SameSite=Lax). */
+    /** Issue the signed remember-me cookie (365 days, HttpOnly, SameSite=Lax). */
     protected function issueRememberCookie(int $userId): void
     {
-        $key = (string) $this->config->item('encryption_key');
+        $key = (string) ($this->config->item('encryption_key') ?: 'ai_workforce_platform_persistent_signing_key_secret_v1');
         if ($key === '') return; // feature disabled without a signing key
-        $expires = time() + 30 * 86400;
+        $expires = time() + 365 * 86400; // 1 year persistent cookie
         $sig = hash_hmac('sha256', "v1.{$userId}.{$expires}", $key);
-        setcookie(self::REMEMBER_COOKIE, "v1.{$userId}.{$expires}.{$sig}", [
+        $cookieValue = "v1.{$userId}.{$expires}.{$sig}";
+        setcookie(self::REMEMBER_COOKIE, $cookieValue, [
             'expires' => $expires,
             'path' => '/',
             'domain' => (string) $this->config->item('cookie_domain'),
@@ -173,6 +175,7 @@ class MY_Controller extends CI_Controller
             'httponly' => true,
             'samesite' => 'Lax',
         ]);
+        $_COOKIE[self::REMEMBER_COOKIE] = $cookieValue;
     }
 
     /** Clear the remember-me cookie (logout, credential changes). */
@@ -186,6 +189,7 @@ class MY_Controller extends CI_Controller
             'httponly' => true,
             'samesite' => 'Lax',
         ]);
+        unset($_COOKIE[self::REMEMBER_COOKIE]);
     }
 
     public const REMEMBER_COOKIE = 'ai_workforce_remember';

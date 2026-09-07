@@ -58,47 +58,39 @@ VP_OG_IMAGE=https://windelsai.com/assets/images/ai_workforce-mark.png
 VP_THEME_COLOR=#07090e
 VP_ANNOUNCEMENT=
 # ---- Public AI website assistant (leave disabled for the built-in guide) ----
+# Supports xAI Grok (https://api.x.ai/v1/chat/completions) and OpenAI-compatible endpoints
 AI_CHAT_ENABLED=0
 AI_CHAT_API_URL=
 AI_CHAT_API_KEY=
 AI_CHAT_MODEL=
 # =============================================================================
-# CLOUDFLARE AI AGENT PLATFORM
+# AI AGENT PLATFORM
 # Powers: LLM routing, MCP tools, agent orchestration, workflows, sessions
-# Docs: docs/CLOUDFLARE_AGENT_PLATFORM.md
 # =============================================================================
-# Primary LLM provider (Cloudflare Workers AI)
-# Get credentials at: https://dash.cloudflare.com/ -> Workers & Pages -> AI
-LLM_DRIVER=cloudflare_workers_ai
-LLM_CLOUDFLARE_ACCOUNT_ID=REPLACE_ME_CLOUDFLARE_ACCOUNT_ID
-LLM_CLOUDFLARE_API_TOKEN=REPLACE_ME_CLOUDFLARE_API_TOKEN
-LLM_CLOUDFLARE_BASE_URL=https://api.cloudflare.com/client/v4/accounts
-LLM_CLOUDFLARE_DEFAULT_MODEL=@cf/meta/llama-3.1-8b-instruct
-LLM_CLOUDFLARE_FALLBACK_MODEL=@cf/mistral/mistral-7b-instruct-v0.2
-# Optional: OpenAI-compatible fallback (if you want a second LLM provider)
-# LLM_OPENAI_COMPAT_BASE_URL=https://api.openai.com/v1
-# LLM_OPENAI_COMPAT_API_KEY=REPLACE_ME_OPENAI_API_KEY
-# LLM_OPENAI_COMPAT_MODEL=gpt-4o-mini
+# Primary LLM provider
+LLM_DRIVER=openai_compatible
+LLM_OPENAI_COMPAT_BASE_URL=https://api.openai.com/v1
+LLM_OPENAI_COMPAT_API_KEY=
+LLM_OPENAI_COMPAT_MODEL=gpt-4o-mini
 # Language AI provider (used for language learning TTS/STT)
-LANGUAGE_AI_DRIVER=cloudflare_workers_ai
-LANGUAGE_AI_ACCOUNT_ID=REPLACE_ME_CLOUDFLARE_ACCOUNT_ID
-LANGUAGE_AI_API_TOKEN=REPLACE_ME_CLOUDFLARE_API_TOKEN
-# Cloudflare AI features
-CLOUDFLARE_AGENTS_ENABLED=1
-CLOUDFLARE_MCP_TOOLS_ENABLED=1
-CLOUDFLARE_WORKFLOWS_ENABLED=1
-CLOUDFLARE_TTS_ENABLED=1
-CLOUDFLARE_STT_ENABLED=1
-CLOUDFLARE_PRONUNCIATION_ENABLED=1
+LANGUAGE_AI_DRIVER=openai_compatible
+LANGUAGE_AI_API_KEY=
+# AI features
+AGENTS_ENABLED=1
+MCP_TOOLS_ENABLED=1
+WORKFLOWS_ENABLED=1
+TTS_ENABLED=1
+STT_ENABLED=1
+PRONUNCIATION_ENABLED=1
 # Multiplier Intelligence + LLM Enhancement
 # When enabled, predictions blend 70% statistical / 30% LLM reasoning
 MULTIPLIER_LLM_ENHANCEMENT_ENABLED=1
-MULTIPLIER_LLM_MODEL=@cf/meta/llama-3.1-8b-instruct
+MULTIPLIER_LLM_MODEL=gpt-4o-mini
 MULTIPLIER_LLM_MAX_TOKENS=400
 MULTIPLIER_LLM_TEMPERATURE=0.3
 # AI Agent observability
-CLOUDFLARE_OBSERVABILITY_ENABLED=1
-CLOUDFLARE_AUDIT_LOG_ENABLED=1
+OBSERVABILITY_ENABLED=1
+AUDIT_LOG_ENABLED=1
 # =============================================================================
 # SPORTS INTELLIGENCE — NATIVE PROVIDERS
 # Real-time sports data for prediction enrichment

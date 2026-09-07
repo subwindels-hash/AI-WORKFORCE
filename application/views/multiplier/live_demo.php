@@ -36,6 +36,17 @@
 .demo-flow-title{font-size:12px;font-weight:700;color:#e2e8f0}
 .demo-flow-desc{font-size:10px;color:#94a3b8;margin-top:2px}
 @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.4)}50%{box-shadow:0 0 0 20px rgba(239,68,68,0)}}
+
+@media(max-width:768px){
+  .demo-grid{grid-template-columns:1fr !important}
+  .demo-header{padding:20px 16px}
+  .demo-header h1{font-size:22px}
+  .demo-live-value{font-size:48px}
+  .demo-signal-value{font-size:42px}
+}
+@media(max-width:480px){
+  .demo-bg{padding:12px}
+}
 </style>
 
 <div class="demo-bg">
@@ -53,7 +64,7 @@
     <?php else: ?>
 
     <!-- Live Round + Signal -->
-    <div class="demo-grid" style="grid-template-columns:1fr 1fr">
+    <div class="demo-grid">
       <!-- Live Aviator Round -->
       <div class="demo-panel">
         <h3>
@@ -90,7 +101,7 @@
           <div class="demo-signal-value"><?= e(number_format($sig['predicted'] ?? 2.0, 2)) ?>x</div>
           <div class="demo-signal-label">Predicted Next Multiplier</div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:16px">
           <div class="demo-stat">
             <div class="demo-stat-label">Confidence</div>
             <div class="demo-stat-value" style="color:#22c55e"><?= e(number_format($sig['confidence'] ?? 50, 0)) ?>%</div>
@@ -121,7 +132,7 @@
     <div class="demo-panel" style="margin-bottom:20px">
       <h3>🔗 Integration Status</h3>
       <div style="display:flex;gap:12px;flex-wrap:wrap">
-        <?php $aiAgents = $demo['windelsai'] ?? $demo['cloudflare'] ?? []; ?>
+        <?php $aiAgents = $demo['windelsai'] ?? []; ?>
         <span class="demo-badge <?= !empty($aiAgents['available']) ? 'demo-badge-success' : 'demo-badge-warning' ?>">
           <?= !empty($aiAgents['available']) ? '✓' : '○' ?> AI Agents <?= !empty($aiAgents['available']) ? 'Connected' : 'Standby' ?>
         </span>
@@ -144,12 +155,12 @@
     </div>
 
     <!-- Aviator Stats + Sports Signals -->
-    <div class="demo-grid" style="grid-template-columns:1fr 1fr">
+    <div class="demo-grid">
       <!-- Aviator Statistics -->
       <div class="demo-panel">
         <h3>📊 Live Crash Statistics</h3>
         <?php $stats = $demo['aviator']['stats'] ?? []; ?>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px">
           <div class="demo-stat">
             <div class="demo-stat-label">Total Rounds</div>
             <div class="demo-stat-value"><?= e(number_format($stats['total_rounds'] ?? 0)) ?></div>
@@ -261,7 +272,7 @@
           </div>
         </div>
         <?php endif; ?>
-        <?php if (!empty($demo['cloudflare']['llm_enhanced'])): ?>
+        <?php if (!empty($demo['windelsai']['llm_enhanced'])): ?>
         <div class="demo-flow-step">
           <div class="demo-flow-icon">⚡</div>
           <div class="demo-flow-text">

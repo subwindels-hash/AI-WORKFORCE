@@ -209,6 +209,7 @@ class Auth extends MY_Controller
             $user = $this->platform->identity->authenticate($username, $password);
             if (!$user) { $this->flash('error', 'Account created. Sign in to continue.'); redirect('/login'); return; }
             $this->establishSession($user);
+            $this->issueRememberCookie((int) $new['id']);
             $this->session->set_flashdata('register_old', null);
             $this->flash('notice', '✓ Changes saved successfully');
             redirect('/dashboard');
@@ -290,10 +291,8 @@ class Auth extends MY_Controller
         if ($admin || $this->canAccessAdmin($user)) {
             $portal->log($user, 'ADMIN_LOGIN', 'ok', null, [], (string) $this->input->ip_address());
         }
-        // "Remember me" keeps the user signed in on this browser for 30 days
-        // via a signed, HttpOnly cookie; the session itself stays short-lived.
-        if ($remember) $this->issueRememberCookie((int) $user['id']);
-        else $this->clearRememberCookie();
+        // Keep the user signed in persistently until they explicitly click Logout
+        $this->issueRememberCookie((int) $user['id']);
         $next = (string) $this->session->userdata('return_to');
         $this->session->unset_userdata('return_to');
         if ($admin || $this->isAdmin($user)) { redirect('/admin'); return; }
@@ -354,6 +353,7 @@ class Auth extends MY_Controller
                 'userId' => (int) $user['id'],
                 'userUid' => (string) ($user['user_uid'] ?? ''),
             ], 'web-setup');
+            $this->issueRememberCookie((int) $user['id']);
             $this->flash('notice', 'Platform administrator created. Sign in now with your new credentials.');
         } catch (Throwable $e) {
             log_message('error', 'first-run admin setup failed: ' . $e->getMessage());

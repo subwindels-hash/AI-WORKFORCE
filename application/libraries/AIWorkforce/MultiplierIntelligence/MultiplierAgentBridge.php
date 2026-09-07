@@ -1,44 +1,22 @@
 <?php
 namespace AIWorkforce\MultiplierIntelligence;
 
-use AIWorkforce\Cloudflare\ModelRouter;
+use AIWorkforce\AgentPlatform\ModelRouter;
 
 /**
- * Multiplier Cloudflare Bridge
+ * Multiplier Agent Bridge
  * 
- * Integrates the 9 Multiplier specialist agents with Cloudflare Agent Platform:
+ * Integrates the 9 Multiplier specialist agents with the Agent Platform:
  * 
  * 1. LLM Enhancement: Each agent can optionally call an LLM through ModelRouter
  *    to enhance its statistical analysis with AI reasoning
  * 
- * 2. Tool Registration: Multiplier tools become available to ALL Cloudflare agents
- *    (e.g., a sports analyst agent can query crash game data)
+ * 2. Tool Registration: Multiplier tools become available to all platform agents
  * 
  * 3. Agent Dispatch: Multiplier agents can be invoked through the AgentCommunicationBus
  *    alongside other specialist agents
- * 
- * Architecture:
- *   ┌──────────────────────────────────────────────┐
- *   │  Cloudflare Agent Platform                    │
- *   │  ┌─────────────┐  ┌───────────────────────┐  │
- *   │  │ModelRouter   │  │McpToolRegistry        │  │
- *   │  │(LLM gateway) │  │(Tool discovery)       │  │
- *   │  └──────┬───────┘  └──────────┬────────────┘  │
- *   │         │                      │               │
- *   │  ┌──────▼──────────────────────▼────────────┐ │
- *   │  │  Multiplier Cloudflare Bridge            │ │
- *   │  │  - LLM-enhanced agent reasoning          │ │
- *   │  │  - Tool registration (multiplier.*)      │ │
- *   │  │  - Agent dispatch via CommunicationBus   │ │
- *   │  └──────┬──────────────────────┬────────────┘ │
- *   │         │                      │               │
- *   │  ┌──────▼───────┐  ┌──────────▼────────────┐ │
- *   │  │9 Multiplier  │  │ CrashGameProvider     │ │
- *   │  │Agents        │  │ (Simulation/Aviator)  │ │
- *   │  └──────────────┘  └───────────────────────┘ │
- *   └──────────────────────────────────────────────┘
  */
-class MultiplierCloudflareBridge
+class MultiplierAgentBridge
 {
     private ModelRouter $modelRouter;
     
@@ -54,7 +32,7 @@ class MultiplierCloudflareBridge
     }
     
     /**
-     * Initialize all 9 multiplier agents for Cloudflare dispatch
+     * Initialize all 9 multiplier agents for platform dispatch
      */
     private function initializeMultiplierAgents(): void
     {
@@ -141,9 +119,9 @@ class MultiplierCloudflareBridge
     
     /**
      * Generate a full signal using all agents + LLM enhancement
-     * This is the main entry point for Cloudflare-enhanced predictions
+     * This is the main entry point for AI-enhanced predictions
      */
-    public function generateCloudflareSignal(array $context = []): array
+    public function generateEnhancedSignal(array $context = []): array
     {
         $provider = $this->getProvider($context);
         $engine = new MultiplierIntelligenceEngine($provider);
@@ -152,11 +130,12 @@ class MultiplierCloudflareBridge
         $baseSignal = $engine->generateSignal();
         
         // Enhance with LLM reasoning if available
-        if ($this->llmEnhancementEnabled && $this->modelRouter->configured()) {
+        $routerStatus = $this->modelRouter->status();
+        if ($this->llmEnhancementEnabled && ($routerStatus['configured'] ?? false)) {
             try {
                 $llmEnhancement = $this->ensembleLLMReasoning($baseSignal, $context);
                 if (!empty($llmEnhancement)) {
-                    $baseSignal['cloudflare_enhanced'] = true;
+                    $baseSignal['ai_enhanced'] = true;
                     $baseSignal['llm_analysis'] = $llmEnhancement;
                     
                     // Blend LLM suggestion with statistical prediction
@@ -169,7 +148,7 @@ class MultiplierCloudflareBridge
                     }
                 }
             } catch (\Throwable $e) {
-                $baseSignal['cloudflare_enhanced'] = false;
+                $baseSignal['ai_enhanced'] = false;
                 $baseSignal['enhancement_error'] = $e->getMessage();
             }
         }
@@ -186,7 +165,8 @@ class MultiplierCloudflareBridge
         array $analysisContext,
         array $request
     ): array {
-        if (!$this->modelRouter->configured()) {
+        $routerStatus = $this->modelRouter->status();
+        if (!($routerStatus['configured'] ?? false)) {
             return ['status' => 'NO_MODEL_PROVIDER'];
         }
         
@@ -217,7 +197,7 @@ Based on your statistical analysis and these patterns, provide a JSON response:
 
 IMPORTANT: You are enhancing a statistical model, not replacing it. Stay grounded in the data.";
 
-        $response = $this->modelRouter->complete([
+        $response = $this->modelRouter->chat([
             ['role' => 'system', 'content' => 'You are a crash game analytics specialist. Respond ONLY with valid JSON. Never guarantee outcomes. Always ground predictions in statistical evidence.'],
             ['role' => 'user', 'content' => $prompt],
         ], [
@@ -226,14 +206,14 @@ IMPORTANT: You are enhancing a statistical model, not replacing it. Stay grounde
             'agent' => 'multiplier.' . $agentType,
         ]);
         
-        if (empty($response['text'])) {
+        if (empty($response['content'])) {
             return ['status' => 'MODEL_FAILED'];
         }
         
         // Parse JSON response
-        $parsed = $this->parseJSON($response['text']);
+        $parsed = $this->parseJSON($response['content']);
         if ($parsed === null) {
-            return ['status' => 'PARSE_ERROR', 'raw' => $response['text']];
+            return ['status' => 'PARSE_ERROR', 'raw' => $response['content']];
         }
         
         return array_merge($parsed, [
@@ -248,17 +228,18 @@ IMPORTANT: You are enhancing a statistical model, not replacing it. Stay grounde
      */
     private function ensembleLLMReasoning(array $baseSignal, array $context): array
     {
-        if (!$this->modelRouter->configured()) {
+        $routerStatus = $this->modelRouter->status();
+        if (!($routerStatus['configured'] ?? false)) {
             return [];
         }
         
         // Build summary of all agent analyses
         $agentSummaries = [];
-        foreach ($baseSignal['agents'] ?? [] as $a) {
+        foreach ($baseSignal['agentOutputs'] ?? [] as $a) {
             $agentSummaries[] = sprintf(
-                '- %s: estimate=%.2fx, confidence=%d%%, reasoning=%s',
-                $a['agent_name'] ?? 'Unknown',
-                $a['estimate'] ?? 0,
+                "- %s: estimate %.2fx, conf %.0f%%, reason: %s",
+                $a['agent'] ?? 'unknown',
+                $a['estimate'] ?? 1.0,
                 ($a['confidence'] ?? 0) * 100,
                 $a['reasoning'] ?? 'N/A'
             );
@@ -285,7 +266,7 @@ Provide a JSON response with your assessment:
 
 Remember: Crash games use provably fair random number generation. Your analysis should be cautious and evidence-based. Never claim certainty.";
 
-        $response = $this->modelRouter->complete([
+        $response = $this->modelRouter->chat([
             ['role' => 'system', 'content' => 'You are an expert crash game analyst. You combine statistical evidence with pattern recognition. Respond ONLY with valid JSON. Always include disclaimers about randomness.'],
             ['role' => 'user', 'content' => $prompt],
         ], [
@@ -294,11 +275,11 @@ Remember: Crash games use provably fair random number generation. Your analysis 
             'agent' => 'multiplier.executive',
         ]);
         
-        if (empty($response['text'])) {
+        if (empty($response['content'])) {
             return [];
         }
         
-        return $this->parseJSON($response['text']) ?? [];
+        return $this->parseJSON($response['content']) ?? [];
     }
     
     /**
@@ -404,9 +385,9 @@ Remember: Crash games use provably fair random number generation. Your analysis 
         $provider = $this->getProvider(['provider' => $args['provider'] ?? 'bustabit']);
         $engine = new MultiplierIntelligenceEngine($provider);
         
-        // Use Cloudflare-enhanced signal if LLM is available
-        if ($this->llmEnhancementEnabled && $this->modelRouter->configured()) {
-            return $this->generateCloudflareSignal(['provider' => $args['provider'] ?? 'bustabit']);
+        $routerStatus = $this->modelRouter->status();
+        if ($this->llmEnhancementEnabled && ($routerStatus['configured'] ?? false)) {
+            return $this->generateEnhancedSignal(['provider' => $args['provider'] ?? 'bustabit']);
         }
         
         return $engine->generateSignal($args['model'] ?? null);

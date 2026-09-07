@@ -195,18 +195,20 @@ $biasClass = static function (?string $bias): string {
       <div class="panel">
         <h3>Technical signals</h3>
         <div class="body scroll">
-          <table class="tbl">
-            <thead><tr><th>Indicator</th><th class="num">Value</th><th class="num">Signal</th></tr></thead>
-            <tbody>
-              <?php foreach ($run['signals'] as $s): ?>
-                <tr>
-                  <td><?= e($s['name']) ?> <span class="dim" style="font-size:10px"><?= e($s['detail']) ?></span></td>
-                  <td class="num mono"><?= $s['value'] !== null ? e(number_format($s['value'], 2)) : '—' ?></td>
-                  <td class="num"><span class="badge <?= $s['signal'] === 'BUY' ? 'b-green' : ($s['signal'] === 'SELL' ? 'b-red' : 'b-gray') ?>" style="padding:0 6px"><?= e($s['signal']) ?></span></td>
-                </tr>
-              <?php endforeach; ?>
-            </tbody>
-          </table>
+          <div class="table-scroll">
+            <table class="tbl">
+              <thead><tr><th>Indicator</th><th class="num">Value</th><th class="num">Signal</th></tr></thead>
+              <tbody>
+                <?php foreach ($run['signals'] as $s): ?>
+                  <tr>
+                    <td><?= e($s['name']) ?> <span class="dim" style="font-size:10px"><?= e($s['detail']) ?></span></td>
+                    <td class="num mono"><?= $s['value'] !== null ? e(number_format($s['value'], 2)) : '—' ?></td>
+                    <td class="num"><span class="badge <?= $s['signal'] === 'BUY' ? 'b-green' : ($s['signal'] === 'SELL' ? 'b-red' : 'b-gray') ?>" style="padding:0 6px"><?= e($s['signal']) ?></span></td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -256,14 +258,16 @@ $biasClass = static function (?string $bias): string {
                 R:R <b><?= e($setup['riskReward']) ?></b> · conf <b><?= round($setup['confidence'] * 100) ?>%</b>
               </div>
             </div>
-            <table class="tbl mono">
-              <tr><td>Entry zone</td><td class="num"><?= e(number_format($setup['entry']['min'], 5)) ?> – <?= e(number_format($setup['entry']['max'], 5)) ?></td></tr>
-              <tr><td class="down">Stop loss</td><td class="num down"><?= e(number_format($setup['stopLoss'], 5)) ?></td></tr>
-              <?php foreach ($setup['takeProfit'] as $i => $tp): ?>
-                <tr><td class="up">Target <?= $i + 1 ?></td><td class="num up"><?= e(number_format($tp, 5)) ?></td></tr>
-              <?php endforeach; ?>
-              <tr><td>Expires</td><td class="num"><?= e(substr($setup['expiration'], 0, 16)) ?>Z</td></tr>
-            </table>
+            <div class="table-scroll">
+              <table class="tbl mono">
+                <tr><td>Entry zone</td><td class="num"><?= e(number_format($setup['entry']['min'], 5)) ?> – <?= e(number_format($setup['entry']['max'], 5)) ?></td></tr>
+                <tr><td class="down">Stop loss</td><td class="num down"><?= e(number_format($setup['stopLoss'], 5)) ?></td></tr>
+                <?php foreach ($setup['takeProfit'] as $i => $tp): ?>
+                  <tr><td class="up">Target <?= $i + 1 ?></td><td class="num up"><?= e(number_format($tp, 5)) ?></td></tr>
+                <?php endforeach; ?>
+                <tr><td>Expires</td><td class="num"><?= e(substr($setup['expiration'], 0, 16)) ?>Z</td></tr>
+              </table>
+            </div>
             <?php if ($rd): ?>
               <div style="margin-top:8px">
                 <span class="badge <?= $rd['approved'] ? 'b-green' : 'b-red' ?>">RISK: <?= $rd['approved'] ? 'APPROVED' : 'VETOED' ?></span>
@@ -278,17 +282,19 @@ $biasClass = static function (?string $bias): string {
       <div class="panel">
         <h3>Recent analysis runs</h3>
         <div class="body">
-          <table class="tbl">
-            <?php foreach ($history as $h): ?>
-              <tr>
-                <td class="mono" style="font-weight:700"><?= e($h['symbol']) ?></td>
-                <td class="dim"><?= e($h['timeframe']) ?></td>
-                <td><span class="badge <?= $biasClass($h['bias'] ?? '') ?>" style="padding:0 6px"><?= e(substr((string) $h['bias'], 0, 4)) ?></span></td>
-                <td class="num mono dim"><?= round($h['confidence'] * 100) ?>%</td>
-                <td class="num dim mono"><?= e(substr($h['completed_at'], 11, 8)) ?></td>
-              </tr>
-            <?php endforeach; ?>
-          </table>
+          <div class="table-scroll">
+            <table class="tbl">
+              <?php foreach ($history as $h): ?>
+                <tr>
+                  <td class="mono" style="font-weight:700"><?= e($h['symbol']) ?></td>
+                  <td class="dim"><?= e($h['timeframe']) ?></td>
+                  <td><span class="badge <?= $biasClass($h['bias'] ?? '') ?>" style="padding:0 6px"><?= e(substr((string) $h['bias'], 0, 4)) ?></span></td>
+                  <td class="num mono dim"><?= round($h['confidence'] * 100) ?>%</td>
+                  <td class="num dim mono"><?= e(substr($h['completed_at'], 11, 8)) ?></td>
+                </tr>
+              <?php endforeach; ?>
+            </table>
+          </div>
         </div>
       </div>
 

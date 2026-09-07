@@ -222,7 +222,7 @@ window.__AI_LOTTERY_STATE__ = <?= $stateJson ?>;
       + '<div class="lottery-meta" style="margin:4px 0">Why this line was selected:</div>'
       + '<ul class="lottery-why" style="margin:0 0 10px;padding-left:18px">'+why+'</ul>'
       + '<div class="lottery-meta" style="margin-bottom:4px">All ranked candidate lines:</div>'
-      + '<table class="tbl mono"><thead><tr><th>#</th><th>Line</th><th>Score</th><th>Why (summary)</th></tr></thead><tbody>'+rows+'</tbody></table>';
+      + '<div class="table-scroll"><table class="tbl mono"><thead><tr><th>#</th><th>Line</th><th>Score</th><th>Why (summary)</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
   }
 
   function renderIntelligence(intel) {
@@ -289,30 +289,30 @@ window.__AI_LOTTERY_STATE__ = <?= $stateJson ?>;
 
   function renderDraws(draws) {
     if (!draws || !draws.length) return '<p class="dim">No draws loaded yet.</p>';
-    return '<table class="tbl mono"><thead><tr><th>Date</th><th>#</th><th>Numbers</th></tr></thead><tbody>' +
+    return '<div class="table-scroll"><table class="tbl mono"><thead><tr><th>Date</th><th>#</th><th>Numbers</th></tr></thead><tbody>' +
       draws.slice(0,10).map(d => {
         const mains = (d.main_numbers||d.numbers&&d.numbers.main||[]).slice().sort((a,b)=>a-b).map(n=>'<span class="ball">'+n+'</span>').join('');
         const stars = (d.lucky_stars||d.stars||(d.numbers&&d.numbers.stars)||[]).slice().sort((a,b)=>a-b).map(n=>'<span class="lucky-star">'+n+'</span>').join('');
         return '<tr><td>'+e(d.draw_date||d.draw_at||'')+'</td><td>'+e(d.draw_no||'')+'</td><td>'+mains+stars+'</td></tr>';
-      }).join('') + '</tbody></table>';
+      }).join('') + '</tbody></table></div>';
   }
   function renderCombinations(list) {
     if (!list || !list.length) return '<p class="dim">No AI combinations saved yet. Generate your first set from the Action card.</p>';
-    return '<table class="tbl mono"><thead><tr><th>When</th><th>Mode</th><th>Line</th></tr></thead><tbody>' +
+    return '<div class="table-scroll"><table class="tbl mono"><thead><tr><th>When</th><th>Mode</th><th>Line</th></tr></thead><tbody>' +
       list.map(c => '<tr><td>'+e(c.created_at||'')+'</td><td>'+e(c.mode||c.generator_mode||'')+'</td><td>'+renderLine(c)+'</td></tr>').join('') +
-      '</tbody></table>';
+      '</tbody></table></div>';
   }
   function renderTickets(list) {
     if (!list || !list.length) return '<p class="dim">No saved tickets yet. Build and save a ticket from the generator.</p>';
-    return '<table class="tbl mono"><thead><tr><th>Label</th><th>Draw</th><th>Lines</th><th>Status</th></tr></thead><tbody>' +
+    return '<div class="table-scroll"><table class="tbl mono"><thead><tr><th>Label</th><th>Draw</th><th>Lines</th><th>Status</th></tr></thead><tbody>' +
       list.map(t => '<tr><td>'+e(t.label||t.name||'Ticket #'+t.id)+'</td><td>'+e(t.target_draw_date||'')+'</td><td>'+(t.line_count||'?')+'</td><td>'+e(t.status||'')+'</td></tr>').join('') +
-      '</tbody></table>';
+      '</tbody></table></div>';
   }
   function renderBacktests(list) {
     if (!list || !list.length) return '<p class="dim">No backtests yet. Run one from Strategy Lab — a random baseline is always included for honest comparison.</p>';
-    return '<table class="tbl mono"><thead><tr><th>Model</th><th>Window</th><th>Win rate</th><th>vs random</th></tr></thead><tbody>' +
+    return '<div class="table-scroll"><table class="tbl mono"><thead><tr><th>Model</th><th>Window</th><th>Win rate</th><th>vs random</th></tr></thead><tbody>' +
       list.map(b => '<tr><td>'+e(b.model_version||b.model||'')+'</td><td>'+e(b.window||'')+'</td><td>'+e(typeof b.hit_rate==='number'?b.hit_rate.toFixed(2)+'%':(b.win_rate||'-'))+'</td><td>'+e(b.vs_random||b.baseline_delta||'—')+'</td></tr>').join('') +
-      '</tbody></table>';
+      '</tbody></table></div>';
   }
   function renderLine(c) {
     const mains = (c.main_numbers||c.mains||[]).slice().sort((a,b)=>a-b).map(n=>'<span class="ball">'+n+'</span>').join('');

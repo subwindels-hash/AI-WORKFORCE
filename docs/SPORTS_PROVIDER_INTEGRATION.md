@@ -215,9 +215,9 @@ WINDELS_SPORTS_HTTP_TIMEOUT=10
   "ok": true,
   "checks": {
     "multiplier_engine": { "status": "OK" },
-    "cloudflare_model_router": { "status": "OK" },
+    "agent_model_router": { "status": "OK" },
     "mcp_multiplier_tools": { "status": "OK" },
-    "cloudflare_bridge": { "status": "OK" },
+    "agent_bridge": { "status": "OK" },
     "sports_enrichment": {
       "status": "OK",
       "data_available": true,
@@ -534,7 +534,7 @@ Check integration status on dashboards:
 ### Multiplier Command Center
 
 Shows 5 integration pills:
-- ⚡ Cloudflare Connected / Standby
+- ⚡ Agent Platform Connected / Standby
 - 🤖 LLM Enhancement Active / Standby
 - ⚽ Sports Intel Enriching / Awaiting Config
 - 🔗 Agent Bus Registered / Unregistered
@@ -543,7 +543,7 @@ Shows 5 integration pills:
 ### User Dashboard Widget
 
 Shows 3 integration pills under latest signal:
-- ⚡ Cloudflare Active / Standby
+- ⚡ AI Platform Active / Standby
 - 🤖 LLM Enhanced / Standby
 - ⚽ Sports Intel Enriching / Awaiting
 

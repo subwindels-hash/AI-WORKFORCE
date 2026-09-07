@@ -38,24 +38,26 @@ $windowLabel = ($windowRequested ?? '') !== '' && ($windowRequested ?? '0') !== 
 <?php endif; ?>
 
 <?php if ($numbers !== []): ?>
-  <div class="lottery-card" style="border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin:12px 0;background:var(--panel);overflow:auto">
+  <div class="lottery-card" style="border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin:12px 0;background:var(--panel)">
     <h3><?= $kind === 'gap' ? 'Gap statistics' : 'Frequency' ?> · <?= (int) ($data['totalDraws'] ?? 0) ?> draws</h3>
-    <table class="tbl mono">
-      <thead><tr><th>#</th><th>Appearances</th><th>%</th><th>Last seen</th><th>Draws since</th><th>Avg gap</th><th>Max gap</th></tr></thead>
-      <tbody>
-      <?php foreach ($numbers as $row): ?>
-        <tr>
-          <td><?= (int) ($row['number'] ?? 0) ?></td>
-          <td><?= (int) ($row['appearances'] ?? 0) ?></td>
-          <td><?= e((string) ($row['appearancePct'] ?? '')) ?></td>
-          <td><?= e((string) ($row['lastAppearance'] ?? '—')) ?></td>
-          <td><?= $row['drawsSinceLast'] === null ? '—' : (int) $row['drawsSinceLast'] ?></td>
-          <td><?= $row['avgGap'] === null ? '—' : e((string) $row['avgGap']) ?></td>
-          <td><?= $row['maxGap'] === null ? '—' : e((string) $row['maxGap']) ?></td>
-        </tr>
-      <?php endforeach; ?>
-      </tbody>
-    </table>
+    <div class="table-scroll">
+      <table class="tbl mono">
+        <thead><tr><th>#</th><th>Appearances</th><th>%</th><th>Last seen</th><th>Draws since</th><th>Avg gap</th><th>Max gap</th></tr></thead>
+        <tbody>
+        <?php foreach ($numbers as $row): ?>
+          <tr>
+            <td><?= (int) ($row['number'] ?? 0) ?></td>
+            <td><?= (int) ($row['appearances'] ?? 0) ?></td>
+            <td><?= e((string) ($row['appearancePct'] ?? '')) ?></td>
+            <td><?= e((string) ($row['lastAppearance'] ?? '—')) ?></td>
+            <td><?= $row['drawsSinceLast'] === null ? '—' : (int) $row['drawsSinceLast'] ?></td>
+            <td><?= $row['avgGap'] === null ? '—' : e((string) $row['avgGap']) ?></td>
+            <td><?= $row['maxGap'] === null ? '—' : e((string) $row['maxGap']) ?></td>
+          </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
   </div>
 <?php endif; ?>
 

@@ -20,17 +20,19 @@ class Api_auth extends Api_controller
         $this->session->sess_regenerate(TRUE);
         $csrf = bin2hex(random_bytes(32));
         $this->session->set_userdata(['identity' => $user, 'csrf_token' => $csrf, 'login_attempts' => 0, 'login_locked_until' => 0]);
+        $this->issueRememberCookie((int) $user['id']);
         $this->json(['user' => $user, 'csrfToken' => $csrf]);
     }
     public function me()
     {
-        $user = $this->session->userdata('identity');
+        $user = $this->currentUser();
         if (!is_array($user)) return $this->jsonError('unauthenticated', 401);
         $this->json(['user' => $user, 'csrfToken' => $this->session->userdata('csrf_token')]);
     }
     public function logout()
     {
-        if (!$this->requirePermission('system.authenticated')) return;
-        $this->session->sess_destroy(); $this->json(['ok' => true]);
+        $this->clearRememberCookie();
+        $this->session->sess_destroy();
+        $this->json(['ok' => true]);
     }
 }
