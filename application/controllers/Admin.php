@@ -767,6 +767,130 @@ class Admin extends App_Controller
         $this->render('admin/settings', $data);
     }
 
+    /** Parse "EURUSD=12, XAUUSD=40" into a symbol => points map. */
+    private static function parseSpreadOverrides(string $raw): array
+    {
+        $out = [];
+        foreach (explode(',', $raw) as $pair) {
+            $pair = trim($pair);
+            if ($pair === '' || !str_contains($pair, '=')) continue;
+            [$symbol, $points] = array_map('trim', explode('=', $pair, 2));
+            if ($symbol === '' || !is_numeric($points)) continue;
+            $out[strtoupper($symbol)] = $points;
+        }
+        return $out;
+    }
+
+    /**
+     * §9 — Automatic Kill Switch configuration. Administrators configure the
+     * thresholds; nobody can switch protection on or off by hand.
+     */
+    public function protection()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        $data = $this->base('Automatic Kill Switch', 'protection');
+        $data['policy'] = $this->platform->protection->policy();
+        $data['protection'] = $this->platform->protection->status();
+        $data['calendar'] = $this->platform->protection->calendarStatus();
+        $data['defaults'] = \AIWorkforce\TradingProtection\ProtectionPolicy::DEFAULTS;
+        $this->render('admin/protection', $data);
+    }
+
+    public function protection_save()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/protection'); return; }
+
+        $patch = [
+            'enabled' => $this->input->post('enabled') === '1',
+            'news' => [
+                'enabled' => $this->input->post('news_enabled') === '1',
+                'minutesBefore' => $this->input->post('news_minutes_before'),
+                'minutesAfter' => $this->input->post('news_minutes_after'),
+                'warningLeadMinutes' => $this->input->post('news_lead'),
+                'impacts' => $this->input->post('news_impacts'),
+                'onFeedFailure' => $this->input->post('news_on_failure'),
+                'pauseWhenNoProvider' => $this->input->post('news_pause_no_provider') === '1',
+                'feedMaxAgeMinutes' => $this->input->post('news_feed_max_age'),
+            ],
+            'dailyLoss' => [
+                'enabled' => $this->input->post('loss_enabled') === '1',
+                'percentLimit' => \AIWorkforce\TradingProtection\ProtectionPolicy::fromPercent($this->input->post('loss_pct')),
+                'fixedLimitUsd' => $this->input->post('loss_fixed'),
+                'warnAtFraction' => $this->input->post('loss_warn'),
+            ],
+            'drawdown' => [
+                'enabled' => $this->input->post('dd_enabled') === '1',
+                'percentLimit' => \AIWorkforce\TradingProtection\ProtectionPolicy::fromPercent($this->input->post('dd_pct')),
+                'warnAtFraction' => $this->input->post('dd_warn'),
+            ],
+            'technical' => [
+                'brokerDisconnect' => $this->input->post('tech_broker') === '1',
+                'staleData' => $this->input->post('tech_stale') === '1',
+                'dataFeedTimeoutSeconds' => $this->input->post('tech_feed_timeout'),
+                'maxConsecutiveOrderFailures' => $this->input->post('tech_order_failures'),
+                'escalateToKill' => $this->input->post('tech_escalate') === '1',
+            ],
+            'spread' => [
+                'enabled' => $this->input->post('spread_enabled') === '1',
+                'maxPoints' => $this->input->post('spread_points'),
+                'perSymbol' => self::parseSpreadOverrides((string) $this->input->post('spread_per_symbol')),
+                'requireReading' => $this->input->post('spread_require') === '1',
+            ],
+            'slippage' => [
+                'enabled' => $this->input->post('slip_enabled') === '1',
+                'maxPoints' => $this->input->post('slip_points'),
+                'sampleWindow' => $this->input->post('slip_window'),
+            ],
+            'emergency' => [
+                'closePositionsOnKill' => $this->input->post('emergency_close') === '1',
+                'cancelPendingOrdersOnKill' => $this->input->post('emergency_cancel') === '1',
+            ],
+            'recovery' => [
+                'enabled' => $this->input->post('recovery_enabled') === '1',
+                'requireAllClear' => $this->input->post('recovery_all_clear') === '1',
+                'consecutiveClearScans' => $this->input->post('recovery_scans'),
+                'maxStatusAgeSeconds' => $this->input->post('recovery_max_age'),
+            ],
+        ];
+
+        try {
+            $policy = $this->platform->protection->updatePolicy($patch);
+            $this->portal->log($actor, 'PROTECTION_POLICY_CHANGED', 'ok', [
+                'type' => 'protection', 'id' => 'policy', 'label' => 'Automatic Kill Switch policy',
+            ], [
+                'enabled' => $policy['enabled'],
+                'news' => $policy['news']['enabled'],
+                'dailyLossPct' => $policy['dailyLoss']['percentLimit'],
+                'dailyLossUsd' => $policy['dailyLoss']['fixedLimitUsd'],
+                'drawdownPct' => $policy['drawdown']['percentLimit'],
+                'maxSpreadPoints' => $policy['spread']['maxPoints'],
+                'maxSlippagePoints' => $policy['slippage']['maxPoints'],
+                'emergency' => $policy['emergency'],
+            ], $this->ip());
+            $this->flash('notice', 'Automatic Kill Switch policy saved and applied.');
+        } catch (\Throwable $e) {
+            $this->portal->log($actor, 'PROTECTION_POLICY_CHANGED', 'error', [
+                'type' => 'protection', 'id' => 'policy', 'label' => 'Automatic Kill Switch policy',
+            ], ['error' => $e->getMessage()], $this->ip());
+            $this->flash('error', 'Policy not saved: ' . $e->getMessage());
+        }
+        redirect('/admin/protection');
+    }
+
+    /** Reset the drawdown high-water mark (administrator action, audited). */
+    public function protection_reset_peak()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/protection'); return; }
+        $this->platform->protection->resetPeakEquity();
+        $this->portal->log($actor, 'PROTECTION_PEAK_RESET', 'ok', [
+            'type' => 'protection', 'id' => 'peak', 'label' => 'Drawdown high-water mark',
+        ], [], $this->ip());
+        $this->flash('notice', 'Drawdown high-water mark reset.');
+        redirect('/admin/protection');
+    }
+
     public function settings_save()
     {
         $actor = $this->gate('admin.settings.manage'); if (!$actor) return;

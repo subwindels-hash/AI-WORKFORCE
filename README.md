@@ -24,8 +24,8 @@ risk monitoring**).
 
 > **Core principle:** AI can analyze, recommend, and automate within approved
 > rules, but it must never bypass market-data validation, risk controls,
-> execution governance, broker safeguards, or the kill switch (scoped to
-> broker and trading-intelligence surfaces — see
+> execution governance, broker safeguards, or the Automatic Kill Switch
+> (scoped to broker and trading-intelligence surfaces — see
 > [`docs/KILL_SWITCH_SCOPE.md`](docs/KILL_SWITCH_SCOPE.md)).
 
 ```text
@@ -58,9 +58,9 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **MT5 connector — full trading surface** (account/quote/candles/positions/orders/history + place/modify/cancel/close) | **TESTED** (simulated bridge; not yet verified against a real MetaTrader terminal) |
 | **Python MT5 bridge service** (`python-services/mt5-bridge`, FastAPI + MetaTrader5, demo-only default) | **IMPLEMENTED** (contract unit-tested; requires deployment on a Windows MT5 host) |
 | **Portfolio Risk Monitor**: HIGH_EXPOSURE, EXCESSIVE_LEVERAGE, CORRELATED_POSITIONS, MAX_DRAWDOWN_WARNING, DAILY_LOSS_WARNING, BROKER_DISCONNECTED | **TESTED** |
-| **Kill switch scoped to broker + trading intelligence** (order-bound surfaces only; market data and non-trading modules never gated), audit trail, ANALYSIS_ONLY default | **TESTED** |
+| **Automatic Kill Switch** (no manual switch exists): news, daily loss (percentage + fixed), max drawdown, connectivity, stale data, order failures, spread and slippage protection; 7 automatic states with self-recovery; scoped to order-bound broker/trading surfaces — market data and non-trading modules never gated; audit trail, ANALYSIS_ONLY default | **TESTED** |
 | **RBAC on the trading API**: trading.view / trading.control / trading.execute (+ CSRF); approval decisions record the deciding operator | **TESTED** |
-| **Notifications**: risk alerts, approval requests, execution outcomes, broker disconnects, kill switch — deduped until acknowledged | **TESTED** |
+| **Notifications**: risk alerts, approval requests, execution outcomes, broker disconnects, automatic kill-switch transitions — deduped until acknowledged | **TESTED** |
 | **Admin-sent notifications** (`/admin/notifications` → send panel): one member or every active account, per-recipient read state, audited as NOTIFICATION_SENT | **TESTED** |
 | **Direct member ⇄ admin messages** (`/messages` member page, `/admin/messages` console): one support thread per member, per-side read badges, start-by-username/email/User-ID, audited as MESSAGE_SENT | **TESTED** |
 | **Scheduled operations worker** (`php index.php tools cron`): portfolio scan, broker transitions, proposal expiry | **TESTED** |
@@ -84,7 +84,7 @@ sandbox — see below), plus 9 contract tests for the Python bridge
 | Backtester: next-bar fills, cost model, pessimistic stop rule, look-ahead guard | **TESTED** |
 | **Paper Trading Engine (Phase 3): accounts, orders, fills, positions, ticks, strategy deployments** | **TESTED** |
 | Trade journal + analytics + confidence calibration | **TESTED** |
-| ANALYSIS_ONLY + PAPER_TRADING modes, kill switch, audit trail | **TESTED** |
+| ANALYSIS_ONLY + PAPER_TRADING modes, automatic kill switch, audit trail | **TESTED** |
 | MT5 bridge health + read-only account/quote contracts | **IMPLEMENTED** (Phase 4 foundation) |
 | Execution supervisor preflight + persistent HUMAN_APPROVAL review workflow | **IMPLEMENTED** (Phase 5 foundation; never routes orders) |
 | Broker order routing and live trading | **PLANNED** (Phase 5) |
@@ -193,7 +193,7 @@ assets/css/ai_workforce.css            dashboard styles (no CDN dependency)
 Every paper order passes the **full governance chain before simulation**:
 
 ```text
-kill switch → trading mode (PAPER_TRADING required) → duplicate check →
+Automatic Kill Switch → trading mode (PAPER_TRADING required) → duplicate check →
 mandatory stop-loss → sizing (risk% × equity ÷ stop distance, notional-capped) →
 Risk Engine (exposure, drawdown, daily/weekly loss) → fill
 ```
@@ -218,7 +218,9 @@ Risk Engine (exposure, drawdown, daily/weekly loss) → fill
 
 ```bash
 curl -X POST :8080/api/trading/mode -d '{"mode":"PAPER_TRADING"}' -H 'Content-Type: application/json'
-curl -X POST :8080/api/trading/kill-switch -d '{"active":false}' -H 'Content-Type: application/json'
+# There is no manual kill switch to release: the Automatic Kill Switch clears
+# itself once the configured safety conditions are met (check its state first).
+curl :8080/api/system/protection
 curl -X POST :8080/api/accounts/create -d '{"name":"Demo","startingBalance":25000}' -H 'Content-Type: application/json'
 # -> account id 1
 curl -X POST :8080/api/backtesting/run -d '{"strategyId":"trend-following","symbol":"BTCUSDT","marketClass":"crypto","timeframe":"1h","limit":1500}' -H 'Content-Type: application/json'
@@ -234,7 +236,7 @@ Every broker-bound intent is a **durable, auditable proposal** that runs the
 15-step pipeline inside `TradeExecutionSupervisor`:
 
 ```text
-1 kill switch → 2 trading mode → 3 strategy (APPROVED lifecycle required for
+1 Automatic Kill Switch → 2 trading mode → 3 strategy (APPROVED lifecycle required for
 automated intents) → 4 broker connection (bridge-VERIFIED order submission) →
 5 market session → 6 data freshness → 7 duplicate orders → 8 symbol
 permissions → 9 margin estimate → 10 Risk Engine (actual order volume:
@@ -268,13 +270,16 @@ approved symbols) → 11 human approval (HUMAN_APPROVAL mode) → 12 place order
 - **Notifications** (`notifications` table + `/api/notifications` + the
   Alerts page): portfolio risk transitions, `TRADE_APPROVAL_REQUESTED`,
   `ORDER_FILLED`, `EXECUTION_FAILED`, `ROUTING_BLOCKED`, `BROKER_DISCONNECTED`
-  / `BROKER_CONNECTED`, kill-switch activation, `PROPOSAL_EXPIRED`. Unread
+  / `BROKER_CONNECTED`, automatic kill-switch activation, `PROPOSAL_EXPIRED`. Unread
   dedupe: one badge per active issue until acknowledged.
 - **Cron worker** — run every minute:
   `* * * * * php /path/index.php tools cron`
-  Executes the portfolio risk scan (with broker transition detection), expires
+  Executes the portfolio risk scan (with broker transition detection), the
+  **Automatic Kill Switch** scan (news, daily loss, drawdown, connectivity,
+  data freshness, order failures, spread, slippage, recovery), expires
   undecided proposals after `proposalExpiryMinutes` (default 240, spec §5
-  invalidation) and audits a `CRON_RUN` summary.
+  invalidation) and audits a `CRON_RUN` summary. The protection scan also runs
+  on demand, so an order decision never waits for the next minute.
 
 ### AI Language Learning (Phases 1–5 complete)
 
@@ -579,7 +584,7 @@ rather than reporting a mysterious all-synthetic registry.
 ## API surface
 
 `/api/auth/{login,me,logout}` · `/api/notifications[/read-all|/:id/read]`
-`/api/system/{status,features}` · `/api/events` · `/api/trading/{kill-switch,mode,synthetic-paper}`
+`/api/system/{status,features,protection,protection/policy}` · `/api/events` · `/api/trading/{mode,synthetic-paper}`
 `/api/trading/limits[/update]` · `/api/trading/propose` · `/api/trading/execute` · `/api/trading/:id/{approve,route}`
 `/api/execution/{preflight,proposals,executions}` · `/api/portfolio/risk-scan` · `/api/brokers` · `/api/brokers/mt5/{account,quote}`
 `/api/market-data/{candles,quote,providers,live,refresh}` · `/api/analysis/{run,history}` · `/api/agents/consensus`
@@ -594,10 +599,10 @@ rather than reporting a mysterious all-synthetic registry.
 | Agents never call brokers | Agents see only `AnalysisContext`; every order path (paper AND broker) runs through the Risk Engine + Execution Supervisor; only the supervisor holds a TradingConnector |
 | Never silently use fake data | `provenance.synthetic` flows end-to-end; paper fills on synthetic prices require the explicit, audited `allowSyntheticPaperData` dev flag |
 | No integration claimed unless tested | `GET /api/system/features` renders the same matrix; unverified integrations are listed as PLANNED (Broker Center) |
-| Live trading disabled by default | Boot state: `ANALYSIS_ONLY` + kill switch ACTIVE; broker routing needs an explicitly deployed bridge + `AI_WORKFORCE_MT5_TRADING_ENABLED=1` + demo account; automated modes need a configured automation envelope |
+| Live trading disabled by default | Boot state: `ANALYSIS_ONLY` + kill switch ACTIVE (released only by the Automatic Kill Switch once conditions clear); broker routing needs an explicitly deployed bridge + `AI_WORKFORCE_MT5_TRADING_ENABLED=1` + demo account; automated modes need a configured automation envelope |
 | Every trade auditable | `audit_logs` table + UI trail; every order/position/journal row is linked |
 | Risk Engine veto power | `RiskEngine::evaluate()` sits in every order path |
-| Kill switch blocks orders | Checked first in `submitOrder()`, in the supervisor pipeline (step 1) and re-verified at routing time. **Scoped:** it gates the execution supervisor, broker orders, paper orders and automation envelopes only — market data keeps streaming and non-trading modules are never gated ([`docs/KILL_SWITCH_SCOPE.md`](docs/KILL_SWITCH_SCOPE.md)) |
+| Automatic Kill Switch blocks orders | No manual switch exists: `TradingProtection\AutomaticProtection` derives the state every minute from news, daily loss, drawdown, connectivity, data freshness, order failures, spread and slippage, and drives the gate itself. Checked first in `submitOrder()`, in the supervisor pipeline (step 1) and re-verified at routing time. **Scoped:** it gates the execution supervisor, broker orders, paper orders and automation envelopes only — market data keeps streaming and non-trading modules are never gated ([`docs/KILL_SWITCH_SCOPE.md`](docs/KILL_SWITCH_SCOPE.md)) |
 
 ## Unfinished-module scaffolds
 
@@ -632,7 +637,7 @@ The scaffolds are intentionally not marked as working integrations in
   only then review `AI_WORKFORCE_MT5_LIVE_ALLOWED` (default stays off). Crypto
   exchanges are added **one at a time** after MT5 is verified.
 - **Phase 5 (core + hardening done)** — supervisor pipeline, human approval,
-  automation modes, kill switch, duplicate protection, broker health
+  automation modes, automatic kill switch, duplicate protection, broker health
   monitoring, portfolio risk monitoring, RBAC on the trading API,
   notifications and the scheduled-operations worker are implemented and
   tested, and the offline demo can run the full chain through the clearly

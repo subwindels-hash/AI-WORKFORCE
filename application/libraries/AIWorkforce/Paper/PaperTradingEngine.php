@@ -36,6 +36,13 @@ class PaperTradingEngine
     public const DEFAULT_SLIPPAGE_BPS = 2.0;
     public const DEFAULT_FEE_BPS = 2.0;
 
+    /**
+     * Automatic Kill Switch. Wired by the Platform container after this engine
+     * exists (the protection engine needs the paper engine, so the dependency
+     * is set once, from Platform, rather than through the constructor).
+     */
+    public ?\AIWorkforce\TradingProtection\AutomaticProtection $protection = null;
+
     public function __construct(
         private readonly PaperRepository $repo,
         private readonly JournalRepository $journal,
@@ -130,6 +137,14 @@ class PaperTradingEngine
         $syntheticAllowed = !empty($state['allowSyntheticPaperData']);
         if (KillSwitchScope::blocks('paper_orders', $state)) {
             return $this->reject($accountId, $input, 'Kill switch is ACTIVE — all order placement is blocked');
+        }
+        // §11 — the Automatic Kill Switch is checked before every new trade,
+        // including simulated ones: the same protection governs paper and live.
+        if ($this->protection !== null) {
+            $gate = $this->protection->gate(strtoupper((string) ($input['symbol'] ?? '')));
+            if (!($gate['allowed'] ?? false)) {
+                return $this->reject($accountId, $input, 'Automatic Kill Switch: ' . (string) $gate['reason']);
+            }
         }
         if ($state['tradingMode'] !== 'PAPER_TRADING') {
             return $this->reject($accountId, $input, "Trading mode is {$state['tradingMode']} — switch to PAPER_TRADING to place paper orders");

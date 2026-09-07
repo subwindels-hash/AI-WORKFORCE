@@ -16,6 +16,7 @@ class CronRunner
             'sports-live' => fn() => self::sportsLive($ci),
             'football' => fn() => self::football($ci),
             'lottery' => fn() => self::lottery($ci),
+            'protection' => fn() => self::protection($ci),
         ];
     }
 
@@ -36,6 +37,25 @@ class CronRunner
             $summary['accountsScanned'], $summary['riskAlerts'], $summary['proposalsExpired']
         ), $summary, 'system');
         return $summary;
+    }
+
+    /**
+     * AUTOMATIC KILL SWITCH scan (§1–§13). The engine audits and notifies on
+     * every state transition, so the runner only reports the outcome.
+     */
+    public static function protection(object $ci): array
+    {
+        $report = $ci->platform->protection->evaluate();
+        return [
+            'ranAt' => gmdate('c'),
+            'state' => $report['status']['state'],
+            'reason' => $report['status']['reason'],
+            'code' => $report['status']['code'] ?? null,
+            'triggers' => count($report['triggers']),
+            'equity' => $report['metrics']['equity'] ?? 0.0,
+            'dailyLossPct' => $report['metrics']['dailyLossPct'] ?? 0.0,
+            'drawdownPct' => $report['metrics']['drawdownPct'] ?? 0.0,
+        ];
     }
 
     /** Full sports sweep (fixtures → odds → live → results → quality → ticket …). */

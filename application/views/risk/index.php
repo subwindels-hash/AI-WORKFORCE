@@ -64,41 +64,49 @@
   </div>
 </div>
 
-<?php /* Kill switch control — scoped to broker + trading-intelligence
-         surfaces. It lives here and on My Trading / the analysis console. */ ?>
+<?php /* §8 — Automatic Kill Switch status. There is deliberately no manual
+         switch here: the state is derived by the protection engine. */ ?>
+<?php $prot = ai_workforce_protection_status(); $chip = ai_workforce_protection_chip($prot); $pm = $prot['metrics'] ?? []; ?>
 <div class="panel" style="margin-top:14px">
-  <h3>Kill switch <span class="statuspill <?= !empty($status['killSwitch']['active']) ? 'warn' : '' ?>"><i class="pill-dot"></i><?= !empty($status['killSwitch']['active']) ? 'ACTIVE' : 'RELEASED' ?></span></h3>
+  <h3>Automatic Kill Switch
+    <span class="statuspill <?= $chip['tone'] === 'ok' ? '' : 'warn' ?>"><i class="pill-dot"></i><?= e($chip['icon'] . ' ' . $chip['label']) ?></span>
+  </h3>
   <div class="body" style="padding-top:12px">
-    <p class="dim" style="margin:0 0 10px">
-      Scoped to order-bound surfaces: the execution supervisor, broker orders
-      (MT5, MT4, crypto exchanges, OANDA, Alpaca, IBKR), paper orders and the
-      automation envelopes. Market data keeps streaming while it is engaged, so
-      charts, analysis and provider health stay observable. Sports, lottery,
-      language learning and lead discovery are never gated by it.
-    </p>
-    <?php if (!empty($status['killSwitch']['active'])): ?>
-      <div class="notice err" style="margin-bottom:10px">
-        <b>Engaged</b><?= !empty($status['killSwitch']['activatedAt']) ? ' at ' . e((string) $status['killSwitch']['activatedAt']) : '' ?>
-        <?= !empty($status['killSwitch']['reason']) ? ' — ' . e((string) $status['killSwitch']['reason']) : '' ?>.
-        Every order-bound surface stays blocked until it is released.
-      </div>
+    <p style="margin:0 0 10px;font-weight:600;color:<?= $chip['tone'] === 'ok' ? 'var(--text)' : 'var(--red)' ?>"><?= e((string) ($prot['reason'] ?? '')) ?></p>
+    <div class="bc-row"><span>New trades</span><b><?= $chip['blocking'] ? 'BLOCKED' : 'Allowed' ?></b></div>
+    <div class="bc-row"><span>Since</span><b><?= e((string) ($prot['since'] ?? '—')) ?></b></div>
+    <div class="bc-row"><span>Last evaluated</span><b><?= e((string) ($prot['evaluatedAt'] ?? 'never')) ?></b></div>
+    <div class="bc-row"><span>Previous state</span><b><?= e((string) ($prot['previousState'] ?? '—')) ?></b></div>
+    <div class="bc-row"><span>Equity / balance</span><b><?= e(number_format((float) ($pm['equity'] ?? 0), 2)) ?> / <?= e(number_format((float) ($pm['balance'] ?? 0), 2)) ?></b></div>
+    <div class="bc-row"><span>Daily P&amp;L</span><b><?= e(number_format((float) ($pm['dailyPnl'] ?? 0), 2)) ?></b></div>
+    <div class="bc-row"><span>Drawdown</span><b><?= e(number_format((float) ($pm['drawdownPct'] ?? 0), 2)) ?>% (peak <?= e(number_format((float) ($pm['peakEquity'] ?? 0), 2)) ?>)</b></div>
+    <div class="bc-row"><span>Open positions</span><b><?= (int) ($pm['openPositions'] ?? 0) ?></b></div>
+
+    <?php if (!empty($prot['triggers'])): ?>
+      <h4 style="margin:14px 0 6px">Active conditions</h4>
+      <table class="tbl mono">
+        <thead><tr><th>State</th><th>Trigger</th><th>Reason</th></tr></thead>
+        <tbody>
+          <?php foreach ($prot['triggers'] as $t): ?>
+            <tr>
+              <td><span class="badge <?= ($t['state'] ?? '') === 'AUTOMATIC_KILL' ? 'b-red' : 'b-amber' ?>"><?= e((string) ($t['state'] ?? '')) ?></span></td>
+              <td><?= e((string) ($t['code'] ?? '')) ?></td>
+              <td><?= e((string) ($t['reason'] ?? '')) ?></td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
     <?php endif; ?>
-    <?php if (ai_workforce_kill_switch_can_control()): ?>
-      <?php if (!empty($status['killSwitch']['active'])): ?>
-        <form method="post" action="/kill-switch">
-          <input type="hidden" name="active" value="0">
-          <input type="hidden" name="return" value="risk">
-          <button class="btn small danger" type="submit">Release kill switch</button>
-        </form>
-      <?php else: ?>
-        <form method="post" action="/kill-switch" onsubmit="return confirm('Engage the kill switch? All broker and paper orders will be blocked.');">
-          <input type="hidden" name="active" value="1">
-          <input type="hidden" name="return" value="risk">
-          <button class="btn small danger" type="submit">Engage kill switch</button>
-        </form>
-      <?php endif; ?>
-    <?php else: ?>
-      <p class="dim" style="margin:0">Engaging or releasing it requires the <span class="mono">trading.control</span> permission.</p>
+
+    <p class="dim" style="margin:12px 0 0">
+      Continuously monitored: high-impact news, daily loss, maximum drawdown, broker
+      and MT4/MT5 connectivity, market-data availability, spread, slippage and repeated
+      order failures. Protection overrides AI agents, strategies, signals and manual
+      requests. There is no manual on/off switch — only an administrator can change
+      the thresholds.
+    </p>
+    <?php if (!empty($isAdmin)): ?>
+      <a class="btn" href="/admin/protection" style="margin-top:10px">Configure protection</a>
     <?php endif; ?>
   </div>
 </div>

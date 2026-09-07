@@ -42,7 +42,7 @@ class Api_system extends Api_controller
         ['name' => 'AI Language Learning — Phase 3 (Vocabulary)', 'category' => 'module', 'status' => 'TESTED', 'detail' => '10-word authored bank per language (word/translation/pronunciation where confidently known/example where genuine), spaced repetition 1→3→7→14→30→90 days with lapse resets, deterministic MCQ quizzes (same options at start and submit), self-assessed flashcards, due-today queue, vocabulary progress from real reviews only'],
         ['name' => 'AI Language Learning — Phase 4 (Listening + Speaking)', 'category' => 'module', 'status' => 'TESTED', 'detail' => 'Listening exercises from the real reading bank (browser speech-synthesis playback, slow/normal/replay/transcript; comprehension + transcription scoring). Speaking practice with browser speech-to-text where the user\'s browser exposes it; word accuracy from the REAL transcript; pronunciation/fluency scores never invented (no provider)'],
         ['name' => 'AI Language Learning — Phase 5 (Adaptive)', 'category' => 'module', 'status' => 'TESTED', 'detail' => 'Weakness detection from stored attempts (per-skill averages, vocabulary lapses, repeated item misses, failed modules — every finding cites evidence; honest empty state), personalized daily plans budgeted to profile minutes with completion tracked from real same-day activity, evidence-cited recommendations, item-level mastery tracking'],
-        ['name' => 'Kill switch (broker + trading intelligence scope)', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'Ships ACTIVE in DB state (fail closed). Gates order-bound surfaces only: execution supervisor, broker orders (MT5/MT4/crypto/forex), paper orders, automation envelopes. Market data keeps streaming and non-trading modules (sports, lottery, language, leads) are never gated'],
+        ['name' => 'Automatic Kill Switch (no manual switch exists)', 'category' => 'engine', 'status' => 'TESTED', 'detail' => 'Continuous monitoring of high-impact news, daily loss (% and fixed), max drawdown, broker/data connectivity, spread, slippage and order failures across NORMAL/WARNING/AUTOMATIC_PAUSED/AUTOMATIC_KILL/RECOVERY/RESUMED. Gates order-bound surfaces only: execution supervisor, broker orders (MT5/MT4/crypto/forex), paper orders, automation envelopes. Market data keeps streaming; non-trading modules are never gated. Fail-safe: unverifiable conditions pause trading'],
         ['name' => 'Lottery Intelligence — EuroMillions foundation', 'category' => 'module', 'status' => 'IMPLEMENTED', 'detail' => 'WINDELS native module: provider-neutral LotteryProvider contract, EuroMillions rule engine (5/1-50 + 2/1-12, DB-updatable), source-attributed validated draws (DATA_VALIDATION_FAILED + audit, idempotent imports, verified results never silently overwritten), frequency/gap/hot-cold/distribution/pair statistics with the independence disclaimer on every output, RBAC (lottery.view/lottery.manage), lottery-cron idempotent jobs. Honest DISABLED_NO_PROVIDER until a provider is configured — no prediction of future draws is claimed anywhere'],
         ['name' => 'Lottery Combination Intelligence (analyzer, generator, diversification)', 'category' => 'module', 'status' => 'IMPLEMENTED', 'detail' => 'Per-line statistical profile vs stored draws (odd/even, low/high, sum & spread percentiles, consecutive patterns, per-number and star history, historical similarity, pattern traits) with a labelled STATISTICAL BALANCE SCORE — never a probability. Five generation modes (RANDOM, BALANCED, HISTORICAL, DIVERSIFIED, ANTI-POPULAR) with lock/exclude support, seeded reproducibility and a full AI decision report (model version, actual inputs, factors, method). Diversification engine scores number/pair/triplet/star overlap and distribution similarity for 10/20/50+ lines (DIVERSITY SCORE, not a likelihood). Combinations and AI decisions persist (lottery_combinations, lottery_ai_decisions) and are audited; results stay connected to the model version that produced them'],
         ['name' => 'Lottery Intelligence — analysis & suggestions', 'category' => 'module', 'status' => 'IMPLEMENTED', 'detail' => 'EUROMILLIONS · LOTTERY INTELLIGENCE report composed from the verified historical dataset only: latest verified draw, main-number and Lucky-Star analysis (frequency, recent occurrence, longest absence reported honestly — never as "due"), recurring pair/triplet/star co-occurrence, distribution (odd/even, low/high, sum, spread, consecutive patterns), and ranked candidate lines (5 mains + 2 stars) scored with a STATISTICAL BALANCE SCORE whose factors and weights are disclosed per line. Clearly labelled AI/statistical suggestions, NOT predictions; a number is never claimed more likely because it appeared frequently or has been absent. Reproducible (seeded, recorded). Insufficient data is stated plainly and no lines are generated. "Run Lottery Intelligence" (lottery.manage) re-syncs and re-analyses; a scheduled lottery-cron intelligence job regenerates after each new verified draw. Credentials never appear in the report or the UI.'],
@@ -80,6 +80,7 @@ class Api_system extends Api_controller
             'implementedTradingModes' => ['ANALYSIS_ONLY', 'PAPER_TRADING', 'HUMAN_APPROVAL', 'SEMI_AUTONOMOUS', 'FULLY_AUTOMATED'],
             'supportedTradingModes' => ['ANALYSIS_ONLY', 'PAPER_TRADING', 'HUMAN_APPROVAL', 'SEMI_AUTONOMOUS', 'FULLY_AUTOMATED'],
             'killSwitch' => $state['killSwitch'],
+            'automaticProtection' => $this->platform->protection->status(),
             'killSwitchScope' => ['gates' => \AIWorkforce\KillSwitchScope::GATED_SURFACES, 'marketDataUninterrupted' => true],
             'providers' => $this->platform->providers->getAllHealth(),
             'brokers' => $this->platform->brokers->allStatus(),
@@ -146,15 +147,42 @@ class Api_system extends Api_controller
         $this->json(['limits' => $this->platform->updateRiskLimits($patch)]);
     }
 
-    public function kill_switch()
+    /** Current Automatic Kill Switch status and policy (read-only). */
+    public function protection()
     {
-        if (!$this->requirePermission('trading.control')) return;
-        $body = $this->jsonBody();
-        if (!isset($body['active']) || !is_bool($body['active'])) {
-            return $this->jsonError('body must be {active: boolean, reason?: string}');
+        if (!$this->requirePermission('trading.view', false)) return;
+        $this->json([
+            'protection' => $this->platform->protection->status(),
+            'policy' => $this->platform->protection->policy(),
+            'checkedAt' => gmdate('c'),
+        ]);
+    }
+
+    /**
+     * Update the Automatic Kill Switch policy (administrators only, §9).
+     * Body: {news:{...}, dailyLoss:{...}, drawdown:{...}, technical:{...},
+     *        spread:{...}, slippage:{...}, emergency:{...}, recovery:{...}}
+     * Unknown keys are ignored; every value is validated and clamped.
+     */
+    public function protection_policy()
+    {
+        $user = $this->refreshIdentityPermissions();
+        if (!is_array($user) || !$this->platform->identity->can($user, 'admin.settings.manage')) {
+            return $this->jsonError('forbidden — administrator permission required', 403);
         }
-        $ks = $this->platform->setKillSwitch($body['active'], $body['reason'] ?? null);
-        $this->json(['killSwitch' => $ks, 'scope' => \AIWorkforce\KillSwitchScope::GATED_SURFACES]);
+        if (!in_array($this->input->method(true), ['GET', 'HEAD'], true)) {
+            $token = $this->input->get_request_header('X-CSRF-Token');
+            if (!is_string($token) || !hash_equals((string) $this->session->userdata('csrf_token'), $token)) {
+                return $this->jsonError('invalid CSRF token', 403);
+            }
+        }
+        $body = $this->jsonBody() ?: [];
+        try {
+            $policy = $this->platform->protection->updatePolicy(is_array($body) ? $body : []);
+        } catch (\Throwable $e) {
+            return $this->jsonError($e->getMessage(), 422);
+        }
+        $this->json(['ok' => true, 'policy' => $policy, 'protection' => $this->platform->protection->status()]);
     }
 
     public function synthetic_paper()

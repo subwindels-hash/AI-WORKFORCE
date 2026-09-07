@@ -2,7 +2,7 @@
 <div class="page-head">
   <div>
     <h2>Alerts</h2>
-    <p><?= (int) $inbox['unread'] ?> unread. Risk transitions, approvals, executions, broker disconnects and kill-switch events — one unread item per active issue.</p>
+    <p><?= (int) $inbox['unread'] ?> unread. Risk transitions, approvals, executions, broker disconnects and automatic kill-switch events — one unread item per active issue.</p>
   </div>
 </div>
 

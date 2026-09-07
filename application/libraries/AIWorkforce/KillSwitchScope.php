@@ -5,6 +5,11 @@ namespace AIWorkforce;
  * Scope of the platform kill switch: BROKER + TRADING INTELLIGENCE only.
  *
  * The kill switch is an order-bound safeguard, not a global platform freeze.
+ * It has NO manual control anywhere: the Automatic Kill Switch engine
+ * (`TradingProtection\AutomaticProtection`) engages the `state.killSwitch`
+ * flag when protection blocks trading and releases it when conditions clear.
+ * This class answers "what does that flag gate?" — read-only scope, never
+ * command.
  * It gates the surfaces where money or a broker connection is at stake:
  *
  *   execution_supervisor — 15-step proposal pipeline (step 1) + routing
@@ -53,11 +58,11 @@ final class KillSwitchScope
     ];
 
     /**
-     * Console routes that surface the kill switch indicator and control:
+     * Console routes that surface the Automatic Protection indicator:
      * broker + trading-intelligence pages (My Trading, Brokers, Execution,
      * Paper Trading, Risk Center, Strategy Lab and the market-data /
      * analysis console). Everywhere else — dashboard, language learning,
-     * sports, lottery, leads, multiplier, messages, admin — the switch is
+     * sports, lottery, leads, multiplier, messages, admin — protection is
      * neither advertised nor enforced.
      */
     public const UI_ROUTES = [

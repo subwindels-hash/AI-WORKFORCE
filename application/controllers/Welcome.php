@@ -75,26 +75,6 @@ class Welcome extends App_Controller
         $this->load->view('layout/footer');
     }
 
-    /**
-     * Engage/release the kill switch (broker + trading-intelligence scope).
-     *
-     * It is an operator control: engaging it blocks every order-bound surface
-     * platform-wide, so it requires trading.control — checked against
-     * refreshed database permissions, not the session snapshot.
-     */
-    public function kill_switch()
-    {
-        $user = $this->refreshIdentityPermissions($this->identity);
-        if (!$user || !$this->platform->identity->can($user, 'trading.control')) {
-            $this->session->set_flashdata('error', 'Refused: engaging or releasing the kill switch requires the trading.control permission.');
-            redirect('/risk');
-            return;
-        }
-        $active = $this->input->post('active') === '1';
-        $this->platform->setKillSwitch($active, $active ? 'engaged from console' : 'released from console');
-        redirect($this->input->post('return') === 'risk' ? '/risk' : '/analysis');
-    }
-
     public function mode()
     {
         $mode = (string)$this->input->post('mode');

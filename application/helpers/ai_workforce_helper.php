@@ -56,21 +56,48 @@ final class AIWorkforce_MessagesHelper
     }
 }
 
+/** @var array<string,mixed>|null */
+$GLOBALS['ai_workforce_protection_cache'] = null;
+
 /**
- * True when the signed-in identity may engage/release the kill switch.
+ * Current Automatic Kill Switch status for views.
  *
- * The kill switch only gates broker + trading-intelligence surfaces, but it
- * is still an operator control: engaging it blocks every order-bound surface
- * for the whole platform. Rendering guard only — the POST endpoint re-checks
- * `trading.control` against refreshed database permissions before it acts.
+ * Read-only: views may display the protection state, never change it. A view
+ * that cannot read the state reports PAUSED rather than NORMAL, so a broken
+ * status read never renders as "safe".
+ *
+ * @return array<string,mixed>
  */
-function ai_workforce_kill_switch_can_control(): bool
+function ai_workforce_protection_status(): array
 {
-    if (!function_exists('get_instance')) return false;
+    if (is_array($GLOBALS['ai_workforce_protection_cache'])) return $GLOBALS['ai_workforce_protection_cache'];
+    $fallback = \AIWorkforce\TradingProtection\AutomaticProtection::unverifiedStatus('Protection state unavailable.');
+    if (!function_exists('get_instance')) return $fallback;
     $ci = get_instance();
-    if (!$ci || !isset($ci->session)) return false;
-    $identity = $ci->session->userdata('identity');
-    $permissions = is_array($identity) ? ($identity['permissions'] ?? []) : [];
-    if (!is_array($permissions)) return false;
-    return in_array('trading.control', $permissions, true) || in_array('system.super_admin', $permissions, true);
+    if (!isset($ci->platform, $ci->platform->protection)) return $fallback;
+    try {
+        $status = $ci->platform->protection->status();
+    } catch (Throwable $e) {
+        return $fallback;
+    }
+    return $GLOBALS['ai_workforce_protection_cache'] = is_array($status) ? $status : $fallback;
+}
+
+/**
+ * Display metadata for a protection state (§8): colour, icon and label.
+ *
+ * @param array<string,mixed> $status
+ * @return array{icon:string,label:string,tone:string,blocking:bool}
+ */
+function ai_workforce_protection_chip(array $status): array
+{
+    $state = (string) ($status['state'] ?? 'NORMAL');
+    return match ($state) {
+        'AUTOMATIC_KILL' => ['icon' => '🔴', 'label' => 'Automatic Kill Switch: ACTIVE', 'tone' => 'danger', 'blocking' => true],
+        'AUTOMATIC_PAUSED' => ['icon' => '🟠', 'label' => 'Automatic Protection: PAUSED', 'tone' => 'warn', 'blocking' => true],
+        'RECOVERY' => ['icon' => '🟡', 'label' => 'Automatic Protection: RECOVERY', 'tone' => 'warn', 'blocking' => true],
+        'WARNING' => ['icon' => '🟠', 'label' => 'Automatic Protection: WARNING', 'tone' => 'warn', 'blocking' => false],
+        'RESUMED' => ['icon' => '🔵', 'label' => 'Automatic Protection: RESUMED', 'tone' => 'ok', 'blocking' => false],
+        default => ['icon' => '🟢', 'label' => 'Automatic Protection: NORMAL', 'tone' => 'ok', 'blocking' => false],
+    };
 }

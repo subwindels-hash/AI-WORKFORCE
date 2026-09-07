@@ -197,8 +197,10 @@ class Trading extends App_Controller
             }
         } catch (\Throwable $e) { /* graceful */ }
         arsort($concentrations);
+        $protection = $this->platform->protection->status();
         $this->json([
             'killSwitch' => !empty($state['killSwitch']['active']),
+            'automaticProtection' => $protection,
             'tradingMode' => $state['tradingMode'],
             'automationLimits' => $limits,
             'alerts' => $alerts,
@@ -237,25 +239,6 @@ class Trading extends App_Controller
         } catch (\Throwable $e) {
             $this->json(['overall' => ['closedTrades' => 0], 'error' => $e->getMessage()]);
         }
-    }
-
-    // ─── API: Kill switch control ─────────────────────────────────────
-    public function toggle_kill_switch()
-    {
-        if (strtoupper($this->input->server('REQUEST_METHOD')) !== 'POST') { show_404(); return; }
-        // Operator control: engaging the switch blocks every order-bound
-        // surface platform-wide, so it needs trading.control — re-read from
-        // the database rather than trusted from the session snapshot.
-        $user = $this->refreshIdentityPermissions($this->identity);
-        if (!$user || !$this->platform->identity->can($user, 'trading.control')) {
-            $this->jsonError('forbidden — engaging or releasing the kill switch requires trading.control', 403);
-            return;
-        }
-        $body = $this->jsonBody() ?: [];
-        $active = !empty($body['active']);
-        $reason = (string) ($body['reason'] ?? ($active ? 'Engaged from My Trading' : 'Released from My Trading'));
-        $result = $this->platform->setKillSwitch($active, $reason);
-        $this->json(['ok' => true, 'killSwitch' => $result]);
     }
 
     // ─── Existing endpoints ───────────────────────────────────────────

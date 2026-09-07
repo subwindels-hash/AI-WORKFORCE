@@ -264,6 +264,9 @@ spl_autoload_register(static function (string $class) use ($ai_workforceDir): vo
     'AIWorkforce\\Strategies\\VersionedStrategyDecorator' => 'Strategies/BuiltinStrategies.php',
     'AIWorkforce\\Timeframes' => 'Timeframes.php',
     'AIWorkforce\\TradingIntelligenceEngine' => 'TradingIntelligenceEngine.php',
+    'AIWorkforce\\TradingProtection\\AutomaticProtection' => 'TradingProtection/AutomaticProtection.php',
+    'AIWorkforce\\TradingProtection\\EconomicCalendar' => 'TradingProtection/EconomicCalendar.php',
+    'AIWorkforce\\TradingProtection\\ProtectionPolicy' => 'TradingProtection/ProtectionPolicy.php',
     ];
     $class = ltrim($class, '\\');
     if (!isset($map[$class])) return;
