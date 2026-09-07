@@ -201,16 +201,19 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
       <textarea id="chat-input" placeholder="Ask the agent a question or attach a file for analysis..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage();}"></textarea>
     </div>
     <div class="wf-chat-draft-meta" id="wf-chat-draft-meta" hidden></div>
-    <div class="wf-chat-hint">Upload TXT, MD, CSV, JSON, DOCX, PDF, MP3, WAV, M4A, OGG, MP4, MOV, AVI, MKV or WEBM up to 25 MB.</div>
+    <div class="wf-chat-hint">Upload TXT, MD, CSV, JSON, DOCX, PDF, JPG, PNG, WEBP, GIF, BMP, SVG, TIFF, MP3, WAV, M4A, OGG, MP4, MOV, AVI, MKV or WEBM up to 25 MB.</div>
     <div class="wf-chat-controls">
       <div class="wf-chat-voice-controls">
         <button type="button" id="wf-chat-attach" class="btn small" aria-label="Attach file">📎 Upload file</button>
-        <input type="file" id="wf-file-input" hidden accept=".txt,.md,.markdown,.csv,.tsv,.json,.xml,.html,.htm,.log,.yaml,.yml,.ini,.sql,.srt,.vtt,.rtf,.docx,.pdf,.mp3,.wav,.m4a,.aac,.ogg,.oga,.flac,.opus,.webm,.mp4,.mov,.m4v,.avi,.mkv">
+        <input type="file" id="wf-file-input" hidden accept=".txt,.md,.markdown,.csv,.tsv,.json,.xml,.html,.htm,.log,.yaml,.yml,.ini,.sql,.srt,.vtt,.rtf,.docx,.pdf,.jpg,.jpeg,.png,.webp,.gif,.bmp,.svg,.tiff,.tif,.heic,.heif,image/*,.mp3,.wav,.m4a,.aac,.ogg,.oga,.flac,.opus,.webm,.mp4,.mov,.m4v,.avi,.mkv,audio/*,video/*">
         <button type="button" id="wf-chat-edit-cancel" class="btn small" hidden>Cancel edit</button>
         <button type="button" id="wf-chat-mic" class="btn small" aria-label="Speak">🎤 Speak</button>
         <button type="button" id="wf-chat-mic-stop" class="btn small" aria-label="Stop" disabled style="display:none">⏹ Stop</button>
       </div>
-      <button type="button" id="chat-send" class="wf-chat-send" onclick="sendMessage()"><?= $ic ?><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg> <span id="chat-send-label">Send</span></button>
+      <div style="display:inline-flex;align-items:center;gap:6px">
+        <button type="button" id="wf-chat-stop" class="btn small" aria-label="Stop" style="display:none;background:#ef4444;color:#fff;border-color:#ef4444" onclick="stopCurrentAction()">⏹ Stop</button>
+        <button type="button" id="chat-send" class="wf-chat-send" onclick="sendMessage()"><?= $ic ?><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg> <span id="chat-send-label">Send</span></button>
+      </div>
     </div>
   </div>
 </div>
@@ -260,6 +263,7 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
   var chatState = loadChatState();
   var draftFiles = {};
   var editState = null;
+  var activeAbortControllers = {};
 
   function defaultState() {
     return { activeAgent: '', chatOpen: false, conversations: {} };
@@ -576,7 +580,11 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
     if (message.attachment) {
       var attach = document.createElement('div');
       attach.className = 'wf-attachment';
-      attach.innerHTML = '<span>📎</span><span>'
+      var icon = '📎';
+      if (message.attachment.kind === 'image') icon = '🖼️';
+      else if (message.attachment.kind === 'audio') icon = '🎵';
+      else if (message.attachment.kind === 'video') icon = '🎥';
+      attach.innerHTML = '<span>' + icon + '</span><span>'
         + escapeHtml(message.attachment.name)
         + (message.attachment.kind ? ' · ' + escapeHtml(message.attachment.kind) : '')
         + (message.attachment.size ? ' · ' + escapeHtml(formatBytes(message.attachment.size)) : '')
@@ -678,6 +686,7 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
     var convo = getCurrentConversation();
     var busy = !!(convo && convo.pendingCount > 0);
     var btn = document.getElementById('chat-send');
+    var stopBtn = document.getElementById('wf-chat-stop');
     var sendLabel = document.getElementById('chat-send-label');
     var statusEl = document.getElementById('chat-status');
     var cancelEdit = document.getElementById('wf-chat-edit-cancel');
@@ -686,6 +695,9 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
     var usingSavedFileContext = !!(editingMessage && editingMessage.attachmentContext && !file);
 
     if (btn) btn.disabled = busy;
+    if (stopBtn) {
+      stopBtn.style.display = busy ? 'inline-flex' : 'none';
+    }
     if (cancelEdit) cancelEdit.hidden = !isEditingCurrentAgent();
 
     if (sendLabel) {
@@ -700,6 +712,57 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
       else statusEl.textContent = 'Ready to assist';
     }
   }
+
+  // Global stop action: stops TTS speech, voice recognition, and aborts any active generation request
+  window.stopCurrentAction = function() {
+    // 1. Stop Speech Synthesis / TTS playback
+    var speech = window.windelsSpeech || (window.SpeechProvider ? new window.SpeechProvider() : null);
+    if (speech && typeof speech.stop === 'function') {
+      try { speech.stop(); } catch (_) {}
+    }
+    if ('speechSynthesis' in window) {
+      try { window.speechSynthesis.cancel(); } catch (_) {}
+    }
+    document.querySelectorAll('[data-wf-listen]').forEach(function(b) {
+      b.classList.remove('is-playing');
+      b.textContent = '🔊 Listen';
+    });
+
+    // 2. Stop Voice Recognition / Mic recording
+    if (speech && typeof speech.stopListening === 'function') {
+      try { speech.stopListening(); } catch (_) {}
+    }
+    var micBtn = document.getElementById('wf-chat-mic');
+    var micStop = document.getElementById('wf-chat-mic-stop');
+    if (micBtn) {
+      micBtn.classList.remove('is-recording');
+      micBtn.textContent = '🎤 Speak';
+      micBtn.setAttribute('aria-pressed', 'false');
+    }
+    if (micStop) {
+      micStop.disabled = true;
+      micStop.hidden = true;
+      micStop.style.display = 'none';
+    }
+
+    // 3. Stop active AI Generation / Request dispatch
+    if (currentAgent && activeAbortControllers[currentAgent]) {
+      try {
+        activeAbortControllers[currentAgent].abort();
+      } catch (_) {}
+      delete activeAbortControllers[currentAgent];
+    }
+    var convo = getCurrentConversation();
+    if (convo && (convo.pendingCount || 0) > 0) {
+      convo.pendingCount = 0;
+      saveChatState();
+      renderCurrentConversation();
+      updateComposerState();
+      addMessageToAgent(currentAgent, { role: 'system', text: '⏹ Response generation stopped.' });
+    } else {
+      updateComposerState();
+    }
+  };
 
   function activateAgent(name, label, icon, options) {
     if (!name) return;
@@ -757,6 +820,7 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
   };
 
   window.closeChat = function() {
+    window.stopCurrentAction();
     var sessionStatusEl = document.getElementById('wf-session-status');
     closeChatPanel();
     if (sessionStatusEl) sessionStatusEl.textContent = 'Ready';
@@ -764,6 +828,7 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
   };
 
   window.clearChat = function() {
+    window.stopCurrentAction();
     if (!currentAgent) return;
     var convo = ensureConversation(currentAgent, currentLabel, currentIcon);
     convo.messages = [{ role: 'assistant', text: 'Chat cleared. How can I assist you with ' + (currentLabel || 'your request') + '?' }];
@@ -804,12 +869,21 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
     if (file) {
       var ext = '';
       if (file.name && file.name.indexOf('.') !== -1) ext = file.name.split('.').pop().toLowerCase();
+      var mime = file.type || '';
+      var kind = 'file';
+      if (mime.indexOf('image/') === 0 || ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'svg', 'tiff', 'tif', 'ico', 'heic', 'heif'].indexOf(ext) !== -1) {
+        kind = 'image';
+      } else if (mime.indexOf('video/') === 0 || ['mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm'].indexOf(ext) !== -1) {
+        kind = 'video';
+      } else if (mime.indexOf('audio/') === 0 || ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'oga', 'flac', 'opus'].indexOf(ext) !== -1) {
+        kind = 'audio';
+      }
       message.attachment = {
         name: file.name,
         size: file.size || 0,
-        mime: file.type || '',
+        mime: mime,
         extension: ext,
-        kind: file.type && file.type.indexOf('video/') === 0 ? 'video' : (file.type && file.type.indexOf('audio/') === 0 ? 'audio' : 'file')
+        kind: kind
       };
     } else if (previous && previous.attachment) {
       message.attachment = cloneJson(previous.attachment) || previous.attachment;
@@ -824,7 +898,7 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
     return message;
   }
 
-  function requestJson(url, payload) {
+  function requestJson(url, payload, signal) {
     var csrf = getCsrfToken();
     return fetch(url, {
       method: 'POST',
@@ -833,6 +907,7 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
         'X-CSRF-Token': csrf,
         'Accept': 'application/json'
       },
+      signal: signal,
       body: JSON.stringify(payload)
     }).then(function(r) {
       return r.json().then(function(data) {
@@ -843,7 +918,7 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
     });
   }
 
-  function requestUpload(agent, instruction, history, file) {
+  function requestUpload(agent, instruction, history, file, signal) {
     var csrf = getCsrfToken();
     var formData = new FormData();
     formData.append('agent', agent);
@@ -856,6 +931,7 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
         'X-CSRF-Token': csrf,
         'Accept': 'application/json'
       },
+      signal: signal,
       body: formData
     }).then(function(r) {
       return r.json().then(function(data) {
@@ -905,9 +981,15 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
     resizeInput(input);
     setPending(agentAtSend, 1);
 
+    var abortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    if (abortController) {
+      activeAbortControllers[agentAtSend] = abortController;
+    }
+    var signal = abortController ? abortController.signal : undefined;
+
     var request;
     if (file) {
-      request = requestUpload(agentAtSend, text, history, file);
+      request = requestUpload(agentAtSend, text, history, file, signal);
     } else {
       var facts = inheritedMessage && inheritedMessage.attachmentFacts
         ? (cloneJson(inheritedMessage.attachmentFacts, MAX_ATTACHMENT_FACTS_CHARS) || inheritedMessage.attachmentFacts)
@@ -917,11 +999,14 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
         instruction: text,
         conversation: history,
         facts: facts
-      });
+      }, signal);
     }
 
     request
       .then(function(res) {
+        if (activeAbortControllers[agentAtSend] === abortController) {
+          delete activeAbortControllers[agentAtSend];
+        }
         setPending(agentAtSend, -1);
         var data = res.data;
         if (file && data && (data.attachment || data.contextMessage || data.fileFacts)) {
@@ -948,7 +1033,13 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
         }
       })
       .catch(function(e) {
+        if (activeAbortControllers[agentAtSend] === abortController) {
+          delete activeAbortControllers[agentAtSend];
+        }
         setPending(agentAtSend, -1);
+        if (e && e.name === 'AbortError') {
+          return;
+        }
         addMessageToAgent(agentAtSend, { role: 'system', text: '⚠️ Network error: ' + (e.message || 'Unable to contact agent service') });
       });
   };
@@ -1030,28 +1121,37 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
     btn.addEventListener('click', function(ev) {
       ev.preventDefault();
       var speech = window.windelsSpeech || (window.SpeechProvider ? new window.SpeechProvider() : null);
-      if (!speech) {
+      if (btn.classList.contains('is-playing') || (speech && speech.isSpeaking()) || (window.speechSynthesis && window.speechSynthesis.speaking)) {
+        if (speech && typeof speech.stop === 'function') speech.stop();
         if ('speechSynthesis' in window) {
-          window.speechSynthesis.cancel();
-          var utter = new SpeechSynthesisUtterance(text);
-          utter.lang = 'en-GB';
-          window.speechSynthesis.speak(utter);
+          try { window.speechSynthesis.cancel(); } catch (_) {}
         }
+        document.querySelectorAll('[data-wf-listen]').forEach(function(b) {
+          b.classList.remove('is-playing');
+          b.textContent = '🔊 Listen';
+        });
         return;
       }
-      if (speech.isSpeaking() && btn.classList.contains('is-playing')) {
-        speech.stop();
-        btn.classList.remove('is-playing');
-        btn.textContent = '🔊 Listen';
-        return;
-      }
+      document.querySelectorAll('[data-wf-listen]').forEach(function(b) {
+        b.classList.remove('is-playing');
+        b.textContent = '🔊 Listen';
+      });
       btn.classList.add('is-playing');
       btn.textContent = '⏹ Stop';
-      speech.textToSpeech(text, {
-        locale: 'en-GB',
-        onEnd: function() { btn.classList.remove('is-playing'); btn.textContent = '🔊 Listen'; },
-        onError: function() { btn.classList.remove('is-playing'); btn.textContent = '🔊 Listen'; }
-      });
+      if (speech) {
+        speech.textToSpeech(text, {
+          locale: 'en-GB',
+          onEnd: function() { btn.classList.remove('is-playing'); btn.textContent = '🔊 Listen'; },
+          onError: function() { btn.classList.remove('is-playing'); btn.textContent = '🔊 Listen'; }
+        });
+      } else if ('speechSynthesis' in window) {
+        try { window.speechSynthesis.cancel(); } catch (_) {}
+        var utter = new SpeechSynthesisUtterance(text);
+        utter.lang = 'en-GB';
+        utter.onend = function() { btn.classList.remove('is-playing'); btn.textContent = '🔊 Listen'; };
+        utter.onerror = function() { btn.classList.remove('is-playing'); btn.textContent = '🔊 Listen'; };
+        window.speechSynthesis.speak(utter);
+      }
     });
     bubble.appendChild(btn);
   }
@@ -1063,10 +1163,11 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
     var inputEl = document.getElementById('chat-input');
     var statusEl = document.getElementById('chat-status');
     if (!micBtn || !inputEl) return;
+    if (micBtn.dataset.speechBound === '1') return;
+    micBtn.dataset.speechBound = '1';
 
     var speech = window.windelsSpeech || (window.SpeechProvider ? new window.SpeechProvider() : null);
     if (speech && typeof speech.bindMic === 'function') {
-      if (micStop) micStop.style.display = '';
       speech.bindMic(micBtn, inputEl, {
         locale: 'en-GB',
         idleLabel: '🎤 Speak',
@@ -1077,43 +1178,85 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
           if (statusEl) statusEl.textContent = msg || 'Ready to assist';
         }
       });
+      if (micStop) {
+        micStop.addEventListener('click', function(ev) {
+          ev.preventDefault();
+          if (speech && typeof speech.stopListening === 'function') speech.stopListening();
+          if (speech && typeof speech.stop === 'function') speech.stop();
+          micBtn.classList.remove('is-recording');
+          micBtn.textContent = '🎤 Speak';
+          micBtn.setAttribute('aria-pressed', 'false');
+          micStop.disabled = true;
+          micStop.hidden = true;
+          micStop.style.display = 'none';
+          if (statusEl) statusEl.textContent = 'Stopped.';
+        });
+      }
     } else {
       var SR = window.SpeechRecognition || window.webkitSpeechRecognition || null;
       if (SR) {
         var recognizer = new SR();
-        recognizer.continuous = false;
-        recognizer.interimResults = false;
+        recognizer.continuous = true;
+        recognizer.interimResults = true;
         recognizer.lang = 'en-GB';
 
-        recognizer.onstart = function() {
-          micBtn.textContent = '🎤 Listening…';
-          if (micStop) { micStop.style.display = ''; micStop.disabled = false; }
-          if (statusEl) statusEl.textContent = 'Listening for speech…';
-        };
-        recognizer.onresult = function(e) {
-          var transcript = (e.results && e.results[0] && e.results[0][0]) ? e.results[0][0].transcript : '';
-          if (transcript) {
-            inputEl.value = inputEl.value ? (inputEl.value + ' ' + transcript) : transcript;
-            inputEl.dispatchEvent(new Event('input'));
+        var stopFallback = function() {
+          try { recognizer.stop(); } catch (_) {}
+          try { recognizer.abort(); } catch (_) {}
+          micBtn.textContent = '🎤 Speak';
+          micBtn.classList.remove('is-recording');
+          micBtn.setAttribute('aria-pressed', 'false');
+          if (micStop) {
+            micStop.disabled = true;
+            micStop.hidden = true;
+            micStop.style.display = 'none';
           }
-        };
-        recognizer.onerror = function() {
-          micBtn.textContent = '🎤 Speak';
-          if (micStop) micStop.disabled = true;
-          if (statusEl) statusEl.textContent = 'Speech capture error';
-        };
-        recognizer.onend = function() {
-          micBtn.textContent = '🎤 Speak';
-          if (micStop) micStop.disabled = true;
+          if (statusEl) statusEl.textContent = 'Stopped.';
           updateComposerState();
         };
 
-        micBtn.addEventListener('click', function() {
-          try { recognizer.start(); } catch (_) {}
+        recognizer.onstart = function() {
+          micBtn.textContent = '🎤 Listening…';
+          micBtn.classList.add('is-recording');
+          micBtn.setAttribute('aria-pressed', 'true');
+          if (micStop) {
+            micStop.hidden = false;
+            micStop.style.display = 'inline-flex';
+            micStop.disabled = false;
+          }
+          if (statusEl) statusEl.textContent = 'Listening for speech…';
+        };
+        recognizer.onresult = function(e) {
+          var transcript = '';
+          for (var i = 0; i < e.results.length; i++) {
+            transcript += e.results[i][0].transcript + ' ';
+          }
+          transcript = transcript.trim();
+          if (transcript) {
+            inputEl.value = transcript;
+            inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        };
+        recognizer.onerror = function() {
+          stopFallback();
+          if (statusEl) statusEl.textContent = 'Speech capture error';
+        };
+        recognizer.onend = function() {
+          stopFallback();
+        };
+
+        micBtn.addEventListener('click', function(ev) {
+          ev.preventDefault();
+          if (micBtn.classList.contains('is-recording')) {
+            stopFallback();
+          } else {
+            try { recognizer.start(); } catch (_) {}
+          }
         });
         if (micStop) {
-          micStop.addEventListener('click', function() {
-            try { recognizer.stop(); } catch (_) {}
+          micStop.addEventListener('click', function(ev) {
+            ev.preventDefault();
+            stopFallback();
           });
         }
       }
