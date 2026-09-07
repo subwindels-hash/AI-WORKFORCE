@@ -58,7 +58,7 @@ $kickoffStamp = static function (mixed $iso): string {
         <?php if (!empty($caps['sync'])): ?>
           <button class="btn small primary">Sync this date</button>
         <?php else: ?>
-          <button class="btn small" disabled title="Requires the sports.manage permission">Sync this date (needs sports.manage)</button>
+          <button class="btn small" disabled title="Requires the sports.manage permission">Sync this date</button>
         <?php endif; ?>
       </form>
       <form method="post" action="/football/predict" style="display:inline">
@@ -67,7 +67,7 @@ $kickoffStamp = static function (mixed $iso): string {
         <?php if (!empty($caps['sync'])): ?>
           <button class="btn small">Rebuild board from stored data</button>
         <?php else: ?>
-          <button class="btn small" disabled title="Requires the sports.manage permission">Rebuild board (needs sports.manage)</button>
+          <button class="btn small" disabled title="Requires the sports.manage permission">Rebuild board from stored data</button>
         <?php endif; ?>
       </form>
       <a class="btn small" href="/football?date=<?= e((string) ($date ?? gmdate('Y-m-d'))) ?>&refresh=1">Re-analyze stored data</a>
