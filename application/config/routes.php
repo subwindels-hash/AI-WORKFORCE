@@ -340,6 +340,7 @@ $route['api/system/protection/ea/(:any)'] = 'api_system/protection_ea_decision/$
 $route['api/system/protection/ea'] = 'api_system/protection_ea';
 $route['api/agents/status'] = 'api_agents/status';
 $route['api/agents/dispatch'] = 'api_agents/dispatch';
+$route['api/agents/analyze-upload'] = 'api_agents/analyze_upload';
 
 // Agent Platform API
 $route['api/agent-platform/execute'] = 'api_agent_platform/execute';

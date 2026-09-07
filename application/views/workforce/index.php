@@ -47,6 +47,17 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
 .wf-chat-send{display:inline-flex;align-items:center;gap:6px;background:var(--brand);color:#fff;border:none;border-radius:var(--radius-sm);padding:9px 18px;font:600 13px/1 inherit;cursor:pointer;transition:all .15s ease}
 .wf-chat-send:hover:not(:disabled){background:var(--brand-hover,var(--brand));transform:translateY(-1px)}
 .wf-chat-send:disabled{opacity:.5;cursor:not-allowed}
+.wf-chat-draft-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.wf-chat-chip{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:6px 10px;border:1px solid var(--line);border-radius:999px;background:var(--panel2);color:var(--text);font-size:11px;line-height:1.2}
+.wf-chat-chip .name{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wf-chat-chip button{border:none;background:transparent;color:var(--dim);cursor:pointer;padding:0;font:inherit}
+.wf-chat-chip button:hover{color:#fff}
+.wf-chat-hint{font-size:11px;color:var(--dim)}
+.wf-msg .wf-bubble .wf-attachment{display:flex;align-items:center;gap:6px;margin-top:8px;padding-top:8px;border-top:1px dashed rgba(255,255,255,.14);font-size:11px;opacity:.95}
+.wf-msg.user .wf-bubble .wf-attachment{border-top-color:rgba(255,255,255,.25)}
+.wf-msg .wf-bubble .wf-msg-actions{display:flex;justify-content:flex-end;margin-top:8px}
+.wf-msg .wf-bubble .wf-msg-edit{border:none;background:transparent;color:inherit;opacity:.75;cursor:pointer;font-size:11px;padding:0}
+.wf-msg .wf-bubble .wf-msg-edit:hover{opacity:1;text-decoration:underline}
 .wf-typing{display:flex;gap:4px;padding:8px 0}
 .wf-typing span{width:7px;height:7px;border-radius:50%;background:var(--dim);animation:wf-bounce .6s ease-in-out infinite}
 .wf-typing span:nth-child(2){animation-delay:.15s}
@@ -187,14 +198,19 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
   <div class="wf-chat-foot">
     <div class="wf-chat-typing-session">
       <label class="wf-chat-typing-label" for="chat-input">WINDELS Assistant typing session</label>
-      <textarea id="chat-input" placeholder="Ask the agent a question..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage();}"></textarea>
+      <textarea id="chat-input" placeholder="Ask the agent a question or attach a file for analysis..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage();}"></textarea>
     </div>
+    <div class="wf-chat-draft-meta" id="wf-chat-draft-meta" hidden></div>
+    <div class="wf-chat-hint">Upload TXT, MD, CSV, JSON, DOCX, PDF, MP3, WAV, M4A, OGG, MP4, MOV, AVI, MKV or WEBM up to 25 MB.</div>
     <div class="wf-chat-controls">
       <div class="wf-chat-voice-controls">
+        <button type="button" id="wf-chat-attach" class="btn small" aria-label="Attach file">📎 Upload file</button>
+        <input type="file" id="wf-file-input" hidden accept=".txt,.md,.markdown,.csv,.tsv,.json,.xml,.html,.htm,.log,.yaml,.yml,.ini,.sql,.srt,.vtt,.rtf,.docx,.pdf,.mp3,.wav,.m4a,.aac,.ogg,.oga,.flac,.opus,.webm,.mp4,.mov,.m4v,.avi,.mkv">
+        <button type="button" id="wf-chat-edit-cancel" class="btn small" hidden>Cancel edit</button>
         <button type="button" id="wf-chat-mic" class="btn small" aria-label="Speak">🎤 Speak</button>
         <button type="button" id="wf-chat-mic-stop" class="btn small" aria-label="Stop" disabled style="display:none">⏹ Stop</button>
       </div>
-      <button type="button" id="chat-send" class="wf-chat-send" onclick="sendMessage()"><?= $ic ?><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg> <span>Send</span></button>
+      <button type="button" id="chat-send" class="wf-chat-send" onclick="sendMessage()"><?= $ic ?><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg> <span id="chat-send-label">Send</span></button>
     </div>
   </div>
 </div>
@@ -235,9 +251,19 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
 <script>
 (function(){
   'use strict';
+  var STORAGE_KEY = 'windels_workforce_chats_v3';
+  var MAX_MESSAGES_PER_AGENT = 80;
+  var MAX_ATTACHMENT_FACTS_CHARS = 20000;
   var currentAgent = null;
   var currentLabel = '';
-  var messages = [];
+  var currentIcon = '';
+  var chatState = loadChatState();
+  var draftFiles = {};
+  var editState = null;
+
+  function defaultState() {
+    return { activeAgent: '', chatOpen: false, conversations: {} };
+  }
 
   function getCsrfToken() {
     var meta = document.querySelector('meta[name="csrf-token"]');
@@ -253,19 +279,437 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
     return d.innerHTML;
   }
 
+  function cloneJson(value, maxChars) {
+    try {
+      var raw = JSON.stringify(value);
+      if (!raw) return null;
+      if (maxChars && raw.length > maxChars) return null;
+      return JSON.parse(raw);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function sanitizeAttachment(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    var name = typeof raw.name === 'string' ? raw.name : '';
+    if (!name) return null;
+    return {
+      name: name,
+      size: Number(raw.size || 0) || 0,
+      mime: typeof raw.mime === 'string' ? raw.mime : '',
+      extension: typeof raw.extension === 'string' ? raw.extension : '',
+      kind: typeof raw.kind === 'string' ? raw.kind : ''
+    };
+  }
+
+  function sanitizeMessage(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    var role = typeof raw.role === 'string' ? raw.role : '';
+    if (['assistant', 'user', 'system'].indexOf(role) === -1) return null;
+    var text = typeof raw.text === 'string' ? raw.text : '';
+    if (text.trim() === '') return null;
+    var message = { role: role, text: text };
+    var attachment = sanitizeAttachment(raw.attachment);
+    if (attachment) message.attachment = attachment;
+    if (typeof raw.attachmentContext === 'string' && raw.attachmentContext.trim() !== '') {
+      message.attachmentContext = raw.attachmentContext.slice(0, MAX_ATTACHMENT_FACTS_CHARS);
+    }
+    var facts = cloneJson(raw.attachmentFacts, MAX_ATTACHMENT_FACTS_CHARS);
+    if (facts) message.attachmentFacts = facts;
+    return message;
+  }
+
+  function loadChatState() {
+    var fallback = defaultState();
+    try {
+      var raw = sessionStorage.getItem(STORAGE_KEY);
+      if (!raw) return fallback;
+      var parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return fallback;
+      var state = {
+        activeAgent: typeof parsed.activeAgent === 'string' ? parsed.activeAgent : '',
+        chatOpen: parsed.chatOpen === true,
+        conversations: {}
+      };
+      var source = parsed.conversations && typeof parsed.conversations === 'object' ? parsed.conversations : {};
+      Object.keys(source).forEach(function(agentName) {
+        var convo = source[agentName];
+        if (!convo || typeof convo !== 'object') return;
+        var messages = [];
+        if (Array.isArray(convo.messages)) {
+          convo.messages.forEach(function(item) {
+            var clean = sanitizeMessage(item);
+            if (clean) messages.push(clean);
+          });
+        }
+        state.conversations[agentName] = {
+          label: typeof convo.label === 'string' ? convo.label : '',
+          icon: typeof convo.icon === 'string' ? convo.icon : '',
+          draftText: typeof convo.draftText === 'string' ? convo.draftText : '',
+          messages: messages.slice(-MAX_MESSAGES_PER_AGENT),
+          pendingCount: 0
+        };
+      });
+      return state;
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  function saveChatState() {
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(chatState));
+    } catch (_) {}
+  }
+
+  function findAgentCard(agentName) {
+    var cards = document.querySelectorAll('.wf-card');
+    for (var i = 0; i < cards.length; i += 1) {
+      if (cards[i].getAttribute('data-agent') === agentName) return cards[i];
+    }
+    return null;
+  }
+
+  function getAgentMeta(agentName) {
+    var card = findAgentCard(agentName);
+    if (card) {
+      return {
+        name: agentName,
+        label: card.getAttribute('data-label') || agentName,
+        icon: card.getAttribute('data-icon') || '🤖'
+      };
+    }
+    var convo = chatState.conversations[agentName];
+    if (convo) {
+      return { name: agentName, label: convo.label || agentName, icon: convo.icon || '🤖' };
+    }
+    return null;
+  }
+
+  function ensureConversation(agentName, label, icon) {
+    if (!agentName) return null;
+    if (!chatState.conversations[agentName] || typeof chatState.conversations[agentName] !== 'object') {
+      chatState.conversations[agentName] = {
+        label: '',
+        icon: '',
+        draftText: '',
+        messages: [],
+        pendingCount: 0
+      };
+    }
+    var convo = chatState.conversations[agentName];
+    if (typeof label === 'string' && label) convo.label = label;
+    if (typeof icon === 'string' && icon) convo.icon = icon;
+    if (typeof convo.draftText !== 'string') convo.draftText = '';
+    if (!Array.isArray(convo.messages)) convo.messages = [];
+    convo.messages = convo.messages.map(sanitizeMessage).filter(Boolean).slice(-MAX_MESSAGES_PER_AGENT);
+    if (typeof convo.pendingCount !== 'number' || convo.pendingCount < 0) convo.pendingCount = 0;
+    return convo;
+  }
+
+  function getCurrentConversation() {
+    return currentAgent ? ensureConversation(currentAgent, currentLabel, currentIcon) : null;
+  }
+
+  function getDraftFile(agentName) {
+    return agentName && draftFiles[agentName] ? draftFiles[agentName] : null;
+  }
+
+  function setDraftFile(agentName, file) {
+    if (!agentName) return;
+    if (file) draftFiles[agentName] = file;
+    else delete draftFiles[agentName];
+    renderDraftMeta();
+  }
+
+  function formatBytes(bytes) {
+    bytes = Number(bytes || 0) || 0;
+    if (bytes < 1024) return bytes + ' B';
+    var units = ['KB', 'MB', 'GB'];
+    var value = bytes / 1024;
+    for (var i = 0; i < units.length; i += 1) {
+      if (value < 1024 || i === units.length - 1) {
+        return (value >= 100 ? Math.round(value) : Math.round(value * 10) / 10) + ' ' + units[i];
+      }
+      value = value / 1024;
+    }
+    return bytes + ' B';
+  }
+
   function updateActiveCard(agentName) {
     document.querySelectorAll('.wf-card').forEach(function(card) {
-      if (card.getAttribute('data-agent') === agentName) {
-        card.classList.add('active');
-      } else {
-        card.classList.remove('active');
-      }
+      if (card.getAttribute('data-agent') === agentName) card.classList.add('active');
+      else card.classList.remove('active');
     });
   }
 
-  window.selectAgent = function(name, label, icon) {
+  function defaultGreeting(label) {
+    return 'Hello! I am your ' + (label || 'assistant') + '. How can I help you today?';
+  }
+
+  function latestUserMessageIndex(convo) {
+    if (!convo || !Array.isArray(convo.messages)) return -1;
+    for (var i = convo.messages.length - 1; i >= 0; i -= 1) {
+      if (convo.messages[i] && convo.messages[i].role === 'user') return i;
+    }
+    return -1;
+  }
+
+  function isEditingCurrentAgent() {
+    return !!(editState && currentAgent && editState.agent === currentAgent);
+  }
+
+  function currentEditMessage() {
+    var convo = getCurrentConversation();
+    if (!convo || !isEditingCurrentAgent()) return null;
+    return convo.messages[editState.index] || null;
+  }
+
+  function resizeInput(el) {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+  }
+
+  function buildHistoryContent(message) {
+    var text = message && typeof message.text === 'string' ? message.text : '';
+    if (message && typeof message.attachmentContext === 'string' && message.attachmentContext.trim() !== '') {
+      text += '\n\nFILE CONTEXT:\n' + message.attachmentContext;
+    }
+    return text.trim();
+  }
+
+  function conversationHistoryFromMessages(messages) {
+    return (messages || [])
+      .filter(function(message) {
+        return message && ['assistant', 'user', 'system'].indexOf(message.role) !== -1;
+      })
+      .slice(-10)
+      .map(function(message) {
+        return { role: message.role, content: buildHistoryContent(message) };
+      })
+      .filter(function(message) { return !!message.content; });
+  }
+
+  function updateMessageAt(agentName, index, patch) {
+    var convo = ensureConversation(agentName);
+    if (!convo || index < 0 || index >= convo.messages.length) return;
+    var next = Object.assign({}, convo.messages[index], patch || {});
+    var clean = sanitizeMessage(next);
+    if (!clean) return;
+    convo.messages[index] = clean;
+    persistConversation(agentName);
+  }
+
+  function persistConversation(agentName) {
+    var convo = ensureConversation(agentName);
+    if (convo && convo.messages.length > MAX_MESSAGES_PER_AGENT) {
+      convo.messages = convo.messages.slice(-MAX_MESSAGES_PER_AGENT);
+    }
+    saveChatState();
+    if (agentName && currentAgent === agentName) {
+      renderCurrentConversation();
+      renderDraftMeta();
+      updateComposerState();
+    }
+  }
+
+  function addMessageToAgent(agentName, message) {
+    var convo = ensureConversation(agentName);
+    if (!convo) return -1;
+    var clean = sanitizeMessage(message);
+    if (!clean) return -1;
+    convo.messages.push(clean);
+    persistConversation(agentName);
+    return convo.messages.length - 1;
+  }
+
+  function setPending(agentName, delta) {
+    var convo = ensureConversation(agentName);
+    if (!convo) return;
+    convo.pendingCount = Math.max(0, (convo.pendingCount || 0) + delta);
+    saveChatState();
+    if (currentAgent === agentName) {
+      renderCurrentConversation();
+      renderDraftMeta();
+      updateComposerState();
+    }
+  }
+
+  function openChatPanel() {
+    var chatEl = document.getElementById('wf-chat');
+    var suggEl = document.getElementById('wf-suggestions');
+    if (chatEl) chatEl.style.display = 'block';
+    if (suggEl) suggEl.style.display = 'none';
+    chatState.chatOpen = true;
+    saveChatState();
+  }
+
+  function closeChatPanel() {
+    var chatEl = document.getElementById('wf-chat');
+    var suggEl = document.getElementById('wf-suggestions');
+    if (chatEl) chatEl.style.display = 'none';
+    if (suggEl) suggEl.style.display = '';
+    chatState.chatOpen = false;
+    saveChatState();
+  }
+
+  function syncComposerFromState() {
+    var inputEl = document.getElementById('chat-input');
+    if (!inputEl) return;
+    var convo = getCurrentConversation();
+    inputEl.value = convo ? (convo.draftText || '') : '';
+    resizeInput(inputEl);
+    renderDraftMeta();
+    updateComposerState();
+  }
+
+  function createMessageElement(message, index, editableIndex) {
+    var div = document.createElement('div');
+    div.className = 'wf-msg ' + message.role;
+
+    var bubble = document.createElement('div');
+    bubble.className = 'wf-bubble';
+    bubble.innerHTML = escapeHtml(message.text).replace(/\n/g, '<br>');
+
+    if (message.attachment) {
+      var attach = document.createElement('div');
+      attach.className = 'wf-attachment';
+      attach.innerHTML = '<span>📎</span><span>'
+        + escapeHtml(message.attachment.name)
+        + (message.attachment.kind ? ' · ' + escapeHtml(message.attachment.kind) : '')
+        + (message.attachment.size ? ' · ' + escapeHtml(formatBytes(message.attachment.size)) : '')
+        + '</span>';
+      bubble.appendChild(attach);
+    }
+
+    if (message.role === 'assistant') {
+      addListenButton(bubble, message.text);
+    }
+
+    if (message.role === 'user' && index === editableIndex) {
+      var actions = document.createElement('div');
+      actions.className = 'wf-msg-actions';
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'wf-msg-edit';
+      btn.textContent = 'Edit & resend';
+      btn.addEventListener('click', function() {
+        window.editLastUserMessage();
+      });
+      actions.appendChild(btn);
+      bubble.appendChild(actions);
+    }
+
+    div.appendChild(bubble);
+    return div;
+  }
+
+  function createTypingElement() {
+    var div = document.createElement('div');
+    div.className = 'wf-msg assistant';
+    div.id = 'wf-typing-indicator';
+    div.innerHTML = '<div class="wf-bubble"><div class="wf-typing"><span></span><span></span><span></span></div></div>';
+    return div;
+  }
+
+  function renderCurrentConversation() {
+    var body = document.getElementById('chat-body');
+    if (!body) return;
+    body.innerHTML = '';
+    var convo = getCurrentConversation();
+    if (!convo) return;
+    var editableIndex = (convo.pendingCount || 0) > 0 ? -1 : latestUserMessageIndex(convo);
+    if (isEditingCurrentAgent() && editableIndex !== editState.index) {
+      editState = null;
+    }
+    convo.messages.forEach(function(message, index) {
+      body.appendChild(createMessageElement(message, index, editableIndex));
+    });
+    if ((convo.pendingCount || 0) > 0) {
+      body.appendChild(createTypingElement());
+    }
+    body.scrollTop = body.scrollHeight;
+  }
+
+  function renderDraftMeta() {
+    var metaEl = document.getElementById('wf-chat-draft-meta');
+    if (!metaEl) return;
+    metaEl.innerHTML = '';
+    var bits = 0;
+
+    function chip(label, removable, action) {
+      var span = document.createElement('span');
+      span.className = 'wf-chat-chip';
+      var name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = label;
+      span.appendChild(name);
+      if (removable) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = '✕';
+        btn.setAttribute('data-chip-action', action);
+        span.appendChild(btn);
+      }
+      metaEl.appendChild(span);
+      bits += 1;
+    }
+
+    if (isEditingCurrentAgent()) {
+      chip('Editing your last message', false, '');
+    }
+
+    var file = getDraftFile(currentAgent);
+    if (file) {
+      chip('New file: ' + file.name + ' · ' + formatBytes(file.size), true, 'remove-file');
+    } else {
+      var editingMessage = currentEditMessage();
+      if (editingMessage && editingMessage.attachment && editingMessage.attachmentContext) {
+        chip('Using saved file context: ' + editingMessage.attachment.name, true, 'clear-saved-file-context');
+      }
+    }
+
+    metaEl.hidden = bits === 0;
+  }
+
+  function updateComposerState() {
+    var convo = getCurrentConversation();
+    var busy = !!(convo && convo.pendingCount > 0);
+    var btn = document.getElementById('chat-send');
+    var sendLabel = document.getElementById('chat-send-label');
+    var statusEl = document.getElementById('chat-status');
+    var cancelEdit = document.getElementById('wf-chat-edit-cancel');
+    var file = getDraftFile(currentAgent);
+    var editingMessage = currentEditMessage();
+    var usingSavedFileContext = !!(editingMessage && editingMessage.attachmentContext && !file);
+
+    if (btn) btn.disabled = busy;
+    if (cancelEdit) cancelEdit.hidden = !isEditingCurrentAgent();
+
+    if (sendLabel) {
+      if (busy) sendLabel.textContent = 'Working…';
+      else if (isEditingCurrentAgent()) sendLabel.textContent = file ? 'Save & analyze' : (usingSavedFileContext ? 'Save & resend' : 'Save & send');
+      else sendLabel.textContent = file ? 'Analyze file' : 'Send';
+    }
+
+    if (statusEl) {
+      if (busy) statusEl.textContent = 'Thinking...';
+      else if (isEditingCurrentAgent()) statusEl.textContent = 'Editing your last message';
+      else statusEl.textContent = 'Ready to assist';
+    }
+  }
+
+  function activateAgent(name, label, icon, options) {
+    if (!name) return;
+    options = options || {};
+    var meta = getAgentMeta(name) || {};
     currentAgent = name;
-    currentLabel = label;
+    currentLabel = label || meta.label || name;
+    currentIcon = icon || meta.icon || '🤖';
+    chatState.activeAgent = name;
+
     updateActiveCard(name);
 
     var iconEl = document.getElementById('chat-icon');
@@ -273,128 +717,116 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
     var statusEl = document.getElementById('chat-status');
     var sessionStatusEl = document.getElementById('wf-session-status');
 
-    if (iconEl) iconEl.textContent = icon || '🤖';
-    if (nameEl) nameEl.textContent = label || name;
+    if (iconEl) iconEl.textContent = currentIcon;
+    if (nameEl) nameEl.textContent = currentLabel;
     if (statusEl) statusEl.textContent = 'Ready to assist';
-    if (sessionStatusEl) sessionStatusEl.textContent = label || name;
+    if (sessionStatusEl) sessionStatusEl.textContent = currentLabel;
 
-    var chatEl = document.getElementById('wf-chat');
-    var suggEl = document.getElementById('wf-suggestions');
-    if (chatEl) chatEl.style.display = 'block';
-    if (suggEl) suggEl.style.display = 'none';
+    openChatPanel();
 
-    var chatBody = document.getElementById('chat-body');
-    if (chatBody && chatBody.children.length === 0) {
-      addMessage('assistant', "Hello! I am your " + label + ". How can I help you today?");
+    var convo = ensureConversation(name, currentLabel, currentIcon);
+    if (convo.messages.length === 0) {
+      convo.messages.push({ role: 'assistant', text: defaultGreeting(currentLabel) });
     }
+    saveChatState();
+    renderCurrentConversation();
+    syncComposerFromState();
 
     var inputEl = document.getElementById('chat-input');
-    if (inputEl) {
-      inputEl.focus();
-    }
+    if (inputEl && !options.skipFocus) inputEl.focus();
 
-    if (chatEl) {
+    var chatEl = document.getElementById('wf-chat');
+    if (chatEl && !options.skipScroll) {
       chatEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
+  }
+
+  window.selectAgent = function(name, label, icon) {
+    activateAgent(name, label, icon);
   };
 
   window.askAgent = function(name, label, icon, prompt) {
-    window.selectAgent(name, label, icon);
-    var input = document.getElementById('chat-input');
-    if (input) {
-      input.value = prompt;
-      input.style.height = 'auto';
-      input.style.height = Math.min(input.scrollHeight, 120) + 'px';
-    }
+    activateAgent(name, label, icon);
+    var convo = getCurrentConversation();
+    if (convo) convo.draftText = prompt || '';
+    saveChatState();
+    syncComposerFromState();
     setTimeout(function() {
       window.sendMessage();
     }, 150);
   };
 
   window.closeChat = function() {
-    var chatEl = document.getElementById('wf-chat');
-    var suggEl = document.getElementById('wf-suggestions');
     var sessionStatusEl = document.getElementById('wf-session-status');
-    if (chatEl) chatEl.style.display = 'none';
-    if (suggEl) suggEl.style.display = '';
+    closeChatPanel();
     if (sessionStatusEl) sessionStatusEl.textContent = 'Ready';
     updateActiveCard(null);
   };
 
   window.clearChat = function() {
-    messages = [];
-    var body = document.getElementById('chat-body');
-    if (body) body.innerHTML = '';
-    addMessage('assistant', "Chat cleared. How can I assist you with " + (currentLabel || 'your request') + "?");
+    if (!currentAgent) return;
+    var convo = ensureConversation(currentAgent, currentLabel, currentIcon);
+    convo.messages = [{ role: 'assistant', text: 'Chat cleared. How can I assist you with ' + (currentLabel || 'your request') + '?' }];
+    convo.pendingCount = 0;
+    convo.draftText = '';
+    setDraftFile(currentAgent, null);
+    if (isEditingCurrentAgent()) editState = null;
+    saveChatState();
+    renderCurrentConversation();
+    syncComposerFromState();
   };
 
-  function addMessage(role, text) {
-    messages.push({ role: role, text: text });
-    var body = document.getElementById('chat-body');
-    if (!body) return;
+  window.editLastUserMessage = function() {
+    var convo = getCurrentConversation();
+    if (!convo || (convo.pendingCount || 0) > 0) return;
+    var idx = latestUserMessageIndex(convo);
+    if (idx < 0) return;
+    editState = { agent: currentAgent, index: idx };
+    convo.draftText = convo.messages[idx].text || '';
+    saveChatState();
+    syncComposerFromState();
+    var inputEl = document.getElementById('chat-input');
+    if (inputEl) inputEl.focus();
+  };
 
-    var div = document.createElement('div');
-    div.className = 'wf-msg ' + role;
-    
-    var formattedText = escapeHtml(text).replace(/\n/g, '<br>');
-    div.innerHTML = '<div class="wf-bubble">' + formattedText + '</div>';
-    body.appendChild(div);
+  window.cancelEditMessage = function() {
+    if (!isEditingCurrentAgent()) return;
+    editState = null;
+    saveChatState();
+    renderCurrentConversation();
+    renderDraftMeta();
+    updateComposerState();
+  };
 
-    if (role === 'assistant') {
-      var bubble = div.querySelector('.wf-bubble');
-      if (bubble) addListenButton(bubble, text);
+  function buildUserMessage(text, file, inheritedMessage) {
+    var message = { role: 'user', text: text };
+    var previous = inheritedMessage || null;
+    if (file) {
+      var ext = '';
+      if (file.name && file.name.indexOf('.') !== -1) ext = file.name.split('.').pop().toLowerCase();
+      message.attachment = {
+        name: file.name,
+        size: file.size || 0,
+        mime: file.type || '',
+        extension: ext,
+        kind: file.type && file.type.indexOf('video/') === 0 ? 'video' : (file.type && file.type.indexOf('audio/') === 0 ? 'audio' : 'file')
+      };
+    } else if (previous && previous.attachment) {
+      message.attachment = cloneJson(previous.attachment) || previous.attachment;
     }
-
-    body.scrollTop = body.scrollHeight;
-  }
-
-  function showTyping() {
-    var body = document.getElementById('chat-body');
-    if (!body) return;
-    var existing = document.getElementById('wf-typing-indicator');
-    if (existing) return;
-
-    var div = document.createElement('div');
-    div.className = 'wf-msg assistant';
-    div.id = 'wf-typing-indicator';
-    div.innerHTML = '<div class="wf-bubble"><div class="wf-typing"><span></span><span></span><span></span></div></div>';
-    body.appendChild(div);
-    body.scrollTop = body.scrollHeight;
-  }
-
-  function hideTyping() {
-    var el = document.getElementById('wf-typing-indicator');
-    if (el) el.remove();
-  }
-
-  window.sendMessage = function() {
-    var input = document.getElementById('chat-input');
-    if (!input) return;
-    var text = input.value.trim();
-    if (!text) return;
-
-    if (!currentAgent) {
-      window.selectAgent('general', 'General Assistant', '🤖');
+    if (previous && previous.attachmentContext) {
+      message.attachmentContext = previous.attachmentContext;
     }
+    if (previous && previous.attachmentFacts) {
+      var carriedFacts = cloneJson(previous.attachmentFacts, MAX_ATTACHMENT_FACTS_CHARS);
+      if (carriedFacts) message.attachmentFacts = carriedFacts;
+    }
+    return message;
+  }
 
-    addMessage('user', text);
-    input.value = '';
-    input.style.height = 'auto';
-
-    var btn = document.getElementById('chat-send');
-    var statusEl = document.getElementById('chat-status');
-    if (btn) btn.disabled = true;
-    if (statusEl) statusEl.textContent = 'Thinking...';
-    showTyping();
-
+  function requestJson(url, payload) {
     var csrf = getCsrfToken();
-    var payload = {
-      agent: currentAgent,
-      instruction: text,
-      conversation: messages.slice(-10)
-    };
-
-    fetch('/api/agents/dispatch', {
+    return fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -402,103 +834,186 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
         'Accept': 'application/json'
       },
       body: JSON.stringify(payload)
-    })
-    .then(function(r) {
+    }).then(function(r) {
       return r.json().then(function(data) {
         return { ok: r.ok, status: r.status, data: data };
       }).catch(function() {
         return { ok: r.ok, status: r.status, data: null };
       });
-    })
-    .then(function(res) {
-      hideTyping();
-      if (btn) btn.disabled = false;
-      if (statusEl) statusEl.textContent = 'Ready to assist';
-
-      var data = res.data;
-      if (res.ok && data && (data.ok || data.result)) {
-        var result = data.result || data;
-        var answer = result.answer || result.response || (typeof result === 'string' ? result : JSON.stringify(result, null, 2));
-        addMessage('assistant', answer);
-      } else {
-        var error = (data && data.error) || (data && data.result && data.result.reason) || ('Request failed (' + res.status + ')');
-        addMessage('system', '⚠️ ' + error);
-      }
-    })
-    .catch(function(e) {
-      hideTyping();
-      if (btn) btn.disabled = false;
-      if (statusEl) statusEl.textContent = 'Ready to assist';
-      addMessage('system', '⚠️ Network error: ' + (e.message || 'Unable to contact agent service'));
     });
+  }
+
+  function requestUpload(agent, instruction, history, file) {
+    var csrf = getCsrfToken();
+    var formData = new FormData();
+    formData.append('agent', agent);
+    formData.append('instruction', instruction);
+    formData.append('conversation', JSON.stringify(history));
+    formData.append('file', file);
+    return fetch('/api/agents/analyze-upload', {
+      method: 'POST',
+      headers: {
+        'X-CSRF-Token': csrf,
+        'Accept': 'application/json'
+      },
+      body: formData
+    }).then(function(r) {
+      return r.json().then(function(data) {
+        return { ok: r.ok, status: r.status, data: data };
+      }).catch(function() {
+        return { ok: r.ok, status: r.status, data: null };
+      });
+    });
+  }
+
+  window.sendMessage = function() {
+    var input = document.getElementById('chat-input');
+    if (!input) return;
+
+    if (!currentAgent) {
+      activateAgent('general', 'General Assistant', '🤖', { skipScroll: true });
+    }
+
+    var agentAtSend = currentAgent;
+    var convo = ensureConversation(agentAtSend, currentLabel, currentIcon);
+    if (!convo || (convo.pendingCount || 0) > 0) return;
+
+    var rawText = (input.value || '').trim();
+    var file = getDraftFile(agentAtSend);
+    var editing = editState && editState.agent === agentAtSend ? { agent: editState.agent, index: editState.index } : null;
+    var inheritedMessage = editing && convo.messages[editing.index] ? convo.messages[editing.index] : null;
+    var text = rawText;
+
+    if (!text && !file && !(inheritedMessage && inheritedMessage.attachmentContext)) return;
+    if (!text && (file || (inheritedMessage && inheritedMessage.attachmentContext))) {
+      text = 'Analyze this uploaded file. Explain what it contains, the key points, and anything unclear.';
+    }
+
+    var beforeMessages = convo.messages.slice(0, editing ? editing.index : convo.messages.length);
+    var history = conversationHistoryFromMessages(beforeMessages);
+    var nextUserMessage = buildUserMessage(text, file, inheritedMessage);
+    convo.messages = beforeMessages.concat([nextUserMessage]);
+    var userMessageIndex = convo.messages.length - 1;
+    convo.draftText = '';
+    if (editing) editState = null;
+    saveChatState();
+    renderCurrentConversation();
+    renderDraftMeta();
+    updateComposerState();
+
+    input.value = '';
+    resizeInput(input);
+    setPending(agentAtSend, 1);
+
+    var request;
+    if (file) {
+      request = requestUpload(agentAtSend, text, history, file);
+    } else {
+      var facts = inheritedMessage && inheritedMessage.attachmentFacts
+        ? (cloneJson(inheritedMessage.attachmentFacts, MAX_ATTACHMENT_FACTS_CHARS) || inheritedMessage.attachmentFacts)
+        : [];
+      request = requestJson('/api/agents/dispatch', {
+        agent: agentAtSend,
+        instruction: text,
+        conversation: history,
+        facts: facts
+      });
+    }
+
+    request
+      .then(function(res) {
+        setPending(agentAtSend, -1);
+        var data = res.data;
+        if (file && data && (data.attachment || data.contextMessage || data.fileFacts)) {
+          var uploadPatch = {};
+          if (data.attachment) uploadPatch.attachment = data.attachment;
+          if (data.contextMessage) uploadPatch.attachmentContext = data.contextMessage;
+          if (data.fileFacts) uploadPatch.attachmentFacts = data.fileFacts;
+          updateMessageAt(agentAtSend, userMessageIndex, uploadPatch);
+          setDraftFile(agentAtSend, null);
+          var fileInput = document.getElementById('wf-file-input');
+          if (fileInput) fileInput.value = '';
+        }
+        if (res.ok && data && (data.ok || data.result)) {
+          var result = data.result || data;
+          var answer = result.answer || result.response || (typeof result === 'string' ? result : JSON.stringify(result, null, 2));
+          addMessageToAgent(agentAtSend, { role: 'assistant', text: answer });
+          var warnings = data && Array.isArray(data.warnings) ? data.warnings.filter(Boolean) : [];
+          if (warnings.length) {
+            addMessageToAgent(agentAtSend, { role: 'system', text: 'ℹ️ File extraction note: ' + warnings.join(' ') });
+          }
+        } else {
+          var error = (data && data.error) || (data && data.result && data.result.reason) || ('Request failed (' + res.status + ')');
+          addMessageToAgent(agentAtSend, { role: 'system', text: '⚠️ ' + error });
+        }
+      })
+      .catch(function(e) {
+        setPending(agentAtSend, -1);
+        addMessageToAgent(agentAtSend, { role: 'system', text: '⚠️ Network error: ' + (e.message || 'Unable to contact agent service') });
+      });
   };
 
-  // Direct Event Listeners for Buttons & Interactive Elements
   function initDirectListeners() {
-    // Agent Grid delegation
-    var grid = document.getElementById('wf-agent-grid');
-    if (grid && !grid.dataset.bound) {
-      grid.dataset.bound = '1';
-      grid.addEventListener('click', function(ev) {
-        var card = ev.target.closest('.wf-card');
-        if (!card) return;
-        var name = card.getAttribute('data-agent');
-        var label = card.getAttribute('data-label');
-        var icon = card.getAttribute('data-icon');
-        if (name) window.selectAgent(name, label, icon);
-      });
-    }
-
-    // Suggestions delegation
-    var sugg = document.getElementById('wf-suggestions');
-    if (sugg && !sugg.dataset.bound) {
-      sugg.dataset.bound = '1';
-      sugg.addEventListener('click', function(ev) {
-        var card = ev.target.closest('.wf-suggest-card');
-        if (!card) return;
-        var name = card.getAttribute('data-agent');
-        var label = card.getAttribute('data-label');
-        var icon = card.getAttribute('data-icon');
-        var prompt = card.getAttribute('data-prompt');
-        if (name && prompt) window.askAgent(name, label, icon, prompt);
-      });
-    }
-
-    // Direct button listeners
-    var sendBtn = document.getElementById('chat-send');
-    if (sendBtn && !sendBtn.dataset.bound) {
-      sendBtn.dataset.bound = '1';
-      sendBtn.addEventListener('click', function(e) {
-        e.preventDefault();
-        window.sendMessage();
-      });
-    }
-
-    var clearBtn = document.getElementById('chat-clear');
-    if (clearBtn && !clearBtn.dataset.bound) {
-      clearBtn.dataset.bound = '1';
-      clearBtn.addEventListener('click', function(e) {
-        e.preventDefault();
-        window.clearChat();
-      });
-    }
-
-    var closeBtn = document.getElementById('chat-close');
-    if (closeBtn && !closeBtn.dataset.bound) {
-      closeBtn.dataset.bound = '1';
-      closeBtn.addEventListener('click', function(e) {
-        e.preventDefault();
-        window.closeChat();
-      });
-    }
-
-    // Auto-resize textarea
     var chatInputEl = document.getElementById('chat-input');
     if (chatInputEl && !chatInputEl.dataset.bound) {
       chatInputEl.dataset.bound = '1';
       chatInputEl.addEventListener('input', function() {
-        this.style.height = 'auto';
-        this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+        resizeInput(this);
+        var convo = getCurrentConversation();
+        if (!convo) return;
+        convo.draftText = this.value || '';
+        saveChatState();
+      });
+    }
+
+    var attachBtn = document.getElementById('wf-chat-attach');
+    var fileInput = document.getElementById('wf-file-input');
+    if (attachBtn && fileInput && !attachBtn.dataset.bound) {
+      attachBtn.dataset.bound = '1';
+      attachBtn.addEventListener('click', function() {
+        if (!currentAgent) activateAgent('general', 'General Assistant', '🤖', { skipScroll: true });
+        fileInput.click();
+      });
+      fileInput.addEventListener('change', function() {
+        if (!currentAgent) activateAgent('general', 'General Assistant', '🤖', { skipScroll: true });
+        var file = this.files && this.files[0] ? this.files[0] : null;
+        setDraftFile(currentAgent, file);
+        updateComposerState();
+      });
+    }
+
+    var metaEl = document.getElementById('wf-chat-draft-meta');
+    if (metaEl && !metaEl.dataset.bound) {
+      metaEl.dataset.bound = '1';
+      metaEl.addEventListener('click', function(ev) {
+        var btn = ev.target.closest('[data-chip-action]');
+        if (!btn || !currentAgent) return;
+        var action = btn.getAttribute('data-chip-action');
+        if (action === 'remove-file') {
+          setDraftFile(currentAgent, null);
+          var fileInput = document.getElementById('wf-file-input');
+          if (fileInput) fileInput.value = '';
+          updateComposerState();
+        }
+        if (action === 'clear-saved-file-context') {
+          var message = currentEditMessage();
+          if (!message) return;
+          updateMessageAt(currentAgent, editState.index, {
+            attachment: null,
+            attachmentContext: '',
+            attachmentFacts: null
+          });
+          renderDraftMeta();
+          updateComposerState();
+        }
+      });
+    }
+
+    var cancelEdit = document.getElementById('wf-chat-edit-cancel');
+    if (cancelEdit && !cancelEdit.dataset.bound) {
+      cancelEdit.dataset.bound = '1';
+      cancelEdit.addEventListener('click', function() {
+        window.cancelEditMessage();
       });
     }
   }
@@ -563,14 +1078,13 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
         }
       });
     } else {
-      // Direct Web Speech API fallback
       var SR = window.SpeechRecognition || window.webkitSpeechRecognition || null;
       if (SR) {
         var recognizer = new SR();
         recognizer.continuous = false;
         recognizer.interimResults = false;
         recognizer.lang = 'en-GB';
-        
+
         recognizer.onstart = function() {
           micBtn.textContent = '🎤 Listening…';
           if (micStop) { micStop.style.display = ''; micStop.disabled = false; }
@@ -591,9 +1105,9 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
         recognizer.onend = function() {
           micBtn.textContent = '🎤 Speak';
           if (micStop) micStop.disabled = true;
-          if (statusEl) statusEl.textContent = 'Ready to assist';
+          updateComposerState();
         };
-        
+
         micBtn.addEventListener('click', function() {
           try { recognizer.start(); } catch (_) {}
         });
@@ -606,16 +1120,30 @@ $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="curre
     }
   }
 
+  function restoreSavedAgent() {
+    if (!chatState.chatOpen || !chatState.activeAgent) return;
+    var meta = getAgentMeta(chatState.activeAgent);
+    if (!meta) return;
+    activateAgent(
+      chatState.activeAgent,
+      meta.label,
+      meta.icon,
+      { skipFocus: true, skipScroll: true }
+    );
+  }
+
   initDirectListeners();
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function() {
       initDirectListeners();
       initSpeechControls();
+      restoreSavedAgent();
     });
   } else {
     setTimeout(function() {
       initDirectListeners();
       initSpeechControls();
+      restoreSavedAgent();
     }, 200);
   }
 })();
