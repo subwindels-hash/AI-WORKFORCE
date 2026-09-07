@@ -133,7 +133,11 @@ test('permissions: the sports console gates its controls on the fresh identity',
 
     $index = file_get_contents(FCPATH . 'application/views/sports/index.php');
     assert_contains("\$caps['sync']", $index);
-    assert_contains('Sync now (needs sports.manage)', $index);
+    assert_contains('>Sync now</button>', $index);
+    assert_contains('🎯 Odds Prediction Ticket', $index);
+    assert_contains("\$ticketDateShown", $index);
+    assert_true(!str_contains($index, 'Sync now (needs sports.manage)'), 'sync label must not include the permission suffix');
+    assert_true(!str_contains($index, '🎯 Odds Prediction Ticket — needs sports.manage'), 'ticket label must not include the permission suffix');
     assert_contains("\$caps['approve']", $index);
     assert_contains("\$caps['settle']", $index);
 
