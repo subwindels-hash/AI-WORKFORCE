@@ -363,7 +363,7 @@ The module can be extended to support:
 - [ ] **Alert System** - Notify on high-confidence signals
 
 ### Integration Opportunities
-- Connect with **Cloudflare AI Agent Platform** for advanced models
+- Connect with **Agent Platform** for advanced models
 - Integrate with **Trading Intelligence** for correlation analysis
 - Add to **Command Center** for unified monitoring
 - Extend **Sports Intelligence** for game outcome prediction

@@ -1,5 +1,5 @@
 <?php
-namespace AIWorkforce\Cloudflare;
+namespace AIWorkforce\AgentPlatform;
 
 /**
  * Agent Communication Bus — Agent-to-agent delegation and messaging

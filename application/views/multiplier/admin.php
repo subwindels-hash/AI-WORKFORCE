@@ -32,6 +32,12 @@
 .ma-badge-warning{background:#f59e0b22;color:#f59e0b}
 .ma-badge-error{background:#ef444422;color:#ef4444}
 .ma-provider{display:flex;align-items:center;justify-content:space-between;padding:12px;background:rgba(15,23,42,.3);border-radius:8px;margin-bottom:8px}
+
+@media(max-width:768px){
+  .ma-header{flex-direction:column;align-items:flex-start;gap:12px;padding:16px}
+  .ma-header h1{font-size:20px}
+  .ma-grid{grid-template-columns:1fr !important}
+}
 </style>
 
 <div class="ma-bg">
@@ -146,28 +152,30 @@
     <!-- Models -->
     <div class="ma-section">
       <h3>🤖 AI Models</h3>
-      <table class="ma-table">
-        <thead>
-          <tr>
-            <th>Model Code</th>
-            <th>Name</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php foreach ($models as $m): ?>
+      <div class="table-scroll">
+        <table class="ma-table">
+          <thead>
             <tr>
-              <td><code style="color:#a5b4fc"><?= e($m['code']) ?></code></td>
-              <td><?= e($m['name']) ?></td>
-              <td>
-                <span class="ma-badge <?= $m['enabled'] ? 'ma-badge-success' : 'ma-badge-error' ?>">
-                  <?= $m['enabled'] ? 'Active' : 'Inactive' ?>
-                </span>
-              </td>
+              <th>Model Code</th>
+              <th>Name</th>
+              <th>Status</th>
             </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            <?php foreach ($models as $m): ?>
+              <tr>
+                <td><code style="color:#a5b4fc"><?= e($m['code']) ?></code></td>
+                <td><?= e($m['name']) ?></td>
+                <td>
+                  <span class="ma-badge <?= $m['enabled'] ? 'ma-badge-success' : 'ma-badge-error' ?>">
+                    <?= $m['enabled'] ? 'Active' : 'Inactive' ?>
+                  </span>
+                </td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
     </div>
     
     <!-- Recent Predictions -->
@@ -176,40 +184,42 @@
       <?php if (empty($recentPredictions)): ?>
         <div style="text-align:center;padding:20px;color:#64748b">No predictions yet</div>
       <?php else: ?>
-        <table class="ma-table">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Predicted</th>
-              <th>Actual</th>
-              <th>Error</th>
-              <th>Confidence</th>
-              <th>Risk</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            <?php foreach (array_slice($recentPredictions, 0, 10) as $p): 
-              $errorPct = $p['error_pct'] ?? null;
-              $status = $p['validated'] ? 'Validated' : 'Pending';
-              $statusCls = $p['validated'] ? 'ma-badge-success' : 'ma-badge-warning';
-            ?>
+        <div class="table-scroll">
+          <table class="ma-table">
+            <thead>
               <tr>
-                <td><?= e(substr($p['predicted_at'] ?? '', 0, 16)) ?></td>
-                <td style="font-weight:700;color:#a5b4fc"><?= e(number_format($p['predicted_multiplier'] ?? 0, 2)) ?>x</td>
-                <td><?= $p['actual_multiplier'] !== null ? e(number_format($p['actual_multiplier'], 2)) . 'x' : '—' ?></td>
-                <td><?= $errorPct !== null ? e(number_format($errorPct, 1)) . '%' : '—' ?></td>
-                <td><?= e(number_format(($p['confidence'] ?? 0) * 100, 0)) ?>%</td>
-                <td>
-                  <span class="ma-badge ma-badge-<?= strtolower($p['risk_level'] ?? 'medium') === 'low' ? 'success' : (strtolower($p['risk_level'] ?? '') === 'high' ? 'error' : 'warning') ?>">
-                    <?= e($p['risk_level'] ?? 'MEDIUM') ?>
-                  </span>
-                </td>
-                <td><span class="ma-badge <?= $statusCls ?>"><?= $status ?></span></td>
+                <th>Time</th>
+                <th>Predicted</th>
+                <th>Actual</th>
+                <th>Error</th>
+                <th>Confidence</th>
+                <th>Risk</th>
+                <th>Status</th>
               </tr>
-            <?php endforeach; ?>
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              <?php foreach (array_slice($recentPredictions, 0, 10) as $p): 
+                $errorPct = $p['error_pct'] ?? null;
+                $status = $p['validated'] ? 'Validated' : 'Pending';
+                $statusCls = $p['validated'] ? 'ma-badge-success' : 'ma-badge-warning';
+              ?>
+                <tr>
+                  <td><?= e(substr($p['predicted_at'] ?? '', 0, 16)) ?></td>
+                  <td style="font-weight:700;color:#a5b4fc"><?= e(number_format($p['predicted_multiplier'] ?? 0, 2)) ?>x</td>
+                  <td><?= $p['actual_multiplier'] !== null ? e(number_format($p['actual_multiplier'], 2)) . 'x' : '—' ?></td>
+                  <td><?= $errorPct !== null ? e(number_format($errorPct, 1)) . '%' : '—' ?></td>
+                  <td><?= e(number_format(($p['confidence'] ?? 0) * 100, 0)) ?>%</td>
+                  <td>
+                    <span class="ma-badge ma-badge-<?= strtolower($p['risk_level'] ?? 'medium') === 'low' ? 'success' : (strtolower($p['risk_level'] ?? '') === 'high' ? 'error' : 'warning') ?>">
+                      <?= e($p['risk_level'] ?? 'MEDIUM') ?>
+                    </span>
+                  </td>
+                  <td><span class="ma-badge <?= $statusCls ?>"><?= $status ?></span></td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
       <?php endif; ?>
       
       <div style="display:flex;gap:10px;margin-top:16px">

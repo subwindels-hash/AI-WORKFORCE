@@ -173,61 +173,63 @@ $kickoffStamp = static function (mixed $iso): string {
                         <div class="stat"><div class="k">Expected total goals</div><div class="v" style="font-size:14px"><?= $dash($card['expectedTotalGoals'] ?? null, 2) ?></div></div>
                         <div class="stat"><div class="k">Data quality</div><div class="v" style="font-size:14px"><?= (int) ($card['dataQuality']['score'] ?? 0) ?>/100</div></div>
                       </div>
-                      <table class="tbl" style="margin-top:8px">
-                        <tbody>
-                          <?php foreach (['home' => 'Home form', 'away' => 'Away form'] as $side => $label): ?>
-                            <?php $form = $card['form'][$side] ?? null; $trend = $card['goalTrend'][$side] ?? []; ?>
+                      <div class="table-scroll">
+                        <table class="tbl" style="margin-top:8px">
+                          <tbody>
+                            <?php foreach (['home' => 'Home form', 'away' => 'Away form'] as $side => $label): ?>
+                              <?php $form = $card['form'][$side] ?? null; $trend = $card['goalTrend'][$side] ?? []; ?>
+                              <tr>
+                                <td class="dim" style="width:120px"><?= e($label) ?></td>
+                                <td>
+                                  <?php if (empty($form) || ($form['state'] ?? '') === 'DATA_UNAVAILABLE'): ?>
+                                    <span class="dim">recent form unavailable</span>
+                                  <?php else: ?>
+                                    <span class="mono"><?= e((string) ($form['string'] ?? '—')) ?></span>
+                                    <span class="dim">(<?= (int) ($form['played'] ?? 0) ?> played, <?= (int) ($form['points'] ?? 0) ?> pts, <?= (int) ($form['goalsFor'] ?? 0) ?> scored / <?= (int) ($form['goalsAgainst'] ?? 0) ?> conceded)</span>
+                                    <span class="dim">· attack <?= $dash($trend['scored'] ?? null, 2) ?> · defence <?= $dash($trend['conceded'] ?? null, 2) ?> · clean sheets <?= $percent($trend['cleanSheetRate'] ?? null, 0) ?></span>
+                                  <?php endif; ?>
+                                </td>
+                              </tr>
+                            <?php endforeach; ?>
                             <tr>
-                              <td class="dim" style="width:120px"><?= e($label) ?></td>
+                              <td class="dim">Head to head</td>
                               <td>
-                                <?php if (empty($form) || ($form['state'] ?? '') === 'DATA_UNAVAILABLE'): ?>
-                                  <span class="dim">recent form unavailable</span>
+                                <?php if (empty($card['headToHead']) || ($card['headToHead']['state'] ?? '') === 'DATA_UNAVAILABLE'): ?>
+                                  <span class="dim">no head-to-head history stored</span>
                                 <?php else: ?>
-                                  <span class="mono"><?= e((string) ($form['string'] ?? '—')) ?></span>
-                                  <span class="dim">(<?= (int) ($form['played'] ?? 0) ?> played, <?= (int) ($form['points'] ?? 0) ?> pts, <?= (int) ($form['goalsFor'] ?? 0) ?> scored / <?= (int) ($form['goalsAgainst'] ?? 0) ?> conceded)</span>
-                                  <span class="dim">· attack <?= $dash($trend['scored'] ?? null, 2) ?> · defence <?= $dash($trend['conceded'] ?? null, 2) ?> · clean sheets <?= $percent($trend['cleanSheetRate'] ?? null, 0) ?></span>
+                                  <?= e((string) ($card['headToHead']['summary'] ?? '—')) ?>
+                                  <span class="dim">(weight <?= $dash($card['headToHead']['weight'] ?? null, 2) ?>)</span>
                                 <?php endif; ?>
                               </td>
                             </tr>
-                          <?php endforeach; ?>
-                          <tr>
-                            <td class="dim">Head to head</td>
-                            <td>
-                              <?php if (empty($card['headToHead']) || ($card['headToHead']['state'] ?? '') === 'DATA_UNAVAILABLE'): ?>
-                                <span class="dim">no head-to-head history stored</span>
-                              <?php else: ?>
-                                <?= e((string) ($card['headToHead']['summary'] ?? '—')) ?>
-                                <span class="dim">(weight <?= $dash($card['headToHead']['weight'] ?? null, 2) ?>)</span>
-                              <?php endif; ?>
-                            </td>
-                          </tr>
-                          <?php if (!empty($card['alternativeScores'])): ?>
+                            <?php if (!empty($card['alternativeScores'])): ?>
+                              <tr>
+                                <td class="dim">Alternative scores</td>
+                                <td class="mono">
+                                  <?php foreach (array_slice((array) $card['alternativeScores'], 0, 3) as $alt): ?>
+                                    <?= e((string) ($alt['home'] ?? '?')) ?>–<?= e((string) ($alt['away'] ?? '?')) ?><?= isset($alt['probability']) ? ' (' . number_format((float) $alt['probability'] * 100, 1) . '%)' : '' ?>&nbsp;&nbsp;
+                                  <?php endforeach; ?>
+                                </td>
+                              </tr>
+                            <?php endif; ?>
                             <tr>
-                              <td class="dim">Alternative scores</td>
-                              <td class="mono">
-                                <?php foreach (array_slice((array) $card['alternativeScores'], 0, 3) as $alt): ?>
-                                  <?= e((string) ($alt['home'] ?? '?')) ?>–<?= e((string) ($alt['away'] ?? '?')) ?><?= isset($alt['probability']) ? ' (' . number_format((float) $alt['probability'] * 100, 1) . '%)' : '' ?>&nbsp;&nbsp;
-                                <?php endforeach; ?>
+                              <td class="dim">Model</td>
+                              <td class="mono dim">
+                                <?= e((string) ($card['model']['version'] ?? '—')) ?> · <?= e((string) ($card['model']['status'] ?? 'DRAFT')) ?> ·
+                                calibration <?= e((string) ($card['model']['calibrationState'] ?? 'CALIBRATION_PENDING')) ?><?= !empty($card['model']['calibrationVersion']) ? ' (' . e((string) $card['model']['calibrationVersion']) . ')' : '' ?>
                               </td>
                             </tr>
-                          <?php endif; ?>
-                          <tr>
-                            <td class="dim">Model</td>
-                            <td class="mono dim">
-                              <?= e((string) ($card['model']['version'] ?? '—')) ?> · <?= e((string) ($card['model']['status'] ?? 'DRAFT')) ?> ·
-                              calibration <?= e((string) ($card['model']['calibrationState'] ?? 'CALIBRATION_PENDING')) ?><?= !empty($card['model']['calibrationVersion']) ? ' (' . e((string) $card['model']['calibrationVersion']) . ')' : '' ?>
-                            </td>
-                          </tr>
-                          <tr>
-                            <td class="dim">Reasoning</td>
-                            <td><?= e((string) ($card['reason'] ?? '—')) ?></td>
-                          </tr>
-                          <tr>
-                            <td class="dim">Predicted at</td>
-                            <td class="mono dim"><?= e($kickoffLabel($card['generatedAt'] ?? null)) ?> · settlement <?= e((string) ($card['settlementState'] ?? 'OPEN')) ?></td>
-                          </tr>
-                        </tbody>
-                      </table>
+                            <tr>
+                              <td class="dim">Reasoning</td>
+                              <td><?= e((string) ($card['reason'] ?? '—')) ?></td>
+                            </tr>
+                            <tr>
+                              <td class="dim">Predicted at</td>
+                              <td class="mono dim"><?= e($kickoffLabel($card['generatedAt'] ?? null)) ?> · settlement <?= e((string) ($card['settlementState'] ?? 'OPEN')) ?></td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </div>
                 <?php endforeach; ?>
@@ -280,33 +282,35 @@ $kickoffStamp = static function (mixed $iso): string {
                     </div>
                   </div>
                 </div>
-                <table class="tbl" style="margin-top:8px">
-                  <tbody>
-                    <tr>
-                      <td class="dim" style="width:150px">Pre-match prediction</td>
-                      <td>
-                        <?php if (empty($match['preMatchPrediction'])): ?>
-                          <span class="dim"><?= e((string) ($match['preMatchPredictionState'] ?? 'NOT_STORED')) ?> — no pre-match prediction is stored for this fixture. It is never written after kickoff.</span>
-                        <?php else: ?>
-                          <?php $pm = $match['preMatchPrediction']; ?>
-                          <span class="mono"><?= e((string) ($pm['prediction']['result'] ?? '—')) ?> <?= (int) ($pm['prediction']['predictedScore']['home'] ?? 0) ?>–<?= (int) ($pm['prediction']['predictedScore']['away'] ?? 0) ?></span>
-                          <span class="dim">· <?= $dash($pm['prediction']['confidence'] ?? null, 1) ?>% (<?= e((string) ($pm['prediction']['confidenceBasis'] ?? 'RAW')) ?>) · stored <?= e($kickoffLabel($pm['generatedAt'] ?? null)) ?></span>
-                        <?php endif; ?>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td class="dim">Live model estimate</td>
-                      <td>
-                        <?php if (($estimate['state'] ?? '') === 'ESTIMATE'): ?>
-                          <span class="mono"><?= e((string) ($estimate['resultLabel'] ?? '—')) ?></span>
-                          <span class="dim">· <?= $dash($estimate['confidence'] ?? null, 1) ?>% (<?= e((string) ($estimate['confidenceBasis'] ?? 'RAW')) ?>) · most likely <?= (int) ($estimate['mostLikelyScore']['home'] ?? 0) ?>–<?= (int) ($estimate['mostLikelyScore']['away'] ?? 0) ?></span>
-                        <?php else: ?>
-                          <span class="dim"><?= e((string) ($estimate['state'] ?? 'NO_ESTIMATE')) ?> — <?= e((string) ($estimate['reason'] ?? 'no live estimate is stored')) ?></span>
-                        <?php endif; ?>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+                <div class="table-scroll">
+                  <table class="tbl" style="margin-top:8px">
+                    <tbody>
+                      <tr>
+                        <td class="dim" style="width:150px">Pre-match prediction</td>
+                        <td>
+                          <?php if (empty($match['preMatchPrediction'])): ?>
+                            <span class="dim"><?= e((string) ($match['preMatchPredictionState'] ?? 'NOT_STORED')) ?> — no pre-match prediction is stored for this fixture. It is never written after kickoff.</span>
+                          <?php else: ?>
+                            <?php $pm = $match['preMatchPrediction']; ?>
+                            <span class="mono"><?= e((string) ($pm['prediction']['result'] ?? '—')) ?> <?= (int) ($pm['prediction']['predictedScore']['home'] ?? 0) ?>–<?= (int) ($pm['prediction']['predictedScore']['away'] ?? 0) ?></span>
+                            <span class="dim">· <?= $dash($pm['prediction']['confidence'] ?? null, 1) ?>% (<?= e((string) ($pm['prediction']['confidenceBasis'] ?? 'RAW')) ?>) · stored <?= e($kickoffLabel($pm['generatedAt'] ?? null)) ?></span>
+                          <?php endif; ?>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td class="dim">Live model estimate</td>
+                        <td>
+                          <?php if (($estimate['state'] ?? '') === 'ESTIMATE'): ?>
+                            <span class="mono"><?= e((string) ($estimate['resultLabel'] ?? '—')) ?></span>
+                            <span class="dim">· <?= $dash($estimate['confidence'] ?? null, 1) ?>% (<?= e((string) ($estimate['confidenceBasis'] ?? 'RAW')) ?>) · most likely <?= (int) ($estimate['mostLikelyScore']['home'] ?? 0) ?>–<?= (int) ($estimate['mostLikelyScore']['away'] ?? 0) ?></span>
+                          <?php else: ?>
+                            <span class="dim"><?= e((string) ($estimate['state'] ?? 'NO_ESTIMATE')) ?> — <?= e((string) ($estimate['reason'] ?? 'no live estimate is stored')) ?></span>
+                          <?php endif; ?>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
                 <p class="dim" style="font-size:11px;margin:6px 0 0">The pre-match prediction and the live estimate are separate stored rows: a kickoff never rewrites the original prediction.</p>
               </div>
             </div>
@@ -324,18 +328,20 @@ $kickoffStamp = static function (mixed $iso): string {
     <div class="panel">
       <h3>Data feed</h3>
       <div class="body" style="padding-top:12px">
-        <table class="tbl">
-          <thead><tr><th>Check</th><th>State</th><th>Detail</th></tr></thead>
-          <tbody>
-            <?php foreach ($diag['checks'] ?? [] as $check): ?>
-              <tr>
-                <td style="font-weight:700"><?= e((string) ($check['key'] ?? '')) ?></td>
-                <td><span class="dot <?= $stateClass((string) ($check['state'] ?? '')) ?>"></span> <?= e((string) ($check['value'] ?? '—')) ?></td>
-                <td class="dim" style="font-size:11px"><?= e((string) ($check['detail'] ?? '')) ?><?= !empty($check['action']) ? '<br><i>' . e((string) $check['action']) . '</i>' : '' ?></td>
-              </tr>
-            <?php endforeach; ?>
-          </tbody>
-        </table>
+        <div class="table-scroll">
+          <table class="tbl">
+            <thead><tr><th>Check</th><th>State</th><th>Detail</th></tr></thead>
+            <tbody>
+              <?php foreach ($diag['checks'] ?? [] as $check): ?>
+                <tr>
+                  <td style="font-weight:700"><?= e((string) ($check['key'] ?? '')) ?></td>
+                  <td><span class="dot <?= $stateClass((string) ($check['state'] ?? '')) ?>"></span> <?= e((string) ($check['value'] ?? '—')) ?></td>
+                  <td class="dim" style="font-size:11px"><?= e((string) ($check['detail'] ?? '')) ?><?= !empty($check['action']) ? '<br><i>' . e((string) $check['action']) . '</i>' : '' ?></td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
         <?php if (empty($diag['checks'])): ?>
           <p class="dim">Diagnostics unavailable: the module could not read its own state.</p>
         <?php endif; ?>
@@ -381,20 +387,22 @@ $kickoffStamp = static function (mixed $iso): string {
           <p class="dim" style="font-size:11px;margin-top:6px"><?= e((string) $perf['note']) ?></p>
         <?php endif; ?>
         <?php if (!empty($perf['byModel'])): ?>
-          <table class="tbl" style="margin-top:10px">
-            <thead><tr><th>Model version</th><th class="num">Evaluated</th><th class="num">Result acc.</th><th class="num">Exact-score acc.</th><th class="num">Brier</th></tr></thead>
-            <tbody>
-              <?php foreach ($perf['byModel'] as $row): ?>
-                <tr>
-                  <td class="mono"><?= e((string) ($row['modelVersion'] ?? '')) ?> <span class="dim"><?= e((string) ($row['status'] ?? '')) ?></span></td>
-                  <td class="num"><?= (int) ($row['evaluated'] ?? 0) ?></td>
-                  <td class="num"><?= $percent($row['resultAccuracy'] ?? null) ?></td>
-                  <td class="num"><?= $percent($row['exactScoreAccuracy'] ?? null, 2) ?></td>
-                  <td class="num mono"><?= $dash($row['brier'] ?? null, 4) ?></td>
-                </tr>
-              <?php endforeach; ?>
-            </tbody>
-          </table>
+          <div class="table-scroll">
+            <table class="tbl" style="margin-top:10px">
+              <thead><tr><th>Model version</th><th class="num">Evaluated</th><th class="num">Result acc.</th><th class="num">Exact-score acc.</th><th class="num">Brier</th></tr></thead>
+              <tbody>
+                <?php foreach ($perf['byModel'] as $row): ?>
+                  <tr>
+                    <td class="mono"><?= e((string) ($row['modelVersion'] ?? '')) ?> <span class="dim"><?= e((string) ($row['status'] ?? '')) ?></span></td>
+                    <td class="num"><?= (int) ($row['evaluated'] ?? 0) ?></td>
+                    <td class="num"><?= $percent($row['resultAccuracy'] ?? null) ?></td>
+                    <td class="num"><?= $percent($row['exactScoreAccuracy'] ?? null, 2) ?></td>
+                    <td class="num mono"><?= $dash($row['brier'] ?? null, 4) ?></td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
         <?php endif; ?>
       </div>
     </div>
@@ -403,14 +411,16 @@ $kickoffStamp = static function (mixed $iso): string {
     <div class="panel">
       <h3>Model &amp; calibration</h3>
       <div class="body" style="padding-top:12px">
-        <table class="tbl">
-          <tbody>
-            <tr><td class="dim" style="width:130px">State</td><td><span class="dot <?= $stateClass((string) ($models['state'] ?? '')) ?>"></span> <?= e((string) ($models['label'] ?? 'no model loaded')) ?></td></tr>
-            <tr><td class="dim">Active version</td><td class="mono"><?= e((string) ($models['activeModel']['version'] ?? '—')) ?></td></tr>
-            <tr><td class="dim">Calibration</td><td class="mono"><?= e((string) ($models['calibration']['calibrationVersion'] ?? ($models['calibration']['status'] ?? 'CALIBRATION_PENDING'))) ?> · <?= (int) ($models['calibration']['samples'] ?? 0) ?> samples</td></tr>
-            <tr><td class="dim">Approved calibrations</td><td class="mono"><?= (int) ($models['approvedCalibrationCount'] ?? 0) ?></td></tr>
-          </tbody>
-        </table>
+        <div class="table-scroll">
+          <table class="tbl">
+            <tbody>
+              <tr><td class="dim" style="width:130px">State</td><td><span class="dot <?= $stateClass((string) ($models['state'] ?? '')) ?>"></span> <?= e((string) ($models['label'] ?? 'no model loaded')) ?></td></tr>
+              <tr><td class="dim">Active version</td><td class="mono"><?= e((string) ($models['activeModel']['version'] ?? '—')) ?></td></tr>
+              <tr><td class="dim">Calibration</td><td class="mono"><?= e((string) ($models['calibration']['calibrationVersion'] ?? ($models['calibration']['status'] ?? 'CALIBRATION_PENDING'))) ?> · <?= (int) ($models['calibration']['samples'] ?? 0) ?> samples</td></tr>
+              <tr><td class="dim">Approved calibrations</td><td class="mono"><?= (int) ($models['approvedCalibrationCount'] ?? 0) ?></td></tr>
+            </tbody>
+          </table>
+        </div>
         <?php if (!empty($models['reason'])): ?><p class="dim" style="font-size:11px;margin-top:8px"><?= e((string) $models['reason']) ?></p><?php endif; ?>
         <p style="margin-top:8px"><a class="btn small" href="/football/models">Models &amp; calibration — full state, history and approvals</a></p>
       </div>
@@ -421,23 +431,25 @@ $kickoffStamp = static function (mixed $iso): string {
       <h3>Refresh schedule</h3>
       <div class="body" style="padding-top:12px">
         <p class="dim" style="font-size:11px;margin-top:0">Cadence is provider-aware: each job runs only when its interval has elapsed, the provider is not in backoff, it was not asked to defer, and there is work waiting. Next wake: <span class="mono"><?= e($kickoffLabel($diag['cadence']['nextWakeAt'] ?? null)) ?></span></p>
-        <table class="tbl">
-          <thead><tr><th>Job</th><th class="num">Interval</th><th>Status</th><th class="num">Requests</th></tr></thead>
-          <tbody>
-            <?php foreach (($diag['cadence']['jobs'] ?? []) as $job): ?>
-              <tr>
-                <td class="mono"><?= e(str_replace('football-', '', (string) ($job['job'] ?? ''))) ?></td>
-                <td class="num dim"><?= (int) ($job['interval'] ?? 0) ?>s</td>
-                <td>
-                  <?php if (!empty($job['due'])): ?><span class="badge b-green">DUE</span>
-                  <?php else: ?><span class="badge b-gray"><?= e((string) ($job['reason'] ?? 'DUE')) ?></span><?php endif; ?>
-                  <?php if (!empty($job['nextRunAt'])): ?><div class="dim" style="font-size:10px">next <?= e(gmdate('H:i', (int) strtotime((string) $job['nextRunAt']))) ?> UTC</div><?php endif; ?>
-                </td>
-                <td class="num mono"><?= $job['requests'] === null ? '—' : (int) $job['requests'] ?></td>
-              </tr>
-            <?php endforeach; ?>
-          </tbody>
-        </table>
+        <div class="table-scroll">
+          <table class="tbl">
+            <thead><tr><th>Job</th><th class="num">Interval</th><th>Status</th><th class="num">Requests</th></tr></thead>
+            <tbody>
+              <?php foreach (($diag['cadence']['jobs'] ?? []) as $job): ?>
+                <tr>
+                  <td class="mono"><?= e(str_replace('football-', '', (string) ($job['job'] ?? ''))) ?></td>
+                  <td class="num dim"><?= (int) ($job['interval'] ?? 0) ?>s</td>
+                  <td>
+                    <?php if (!empty($job['due'])): ?><span class="badge b-green">DUE</span>
+                    <?php else: ?><span class="badge b-gray"><?= e((string) ($job['reason'] ?? 'DUE')) ?></span><?php endif; ?>
+                    <?php if (!empty($job['nextRunAt'])): ?><div class="dim" style="font-size:10px">next <?= e(gmdate('H:i', (int) strtotime((string) $job['nextRunAt']))) ?> UTC</div><?php endif; ?>
+                  </td>
+                  <td class="num mono"><?= $job['requests'] === null ? '—' : (int) $job['requests'] ?></td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>

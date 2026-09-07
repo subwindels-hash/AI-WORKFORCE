@@ -55,21 +55,23 @@
     <h3>Mastery tracking <span class="dim" style="font-weight:400">(from real outcomes only)</span></h3>
     <div class="body scroll" style="padding-top:12px">
       <p class="dim" style="font-size:11px"><?= e($mastery['note']) ?> · mastered <?= (int) $mastery['counts']['mastered'] ?> · learning <?= (int) $mastery['counts']['learning'] ?> · weak <?= (int) $mastery['counts']['weak'] ?> · unseen <?= (int) $mastery['counts']['unseen'] ?></p>
-      <table class="tbl">
-        <thead><tr><th>Item</th><th>Skill</th><th>Level</th><th class="num">Attempts</th><th class="num">Correct</th><th>Mastery</th></tr></thead>
-        <tbody>
-          <?php foreach ($mastery['grammarAndItems'] as $m): ?>
-            <tr>
-              <td><?= e(mb_substr($m['prompt'], 0, 60)) ?></td>
-              <td class="dim"><?= e($m['skill']) ?></td>
-              <td class="dim"><?= e($m['level']) ?></td>
-              <td class="num"><?= (int) $m['attempts'] ?></td>
-              <td class="num"><?= (int) $m['correct'] ?></td>
-              <td><span class="badge <?= ['mastered' => 'b-green', 'learning' => 'b-sky', 'weak' => 'b-red'][$m['mastery']] ?>"><?= e($m['mastery']) ?></span></td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
+      <div class="table-scroll">
+        <table class="tbl">
+          <thead><tr><th>Item</th><th>Skill</th><th>Level</th><th class="num">Attempts</th><th class="num">Correct</th><th>Mastery</th></tr></thead>
+          <tbody>
+            <?php foreach ($mastery['grammarAndItems'] as $m): ?>
+              <tr>
+                <td><?= e(mb_substr($m['prompt'], 0, 60)) ?></td>
+                <td class="dim"><?= e($m['skill']) ?></td>
+                <td class="dim"><?= e($m['level']) ?></td>
+                <td class="num"><?= (int) $m['attempts'] ?></td>
+                <td class="num"><?= (int) $m['correct'] ?></td>
+                <td><span class="badge <?= ['mastered' => 'b-green', 'learning' => 'b-sky', 'weak' => 'b-red'][$m['mastery']] ?>"><?= e($m['mastery']) ?></span></td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 <?php endif; ?>

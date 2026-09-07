@@ -13,8 +13,8 @@ class Api_agents extends Api_controller
             $agentList[$name] = [
                 'name' => $agent->name(),
                 'tools' => $agent->tools(),
-                'model' => class_exists(\AIWorkforce\Agents\EnhancedCloudflareAgent::class)
-                    ? \AIWorkforce\Agents\EnhancedCloudflareAgent::modelFor($name)
+                'model' => class_exists(\AIWorkforce\Agents\EnhancedSpecialistAgent::class)
+                    ? \AIWorkforce\Agents\EnhancedSpecialistAgent::modelFor($name)
                     : null,
             ];
         }
@@ -22,8 +22,8 @@ class Api_agents extends Api_controller
             'agents' => $agentList,
             'llm' => $llm,
             'provider' => $llm['driver'],
-            'models' => class_exists(\AIWorkforce\Agents\EnhancedCloudflareAgent::class)
-                ? \AIWorkforce\Agents\EnhancedCloudflareAgent::allRoleModels()
+            'models' => class_exists(\AIWorkforce\Agents\EnhancedSpecialistAgent::class)
+                ? \AIWorkforce\Agents\EnhancedSpecialistAgent::allRoleModels()
                 : [],
         ]);
     }

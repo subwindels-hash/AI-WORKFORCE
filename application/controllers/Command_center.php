@@ -54,20 +54,20 @@ class Command_center extends App_Controller
         
         // 1. Windels AI Agents
         try {
-            $cfStatus = $this->platform->cloudflare->status();
-            $modules['cloudflare'] = [
+            $agentStatus = $this->platform->agentPlatform->status();
+            $modules['agents'] = [
                 'name' => 'Windels AI Agents',
                 'icon' => '⚡',
-                'status' => !empty($cfStatus['modelRouter']['configured']) ? 'healthy' : 'degraded',
+                'status' => !empty($agentStatus['modelRouter']['configured']) ? 'healthy' : 'degraded',
                 'stats' => [
-                    'agents' => count($cfStatus['communicationBus']['availableAgents'] ?? []),
-                    'tools' => $cfStatus['toolRegistry']['totalTools'] ?? 0,
-                    'models' => count($cfStatus['modelRouter']['providers'] ?? []),
+                    'agents' => count($agentStatus['communicationBus']['availableAgents'] ?? []),
+                    'tools' => $agentStatus['toolRegistry']['totalTools'] ?? 0,
+                    'models' => count($agentStatus['modelRouter']['providers'] ?? []),
                 ],
                 'link' => '/app/agent-platform',
             ];
         } catch (\Throwable $e) {
-            $modules['cloudflare'] = [
+            $modules['agents'] = [
                 'name' => 'Windels AI Agents',
                 'icon' => '⚡',
                 'status' => 'error',

@@ -34,16 +34,18 @@ $stars = is_array($stars ?? null) ? $stars : [];
   </div>
 <?php endif; ?>
 <?php if ($lines !== []): ?>
-  <table class="tbl mono">
-    <thead><tr><th>#</th><th>Mains</th><th>Stars</th></tr></thead>
-    <tbody>
-    <?php foreach ($lines as $i => $line): ?>
-      <tr>
-        <td><?= (int) (($page ?? 0) * ($limit ?? 50) + $i + 1) ?></td>
-        <td><?php foreach (($line['mains'] ?? []) as $n): ?><span class="ball" style="display:inline-flex;width:28px;height:28px;border-radius:50%;background:#ffd24a;color:#1b1b1b;align-items:center;justify-content:center;margin-right:3px;font-weight:700"><?= (int)$n ?></span><?php endforeach; ?></td>
-        <td><?php foreach (($line['stars'] ?? []) as $n): ?><span class="lucky-star" style="display:inline-flex;width:28px;height:28px;border-radius:50%;background:#7dd3fc;color:#0c2e46;align-items:center;justify-content:center;margin-right:3px;font-weight:700"><?= (int)$n ?></span><?php endforeach; ?></td>
-      </tr>
-    <?php endforeach; ?>
-    </tbody>
-  </table>
+  <div class="table-scroll">
+    <table class="tbl mono">
+      <thead><tr><th>#</th><th>Mains</th><th>Stars</th></tr></thead>
+      <tbody>
+      <?php foreach ($lines as $i => $line): ?>
+        <tr>
+          <td><?= (int) (($page ?? 0) * ($limit ?? 50) + $i + 1) ?></td>
+          <td><?php foreach (($line['mains'] ?? []) as $n): ?><span class="ball" style="display:inline-flex;width:28px;height:28px;border-radius:50%;background:#ffd24a;color:#1b1b1b;align-items:center;justify-content:center;margin-right:3px;font-weight:700"><?= (int)$n ?></span><?php endforeach; ?></td>
+          <td><?php foreach (($line['stars'] ?? []) as $n): ?><span class="lucky-star" style="display:inline-flex;width:28px;height:28px;border-radius:50%;background:#7dd3fc;color:#0c2e46;align-items:center;justify-content:center;margin-right:3px;font-weight:700"><?= (int)$n ?></span><?php endforeach; ?></td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
 <?php endif; ?>

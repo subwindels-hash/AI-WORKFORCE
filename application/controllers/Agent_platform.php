@@ -27,8 +27,8 @@ class Agent_platform extends App_Controller
         $dashboard = [];
         $platformStatus = [];
         try {
-            $dashboard = $this->platform->cloudflare->observability()->dashboard();
-            $platformStatus = $this->platform->cloudflare->status();
+            $dashboard = $this->platform->agentPlatform->observability()->dashboard();
+            $platformStatus = $this->platform->agentPlatform->status();
         } catch (\Throwable $e) {
             $dashboard = ['error' => $e->getMessage()];
         }
@@ -36,7 +36,7 @@ class Agent_platform extends App_Controller
         $data['dashboard'] = $dashboard;
         $data['platformStatus'] = $platformStatus;
         $data['agents'] = array_keys($this->platform->agents->agents());
-        $data['tools'] = $this->platform->cloudflare->toolRegistry()->categories();
+        $data['tools'] = $this->platform->agentPlatform->toolRegistry()->categories();
         $data['admin'] = $this->isAdmin($user);
 
         $this->load->view('layout/header', $data);

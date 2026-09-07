@@ -1,8 +1,8 @@
 <?php
-namespace AIWorkforce\Cloudflare;
+namespace AIWorkforce\AgentPlatform;
 
 /**
- * Cloudflare Agent Platform — Unified entry point for the AI agent infrastructure
+ * AI Agent Platform — Unified entry point for the AI agent infrastructure
  *
  * This is the central orchestrator that wires together:
  * - ModelRouter (multi-provider model gateway with failover)
@@ -11,11 +11,6 @@ namespace AIWorkforce\Cloudflare;
  * - WorkflowEngine (long-running task workflows)
  * - AgentCommunicationBus (agent-to-agent delegation)
  * - AgentObservability (monitoring and analytics)
- *
- * Architecture:
- * - Existing Backend = Business/Application Control Plane
- * - Cloudflare Agents = AI/Agent Intelligence & Execution Plane
- * - External APIs = Specialized Data and Execution Providers
  *
  * The platform is lazily initialized — components are only created when needed.
  */
@@ -143,8 +138,6 @@ class AgentPlatform
             'sessionManager' => $this->sessionManager?->stats() ?? ['configured' => false],
             'workflowEngine' => $this->workflowEngine?->stats() ?? ['configured' => false],
             'communicationBus' => [
-                // List of agent roles — every consumer (workspace widgets,
-                // command center) treats this as an array (count/array_slice).
                 'availableAgents' => $this->agentOrchestrator ? array_keys($this->agentOrchestrator->agents()) : [],
             ],
         ];

@@ -68,7 +68,7 @@ class Platform
     public \AIWorkforce\LangLearn\AdaptiveLearningService $adaptive;
     public \AIWorkforce\LangLearn\TeacherCoach $langcoach;
     public \AIWorkforce\LangLearn\Translator $translator;
-    public \AIWorkforce\Cloudflare\AgentPlatform $cloudflare;
+    public \AIWorkforce\AgentPlatform\AgentPlatform $agentPlatform;
     public \AIWorkforce\MultiplierIntelligence\MultiplierPlatformIntegration $multiplierIntegration;
 
     /** True when AI_WORKFORCE_DISABLE_REAL_PROVIDERS=1 forces the simulated feed. */
@@ -93,13 +93,7 @@ class Platform
             ['video', ['video.create']],
             ['multiplier', ['multiplier.getCurrentMultiplier', 'multiplier.getHistory', 'multiplier.generateSignal', 'multiplier.getAccuracy', 'multiplier.listAgents', 'multiplier.analyzeRound']],
         ] as [$role, $tools]) {
-            // Use EnhancedCloudflareAgent for multi-model Cloudflare support,
-            // falling back to CloudflareSpecialistAgent if the enhanced class is unavailable.
-            if (class_exists(\AIWorkforce\Agents\EnhancedCloudflareAgent::class)) {
-                $this->agents->register(new \AIWorkforce\Agents\EnhancedCloudflareAgent($role, $tools));
-            } else {
-                $this->agents->register(new \AIWorkforce\Agents\CloudflareSpecialistAgent($role, $tools));
-            }
+            $this->agents->register(new \AIWorkforce\Agents\EnhancedSpecialistAgent($role, $tools));
         }
 
         $this->providers = new ProviderManager();
@@ -201,23 +195,23 @@ class Platform
         $this->eaProtection = new EaProtection($model->state, $model->audit, $this->notifications);
         $this->eaBridge = new EaBridgeClient();
 
-        // ── Cloudflare AI Agent Platform ───────────────────────────
-        $this->cloudflare = new \AIWorkforce\Cloudflare\AgentPlatform(
+        // ── AI Agent Platform ───────────────────────────────────────
+        $this->agentPlatform = new \AIWorkforce\AgentPlatform\AgentPlatform(
             $model->db,
             $auditFn,
             null, // Approval handler — set by ExecutionSupervisor when needed
             $this->agents
         );
 
-        // ── Multiplier Intelligence + Cloudflare Integration ───────
-        // Wires Multiplier specialist agents into the Cloudflare platform:
+        // ── Multiplier Intelligence Integration ─────────────────────
+        // Wires Multiplier specialist agents into the Agent Platform:
         // - Registers MultiplierSpecialistAgent with orchestrator (for CommunicationBus dispatch)
-        // - Registers 6 multiplier.* MCP tools (available to ALL Cloudflare agents)
+        // - Registers 6 multiplier.* MCP tools (available to ALL agents)
         // - Connects Sports Intelligence enrichment (api-football/thesportsdb/sportmonks)
         // - Enables LLM enhancement via ModelRouter (70% stat / 30% LLM blend)
         try {
             $this->multiplierIntegration = new \AIWorkforce\MultiplierIntelligence\MultiplierPlatformIntegration(
-                $this->cloudflare,
+                $this->agentPlatform,
                 $this->sports ?? null
             );
             $this->multiplierIntegration->register();

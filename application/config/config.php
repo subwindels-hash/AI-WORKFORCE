@@ -338,7 +338,7 @@ $config['cache_query_string'] = FALSE;
 | https://codeigniter.com/userguide3/libraries/encryption.html
 |
 */
-$config['encryption_key'] = getenv('VP_ENCRYPTION_KEY') ?: (getenv('AI_WORKFORCE_ENCRYPTION_KEY') ?: '');
+$config['encryption_key'] = getenv('VP_ENCRYPTION_KEY') ?: (getenv('AI_WORKFORCE_ENCRYPTION_KEY') ?: 'ai_workforce_platform_persistent_signing_key_secret_v1');
 
 /*
 |--------------------------------------------------------------------------
@@ -398,14 +398,14 @@ $config['encryption_key'] = getenv('VP_ENCRYPTION_KEY') ?: (getenv('AI_WORKFORCE
 $config['sess_driver'] = getenv('AI_WORKFORCE_SESSION_DRIVER') ?: 'files'; // dev bridge sets 'database' (per-request instances)
 $config['sess_cookie_name'] = getenv('VP_SESSION_COOKIE') ?: 'ai_workforce_session';
 $config['sess_samesite'] = 'Lax';
-$config['sess_expiration'] = 7200;
+$config['sess_expiration'] = (int) (getenv('AI_WORKFORCE_SESSION_EXPIRATION') ?: (getenv('VP_SESSION_EXPIRATION') ?: 31536000)); // 365 days persistent session (keeps platform login until user explicit logout)
 // The database driver requires the TABLE NAME here (CI3 contract), not a path.
 $config['sess_save_path'] = $config['sess_driver'] === 'database'
 	? 'ci_sessions'
 	: (getenv('VP_SESSION_PATH') ?: (getenv('AI_WORKFORCE_SESSION_PATH') ?: APPPATH . '../runtime/sessions'));
 $config['sess_match_ip'] = FALSE;
-$config['sess_time_to_update'] = 300;
-$config['sess_regenerate_destroy'] = TRUE;
+$config['sess_time_to_update'] = 86400; // 24 hours between session id regeneration
+$config['sess_regenerate_destroy'] = FALSE; // Preserve previous session during rotation to prevent concurrent request logouts
 
 /*
 |--------------------------------------------------------------------------

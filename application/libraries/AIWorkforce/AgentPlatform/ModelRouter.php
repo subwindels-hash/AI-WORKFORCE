@@ -1,5 +1,5 @@
 <?php
-namespace AIWorkforce\Cloudflare;
+namespace AIWorkforce\AgentPlatform;
 
 use AIWorkforce\ApiProviders;
 
@@ -7,8 +7,7 @@ use AIWorkforce\ApiProviders;
  * Centralized AI Model Gateway / Router
  *
  * All agents call models through this abstraction. It supports:
- * - Multiple OpenAI-compatible providers with automatic failover
- * - Automatic failover between providers and models
+ * - Multiple AI providers (OpenAI, Grok, etc.) with automatic failover
  * - Rate limiting per provider/model
  * - Usage tracking (tokens, cost, latency)
  * - Provider health monitoring
@@ -52,7 +51,7 @@ class ModelRouter
      */
     private function discoverProviders(): void
     {
-        // Register the configured LLM provider (OpenAI-compatible)
+        // Register the configured LLM provider
         $llmCfg = ApiProviders::resolve('llm');
         if (is_array($llmCfg) && ($llmCfg['driver'] ?? '') === 'openai_compatible') {
             $this->registerProvider('openai_compat', [
@@ -63,16 +62,28 @@ class ModelRouter
                 'health' => ['status' => 'UNKNOWN', 'lastCheck' => null],
             ]);
         }
+        if (is_array($llmCfg) && ($llmCfg['driver'] ?? '') === 'grok') {
+            $this->registerProvider('grok', [
+                'driver' => 'grok',
+                'config' => $llmCfg,
+                'priority' => 2,
+                'models' => $this->grokModels($llmCfg),
+                'health' => ['status' => 'UNKNOWN', 'lastCheck' => null],
+                'rateLimit' => ['rpm' => 120, 'tpm' => 200000],
+            ]);
+        }
 
         // Register language_ai provider (if different from llm)
         $langCfg = ApiProviders::resolve('language_ai');
         if (is_array($langCfg) && ($langCfg['driver'] ?? '') !== ($llmCfg['driver'] ?? '')) {
-            $this->registerProvider('language_ai', [
-                'driver' => $langCfg['driver'] ?? 'unknown',
+            $driver = $langCfg['driver'] ?? 'unknown';
+            $this->registerProvider($driver === 'grok' ? 'grok_language' : 'language_ai', [
+                'driver' => $driver,
                 'config' => $langCfg,
                 'priority' => 3,
-                'models' => ['default'],
+                'models' => $driver === 'grok' ? $this->grokModels($langCfg) : ['default'],
                 'health' => ['status' => 'UNKNOWN', 'lastCheck' => null],
+                'rateLimit' => $driver === 'grok' ? ['rpm' => 120, 'tpm' => 200000] : ['rpm' => 60, 'tpm' => 100000],
             ]);
         }
     }
@@ -203,7 +214,7 @@ class ModelRouter
     {
         $cfg = $provider['config'];
 
-        // All model calls go through the standard OpenAI-compatible chat client.
+        // All model calls go through the standard chat client.
         return ApiProviders::openaiChat($cfg, $messages, $maxTokens);
     }
 
@@ -291,6 +302,8 @@ class ModelRouter
         // Approximate per-token cost estimates (USD)
         $rates = [
             'openai_compat' => 0.00002,
+            'grok' => 0.00001,
+            'grok_language' => 0.00001,
             'language_ai' => 0.00001,
         ];
         $rate = $rates[$provider] ?? 0.00002;
@@ -341,6 +354,16 @@ class ModelRouter
     private function openaiCompatibleModels(): array
     {
         return ['default'];
+    }
+
+    private function grokModels(?array $cfg = null): array
+    {
+        $default = (string) ($cfg['extra']['model'] ?? $cfg['model'] ?? 'grok-2-latest');
+        $catalog = ['grok-2-latest', 'grok-2', 'grok-2-mini', 'grok-2-vision-1212', 'grok-beta', 'grok-3', 'grok-3-mini'];
+        if ($default !== '' && !in_array($default, $catalog, true)) {
+            array_unshift($catalog, $default);
+        }
+        return array_values(array_unique($catalog));
     }
 
     private function auditLog(string $type, array $detail): void

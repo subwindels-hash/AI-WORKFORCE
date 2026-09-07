@@ -25,23 +25,25 @@
       <?php if (empty($accounts)): ?>
         <p class="dim">No paper accounts yet — create one on the right to begin.</p>
       <?php else: ?>
-        <table class="tbl mono">
-          <thead><tr><th>#</th><th>Name</th><th class="num">Balance</th><th class="num">Equity</th><th class="num">Unrealized</th><th class="num">Daily P&L</th><th class="num">Open</th><th></th></tr></thead>
-          <tbody>
-            <?php foreach ($accounts as $s): ?>
-              <tr>
-                <td class="dim"><?= e($s['account']['id']) ?></td>
-                <td style="font-weight:700"><?= e($s['account']['name']) ?></td>
-                <td class="num"><?= e(number_format($s['balance'], 2)) ?></td>
-                <td class="num" style="font-weight:700"><?= e(number_format($s['equity'], 2)) ?></td>
-                <td class="num <?= $s['unrealizedPnl'] >= 0 ? 'up' : 'down' ?>"><?= e(number_format($s['unrealizedPnl'], 2)) ?></td>
-                <td class="num <?= $s['dailyPnl'] >= 0 ? 'up' : 'down' ?>"><?= e(number_format($s['dailyPnl'], 2)) ?></td>
-                <td class="num"><?= e($s['openPositions']) ?></td>
-                <td class="num"><a class="btn small" href="/paper/<?= e($s['account']['id']) ?>">open console</a></td>
-              </tr>
-            <?php endforeach; ?>
-          </tbody>
-        </table>
+        <div class="table-scroll">
+          <table class="tbl mono">
+            <thead><tr><th>#</th><th>Name</th><th class="num">Balance</th><th class="num">Equity</th><th class="num">Unrealized</th><th class="num">Daily P&L</th><th class="num">Open</th><th></th></tr></thead>
+            <tbody>
+              <?php foreach ($accounts as $s): ?>
+                <tr>
+                  <td class="dim"><?= e($s['account']['id']) ?></td>
+                  <td style="font-weight:700"><?= e($s['account']['name']) ?></td>
+                  <td class="num"><?= e(number_format($s['balance'], 2)) ?></td>
+                  <td class="num" style="font-weight:700"><?= e(number_format($s['equity'], 2)) ?></td>
+                  <td class="num <?= $s['unrealizedPnl'] >= 0 ? 'up' : 'down' ?>"><?= e(number_format($s['unrealizedPnl'], 2)) ?></td>
+                  <td class="num <?= $s['dailyPnl'] >= 0 ? 'up' : 'down' ?>"><?= e(number_format($s['dailyPnl'], 2)) ?></td>
+                  <td class="num"><?= e($s['openPositions']) ?></td>
+                  <td class="num"><a class="btn small" href="/paper/<?= e($s['account']['id']) ?>">open console</a></td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
       <?php endif; ?>
     </div>
   </div>

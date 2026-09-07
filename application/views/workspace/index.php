@@ -125,7 +125,7 @@ $mode = $status['tradingMode'] ?? null;
     </div>
     
     <!-- Jackpot Display with Countdown -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px">
+    <div class="grid-2-col" style="margin-bottom:18px">
       <!-- Jackpot Card -->
       <div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:var(--radius);padding:20px;color:#fff">
         <div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;opacity:.9;margin-bottom:6px">Current Jackpot</div>
@@ -368,9 +368,9 @@ $_aiHealth = $_aiTotal > 0 ? round(($_aiHealthy / $_aiTotal) * 100, 0) : 0;
       </div>
       <?php $mIntg = $multiplierWidget['integration'] ?? []; ?>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
-        <span class="statuspill" style="font-size:10px;<?= !empty($mIntg['cloudflare']) ? 'border-color:var(--green)' : '' ?>">
-          <i class="pill-dot" style="<?= !empty($mIntg['cloudflare']) ? 'background:var(--green)' : 'background:var(--dim)' ?>"></i>
-          AI Agents <?= !empty($mIntg['cloudflare']) ? 'Active' : 'Standby' ?>
+        <span class="statuspill" style="font-size:10px;<?= !empty($mIntg['ai_agents']) ? 'border-color:var(--green)' : '' ?>">
+          <i class="pill-dot" style="<?= !empty($mIntg['ai_agents']) ? 'background:var(--green)' : 'background:var(--dim)' ?>"></i>
+          AI Agents <?= !empty($mIntg['ai_agents']) ? 'Active' : 'Standby' ?>
         </span>
         <span class="statuspill" style="font-size:10px;<?= !empty($mIntg['llm']) ? 'border-color:var(--green)' : '' ?>">
           <i class="pill-dot" style="<?= !empty($mIntg['llm']) ? 'background:var(--green)' : 'background:var(--dim)' ?>"></i>
@@ -528,19 +528,21 @@ $sportsFeeds = (int) ($sportsWidget['totalProviders'] ?? 0);
           <p style="margin-top:12px"><a class="btn primary" href="/analysis">Run your first analysis</a></p>
         </div>
       <?php else: ?>
-        <table class="tbl">
-          <thead><tr><th>Symbol</th><th>Timeframe</th><th>Bias</th><th class="num">Completed</th></tr></thead>
-          <tbody>
-            <?php foreach ($history as $h): ?>
-              <tr>
-                <td class="mono"><?= e($h['symbol']) ?></td>
-                <td class="dim"><?= e($h['timeframe']) ?></td>
-                <td><?= e($h['bias']) ?></td>
-                <td class="num dim"><?= e(substr((string)$h['completed_at'], 0, 16)) ?></td>
-              </tr>
-            <?php endforeach; ?>
-          </tbody>
-        </table>
+        <div class="table-scroll">
+          <table class="tbl">
+            <thead><tr><th>Symbol</th><th>Timeframe</th><th>Bias</th><th class="num">Completed</th></tr></thead>
+            <tbody>
+              <?php foreach ($history as $h): ?>
+                <tr>
+                  <td class="mono"><?= e($h['symbol']) ?></td>
+                  <td class="dim"><?= e($h['timeframe']) ?></td>
+                  <td><?= e($h['bias']) ?></td>
+                  <td class="num dim"><?= e(substr((string)$h['completed_at'], 0, 16)) ?></td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
       <?php endif; ?>
     </div>
     <a class="panel-foot-link" href="/journal">View analytics →</a>

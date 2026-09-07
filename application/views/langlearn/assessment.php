@@ -31,13 +31,15 @@
     <h3>Result</h3>
     <div class="body" style="padding-top:12px">
       <div style="font-size:20px;font-weight:700;margin-bottom:8px">Overall level: <span class="badge big b-green"><?= e($r['overallLevel']) ?></span></div>
-      <table class="tbl">
-        <?php foreach ($r['perSkill'] as $skill => $s): ?>
-          <tr><td class="dim"><?= e($skill) ?></td><td><?= e($s['level']) ?> <span class="dim">(<?= (int) $s['correct'] ?>/<?= (int) $s['total'] ?> correct)</span></td></tr>
-        <?php endforeach; ?>
-        <?php if ($r['strengths']): ?><tr><td class="dim">Strengths</td><td class="up"><?= e(implode(', ', $r['strengths'])) ?></td></tr><?php endif; ?>
-        <?php if ($r['weaknesses']): ?><tr><td class="dim">Recommended focus</td><td class="down"><?= e(implode(', ', $r['weaknesses'])) ?></td></tr><?php endif; ?>
-      </table>
+      <div class="table-scroll">
+        <table class="tbl">
+          <?php foreach ($r['perSkill'] as $skill => $s): ?>
+            <tr><td class="dim"><?= e($skill) ?></td><td><?= e($s['level']) ?> <span class="dim">(<?= (int) $s['correct'] ?>/<?= (int) $s['total'] ?> correct)</span></td></tr>
+          <?php endforeach; ?>
+          <?php if ($r['strengths']): ?><tr><td class="dim">Strengths</td><td class="up"><?= e(implode(', ', $r['strengths'])) ?></td></tr><?php endif; ?>
+          <?php if ($r['weaknesses']): ?><tr><td class="dim">Recommended focus</td><td class="down"><?= e(implode(', ', $r['weaknesses'])) ?></td></tr><?php endif; ?>
+        </table>
+      </div>
       <?php if ($r['ceilingNote']): ?><p class="dim" style="font-size:11px;margin-top:8px"><?= e($r['ceilingNote']) ?></p><?php endif; ?>
       <p class="dim" style="font-size:11px"><?= e($r['notAssessedNote']) ?></p>
       <div style="margin-top:12px"><a class="btn primary" href="/app/languages/p/<?= (int) $assessment['profile_id'] ?>">Back to my <?= e($language['name']) ?></a></div>

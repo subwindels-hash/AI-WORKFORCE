@@ -67,41 +67,43 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
       <span class="dim" style="font-size:11px">PNG, JPEG, GIF or WebP · up to 2 MB. Circular preview shown throughout the dashboard.</span>
     </div>
 
-    <table class="tbl" style="margin-top:18px">
-      <tr>
-        <td class="dim">Username</td>
-        <td><b>@<?= e($username) ?></b></td>
-        <td class="num">
-          <button class="btn small" type="button" data-toggle-panel="edit-username" aria-expanded="false">Edit</button>
-        </td>
-      </tr>
-      <tr>
-        <td class="dim">Email</td>
-        <td><?= e($email) ?></td>
-        <td class="num">
-          <button class="btn small" type="button" data-toggle-panel="edit-email" aria-expanded="false">Edit</button>
-        </td>
-      </tr>
-      <tr>
-        <td class="dim">Phone</td>
-        <td><?= $phone !== '' ? e($phone) : '<span class="dim">Not set</span>' ?></td>
-        <td class="num">
-          <button class="btn small" type="button" data-toggle-panel="edit-contact" aria-expanded="false">Edit</button>
-        </td>
-      </tr>
-      <tr>
-        <td class="dim">Address</td>
-        <td><?= $address !== '' ? e($address) : '<span class="dim">Not set</span>' ?></td>
-        <td class="num">
-          <button class="btn small" type="button" data-toggle-panel="edit-contact" aria-expanded="false">Edit</button>
-        </td>
-      </tr>
-      <tr>
-        <td class="dim">User ID</td>
-        <td><span class="mono badge b-sky"><?= e($uid) ?></span> <span class="dim" style="font-size:11px">permanent — cannot be changed</span></td>
-        <td class="num"></td>
-      </tr>
-    </table>
+    <div class="table-scroll" style="margin-top:18px">
+      <table class="tbl">
+        <tr>
+          <td class="dim">Username</td>
+          <td><b>@<?= e($username) ?></b></td>
+          <td class="num">
+            <button class="btn small" type="button" data-toggle-panel="edit-username" aria-expanded="false">Edit</button>
+          </td>
+        </tr>
+        <tr>
+          <td class="dim">Email</td>
+          <td><?= e($email) ?></td>
+          <td class="num">
+            <button class="btn small" type="button" data-toggle-panel="edit-email" aria-expanded="false">Edit</button>
+          </td>
+        </tr>
+        <tr>
+          <td class="dim">Phone</td>
+          <td><?= $phone !== '' ? e($phone) : '<span class="dim">Not set</span>' ?></td>
+          <td class="num">
+            <button class="btn small" type="button" data-toggle-panel="edit-contact" aria-expanded="false">Edit</button>
+          </td>
+        </tr>
+        <tr>
+          <td class="dim">Address</td>
+          <td><?= $address !== '' ? e($address) : '<span class="dim">Not set</span>' ?></td>
+          <td class="num">
+            <button class="btn small" type="button" data-toggle-panel="edit-contact" aria-expanded="false">Edit</button>
+          </td>
+        </tr>
+        <tr>
+          <td class="dim">User ID</td>
+          <td><span class="mono badge b-sky"><?= e($uid) ?></span> <span class="dim" style="font-size:11px">permanent — cannot be changed</span></td>
+          <td class="num"></td>
+        </tr>
+      </table>
+    </div>
 
     <div id="edit-username" class="account-edit" hidden>
       <h4>Change username</h4>
@@ -190,11 +192,13 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
       <hr style="border:0;border-top:1px solid var(--line, #e2e8f0);margin:22px 0">
       <h4 style="margin:0 0 6px">Security PIN and question</h4>
       <p class="dim" style="font-size:12px;margin:0 0 10px">Your 4-digit PIN is assigned automatically and cannot be changed. Super Admin can read it from the dashboard. Confirm your password to change the security question.</p>
-      <table class="tbl" style="margin-bottom:14px">
-        <tr><td class="dim">Current PIN</td><td class="mono"><?= $pin !== '' ? e($pin) : '<span class="dim">Not set</span>' ?> <span class="dim" style="font-size:11px">permanent — cannot be changed</span></td></tr>
-        <tr><td class="dim">Security question</td><td><?= $question !== '' ? e($question) : '<span class="dim">Not set</span>' ?></td></tr>
-        <tr><td class="dim">Security answer</td><td><?= $answer !== '' ? e($answer) : '<span class="dim">Not set</span>' ?></td></tr>
-      </table>
+      <div class="table-scroll" style="margin-bottom:14px">
+        <table class="tbl">
+          <tr><td class="dim">Current PIN</td><td class="mono"><?= $pin !== '' ? e($pin) : '<span class="dim">Not set</span>' ?> <span class="dim" style="font-size:11px">permanent — cannot be changed</span></td></tr>
+          <tr><td class="dim">Security question</td><td><?= $question !== '' ? e($question) : '<span class="dim">Not set</span>' ?></td></tr>
+          <tr><td class="dim">Security answer</td><td><?= $answer !== '' ? e($answer) : '<span class="dim">Not set</span>' ?></td></tr>
+        </table>
+      </div>
       <form method="post" action="/account/recovery" class="auth-form" id="change-recovery-form">
         <input type="hidden" name="csrf_token" value="<?= e($csrf) ?>">
         <label class="auth-field">
@@ -230,20 +234,22 @@ $initials = strtoupper(mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', $displayNam
   <section class="panel">
     <h3>Account information</h3>
     <div class="body">
-      <table class="tbl">
-        <tr><td class="dim">User ID</td><td><span class="mono badge b-sky"><?= e($uid) ?></span></td></tr>
-        <tr><td class="dim">Username</td><td>@<?= e($username) ?></td></tr>
-        <tr><td class="dim">Email</td><td><?= e($email) ?></td></tr>
-        <tr><td class="dim">Phone</td><td><?= $phone !== '' ? e($phone) : 'Not set' ?></td></tr>
-        <tr><td class="dim">Address</td><td><?= $address !== '' ? e($address) : 'Not set' ?></td></tr>
-        <?php if (!$impersonating): ?>
-        <tr><td class="dim">Security PIN</td><td class="mono"><?= $pin !== '' ? e($pin) : 'Not set' ?> <span class="dim" style="font-size:11px">cannot be changed</span></td></tr>
-        <tr><td class="dim">Security question</td><td><?= $question !== '' ? e($question) : 'Not set' ?></td></tr>
-        <?php endif; ?>
-        <tr><td class="dim">Account created</td><td><?= e(substr((string) ($u['created_at'] ?? ''), 0, 16)) ?></td></tr>
-        <tr><td class="dim">Last login</td><td><?= e(substr((string) ($u['last_login_at'] ?? 'Not recorded'), 0, 16)) ?></td></tr>
-        <tr><td class="dim">Account status</td><td><span class="badge <?= empty($u['active']) ? 'b-red' : 'b-green' ?>"><?= empty($u['active']) ? 'INACTIVE' : 'ACTIVE' ?></span></td></tr>
-      </table>
+      <div class="table-scroll">
+        <table class="tbl">
+          <tr><td class="dim">User ID</td><td><span class="mono badge b-sky"><?= e($uid) ?></span></td></tr>
+          <tr><td class="dim">Username</td><td>@<?= e($username) ?></td></tr>
+          <tr><td class="dim">Email</td><td><?= e($email) ?></td></tr>
+          <tr><td class="dim">Phone</td><td><?= $phone !== '' ? e($phone) : 'Not set' ?></td></tr>
+          <tr><td class="dim">Address</td><td><?= $address !== '' ? e($address) : 'Not set' ?></td></tr>
+          <?php if (!$impersonating): ?>
+          <tr><td class="dim">Security PIN</td><td class="mono"><?= $pin !== '' ? e($pin) : 'Not set' ?> <span class="dim" style="font-size:11px">cannot be changed</span></td></tr>
+          <tr><td class="dim">Security question</td><td><?= $question !== '' ? e($question) : 'Not set' ?></td></tr>
+          <?php endif; ?>
+          <tr><td class="dim">Account created</td><td><?= e(substr((string) ($u['created_at'] ?? ''), 0, 16)) ?></td></tr>
+          <tr><td class="dim">Last login</td><td><?= e(substr((string) ($u['last_login_at'] ?? 'Not recorded'), 0, 16)) ?></td></tr>
+          <tr><td class="dim">Account status</td><td><span class="badge <?= empty($u['active']) ? 'b-red' : 'b-green' ?>"><?= empty($u['active']) ? 'INACTIVE' : 'ACTIVE' ?></span></td></tr>
+        </table>
+      </div>
     </div>
   </section>
 </div>

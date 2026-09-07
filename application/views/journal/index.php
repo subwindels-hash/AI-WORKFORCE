@@ -25,21 +25,23 @@
           <div class="stat"><div class="k">Max DD ($)</div><div class="v warn"><?= e(number_format($summary['overall']['maxDrawdownAbs'], 0)) ?></div></div>
         </div>
         <?php if (!empty($summary['groups'])): ?>
-          <table class="tbl mono" style="margin-top:12px">
-            <thead><tr><th><?= e($groupBy) ?></th><th class="num">Trades</th><th class="num">Win%</th><th class="num">PF</th><th class="num">E[P&L]</th><th class="num">Total P&L</th></tr></thead>
-            <tbody>
-              <?php foreach ($summary['groups'] as $g): $m = $g['metrics']; ?>
-                <tr>
-                  <td style="font-weight:700"><?= e($g['key']) ?></td>
-                  <td class="num dim"><?= e($m['count']) ?></td>
-                  <td class="num"><?= $m['winRate'] !== null ? e(number_format($m['winRate'] * 100, 0)) . '%' : '—' ?></td>
-                  <td class="num"><?= $m['profitFactor'] !== null ? e(number_format($m['profitFactor'], 2)) : '—' ?></td>
-                  <td class="num <?= ($m['expectancyPnl'] ?? 0) >= 0 ? 'up' : 'down' ?>"><?= $m['expectancyPnl'] !== null ? e(number_format($m['expectancyPnl'], 1)) : '—' ?></td>
-                  <td class="num <?= $m['totalPnl'] >= 0 ? 'up' : 'down' ?>"><?= e(number_format($m['totalPnl'], 0)) ?></td>
-                </tr>
-              <?php endforeach; ?>
-            </tbody>
-          </table>
+          <div class="table-scroll" style="margin-top:12px">
+            <table class="tbl mono">
+              <thead><tr><th><?= e($groupBy) ?></th><th class="num">Trades</th><th class="num">Win%</th><th class="num">PF</th><th class="num">E[P&L]</th><th class="num">Total P&L</th></tr></thead>
+              <tbody>
+                <?php foreach ($summary['groups'] as $g): $m = $g['metrics']; ?>
+                  <tr>
+                    <td style="font-weight:700"><?= e($g['key']) ?></td>
+                    <td class="num dim"><?= e($m['count']) ?></td>
+                    <td class="num"><?= $m['winRate'] !== null ? e(number_format($m['winRate'] * 100, 0)) . '%' : '—' ?></td>
+                    <td class="num"><?= $m['profitFactor'] !== null ? e(number_format($m['profitFactor'], 2)) : '—' ?></td>
+                    <td class="num <?= ($m['expectancyPnl'] ?? 0) >= 0 ? 'up' : 'down' ?>"><?= $m['expectancyPnl'] !== null ? e(number_format($m['expectancyPnl'], 1)) : '—' ?></td>
+                    <td class="num <?= $m['totalPnl'] >= 0 ? 'up' : 'down' ?>"><?= e(number_format($m['totalPnl'], 0)) ?></td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
         <?php endif; ?>
         <?php if (!empty($summary['note'])): ?><p class="warn" style="font-size:11px"><?= e($summary['note']) ?></p><?php endif; ?>
       </div>
@@ -49,26 +51,28 @@
       <h3>Journal entries (latest 200)</h3>
       <div class="body scroll" style="max-height:520px;overflow-y:auto;padding-top:12px">
         <?php if (empty($entries)): ?><p class="dim">No entries yet — run a backtest or paper trade.</p><?php else: ?>
-          <table class="tbl mono">
-            <thead><tr><th>Time</th><th>Src</th><th>Sym</th><th>Dir</th><th>Strategy</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">P&L</th><th class="num">R</th><th class="num">Conf</th><th>Reason</th></tr></thead>
-            <tbody>
-              <?php foreach ($entries as $en): ?>
-                <tr>
-                  <td class="dim"><?= e(substr($en['entry_time'], 0, 16)) ?></td>
-                  <td><span class="badge <?= ['backtest' => 'b-sky', 'paper' => 'b-violet', 'manual' => 'b-gray', 'live' => 'b-red'][$en['source']] ?? 'b-gray' ?>" style="padding:0 5px"><?= e($en['source']) ?></span></td>
-                  <td style="font-weight:700"><?= e($en['symbol']) ?></td>
-                  <td class="<?= $en['direction'] === 'LONG' ? 'up' : 'down' ?>"><?= $en['direction'] === 'LONG' ? '▲' : '▼' ?></td>
-                  <td class="dim"><?= e($en['strategy'] ?? '—') ?></td>
-                  <td class="num"><?= e(number_format($en['entry_price'], 5)) ?></td>
-                  <td class="num"><?= $en['exit_price'] !== null ? e(number_format($en['exit_price'], 5)) : 'open' ?></td>
-                  <td class="num <?= ($en['pnl'] ?? 0) >= 0 ? 'up' : 'down' ?>"><?= $en['pnl'] !== null ? e(number_format($en['pnl'], 1)) : '—' ?></td>
-                  <td class="num dim"><?= $en['r_multiple'] !== null ? e(number_format($en['r_multiple'], 2)) : '—' ?></td>
-                  <td class="num dim"><?= $en['ai_confidence'] !== null ? e(number_format($en['ai_confidence'] * 100, 0)) . '%' : '—' ?></td>
-                  <td class="dim" style="font-size:10px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= e($en['reason'] ?? '') ?>"><?= e($en['reason'] ?? '') ?></td>
-                </tr>
-              <?php endforeach; ?>
-            </tbody>
-          </table>
+          <div class="table-scroll">
+            <table class="tbl mono">
+              <thead><tr><th>Time</th><th>Src</th><th>Sym</th><th>Dir</th><th>Strategy</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">P&L</th><th class="num">R</th><th class="num">Conf</th><th>Reason</th></tr></thead>
+              <tbody>
+                <?php foreach ($entries as $en): ?>
+                  <tr>
+                    <td class="dim"><?= e(substr($en['entry_time'], 0, 16)) ?></td>
+                    <td><span class="badge <?= ['backtest' => 'b-sky', 'paper' => 'b-violet', 'manual' => 'b-gray', 'live' => 'b-red'][$en['source']] ?? 'b-gray' ?>" style="padding:0 5px"><?= e($en['source']) ?></span></td>
+                    <td style="font-weight:700"><?= e($en['symbol']) ?></td>
+                    <td class="<?= $en['direction'] === 'LONG' ? 'up' : 'down' ?>"><?= $en['direction'] === 'LONG' ? '▲' : '▼' ?></td>
+                    <td class="dim"><?= e($en['strategy'] ?? '—') ?></td>
+                    <td class="num"><?= e(number_format($en['entry_price'], 5)) ?></td>
+                    <td class="num"><?= $en['exit_price'] !== null ? e(number_format($en['exit_price'], 5)) : 'open' ?></td>
+                    <td class="num <?= ($en['pnl'] ?? 0) >= 0 ? 'up' : 'down' ?>"><?= $en['pnl'] !== null ? e(number_format($en['pnl'], 1)) : '—' ?></td>
+                    <td class="num dim"><?= $en['r_multiple'] !== null ? e(number_format($en['r_multiple'], 2)) : '—' ?></td>
+                    <td class="num dim"><?= $en['ai_confidence'] !== null ? e(number_format($en['ai_confidence'] * 100, 0)) . '%' : '—' ?></td>
+                    <td class="dim" style="font-size:10px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= e($en['reason'] ?? '') ?>"><?= e($en['reason'] ?? '') ?></td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
         <?php endif; ?>
       </div>
     </div>

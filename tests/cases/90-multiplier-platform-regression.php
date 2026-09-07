@@ -59,7 +59,7 @@ test('multiplier intelligence schema module is registered and installed', functi
 });
 
 test('agent platform status exposes availableAgents as a list of roles', function () {
-    $status = platform()->cloudflare->status();
+    $status = platform()->agentPlatform->status();
     assert_true(is_array($status['communicationBus']['availableAgents'] ?? null), 'availableAgents is an array');
     foreach ($status['communicationBus']['availableAgents'] as $role) {
         assert_true(is_string($role) && $role !== '', 'agent role is a non-empty string');

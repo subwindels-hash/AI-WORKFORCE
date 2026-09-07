@@ -4,10 +4,10 @@ namespace AIWorkforce\MultiplierIntelligence;
 use AIWorkforce\Agents\SpecialistAgent;
 
 /**
- * Cloudflare Specialist Agent Adapter for Multiplier Intelligence
+ * Specialist Agent Adapter for Multiplier Intelligence
  * 
  * Wraps the Multiplier Intelligence system as a SpecialistAgent so it can be
- * dispatched through the Cloudflare AgentCommunicationBus alongside other agents.
+ * dispatched through the AgentCommunicationBus alongside other agents.
  * 
  * This enables scenarios like:
  * - A user asks "What's the next multiplier signal?" → routes to this agent
@@ -25,7 +25,7 @@ final class MultiplierSpecialistAgent implements SpecialistAgent
     /** @var object|null Sports enrichment provider */
     private $sportsEnrichment;
     
-    /** @var \AIWorkforce\Cloudflare\ModelRouter|null */
+    /** @var \AIWorkforce\AgentPlatform\ModelRouter|null */
     private $modelRouter;
     
     private bool $useLLM = false;
@@ -83,14 +83,14 @@ final class MultiplierSpecialistAgent implements SpecialistAgent
         // Apply LLM enhancement if available
         if ($this->useLLM && $this->modelRouter !== null) {
             try {
-                $bridge = new MultiplierCloudflareBridge($this->modelRouter);
-                $signal['cloudflare_enhanced'] = true;
-                $signal['cloudflare_signal'] = $bridge->generateCloudflareSignal([
+                $bridge = new MultiplierAgentBridge($this->modelRouter);
+                $signal['ai_enhanced'] = true;
+                $signal['ai_signal'] = $bridge->generateEnhancedSignal([
                     'provider' => $this->provider->code(),
                 ]);
             } catch (\Throwable $e) {
-                $signal['cloudflare_enhanced'] = false;
-                $signal['cloudflare_error'] = $e->getMessage();
+                $signal['ai_enhanced'] = false;
+                $signal['ai_error'] = $e->getMessage();
             }
         }
         
@@ -135,8 +135,8 @@ final class MultiplierSpecialistAgent implements SpecialistAgent
             );
         }
         
-        if (!empty($signal['cloudflare_enhanced'])) {
-            $lines[] = "- Cloudflare AI Enhanced: Yes (LLM reasoning applied)";
+        if (!empty($signal['ai_enhanced'])) {
+            $lines[] = "- AI Enhanced: Yes (LLM reasoning applied)";
         }
         
         $lines[] = "";

@@ -32,6 +32,7 @@ $isActive = function(array $keys) use ($active): bool {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= e($pageTitle . ($seo['title_suffix'] ?? ' · WINDELS AI WORKFORCE')) ?></title>
 <meta name="robots" content="noindex,nofollow">
+<meta name="csrf-token" content="<?= e((string) $ci->session->userdata('csrf_token')) ?>">
 <link rel="icon" type="image/png" href="/assets/images/windels-mark.png">
 <link rel="stylesheet" href="/assets/css/ai_workforce.css">
 </head>

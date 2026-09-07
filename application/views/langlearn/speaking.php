@@ -43,19 +43,21 @@ $locale = $lcodes[$langCode ?? 'en'] ?? 'en-GB';
   <div class="panel">
     <h3>Speaking history (real transcripts)</h3>
     <div class="body scroll" style="padding-top:12px">
-      <table class="tbl">
-        <thead><tr><th>At</th><th>Prompt</th><th>Transcript</th><th class="num">Word accuracy</th></tr></thead>
-        <tbody>
-          <?php foreach ($history as $h): ?>
-            <tr>
-              <td class="dim"><?= e(substr((string) $h['created_at'], 5, 14)) ?></td>
-              <td><?= e(mb_substr((string) $h['prompt_text'], 0, 40)) ?></td>
-              <td class="dim"><?= e(mb_substr((string) ($h['transcript'] ?? '(no transcript)'), 0, 40)) ?></td>
-              <td class="num"><?= $h['word_accuracy_pct'] !== null ? e((string) $h['word_accuracy_pct']) . '%' : '—' ?></td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
+      <div class="table-scroll">
+        <table class="tbl">
+          <thead><tr><th>At</th><th>Prompt</th><th>Transcript</th><th class="num">Word accuracy</th></tr></thead>
+          <tbody>
+            <?php foreach ($history as $h): ?>
+              <tr>
+                <td class="dim"><?= e(substr((string) $h['created_at'], 5, 14)) ?></td>
+                <td><?= e(mb_substr((string) $h['prompt_text'], 0, 40)) ?></td>
+                <td class="dim"><?= e(mb_substr((string) ($h['transcript'] ?? '(no transcript)'), 0, 40)) ?></td>
+                <td class="num"><?= $h['word_accuracy_pct'] !== null ? e((string) $h['word_accuracy_pct']) . '%' : '—' ?></td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 <?php endif; ?>

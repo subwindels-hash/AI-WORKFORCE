@@ -13,7 +13,7 @@
   <div class="panel">
     <h3>Risk limits</h3>
     <div class="body" style="padding-top:12px">
-      <form method="post" action="/risk/limits" class="mono" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px">
+      <form method="post" action="/risk/limits" class="mono risk-form-grid">
         <?php
         $fields = [
             'riskPerTradePct' => ['Risk per trade (%)', 100], 'maxRiskPerTradePct' => ['Hard risk cap/trade (%)', 100],
@@ -45,19 +45,21 @@
         <?php if (empty($lastReport['alerts'])): ?>
           <div class="notice ok" style="margin-top:8px">No active risk alerts.</div>
         <?php else: ?>
-          <table class="tbl mono" style="margin-top:8px">
-            <thead><tr><th>Severity</th><th>Code</th><th>Scope</th><th>Detail</th></tr></thead>
-            <tbody>
-              <?php foreach ($lastReport['alerts'] as $a): ?>
-                <tr>
-                  <td><span class="badge <?= $a['severity'] === 'critical' ? 'b-red' : 'b-amber' ?>"><?= e($a['severity']) ?></span></td>
-                  <td><?= e($a['code']) ?></td>
-                  <td class="dim"><?= e($a['scope']) ?></td>
-                  <td><?= e($a['detail']) ?></td>
-                </tr>
-              <?php endforeach; ?>
-            </tbody>
-          </table>
+          <div class="table-scroll">
+            <table class="tbl mono" style="margin-top:8px">
+              <thead><tr><th>Severity</th><th>Code</th><th>Scope</th><th>Detail</th></tr></thead>
+              <tbody>
+                <?php foreach ($lastReport['alerts'] as $a): ?>
+                  <tr>
+                    <td><span class="badge <?= $a['severity'] === 'critical' ? 'b-red' : 'b-amber' ?>"><?= e($a['severity']) ?></span></td>
+                    <td><?= e($a['code']) ?></td>
+                    <td class="dim"><?= e($a['scope']) ?></td>
+                    <td><?= e($a['detail']) ?></td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
         <?php endif; ?>
       <?php endif; ?>
     </div>
@@ -84,18 +86,20 @@
 
     <?php if (!empty($prot['triggers'])): ?>
       <h4 style="margin:14px 0 6px">Active conditions</h4>
-      <table class="tbl mono">
-        <thead><tr><th>State</th><th>Trigger</th><th>Reason</th></tr></thead>
-        <tbody>
-          <?php foreach ($prot['triggers'] as $t): ?>
-            <tr>
-              <td><span class="badge <?= ($t['state'] ?? '') === 'AUTOMATIC_KILL' ? 'b-red' : 'b-amber' ?>"><?= e((string) ($t['state'] ?? '')) ?></span></td>
-              <td><?= e((string) ($t['code'] ?? '')) ?></td>
-              <td><?= e((string) ($t['reason'] ?? '')) ?></td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
+      <div class="table-scroll">
+        <table class="tbl mono">
+          <thead><tr><th>State</th><th>Trigger</th><th>Reason</th></tr></thead>
+          <tbody>
+            <?php foreach ($prot['triggers'] as $t): ?>
+              <tr>
+                <td><span class="badge <?= ($t['state'] ?? '') === 'AUTOMATIC_KILL' ? 'b-red' : 'b-amber' ?>"><?= e((string) ($t['state'] ?? '')) ?></span></td>
+                <td><?= e((string) ($t['code'] ?? '')) ?></td>
+                <td><?= e((string) ($t['reason'] ?? '')) ?></td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
     <?php endif; ?>
 
     <p class="dim" style="margin:12px 0 0">

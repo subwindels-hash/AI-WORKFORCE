@@ -232,15 +232,17 @@ $pageTitle = $isPipeline ? 'Lead Pipeline' : 'Lead Discovery';
     <div class="card" id="resultsCard">
       <h2>Lead results</h2>
       <div id="empty" class="muted">Your saved leads will appear here.</div>
-      <table id="table" class="hidden">
-        <thead>
-          <tr>
-            <th><input type="checkbox" id="selectAllBox" aria-label="Select all"></th>
-            <th>Lead</th><th>Kind</th><th>Category / Title</th><th>Location</th><th>Contact</th><th>Verification</th><th>Pipeline</th><th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="rows"></tbody>
-      </table>
+      <div class="table-scroll">
+        <table id="table" class="hidden">
+          <thead>
+            <tr>
+              <th><input type="checkbox" id="selectAllBox" aria-label="Select all"></th>
+              <th>Lead</th><th>Kind</th><th>Category / Title</th><th>Location</th><th>Contact</th><th>Verification</th><th>Pipeline</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
     </div>
 
     <div id="pipelineWorkspace" class="card hidden">

@@ -53,28 +53,30 @@ $stateClass = static fn(string $state): string => match (strtoupper($state)) {
         <?php if ($active === null): ?>
           <p class="dim">No model version is registered yet. The engine registers the deployed scoring configuration as <b>DRAFT</b> the first time it analyzes a fixture — never as an approved model.</p>
         <?php else: ?>
-          <table class="tbl">
-            <tbody>
-              <?php foreach ([
-                ['Model id', $active['modelId'] ?? null], ['Model name', $active['name'] ?? null], ['Model version', $active['version'] ?? null],
-                ['Algorithm', $active['algorithm'] ?? null], ['Feature version', $active['featureVersion'] ?? null],
-                ['Training dataset version', $active['trainingDatasetVersion'] ?? null],
-                ['Status', $active['status'] ?? null],
-                ['Created', $active['createdAt'] ?? null], ['Trained', $active['trainedAt'] ?? null],
-                ['Validated', $active['validatedAt'] ?? null], ['Calibrated', $active['calibratedAt'] ?? null],
-                ['Approved', $active['approvedAt'] ?? null], ['Approved by', $active['approvedBy'] ?? null],
-                ['Activated', $active['activatedAt'] ?? null], ['Last evaluated', $active['lastEvaluatedAt'] ?? null],
-              ] as [$label, $value]): ?>
-                <tr><td class="dim" style="width:180px"><?= e($label) ?></td><td class="mono"><?= $value === null ? '—' : e(is_string($value) && (str_contains((string) $value, 'T') && strlen((string) $value) > 15) ? $when($value) : (string) $value) ?></td></tr>
-              <?php endforeach; ?>
-              <tr><td class="dim">Validation sample size</td><td class="mono"><?= $active['validationSampleSize'] === null ? '—' : (int) $active['validationSampleSize'] ?> settled prediction(s)</td></tr>
-              <tr><td class="dim">Accuracy</td><td class="mono"><?= is_numeric($active['accuracy'] ?? null) ? $pct($active['accuracy']) : '—' ?></td></tr>
-              <tr><td class="dim">Log loss</td><td class="mono"><?= $dash($active['logLoss'] ?? null) ?></td></tr>
-              <tr><td class="dim">Brier score</td><td class="mono"><?= $dash($active['brierScore'] ?? null) ?></td></tr>
-              <tr><td class="dim">ECE</td><td class="mono"><?= $dash($active['ece'] ?? null) ?></td></tr>
-              <tr><td class="dim">Calibration version</td><td class="mono"><?= e((string) ($active['calibrationVersion'] ?? '—')) ?> <span class="badge <?= $stateClass((string) ($active['calibrationStatus'] ?? 'CALIBRATION_PENDING')) ?>"><?= e((string) ($active['calibrationStatus'] ?? 'CALIBRATION_PENDING')) ?></span></td></tr>
-            </tbody>
-          </table>
+          <div class="table-scroll">
+            <table class="tbl">
+              <tbody>
+                <?php foreach ([
+                  ['Model id', $active['modelId'] ?? null], ['Model name', $active['name'] ?? null], ['Model version', $active['version'] ?? null],
+                  ['Algorithm', $active['algorithm'] ?? null], ['Feature version', $active['featureVersion'] ?? null],
+                  ['Training dataset version', $active['trainingDatasetVersion'] ?? null],
+                  ['Status', $active['status'] ?? null],
+                  ['Created', $active['createdAt'] ?? null], ['Trained', $active['trainedAt'] ?? null],
+                  ['Validated', $active['validatedAt'] ?? null], ['Calibrated', $active['calibratedAt'] ?? null],
+                  ['Approved', $active['approvedAt'] ?? null], ['Approved by', $active['approvedBy'] ?? null],
+                  ['Activated', $active['activatedAt'] ?? null], ['Last evaluated', $active['lastEvaluatedAt'] ?? null],
+                ] as [$label, $value]): ?>
+                  <tr><td class="dim" style="width:180px"><?= e($label) ?></td><td class="mono"><?= $value === null ? '—' : e(is_string($value) && (str_contains((string) $value, 'T') && strlen((string) $value) > 15) ? $when($value) : (string) $value) ?></td></tr>
+                <?php endforeach; ?>
+                <tr><td class="dim">Validation sample size</td><td class="mono"><?= $active['validationSampleSize'] === null ? '—' : (int) $active['validationSampleSize'] ?> settled prediction(s)</td></tr>
+                <tr><td class="dim">Accuracy</td><td class="mono"><?= is_numeric($active['accuracy'] ?? null) ? $pct($active['accuracy']) : '—' ?></td></tr>
+                <tr><td class="dim">Log loss</td><td class="mono"><?= $dash($active['logLoss'] ?? null) ?></td></tr>
+                <tr><td class="dim">Brier score</td><td class="mono"><?= $dash($active['brierScore'] ?? null) ?></td></tr>
+                <tr><td class="dim">ECE</td><td class="mono"><?= $dash($active['ece'] ?? null) ?></td></tr>
+                <tr><td class="dim">Calibration version</td><td class="mono"><?= e((string) ($active['calibrationVersion'] ?? '—')) ?> <span class="badge <?= $stateClass((string) ($active['calibrationStatus'] ?? 'CALIBRATION_PENDING')) ?>"><?= e((string) ($active['calibrationStatus'] ?? 'CALIBRATION_PENDING')) ?></span></td></tr>
+              </tbody>
+            </table>
+          </div>
         <?php endif; ?>
         <?php if (!empty($caps['calibrate'])): ?>
           <form method="post" action="/football/calibrate" style="margin-top:10px">
@@ -124,23 +126,25 @@ $stateClass = static fn(string $state): string => match (strtoupper($state)) {
         <?php if (($perf['state'] ?? '') !== 'MEASURED'): ?>
           <p class="dim">No settled predictions yet. Historical performance metrics will appear after predicted matches have completed.</p>
         <?php else: ?>
-          <table class="tbl">
-            <thead><tr><th>Version</th><th>Status</th><th class="num">Evaluated</th><th class="num">Result acc.</th><th class="num">Exact-score acc.</th><th class="num">Avg conf.</th><th class="num">Brier</th><th class="num">Log loss</th></tr></thead>
-            <tbody>
-              <?php foreach (($perf['byModel'] ?? []) as $row): ?>
-                <tr>
-                  <td class="mono"><?= e((string) ($row['modelVersion'] ?? '')) ?></td>
-                  <td><span class="badge <?= $stateClass((string) ($row['status'] ?? '')) ?>"><?= e((string) ($row['status'] ?? '')) ?></span></td>
-                  <td class="num"><?= (int) ($row['evaluated'] ?? 0) ?></td>
-                  <td class="num"><?= $pct($row['resultAccuracy'] ?? null) ?></td>
-                  <td class="num"><?= $pct($row['exactScoreAccuracy'] ?? null) ?></td>
-                  <td class="num"><?= $dash($row['averageConfidence'] ?? null, 1) ?>%</td>
-                  <td class="num mono"><?= $dash($row['brier'] ?? null) ?></td>
-                  <td class="num mono"><?= $dash($row['logLoss'] ?? null) ?></td>
-                </tr>
-              <?php endforeach; ?>
-            </tbody>
-          </table>
+          <div class="table-scroll">
+            <table class="tbl">
+              <thead><tr><th>Version</th><th>Status</th><th class="num">Evaluated</th><th class="num">Result acc.</th><th class="num">Exact-score acc.</th><th class="num">Avg conf.</th><th class="num">Brier</th><th class="num">Log loss</th></tr></thead>
+              <tbody>
+                <?php foreach (($perf['byModel'] ?? []) as $row): ?>
+                  <tr>
+                    <td class="mono"><?= e((string) ($row['modelVersion'] ?? '')) ?></td>
+                    <td><span class="badge <?= $stateClass((string) ($row['status'] ?? '')) ?>"><?= e((string) ($row['status'] ?? '')) ?></span></td>
+                    <td class="num"><?= (int) ($row['evaluated'] ?? 0) ?></td>
+                    <td class="num"><?= $pct($row['resultAccuracy'] ?? null) ?></td>
+                    <td class="num"><?= $pct($row['exactScoreAccuracy'] ?? null) ?></td>
+                    <td class="num"><?= $dash($row['averageConfidence'] ?? null, 1) ?>%</td>
+                    <td class="num mono"><?= $dash($row['brier'] ?? null) ?></td>
+                    <td class="num mono"><?= $dash($row['logLoss'] ?? null) ?></td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
           <p class="dim" style="font-size:11px;margin-top:8px">These are the numbers an approval is judged on; the board's own 30-day panel shows the same stored aggregates, never a second calculation.</p>
         <?php endif; ?>
       </div>

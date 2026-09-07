@@ -232,9 +232,9 @@ $overall = $perfSummary['overall'] ?? [];
   <div class="panel"><div class="body">
     <?php $pendingList = array_filter($proposals??[],fn($p)=>in_array($p['status']??'',['PENDING','PENDING_APPROVAL'],true));?>
     <?php if(empty($pendingList)):?><p class="dim">No pending proposals.</p><?php else:?>
-    <table class="tbl"><thead><tr><th>Symbol</th><th>Side</th><th>Confidence</th><th>Status</th><th>Created</th></tr></thead><tbody>
+    <div class="table-scroll"><table class="tbl"><thead><tr><th>Symbol</th><th>Side</th><th>Confidence</th><th>Status</th><th>Created</th></tr></thead><tbody>
     <?php foreach($pendingList as $p):?><tr><td class="mono"><?=e($p['symbol']??'—')?></td><td><?=e($p['side']??'—')?></td><td><?=isset($p['confidence'])?e(number_format((float)$p['confidence']*100,0).'%'):'—'?></td><td><span class="badge b-amber"><?=e($p['status']??'PENDING')?></span></td><td class="dim"><?=e(substr((string)($p['created_at']??'—'),0,16))?></td></tr><?php endforeach;?>
-    </tbody></table><?php endif;?>
+    </tbody></table></div><?php endif;?>
   </div></div>
 </section>
 
@@ -244,10 +244,10 @@ $overall = $perfSummary['overall'] ?? [];
     <?php if(empty($positions)):?>
       <div style="text-align:center;padding:30px 0"><p class="dim" style="font-size:15px">No open positions.</p><a class="btn primary" href="#" onclick="document.querySelector('[data-tab=trade]').click();return false" style="margin-top:10px">Open Trade tab</a></div>
     <?php else:?>
-    <table class="pos-table"><thead><tr><th>Broker</th><th>Symbol</th><th>Side</th><th>Volume</th><th>Entry</th><th>Current</th><th>P&amp;L</th><th></th></tr></thead><tbody>
+    <div class="table-scroll"><table class="pos-table"><thead><tr><th>Broker</th><th>Symbol</th><th>Side</th><th>Volume</th><th>Entry</th><th>Current</th><th>P&amp;L</th><th></th></tr></thead><tbody>
     <?php foreach($positions as $p):$pnl=(float)($p['unrealizedPnl']??$p['pnl']??0);?>
       <tr><td><?=e($p['broker']??'')?></td><td class="mono"><?=e($p['symbol']??'')?></td><td><span class="badge <?=($p['side']??'')==='BUY'?'b-green':'b-red'?>"><?=e($p['side']??'')?></span></td><td><?=e((string)($p['volume']??''))?></td><td><?=e((string)($p['entryPrice']??$p['openPrice']??'—'))?></td><td><?=e((string)($p['currentPrice']??'—'))?></td><td class="<?=$pnl>=0?'pnl-pos':'pnl-neg'?>"><?=$pnl>=0?'+':''?>$<?=number_format($pnl,2)?></td><td><button class="btn small" onclick="closePosition('<?=e($p['broker']??'')?>','<?=e($p['id']??$p['ticket']??'')?>')">Close</button></td></tr>
-    <?php endforeach;?></tbody></table>
+    <?php endforeach;?></tbody></table></div>
     <?php endif;?>
   </div></div>
 </section>
@@ -383,10 +383,10 @@ $overall = $perfSummary['overall'] ?? [];
   <h3 style="margin:18px 0 10px">Trade Journal</h3>
   <div class="panel"><div class="body" style="max-height:400px;overflow-y:auto">
     <?php if(empty($journalEntries)):?><p class="dim">No journal entries yet.</p><?php else:?>
-    <table class="tbl"><thead><tr><th>Time</th><th>Src</th><th>Symbol</th><th>Dir</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>R</th><th>Conf</th></tr></thead><tbody>
+    <div class="table-scroll"><table class="tbl"><thead><tr><th>Time</th><th>Src</th><th>Symbol</th><th>Dir</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>R</th><th>Conf</th></tr></thead><tbody>
     <?php foreach(array_slice($journalEntries,0,30) as $en):?>
       <tr><td class="dim"><?=e(substr($en['entry_time'],0,16))?></td><td><span class="badge <?=['backtest'=>'b-sky','paper'=>'b-violet','manual'=>'b-gray','live'=>'b-red'][$en['source']]??'b-gray'?>" style="padding:0 5px"><?=e($en['source'])?></span></td><td class="mono" style="font-weight:700"><?=e($en['symbol'])?></td><td class="<?=$en['direction']==='LONG'?'pnl-pos':'pnl-neg'?>"><?= $en['direction']==='LONG'?'▲':'▼'?></td><td><?=e(number_format($en['entry_price'],5))?></td><td><?=$en['exit_price']!==null?e(number_format($en['exit_price'],5)):'open'?></td><td class="<?=($en['pnl']??0)>=0?'pnl-pos':'pnl-neg'?>"><?= $en['pnl']!==null?e(number_format($en['pnl'],1)):'—'?></td><td class="dim"><?= $en['r_multiple']!==null?e(number_format($en['r_multiple'],2)):'—'?></td><td class="dim"><?= $en['ai_confidence']!==null?e(number_format($en['ai_confidence']*100,0)).'%':'—'?></td></tr>
-    <?php endforeach;?></tbody></table><?php endif;?>
+    <?php endforeach;?></tbody></table></div><?php endif;?>
   </div><a class="panel-foot-link" href="/journal">Full analytics →</a></div>
 </section>
 

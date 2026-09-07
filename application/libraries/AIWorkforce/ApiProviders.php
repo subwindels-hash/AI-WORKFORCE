@@ -1,6 +1,7 @@
 <?php
 namespace AIWorkforce;
 
+use AIWorkforce\Providers\GrokProvider;
 use AIWorkforce\Providers\OpenAIProvider;
 
 /**
@@ -73,7 +74,7 @@ final class ApiProviders
                 'label' => 'Translation',
                 'group' => 'Language Learning',
                 'kind' => 'data',
-                'drivers' => ['openai_compatible', 'libretranslate', 'custom_http'],
+                'drivers' => ['openai_compatible', 'grok', 'libretranslate', 'custom_http'],
             ],
             'stt' => [
                 'label' => 'Speech-to-Text',
@@ -91,13 +92,13 @@ final class ApiProviders
                 'label' => 'Language AI tutor',
                 'group' => 'Language Learning',
                 'kind' => 'data',
-                'drivers' => ['openai_compatible', 'custom_http'],
+                'drivers' => ['openai_compatible', 'grok', 'custom_http'],
             ],
             'llm' => [
                 'label' => 'AI / LLM services',
                 'group' => 'AI Workforce',
                 'kind' => 'data',
-                'drivers' => ['openai_compatible', 'custom_http'],
+                'drivers' => ['openai_compatible', 'grok', 'custom_http'],
             ],
             'pronunciation' => [
                 'label' => 'Pronunciation scoring',
@@ -115,7 +116,7 @@ final class ApiProviders
                 'label' => 'Text Embeddings / Vector Search',
                 'group' => 'AI Workforce',
                 'kind' => 'data',
-                'drivers' => ['openai_compatible', 'custom_http'],
+                'drivers' => ['openai_compatible', 'grok', 'custom_http'],
             ],
             'image_generation' => [
                 'label' => 'Image Generation',
@@ -127,19 +128,19 @@ final class ApiProviders
                 'label' => 'Text Summarization',
                 'group' => 'AI Workforce',
                 'kind' => 'data',
-                'drivers' => ['openai_compatible', 'custom_http'],
+                'drivers' => ['openai_compatible', 'grok', 'custom_http'],
             ],
             'classification' => [
                 'label' => 'Text Classification / Sentiment',
                 'group' => 'AI Workforce',
                 'kind' => 'data',
-                'drivers' => ['openai_compatible', 'custom_http'],
+                'drivers' => ['openai_compatible', 'grok', 'custom_http'],
             ],
             'moderation' => [
                 'label' => 'Content Moderation',
                 'group' => 'AI Workforce',
                 'kind' => 'data',
-                'drivers' => ['openai_compatible', 'custom_http'],
+                'drivers' => ['openai_compatible', 'grok', 'custom_http'],
             ],
         ];
     }
@@ -292,6 +293,15 @@ final class ApiProviders
                     $f('model', 'Model', false, true, 'e.g. gpt-4o-mini (chat/LLM), text-embedding-3-small (embeddings), dall-e-3 (images)'),
                     $f('organization', 'Organization ID', false, false),
                     $f('project', 'Project ID', false, false, 'Optional OpenAI project'),
+                ],
+            ],
+            'grok' => [
+                'label' => 'xAI Grok (x.ai)',
+                'fields' => [
+                    $f('base_url', 'Base URL', false, false, 'Defaults to https://api.x.ai/v1 — console.x.ai and team URLs are automatically normalized'),
+                    $f('api_key', 'API Key (xai-…)', true, true, 'API key from xAI Console (https://console.x.ai/)'),
+                    $f('model', 'Model', false, false, 'Defaults to grok-2-latest (alt: grok-2, grok-2-mini, grok-2-vision-1212, grok-beta, grok-3, grok-3-mini)'),
+                    $f('team_id', 'Team ID', false, false, 'Optional xAI Team ID (e.g. 97c85eb6-af25-4109-8554-4c6cbff12ee8 from console URL)'),
                 ],
             ],
             'libretranslate' => [
@@ -806,6 +816,10 @@ final class ApiProviders
         if ($driver === 'api_football' && $baseUrl !== '') {
             $baseUrl = self::normalizeApiFootballBaseUrl($baseUrl);
         }
+        $extractedTeamId = null;
+        if ($driver === 'grok') {
+            $baseUrl = self::normalizeGrokBaseUrl($baseUrl, $extractedTeamId);
+        }
         if ($baseUrl !== '' && !preg_match('#^https://#i', $baseUrl)) {
             throw new \InvalidArgumentException('Base URL must use HTTPS.');
         }
@@ -820,6 +834,9 @@ final class ApiProviders
             } elseif (!in_array($name, ['base_url', 'account_id'], true)) {
                 if ($value !== '') $extra[$name] = $value;
             }
+        }
+        if ($driver === 'grok' && !empty($extractedTeamId) && empty($extra['team_id'])) {
+            $extra['team_id'] = $extractedTeamId;
         }
         if (!empty($input['extra']) && is_array($input['extra'])) {
             foreach ($input['extra'] as $k => $v) {
@@ -926,6 +943,7 @@ final class ApiProviders
                 'official_lottery' => self::testGet((string) ($extra['health_url'] ?? ($base . '/health')), $secrets['token'] ?? $secrets['api_key'] ?? ''),
                 'libretranslate' => self::testGet(($base !== '' ? $base : '') . '/languages'),
                 'openai_compatible' => self::testOpenAi($base, (string) ($secrets['api_key'] ?? '')),
+                'grok' => self::testGrok($base, (string) ($secrets['api_key'] ?? ''), $extra),
                 'browser_webspeech' => ['ok' => true, 'message' => 'Browser Web Speech needs no server credential.'],
                 'custom_http' => self::testGet($base . ((string) ($extra['health_path'] ?? '/health')), $secrets['token'] ?? $secrets['api_key'] ?? ''),
                 default => ['ok' => false, 'message' => 'No test is defined for this provider.'],
@@ -1220,6 +1238,30 @@ final class ApiProviders
             return ['ok' => false, 'message' => 'Connection failed: the API key was rejected (HTTP ' . $status . '). Check the key and that the base URL matches the provider.'];
         }
         return ['ok' => false, 'message' => 'Connection failed: /models answered HTTP ' . $status . '. Check the base URL and network egress.'];
+    }
+
+    public static function normalizeGrokBaseUrl(string $url, ?string &$teamId = null): string
+    {
+        return GrokProvider::normalizeBase($url, $teamId);
+    }
+
+    private static function testGrok(string $url, string $key, array $extra = []): array
+    {
+        if ($key === '') return ['ok' => false, 'message' => 'API key is required. Get an API key at https://console.x.ai/'];
+        $teamId = (string) ($extra['team_id'] ?? '');
+        $root = self::normalizeGrokBaseUrl($url, $teamId);
+        $models = $root . '/models';
+        $headers = ['Authorization: Bearer ' . $key];
+        if ($teamId !== '') $headers[] = 'X-Team-Id: ' . $teamId;
+        $resp = self::http($models, $headers);
+        $status = (int) ($resp['status'] ?? 0);
+        if ($status >= 200 && $status < 400) {
+            return ['ok' => true, 'message' => 'Connected — the xAI API key lists models at ' . $models];
+        }
+        if ($status === 401 || $status === 403) {
+            return ['ok' => false, 'message' => 'Connection failed: the xAI API key was rejected (HTTP ' . $status . '). Check the key at https://console.x.ai/ and verify billing status.'];
+        }
+        return ['ok' => false, 'message' => 'Connection failed: /models answered HTTP ' . $status . '. Check network egress to api.x.ai.'];
     }
 
     /**
@@ -1597,6 +1639,10 @@ final class ApiProviders
 
     public static function openaiChat(array $cfg, array $messages, int $maxTokens = 260): ?string
     {
+        $driver = (string) ($cfg['driver'] ?? '');
+        if ($driver === 'grok') {
+            return self::grokChat($cfg, $messages, $maxTokens);
+        }
         $url = trim((string) ($cfg['base_url'] ?? ''));
         $model = (string) ($cfg['extra']['model'] ?? '');
         $key = (string) ($cfg['secrets']['api_key'] ?? '');
@@ -1650,6 +1696,43 @@ final class ApiProviders
         return (new OpenAIProvider($cfg))->models();
     }
 
+    /** Chat completion via the configured xAI Grok provider. */
+    public static function grokChat(array $cfg, array $messages, int $maxTokens = 260): ?string
+    {
+        $res = (new GrokProvider($cfg))->chat($messages, ['max_tokens' => $maxTokens]);
+        return is_array($res) && isset($res['content']) && is_string($res['content']) ? mb_substr(trim($res['content']), 0, 4000) : null;
+    }
+
+    /** Responses API call via the configured Grok provider. */
+    public static function grokResponses(array $cfg, string $input, array $options = []): ?array
+    {
+        return (new GrokProvider($cfg))->responses($input, $options);
+    }
+
+    /** Structured JSON output (JSON-schema mode) via the configured Grok provider. */
+    public static function grokStructured(array $cfg, array $messages, array $jsonSchema, array $options = []): ?array
+    {
+        return (new GrokProvider($cfg))->structuredJson($messages, $jsonSchema, $options);
+    }
+
+    /** JSON-object output (no schema) via the configured Grok provider. */
+    public static function grokJsonObject(array $cfg, array $messages, array $options = []): ?array
+    {
+        return (new GrokProvider($cfg))->jsonObject($messages, $options);
+    }
+
+    /** Text embeddings via the configured Grok provider. Accepts a string or an array. */
+    public static function grokEmbedding(array $cfg, $input, array $options = []): ?array
+    {
+        return (new GrokProvider($cfg))->embedding($input, $options);
+    }
+
+    /** List model IDs available to the configured Grok provider. */
+    public static function grokModels(array $cfg): ?array
+    {
+        return (new GrokProvider($cfg))->models();
+    }
+
     /** Server-side translation via the configured provider. Returns null when unused or unavailable. */
     public static function translateText(array $cfg, string $text, string $source, string $target): ?string
     {
@@ -1668,6 +1751,12 @@ final class ApiProviders
             }
             if ($driver === 'openai_compatible') {
                 return self::openaiChat($cfg, [
+                    ['role' => 'system', 'content' => 'Translate the user text from ' . ($source !== '' ? $source : 'auto-detected language') . ' to ' . $target . '. Return only the translation, with no quotes or commentary.'],
+                    ['role' => 'user', 'content' => $text],
+                ], 400);
+            }
+            if ($driver === 'grok') {
+                return self::grokChat($cfg, [
                     ['role' => 'system', 'content' => 'Translate the user text from ' . ($source !== '' ? $source : 'auto-detected language') . ' to ' . $target . '. Return only the translation, with no quotes or commentary.'],
                     ['role' => 'user', 'content' => $text],
                 ], 400);

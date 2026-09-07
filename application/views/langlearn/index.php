@@ -45,20 +45,22 @@
           <p>You are not learning a language yet. Pick one from the catalog below.</p>
         </div>
       <?php else: ?>
-        <table class="tbl">
-          <thead><tr><th>Language</th><th>Level</th><th>Path</th><th>Streak</th><th class="num"></th></tr></thead>
-          <tbody>
-            <?php foreach ($myProfiles as $p): $pr = $p['progress']; ?>
-              <tr>
-                <td style="font-weight:700"><?= e(($p['language']['name'] ?? $p['language_code'])) ?> <span class="dim"><?= e($p['language']['native_name'] ?? '') ?></span></td>
-                <td><span class="badge b-sky"><?= e($pr['level']) ?></span> <span class="dim" style="font-size:11px"><?= e($pr['levelSource']) ?></span></td>
-                <td class="num"><?= $pr['pathCompletionPct'] !== null ? e(rtrim(rtrim(number_format($pr['pathCompletionPct'], 1), '0'), '.')) . '%' : '—' ?></td>
-                <td class="num"><?= (int) $pr['studyStreakDays'] ?>d</td>
-                <td class="num"><a class="btn small primary" href="/app/languages/p/<?= (int) $p['id'] ?>">Continue</a></td>
-              </tr>
-            <?php endforeach; ?>
-          </tbody>
-        </table>
+        <div class="table-scroll">
+          <table class="tbl">
+            <thead><tr><th>Language</th><th>Level</th><th>Path</th><th>Streak</th><th class="num"></th></tr></thead>
+            <tbody>
+              <?php foreach ($myProfiles as $p): $pr = $p['progress']; ?>
+                <tr>
+                  <td style="font-weight:700"><?= e(($p['language']['name'] ?? $p['language_code'])) ?> <span class="dim"><?= e($p['language']['native_name'] ?? '') ?></span></td>
+                  <td><span class="badge b-sky"><?= e($pr['level']) ?></span> <span class="dim" style="font-size:11px"><?= e($pr['levelSource']) ?></span></td>
+                  <td class="num"><?= $pr['pathCompletionPct'] !== null ? e(rtrim(rtrim(number_format($pr['pathCompletionPct'], 1), '0'), '.')) . '%' : '—' ?></td>
+                  <td class="num"><?= (int) $pr['studyStreakDays'] ?>d</td>
+                  <td class="num"><a class="btn small primary" href="/app/languages/p/<?= (int) $p['id'] ?>">Continue</a></td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
       <?php endif; ?>
     </div>
   </div>
@@ -71,7 +73,7 @@
     <label class="fld" style="max-width:420px;margin-bottom:14px">Search language…
       <input class="sel" id="catalog-search" type="search" placeholder="Dutch, Nederlands, nl…" autocomplete="off">
     </label>
-    <div class="scroll">
+    <div class="table-scroll">
       <table class="tbl" id="catalog-table">
         <thead><tr><th>Language</th><th>Native</th><th>ISO</th><th>Support</th><th class="num"></th></tr></thead>
         <tbody id="catalog-body">

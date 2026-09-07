@@ -159,7 +159,7 @@ class Workspace extends App_Controller
             'totalPredictions' => 0,
             'historyCount' => 0,
             'integration' => [
-                'cloudflare' => false,
+                'ai_agents' => false,
                 'llm' => false,
                 'sports' => false,
             ],
@@ -169,7 +169,7 @@ class Workspace extends App_Controller
         try {
             if (isset($this->platform->multiplierIntegration)) {
                 $intStatus = $this->platform->multiplierIntegration->status();
-                $out['integration']['cloudflare'] = $intStatus['bridge_available'];
+                $out['integration']['ai_agents'] = $intStatus['bridge_available'];
                 $out['integration']['llm'] = $intStatus['llm_enhancement'];
                 $out['integration']['sports'] = $intStatus['enrichment_available'];
             }
@@ -228,13 +228,13 @@ class Workspace extends App_Controller
         
         // Windels AI Agent Platform
         try {
-            $cfStatus = $this->platform->cloudflare->status();
+            $agentStatus = $this->platform->agentPlatform->status();
             $modules['windelsai'] = [
                 'name' => 'Windels AI Agents',
                 'icon' => '⚡',
-                'status' => !empty($cfStatus['modelRouter']['configured']) ? 'healthy' : 'degraded',
-                'agents' => count($cfStatus['communicationBus']['availableAgents'] ?? []),
-                'tools' => $cfStatus['toolRegistry']['totalTools'] ?? 0,
+                'status' => !empty($agentStatus['modelRouter']['configured']) ? 'healthy' : 'degraded',
+                'agents' => count($agentStatus['communicationBus']['availableAgents'] ?? []),
+                'tools' => $agentStatus['toolRegistry']['totalTools'] ?? 0,
             ];
         } catch (\Throwable $e) {
             $modules['windelsai'] = ['name' => 'Windels AI Agents', 'icon' => '⚡', 'status' => 'error'];
@@ -354,7 +354,7 @@ class Workspace extends App_Controller
         ];
         
         try {
-            $status = $this->platform->cloudflare->status();
+            $status = $this->platform->agentPlatform->status();
             $out['agents'] = $status['communicationBus']['availableAgents'] ?? [];
             $out['totalAgents'] = count($out['agents']);
             $out['totalTools'] = $status['toolRegistry']['totalTools'] ?? 0;

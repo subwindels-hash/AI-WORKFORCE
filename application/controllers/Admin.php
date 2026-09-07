@@ -43,7 +43,7 @@ class Admin extends App_Controller
         // Get agent platform status (unified platform)
         $platformStatus = [];
         try {
-            $platformStatus = $this->platform->cloudflare->status();
+            $platformStatus = $this->platform->agentPlatform->status();
         } catch (\Throwable $e) {
             // Platform not yet initialized
         }
@@ -56,16 +56,16 @@ class Admin extends App_Controller
             'platformStatus' => $platformStatus,
             'registeredAgents' => array_keys($this->platform->agents->agents()),
             'availableServices' => [
-                'text_generation' => 'GPT models via OpenAI-compatible API',
+                'text_generation' => 'Grok & GPT models via xAI / OpenAI-compatible API',
                 'structured_output' => 'JSON-schema and JSON-object modes',
-                'embeddings' => 'text-embedding via OpenAI-compatible API',
+                'embeddings' => 'Vector embeddings via xAI / OpenAI-compatible API',
                 'image_generation' => 'DALL·E / gpt-image via OpenAI API',
                 'speech_recognition' => 'Whisper via OpenAI API',
                 'text_to_speech' => 'TTS via OpenAI API',
-                'moderation' => 'omni-moderation via OpenAI API',
-                'translation' => 'OpenAI-compatible chat',
-                'summarization' => 'OpenAI-compatible chat',
-                'classification' => 'OpenAI-compatible chat',
+                'moderation' => 'Content moderation via xAI / OpenAI API',
+                'translation' => 'Grok / OpenAI-compatible chat',
+                'summarization' => 'Grok / OpenAI-compatible chat',
+                'classification' => 'Grok / OpenAI-compatible chat',
             ],
             'platformComponents' => [
                 'Model Router' => 'Multi-provider failover with rate limiting and cost tracking',
