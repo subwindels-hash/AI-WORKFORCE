@@ -57,8 +57,6 @@ $viewIsToday = (bool) ($isToday ?? ($viewDateIso === gmdate('Y-m-d')));
 // Ticket generation defaults to the day being viewed; the input stays editable
 // so any other day can still be generated for.
 $ticketDateIso = $viewDateIso;
-$ticketDateTs = strtotime($ticketDateIso);
-$ticketDateShown = gmdate('m/d/Y', $ticketDateTs !== false ? $ticketDateTs : time());
 // Match date + time as one UTC stamp (`YYYY-MM-DD HH:MM`) from the stored
 // kickoff. A match the provider gave no kickoff for prints — : never a blank
 // cell, never 00:00, because a guessed time would read as a real one.
@@ -76,7 +74,6 @@ $kickoffStamp = static function (mixed $iso): string {
         <label for="sports-view-date" style="font-size:12px;font-weight:700">Viewing date (UTC):</label>
         <input type="date" id="sports-view-date" name="date" value="<?= e($viewDateIso) ?>" onchange="this.form.submit()" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px" title="Viewing date (UTC)">
         <noscript><button class="btn small" type="submit">View</button></noscript>
-        <span class="mono" style="font-size:12px;font-weight:700" title="Viewing date"><?= e($ticketDateShown) ?></span>
       </form>
       <a class="btn small" href="/sports?date=<?= e($viewYesterday) ?>">← Prev day</a>
       <?php if (!$viewIsToday): ?><a class="btn small" href="/sports">Today</a><?php endif; ?>
