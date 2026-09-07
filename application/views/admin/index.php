@@ -79,52 +79,45 @@ $s = $stats ?? [];
 <?php endif; ?>
 
 <section class="panel" style="margin-top:16px">
-  <h3>🤖 Cloudflare Agent Runtime</h3>
+  <h3>🤖 AI Agent Runtime</h3>
   <div class="body">
-    <?php if (!empty($agentRuntime['cloudflareRuntime'])): ?>
-      <!-- Cloudflare Runtime Active -->
-      <div style="background:linear-gradient(135deg,#f6821f22 0%,#fbad4122 100%);border:1px solid #f6821f44;border-radius:var(--radius);padding:16px;margin-bottom:16px">
+    <?php if (!empty($agentRuntime['openaiConfigured'])): ?>
+      <div style="background:linear-gradient(135deg,#10a37f22 0%,#1a7f6422 100%);border:1px solid #10a37f44;border-radius:var(--radius);padding:16px;margin-bottom:16px">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-          <span style="font-size:32px">⚡</span>
+          <span style="font-size:32px">🤖</span>
           <div>
-            <h4 style="margin:0;color:#f6821f;font-size:16px">Cloudflare Workers AI Active</h4>
-            <p class="dim" style="margin:2px 0 0;font-size:12px">Edge AI inference powered by Cloudflare's global network</p>
+            <h4 style="margin:0;color:#10a37f;font-size:16px">OpenAI-compatible AI Active</h4>
+            <p class="dim" style="margin:2px 0 0;font-size:12px">Inference via the configured OpenAI-compatible provider</p>
           </div>
         </div>
-        
+
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px">
           <div style="background:#ffffff11;border-radius:var(--radius-sm);padding:12px">
-            <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">Account ID</div>
-            <div style="font-size:14px;font-weight:600;color:#fff"><?= e($agentRuntime['cloudflareRuntime']['accountId'] ?? '—') ?></div>
+            <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">Driver</div>
+            <div style="font-size:14px;font-weight:600;color:#fff"><?= e((string) ($agentRuntime['llmDriver'] ?? '—')) ?></div>
           </div>
           <div style="background:#ffffff11;border-radius:var(--radius-sm);padding:12px">
             <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">Agents</div>
             <div style="font-size:14px;font-weight:600;color:#fff"><?= count($agentRuntime['registeredAgents'] ?? []) ?></div>
           </div>
           <div style="background:#ffffff11;border-radius:var(--radius-sm);padding:12px">
-            <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">Tools</div>
-            <div style="font-size:14px;font-weight:600;color:#fff"><?= count($agentRuntime['registeredTools'] ?? []) ?></div>
-          </div>
-          <div style="background:#ffffff11;border-radius:var(--radius-sm);padding:12px">
-            <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">Tool Policy</div>
-            <div style="font-size:14px;font-weight:600;color:#fff">Approval Required</div>
+            <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em">Capabilities</div>
+            <div style="font-size:14px;font-weight:600;color:#fff"><?= count($agentRuntime['availableServices'] ?? []) ?></div>
           </div>
         </div>
       </div>
-      
-      <!-- Registered Agents -->
+
       <?php if (!empty($agentRuntime['registeredAgents'])): ?>
       <div style="margin-bottom:16px">
         <h4 style="margin:0 0 8px;font-size:13px;font-weight:600">Registered AI Agents</h4>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <?php foreach ($agentRuntime['registeredAgents'] as $agent): ?>
-            <span style="background:#f6821f22;color:#f6821f;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600"><?= e(ucfirst(str_replace('_', ' ', $agent))) ?></span>
+            <span style="background:#10a37f22;color:#10a37f;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600"><?= e(ucfirst(str_replace('_', ' ', $agent))) ?></span>
           <?php endforeach; ?>
         </div>
       </div>
       <?php endif; ?>
-      
-      <!-- Available Services -->
+
       <?php if (!empty($agentRuntime['availableServices'])): ?>
       <div style="margin-bottom:16px">
         <h4 style="margin:0 0 8px;font-size:13px;font-weight:600">Supported AI Capabilities</h4>
@@ -138,34 +131,34 @@ $s = $stats ?? [];
         </div>
       </div>
       <?php endif; ?>
-      
+
       <div style="display:flex;gap:8px;margin-top:12px">
         <a class="btn primary" href="/admin/api">Manage AI Providers</a>
-        <a class="btn" href="https://developers.cloudflare.com/workers-ai/" target="_blank">Cloudflare AI Docs</a>
       </div>
-      
+
     <?php else: ?>
-      <!-- Cloudflare Not Configured -->
       <div style="text-align:center;padding:30px 0">
-        <div style="font-size:48px;margin-bottom:12px">⚡</div>
-        <h4 style="margin:0 0 8px;color:var(--text)">Cloudflare Workers AI Not Configured</h4>
+        <div style="font-size:48px;margin-bottom:12px">🤖</div>
+        <h4 style="margin:0 0 8px;color:var(--text)">OpenAI-compatible AI Not Configured</h4>
         <p class="dim" style="margin:0 0 16px;font-size:13px">
-          Enable edge AI inference with Cloudflare Workers AI for LLMs, embeddings, image generation, and more.
+          Configure an OpenAI-compatible provider to enable LLM chat, Whisper transcription, TTS, and more.
         </p>
-        <a class="btn primary" href="/admin/api/create">Configure Cloudflare</a>
+        <a class="btn primary" href="/admin/api/create">Configure AI Provider</a>
       </div>
-      
+
       <div style="margin-top:16px;padding:14px;background:var(--panel2);border-radius:var(--radius-sm)">
-        <h5 style="margin:0 0 8px;font-size:12px;font-weight:600">What you get with Cloudflare Workers AI:</h5>
+        <h5 style="margin:0 0 8px;font-size:12px;font-weight:600">What you get with an OpenAI-compatible provider:</h5>
         <ul style="margin:0;padding-left:20px;font-size:12px;color:var(--dim);line-height:1.8">
-          <li><strong>Text Generation</strong> — Llama 3.1, Mistral, Gemma, Phi-2</li>
-          <li><strong>Embeddings</strong> — BGE for semantic search and RAG</li>
-          <li><strong>Image Generation</strong> — Stable Diffusion XL</li>
+          <li><strong>Text Generation</strong> — GPT models via chat completions</li>
+          <li><strong>Structured Output</strong> — JSON-schema and JSON-object modes</li>
+          <li><strong>Embeddings</strong> — text-embedding vectors for search/RAG</li>
+          <li><strong>Image Generation</strong> — DALL·E / gpt-image</li>
           <li><strong>Speech Recognition</strong> — Whisper transcription</li>
-          <li><strong>Translation</strong> — 100+ languages with M2M100</li>
-          <li><strong>Summarization</strong> — BART text summarization</li>
-          <li><strong>Classification</strong> — Sentiment analysis</li>
-          <li><strong>Edge Inference</strong> — Low latency, global distribution</li>
+          <li><strong>Text-to-Speech</strong> — tts-1 voice synthesis</li>
+          <li><strong>Moderation</strong> — omni-moderation safety screening</li>
+          <li><strong>Translation</strong> — chat-based translation</li>
+          <li><strong>Summarization</strong> — chat-based summarization</li>
+          <li><strong>Classification</strong> — chat-based sentiment analysis</li>
         </ul>
       </div>
     <?php endif; ?>

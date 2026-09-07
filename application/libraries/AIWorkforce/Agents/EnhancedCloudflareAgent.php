@@ -2,17 +2,17 @@
 namespace AIWorkforce\Agents;
 
 use AIWorkforce\ApiProviders;
-use AIWorkforce\Providers\CloudflareProvider;
 
 /**
- * Enhanced Cloudflare Specialist Agent
- * 
- * Bridges the existing SpecialistAgent interface with the new CloudflareProvider,
- * enabling rich multi-model AI capabilities across all specialist roles.
- * 
+ * Enhanced Specialist Agent
+ *
+ * Bridges the existing SpecialistAgent interface with the configured
+ * AI provider, enabling rich multi-model AI capabilities across all
+ * specialist roles.
+ *
  * Supports:
- *   - Dynamic model selection per agent role
- *   - Cloudflare Workers AI for edge inference
+ *   - Recommended model selection per agent role
+ *   - OpenAI-compatible inference
  *   - Fallback to local knowledge when provider unavailable
  *   - Tool-aware prompting with role-specific expertise
  *   - Structured JSON output for machine-readable responses
@@ -21,18 +21,17 @@ final class EnhancedCloudflareAgent implements SpecialistAgent
 {
     private string $role;
     private array $allowedTools;
-    private ?CloudflareProvider $provider = null;
 
-    /** Model recommendations per agent role */
+    /** Recommended model per agent role */
     private const ROLE_MODELS = [
-        'general'        => '@cf/meta/llama-3.1-8b-instruct',
-        'market'         => '@cf/meta/llama-3.1-70b-instruct',
-        'sports'         => '@cf/meta/llama-3.1-8b-instruct',
-        'lead_discovery' => '@cf/mistral/mistral-7b-instruct-v0.1',
-        'lottery'        => '@cf/meta/llama-3.1-8b-instruct',
-        'language'       => '@cf/meta/llama-3.1-8b-instruct',
-        'trading'        => '@cf/meta/llama-3.1-70b-instruct',
-        'video'          => '@cf/meta/llama-3.1-8b-instruct',
+        'general'        => 'gpt-4o-mini',
+        'market'         => 'gpt-4o',
+        'sports'         => 'gpt-4o-mini',
+        'lead_discovery' => 'gpt-4o-mini',
+        'lottery'        => 'gpt-4o-mini',
+        'language'       => 'gpt-4o-mini',
+        'trading'        => 'gpt-4o',
+        'video'          => 'gpt-4o-mini',
     ];
 
     /** System prompts per agent role */
@@ -51,7 +50,6 @@ final class EnhancedCloudflareAgent implements SpecialistAgent
     {
         $this->role = $role;
         $this->allowedTools = $allowedTools;
-        $this->initProvider();
     }
 
     public function name(): string
@@ -71,12 +69,10 @@ final class EnhancedCloudflareAgent implements SpecialistAgent
         if (!is_array($cfg)) {
             return [
                 'status' => 'UNAVAILABLE',
-                'reason' => 'No AI provider configured. Ask an administrator to configure Cloudflare Workers AI or an OpenAI-compatible provider.',
+                'reason' => 'No AI provider configured. Ask an administrator to configure an OpenAI-compatible provider.',
             ];
         }
 
-        // Determine model based on role
-        $model = self::ROLE_MODELS[$this->role] ?? '@cf/meta/llama-3.1-8b-instruct';
         $system = self::ROLE_SYSTEM[$this->role] ?? self::ROLE_SYSTEM['general'];
 
         // Enhance system prompt with tool awareness
@@ -103,34 +99,7 @@ final class EnhancedCloudflareAgent implements SpecialistAgent
 
         $messages[] = ['role' => 'user', 'content' => $instruction . "\n\nFACTS:\n" . $facts];
 
-        // Try Cloudflare provider first (if configured)
-        if ($this->provider && $this->provider->isConfigured()) {
-            try {
-                $result = $this->provider->chat($messages, [
-                    'model' => $model,
-                    'max_tokens' => 800,
-                    'temperature' => 0.3,
-                ]);
-
-                if ($result && !isset($result['error'])) {
-                    $answer = $result['result']['response'] ?? $result['response'] ?? null;
-                    if (is_string($answer) && trim($answer) !== '') {
-                        return [
-                            'status' => 'COMPLETED',
-                            'role' => $this->role,
-                            'answer' => mb_substr(trim($answer), 0, 4000),
-                            'provider' => 'cloudflare_workers_ai',
-                            'model' => $model,
-                            'tools' => $this->allowedTools,
-                        ];
-                    }
-                }
-            } catch (\Throwable $e) {
-                // Fall through to standard provider
-            }
-        }
-
-        // Fall back to standard ApiProviders::openaiChat
+        // Call the configured provider via the standard OpenAI-compatible client
         $answer = ApiProviders::openaiChat($cfg, $messages, 800);
 
         if ($answer === null) {
@@ -145,30 +114,9 @@ final class EnhancedCloudflareAgent implements SpecialistAgent
             'role' => $this->role,
             'answer' => $answer,
             'provider' => $cfg['driver'] ?? 'configured-ai',
-            'model' => $model,
+            'model' => (string) ($cfg['extra']['model'] ?? ''),
             'tools' => $this->allowedTools,
         ];
-    }
-
-    /**
-     * Initialize the Cloudflare provider from active config
-     */
-    private function initProvider(): void
-    {
-        try {
-            $cfg = ApiProviders::resolve('llm');
-            if (is_array($cfg) && ($cfg['driver'] ?? '') === 'cloudflare_workers_ai') {
-                $this->provider = new CloudflareProvider([
-                    'account_id' => $cfg['account_id'] ?? '',
-                    'token' => $cfg['secrets']['token'] ?? '',
-                    'gateway' => $cfg['extra']['gateway'] ?? null,
-                    'base_url' => $cfg['base_url'] ?? '',
-                    'timeout' => 30,
-                ]);
-            }
-        } catch (\Throwable $e) {
-            $this->provider = null;
-        }
     }
 
     /**
@@ -176,7 +124,7 @@ final class EnhancedCloudflareAgent implements SpecialistAgent
      */
     public static function modelFor(string $role): string
     {
-        return self::ROLE_MODELS[$role] ?? '@cf/meta/llama-3.1-8b-instruct';
+        return self::ROLE_MODELS[$role] ?? 'gpt-4o-mini';
     }
 
     /**

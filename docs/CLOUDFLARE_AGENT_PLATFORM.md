@@ -2,7 +2,7 @@
 
 ## 🎯 Overview
 
-The Cloudflare AI Agent Platform is a production-grade AI agent infrastructure built on top of Cloudflare Workers AI. It provides a complete orchestration layer for AI agents, tools, workflows, and observability.
+The Cloudflare AI Agent Platform is a production-grade AI agent infrastructure built on top of an OpenAI-compatible inference layer. It provides a complete orchestration layer for AI agents, tools, workflows, and observability.
 
 **Architecture:**
 ```
@@ -40,7 +40,7 @@ The Cloudflare AI Agent Platform is a production-grade AI agent infrastructure b
 **Purpose:** Centralized AI model gateway with automatic failover
 
 **Features:**
-- Multi-provider support (Cloudflare Workers AI + OpenAI-compatible)
+- OpenAI-compatible provider support
 - Automatic failover between providers
 - Rate limiting per provider
 - Cost tracking and estimation
@@ -53,7 +53,7 @@ $router = $this->platform->cloudflare->modelRouter();
 $result = $router->chat([
     ['role' => 'user', 'content' => 'Analyze BTC price']
 ], [
-    'model' => '@cf/meta/llama-3.1-70b-instruct',
+    'model' => 'gpt-4o',
     'agent' => 'market',
     'max_tokens' => 512,
 ]);
@@ -334,16 +334,14 @@ $links = $browser->extractLinks($html, 'https://example.com');
 **Location:** `application/libraries/AIWorkforce/Providers/SpeechToTextProvider.php`
 
 **Features:**
-- Cloudflare Workers AI (Whisper)
 - OpenAI Whisper API
 - Auto language detection
 
 **Usage:**
 ```php
 $stt = new \AIWorkforce\Providers\SpeechToTextProvider([
-    'driver' => 'cloudflare_workers_ai',
-    'account_id' => $accountId,
-    'token' => $token,
+    'driver' => 'openai_compatible',
+    'secrets' => ['api_key' => $apiKey],
 ]);
 
 $result = $stt->transcribe($audioData, 'en');
@@ -382,9 +380,8 @@ $audio = $result['audio']; // base64
 **Usage:**
 ```php
 $analyzer = new \AIWorkforce\Providers\PronunciationAnalyzer([
-    'driver' => 'cloudflare_workers_ai',
-    'account_id' => $accountId,
-    'token' => $token,
+    'driver' => 'openai_compatible',
+    'secrets' => ['api_key' => $apiKey],
 ]);
 
 $result = $analyzer->analyze($audioData, 'Hello world', 'en');
@@ -417,8 +414,8 @@ $feedback = $result['feedback'];
   "ok": true,
   "result": {
     "answer": "BTC is currently trading at...",
-    "model": "@cf/meta/llama-3.1-70b-instruct",
-    "provider": "cloudflare"
+    "model": "gpt-4o",
+    "provider": "openai_compat"
   },
   "sessionId": "sess_abc123"
 }
@@ -679,15 +676,12 @@ Access via `/app/agent-platform` or API endpoint `/api/agent-platform/observabil
 ### Requirements
 - PHP 8.1+
 - MySQL/MariaDB (for session/workflow storage)
-- Cloudflare Workers AI account (for AI models)
-- Optional: OpenAI API key (for TTS)
+- OpenAI-compatible API key (for LLM, STT and TTS)
 
 ### Configuration
-Add to `.env`:
+Providers are configured in **Admin → API**. If wiring a key via `.env`:
 ```env
-CLOUDFLARE_ACCOUNT_ID=your_account_id
-CLOUDFLARE_API_TOKEN=your_api_token
-OPENAI_API_KEY=your_openai_key  # Optional
+OPENAI_API_KEY=your_openai_key
 ```
 
 ### Database Tables
@@ -758,7 +752,7 @@ $engine->registerHandler('my_workflow', function($params, $wfId, $engine) {
 
 ## 📚 Additional Resources
 
-- [Cloudflare Workers AI Documentation](https://developers.cloudflare.com/workers-ai/)
+- [OpenAI API Reference](https://platform.openai.com/docs/api-reference)
 - [Model Context Protocol (MCP)](https://modelcontextprotocol.io/)
 - [WINDELS AI Workforce Documentation](./README.md)
 

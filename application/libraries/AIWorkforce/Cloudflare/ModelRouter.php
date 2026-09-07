@@ -7,7 +7,7 @@ use AIWorkforce\ApiProviders;
  * Centralized AI Model Gateway / Router
  *
  * All agents call models through this abstraction. It supports:
- * - Multiple providers (Cloudflare Workers AI, OpenAI-compatible)
+ * - Multiple OpenAI-compatible providers with automatic failover
  * - Automatic failover between providers and models
  * - Rate limiting per provider/model
  * - Usage tracking (tokens, cost, latency)
@@ -52,19 +52,8 @@ class ModelRouter
      */
     private function discoverProviders(): void
     {
-        // Register Cloudflare Workers AI
+        // Register the configured LLM provider (OpenAI-compatible)
         $llmCfg = ApiProviders::resolve('llm');
-        if (is_array($llmCfg) && ($llmCfg['driver'] ?? '') === 'cloudflare_workers_ai') {
-            $this->registerProvider('cloudflare', [
-                'driver' => 'cloudflare_workers_ai',
-                'config' => $llmCfg,
-                'priority' => 1,
-                'models' => $this->cloudflareModels(),
-                'health' => ['status' => 'UNKNOWN', 'lastCheck' => null],
-            ]);
-        }
-
-        // Register any OpenAI-compatible provider
         if (is_array($llmCfg) && ($llmCfg['driver'] ?? '') === 'openai_compatible') {
             $this->registerProvider('openai_compat', [
                 'driver' => 'openai_compatible',
@@ -213,64 +202,9 @@ class ModelRouter
     private function callProvider(string $name, array $provider, array $messages, string $model, int $maxTokens, array $options): ?string
     {
         $cfg = $provider['config'];
-        $driver = $provider['driver'];
 
-        if ($driver === 'cloudflare_workers_ai') {
-            return $this->callCloudflare($cfg, $messages, $model, $maxTokens);
-        }
-
-        // Fallback to standard ApiProviders::openaiChat
+        // All model calls go through the standard OpenAI-compatible chat client.
         return ApiProviders::openaiChat($cfg, $messages, $maxTokens);
-    }
-
-    /**
-     * Call Cloudflare Workers AI directly
-     */
-    private function callCloudflare(array $cfg, array $messages, string $model, int $maxTokens): ?string
-    {
-        $account = (string) ($cfg['account_id'] ?? '');
-        $token = (string) ($cfg['secrets']['token'] ?? '');
-        $gateway = $cfg['extra']['gateway'] ?? null;
-
-        if ($account === '' || $token === '') return null;
-
-        if ($gateway) {
-            $url = "https://gateway.ai.cloudflare.com/v1/{$account}/{$gateway}/workers-ai/{$model}";
-        } else {
-            $url = "https://api.cloudflare.com/client/v4/accounts/{$account}/ai/run/{$model}";
-        }
-
-        $body = json_encode([
-            'messages' => $messages,
-            'max_tokens' => $maxTokens,
-        ], JSON_UNESCAPED_SLASHES);
-
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => true,
-            CURLOPT_HTTPHEADER => [
-                'Content-Type: application/json',
-                'Authorization: Bearer ' . $token,
-            ],
-            CURLOPT_POSTFIELDS => $body,
-            CURLOPT_TIMEOUT => 30,
-            CURLOPT_CONNECTTIMEOUT => 10,
-        ]);
-
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $error = curl_error($ch);
-        curl_close($ch);
-
-        if ($error || $httpCode >= 400) {
-            throw new \RuntimeException("Cloudflare API error: {$error} (HTTP {$httpCode})");
-        }
-
-        $payload = json_decode($response, true);
-        $answer = $payload['result']['response'] ?? $payload['response'] ?? $payload['choices'][0]['message']['content'] ?? null;
-
-        return is_string($answer) && trim($answer) !== '' ? mb_substr(trim($answer), 0, 4000) : null;
     }
 
     /**
@@ -354,9 +288,8 @@ class ModelRouter
      */
     private function estimateCost(string $provider, string $model, int $tokens): float
     {
-        // Cloudflare Workers AI: ~$0.01 per 1000 tokens (varies by model)
+        // Approximate per-token cost estimates (USD)
         $rates = [
-            'cloudflare' => 0.00001,
             'openai_compat' => 0.00002,
             'language_ai' => 0.00001,
         ];
@@ -403,17 +336,6 @@ class ModelRouter
             }
         }
         return $out;
-    }
-
-    private function cloudflareModels(): array
-    {
-        return [
-            '@cf/meta/llama-3.1-8b-instruct',
-            '@cf/meta/llama-3.1-70b-instruct',
-            '@cf/mistral/mistral-7b-instruct-v0.1',
-            '@cf/google/gemma-7b-it',
-            '@hf/microsoft/phi-2',
-        ];
     }
 
     private function openaiCompatibleModels(): array

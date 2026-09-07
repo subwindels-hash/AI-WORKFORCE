@@ -1,6 +1,8 @@
 <?php
 namespace AIWorkforce;
 
+use AIWorkforce\Providers\OpenAIProvider;
+
 /**
  * Central Provider / API Management.
  *
@@ -65,13 +67,13 @@ final class ApiProviders
                 'label' => 'Translation',
                 'group' => 'Language Learning',
                 'kind' => 'data',
-                'drivers' => ['openai_compatible', 'cloudflare_workers_ai', 'libretranslate', 'custom_http'],
+                'drivers' => ['openai_compatible', 'libretranslate', 'custom_http'],
             ],
             'stt' => [
                 'label' => 'Speech-to-Text',
                 'group' => 'Language Learning',
                 'kind' => 'data',
-                'drivers' => ['cloudflare_workers_ai', 'openai_compatible', 'browser_webspeech', 'custom_http'],
+                'drivers' => ['openai_compatible', 'browser_webspeech', 'custom_http'],
             ],
             'tts' => [
                 'label' => 'Text-to-Speech',
@@ -83,13 +85,13 @@ final class ApiProviders
                 'label' => 'Language AI tutor',
                 'group' => 'Language Learning',
                 'kind' => 'data',
-                'drivers' => ['openai_compatible', 'cloudflare_workers_ai', 'custom_http'],
+                'drivers' => ['openai_compatible', 'custom_http'],
             ],
             'llm' => [
                 'label' => 'AI / LLM services',
                 'group' => 'AI Workforce',
                 'kind' => 'data',
-                'drivers' => ['openai_compatible', 'cloudflare_workers_ai', 'custom_http'],
+                'drivers' => ['openai_compatible', 'custom_http'],
             ],
             'pronunciation' => [
                 'label' => 'Pronunciation scoring',
@@ -107,25 +109,31 @@ final class ApiProviders
                 'label' => 'Text Embeddings / Vector Search',
                 'group' => 'AI Workforce',
                 'kind' => 'data',
-                'drivers' => ['cloudflare_workers_ai', 'openai_compatible', 'custom_http'],
+                'drivers' => ['openai_compatible', 'custom_http'],
             ],
             'image_generation' => [
                 'label' => 'Image Generation',
                 'group' => 'AI Workforce',
                 'kind' => 'data',
-                'drivers' => ['cloudflare_workers_ai', 'custom_http'],
+                'drivers' => ['openai_compatible', 'custom_http'],
             ],
             'summarization' => [
                 'label' => 'Text Summarization',
                 'group' => 'AI Workforce',
                 'kind' => 'data',
-                'drivers' => ['cloudflare_workers_ai', 'openai_compatible', 'custom_http'],
+                'drivers' => ['openai_compatible', 'custom_http'],
             ],
             'classification' => [
                 'label' => 'Text Classification / Sentiment',
                 'group' => 'AI Workforce',
                 'kind' => 'data',
-                'drivers' => ['cloudflare_workers_ai', 'openai_compatible', 'custom_http'],
+                'drivers' => ['openai_compatible', 'custom_http'],
+            ],
+            'moderation' => [
+                'label' => 'Content Moderation',
+                'group' => 'AI Workforce',
+                'kind' => 'data',
+                'drivers' => ['openai_compatible', 'custom_http'],
             ],
         ];
     }
@@ -262,23 +270,14 @@ final class ApiProviders
                     $f('base_url', 'Base URL', false, false, 'Defaults to https://api.frankfurter.dev'),
                 ],
             ],
-            'cloudflare_workers_ai' => [
-                'label' => 'Cloudflare Workers AI',
-                'fields' => [
-                    $f('account_id', 'Cloudflare Account ID', false, true, 'Cloudflare dashboard → Account ID'),
-                    $f('base_url', 'AI Gateway / API base URL', false, false, 'Defaults to https://api.cloudflare.com/client/v4/accounts/{account}/ai/run'),
-                    $f('token', 'Cloudflare API token', true, true, 'Token needs Workers AI: Read permission; use a restricted token.'),
-                    $f('model', 'Workers AI model', false, true, 'e.g. @cf/meta/llama-3.1-8b-instruct'),
-                    $f('gateway', 'AI Gateway name', false, false, 'Optional gateway for observability, caching and rate limits'),
-                ],
-            ],
             'openai_compatible' => [
-                'label' => 'OpenAI-compatible API',
+                'label' => 'OpenAI (or OpenAI-compatible) API',
                 'fields' => [
-                    $f('base_url', 'Base URL', false, true, 'e.g. https://api.openai.com/v1/chat/completions'),
+                    $f('base_url', 'Base URL', false, true, 'e.g. https://api.openai.com/v1 — leave blank to use OpenAI'),
                     $f('api_key', 'API Key', true, true),
-                    $f('model', 'Model', false, true),
+                    $f('model', 'Model', false, true, 'e.g. gpt-4o-mini (chat/LLM), text-embedding-3-small (embeddings), dall-e-3 (images)'),
                     $f('organization', 'Organization ID', false, false),
+                    $f('project', 'Project ID', false, false, 'Optional OpenAI project'),
                 ],
             ],
             'libretranslate' => [
@@ -913,7 +912,6 @@ final class ApiProviders
                 'official_lottery' => self::testGet((string) ($extra['health_url'] ?? ($base . '/health')), $secrets['token'] ?? $secrets['api_key'] ?? ''),
                 'libretranslate' => self::testGet(($base !== '' ? $base : '') . '/languages'),
                 'openai_compatible' => self::testOpenAi($base, (string) ($secrets['api_key'] ?? '')),
-                'cloudflare_workers_ai' => self::testCloudflare($row, $secrets),
                 'browser_webspeech' => ['ok' => true, 'message' => 'Browser Web Speech needs no server credential.'],
                 'custom_http' => self::testGet($base . ((string) ($extra['health_path'] ?? '/health')), $secrets['token'] ?? $secrets['api_key'] ?? ''),
                 default => ['ok' => false, 'message' => 'No test is defined for this provider.'],
@@ -1191,26 +1189,23 @@ final class ApiProviders
         return 'Could not reach Apollo.io — check outbound HTTPS to api.apollo.io (port 443).' . $hint;
     }
 
-    private static function testCloudflare(array $row, array $secrets): array
-    {
-        $account = (string)($row['account_id'] ?? ''); $token = (string)($secrets['token'] ?? '');
-        $extra = is_array($row['extra'] ?? null) ? $row['extra'] : [];
-        $model = (string)($extra['model'] ?? '@cf/meta/llama-3.1-8b-instruct');
-        if ($account === '' || $token === '') return ['ok'=>false,'message'=>'Cloudflare account ID and token are required.'];
-        $url = rtrim((string)($row['base_url'] ?? ''), '/');
-        if ($url === '') $url = 'https://api.cloudflare.com/client/v4/accounts/'.rawurlencode($account).'/ai/run/'.rawurlencode($model);
-        $r = self::http($url, ['Authorization: Bearer '.$token, 'Content-Type: application/json'], json_encode(['prompt'=>'Reply with OK.']));
-        $status=(int)($r['status']??0); return ['ok'=>$status>=200&&$status<400,'message'=>$status>=200&&$status<400?'Connected':'Connection failed'];
-    }
-
     private static function testOpenAi(string $url, string $key): array
     {
         if ($url === '' || $key === '') return ['ok' => false, 'message' => 'Base URL and API key are required.'];
-        $models = preg_replace('#/chat/completions/?$#', '/models', rtrim($url, '/'));
-        if ($models === $url) $models = rtrim($url, '/') . '/models';
+        $root = rtrim($url, '/');
+        // Accept a pasted endpoint URL and probe /models instead.
+        $root = (string) preg_replace('#/(chat/completions|responses)$#i', '', $root);
+        if (!preg_match('#/v\d+$#i', $root)) $root .= '/v1';
+        $models = $root . '/models';
         $resp = self::http($models, ['Authorization: Bearer ' . $key]);
         $status = (int) ($resp['status'] ?? 0);
-        return ['ok' => $status >= 200 && $status < 400, 'message' => ($status >= 200 && $status < 400) ? 'Connected' : 'Connection failed'];
+        if ($status >= 200 && $status < 400) {
+            return ['ok' => true, 'message' => 'Connected — the API key lists models at ' . $models];
+        }
+        if ($status === 401 || $status === 403) {
+            return ['ok' => false, 'message' => 'Connection failed: the API key was rejected (HTTP ' . $status . '). Check the key and that the base URL matches the provider.'];
+        }
+        return ['ok' => false, 'message' => 'Connection failed: /models answered HTTP ' . $status . '. Check the base URL and network egress.'];
     }
 
     /**
@@ -1588,23 +1583,57 @@ final class ApiProviders
 
     public static function openaiChat(array $cfg, array $messages, int $maxTokens = 260): ?string
     {
-        $driver = (string)($cfg['driver'] ?? '');
         $url = trim((string) ($cfg['base_url'] ?? ''));
         $model = (string) ($cfg['extra']['model'] ?? '');
-        $key = (string) ($cfg['secrets']['api_key'] ?? $cfg['secrets']['token'] ?? '');
-        if ($driver === 'cloudflare_workers_ai') {
-            $account = (string)($cfg['account_id'] ?? '');
-            if ($url === '') $url = 'https://api.cloudflare.com/client/v4/accounts/'.rawurlencode($account).'/ai/run/'.rawurlencode($model);
-            if ($account !== '' && ($cfg['extra']['gateway'] ?? '') !== '') $url = 'https://gateway.ai.cloudflare.com/v1/'.rawurlencode($account).'/'.rawurlencode((string)$cfg['extra']['gateway']).'/workers-ai/'.rawurlencode($model);
-        }
+        $key = (string) ($cfg['secrets']['api_key'] ?? '');
         if ($url === '' || $key === '' || $model === '') return null;
-        $body = $driver === 'cloudflare_workers_ai'
-            ? json_encode(['messages' => $messages, 'max_tokens' => $maxTokens], JSON_UNESCAPED_SLASHES)
-            : json_encode(['model' => $model, 'messages' => $messages, 'temperature' => 0.2, 'max_tokens' => $maxTokens], JSON_UNESCAPED_SLASHES);
+        $body = json_encode(['model' => $model, 'messages' => $messages, 'temperature' => 0.2, 'max_tokens' => $maxTokens], JSON_UNESCAPED_SLASHES);
         $resp = self::http($url, ['Content-Type: application/json', 'Authorization: Bearer ' . $key], $body);
         $payload = json_decode($resp['body'] ?? '', true);
         $answer = $payload['choices'][0]['message']['content'] ?? null;
         return is_string($answer) && trim($answer) !== '' ? mb_substr(trim($answer), 0, 4000) : null;
+    }
+
+    /** Responses API call via the configured OpenAI-compatible provider. */
+    public static function openaiResponses(array $cfg, string $input, array $options = []): ?array
+    {
+        return (new OpenAIProvider($cfg))->responses($input, $options);
+    }
+
+    /** Structured JSON output (JSON-schema mode) via the configured provider. */
+    public static function openaiStructured(array $cfg, array $messages, array $jsonSchema, array $options = []): ?array
+    {
+        return (new OpenAIProvider($cfg))->structuredJson($messages, $jsonSchema, $options);
+    }
+
+    /** JSON-object output (no schema) via the configured provider. */
+    public static function openaiJsonObject(array $cfg, array $messages, array $options = []): ?array
+    {
+        return (new OpenAIProvider($cfg))->jsonObject($messages, $options);
+    }
+
+    /** Text embeddings via the configured provider. Accepts a string or an array. */
+    public static function openaiEmbedding(array $cfg, $input, array $options = []): ?array
+    {
+        return (new OpenAIProvider($cfg))->embedding($input, $options);
+    }
+
+    /** Image generation via the configured provider. */
+    public static function openaiImage(array $cfg, string $prompt, array $options = []): ?array
+    {
+        return (new OpenAIProvider($cfg))->image($prompt, $options);
+    }
+
+    /** Content moderation via the configured provider. Accepts a string or an array. */
+    public static function openaiModeration(array $cfg, $input, array $options = []): ?array
+    {
+        return (new OpenAIProvider($cfg))->moderate($input, $options);
+    }
+
+    /** List model IDs available to the configured provider. */
+    public static function openaiModels(array $cfg): ?array
+    {
+        return (new OpenAIProvider($cfg))->models();
     }
 
     /** Server-side translation via the configured provider. Returns null when unused or unavailable. */

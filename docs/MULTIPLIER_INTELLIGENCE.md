@@ -339,12 +339,12 @@ This module demonstrates the **WINDELS AI Agent Orchestration** pattern:
 2. **Specialist Agents** - Same architecture as trading/sports agents
 3. **Ensemble Prediction** - Same as multi-agent consensus
 4. **Validation Loop** - Same as trading prediction validation
-5. **Observability** - Integrated with Cloudflare observability
+5. **Observability** - Integrated with the agent platform's observability
 
 The module can be extended to support:
 - Real crash game providers (via adapters)
 - Additional specialist agents
-- Advanced ML models (when integrated with Cloudflare Workers AI)
+- Advanced ML models (when integrated with an OpenAI-compatible provider)
 - WebSocket live updates
 - Mobile app integration
 
@@ -354,7 +354,7 @@ The module can be extended to support:
 
 ### Planned Features
 - [ ] **Real Provider Adapters** - Connect to actual game APIs
-- [ ] **ML Models** - Integrate with Cloudflare Workers AI
+- [ ] **ML Models** - Integrate with an OpenAI-compatible provider
 - [ ] **WebSocket Support** - Real-time signal updates
 - [ ] **Mobile App** - Push notifications for signals
 - [ ] **Advanced Analytics** - Sharpe ratio, drawdown analysis
