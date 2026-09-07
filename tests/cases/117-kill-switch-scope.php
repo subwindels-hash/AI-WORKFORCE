@@ -266,6 +266,25 @@ test('kill switch scope: the indicator renders on trading/broker pages only', fu
     }
 });
 
+test('kill switch scope: the production.sql seed matches the policy default', function () {
+    putenv(KillSwitchPolicy::BOOT_ACTIVE_ENV); // compare against the shipped default
+    $sql = ks_src('database/production.sql');
+    assert_true($sql !== '', 'database/production.sql exists');
+    $ok = preg_match("/INSERT INTO platform_state \(k,v\) VALUES \('state', '(.*?)'\) ON DUPLICATE/s", $sql, $m) === 1;
+    assert_true($ok, 'the deployment seed carries the default platform state');
+    $seed = json_decode($m[1], true);
+    assert_true(is_array($seed), 'the seeded state is valid JSON');
+
+    assert_equals('ANALYSIS_ONLY', $seed['tradingMode'] ?? null, 'trading still boots fail-closed in ANALYSIS_ONLY');
+    $ks = $seed['killSwitch'] ?? [];
+    assert_false((bool) ($ks['active'] ?? true), 'the seed ships the kill switch RELEASED');
+    assert_equals(KillSwitchPolicy::BOOT_REASON, $ks['reason'] ?? null, 'the seed records the scoped boot reason');
+    assert_equals(KillSwitchPolicy::GOVERNED_SURFACES, $ks['scope'] ?? null, 'the seed records the governed surfaces');
+    assert_equals(KillSwitchPolicy::scopeLabel(), $ks['scopeLabel'] ?? null, 'the seed records the scope label');
+    assert_equals(json_encode(KillSwitchPolicy::defaultState()), json_encode($ks), 'SQL seed and KillSwitchPolicy::defaultState() cannot drift');
+    assert_true(!str_contains($m[1], KillSwitchPolicy::LEGACY_BOOT_REASON), 'the pre-scope fail-closed seed is gone');
+});
+
 test('kill switch scope: APIs and the console expose the scope', function () {
     putenv(KillSwitchPolicy::BOOT_ACTIVE_ENV); // deterministic boot default
     $scope = platform()->killSwitchScope();
