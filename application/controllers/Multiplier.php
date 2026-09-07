@@ -479,17 +479,6 @@ class Multiplier extends App_Controller
             $results['checks']['platform_integration'] = ['status' => 'FAIL', 'error' => $e->getMessage()];
         }
         
-        header('Content-Type: application/json');
-        echo json_encode($results, JSON_PRETTY_PRINT);
-    }
-                'bridge_available' => $status['bridge_available'],
-                'enrichment_available' => $status['enrichment_available'],
-                'llm_enhancement' => $status['llm_enhancement'],
-            ];
-        } catch (\Throwable $e) {
-            $results['checks']['platform_integration'] = ['status' => 'FAIL', 'error' => $e->getMessage()];
-        }
-        
         // Summary
         $totalChecks = count($results['checks']);
         $okChecks = count(array_filter($results['checks'], fn($c) => in_array($c['status'] ?? '', ['OK', 'NOT_CONFIGURED', 'AWAITING_SPORTS_CONFIG', 'NOT_YET_REGISTERED'])));
@@ -502,7 +491,7 @@ class Multiplier extends App_Controller
                 ? 'All systems operational — full integration ready'
                 : 'Integration architecture verified — configure providers to activate',
         ];
-        
+
         header('Content-Type: application/json');
         echo json_encode($results, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
     }
