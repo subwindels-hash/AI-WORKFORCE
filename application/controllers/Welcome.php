@@ -75,13 +75,6 @@ class Welcome extends App_Controller
         $this->load->view('layout/footer');
     }
 
-    public function kill_switch()
-    {
-        $active = $this->input->post('active') === '1';
-        $this->platform->setKillSwitch($active, $active ? 'engaged from dashboard' : 'released from dashboard');
-        redirect('/analysis');
-    }
-
     public function mode()
     {
         $mode = (string)$this->input->post('mode');

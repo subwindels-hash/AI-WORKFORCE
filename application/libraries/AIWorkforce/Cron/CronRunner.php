@@ -16,6 +16,7 @@ class CronRunner
             'sports-live' => fn() => self::sportsLive($ci),
             'football' => fn() => self::football($ci),
             'lottery' => fn() => self::lottery($ci),
+            'protection' => fn() => self::protection($ci),
         ];
     }
 
@@ -36,6 +37,48 @@ class CronRunner
             $summary['accountsScanned'], $summary['riskAlerts'], $summary['proposalsExpired']
         ), $summary, 'system');
         return $summary;
+    }
+
+    /**
+     * AUTOMATIC KILL SWITCH scan (§1–§13). The engine audits and notifies on
+     * every state transition, so the runner only reports the outcome.
+     *
+     * The same pass reconciles MT4/MT5 Expert Advisors (§10): heartbeats are
+     * pulled from the bridge, evaluated against the administrator's policy and
+     * the decisions are pushed back for the EAs to obey.
+     */
+    public static function protection(object $ci): array
+    {
+        $report = $ci->platform->protection->evaluate();
+
+        $sync = ['ok' => false, 'skipped' => true, 'reason' => 'Expert Advisor sync not available.', 'accepted' => 0, 'blocked' => 0];
+        if (isset($ci->platform->eaProtection, $ci->platform->eaBridge)) {
+            $sync = $ci->platform->eaBridge->sync($ci->platform->eaProtection);
+        }
+        if (!($sync['skipped'] ?? true) && ($sync['ok'] ?? false) !== true) {
+            $ci->AIWorkforce_model->audit->emit('EA_PROTECTION_SYNC_FAILED',
+                sprintf('Expert Advisor sync failed: %s', (string) ($sync['reason'] ?? 'unknown error')),
+                $sync, 'system');
+        }
+
+        return [
+            'ranAt' => gmdate('c'),
+            'state' => $report['status']['state'],
+            'reason' => $report['status']['reason'],
+            'code' => $report['status']['code'] ?? null,
+            'triggers' => count($report['triggers']),
+            'equity' => $report['metrics']['equity'] ?? 0.0,
+            'dailyLossPct' => $report['metrics']['dailyLossPct'] ?? 0.0,
+            'drawdownPct' => $report['metrics']['drawdownPct'] ?? 0.0,
+            'ea' => [
+                'synced' => ($sync['ok'] ?? false) === true,
+                'skipped' => (bool) ($sync['skipped'] ?? false),
+                'reason' => $sync['reason'] ?? null,
+                'heartbeats' => (int) ($sync['accepted'] ?? 0),
+                'registered' => $sync['registered'] ?? [],
+                'blocked' => (int) ($sync['blocked'] ?? 0),
+            ],
+        ];
     }
 
     /** Full sports sweep (fixtures → odds → live → results → quality → ticket …). */

@@ -28,6 +28,10 @@ use AIWorkforce\Providers\YahooChartProvider;
 use AIWorkforce\Lottery\OfficialLotteryProvider;
 use AIWorkforce\Strategies\StrategyRegistry;
 use AIWorkforce\Strategies\TradingStrategy;
+use AIWorkforce\TradingProtection\AutomaticProtection;
+use AIWorkforce\TradingProtection\EaBridgeClient;
+use AIWorkforce\TradingProtection\EaProtection;
+use AIWorkforce\TradingProtection\EconomicCalendar;
 
 /**
  * Service container wiring the whole platform from CI3's database handle.
@@ -50,6 +54,11 @@ class Platform
     public readonly TradingIntelligenceEngine $engine;
     public readonly PaperTradingEngine $paper;
     public readonly \AIWorkforce\Portfolio\PortfolioRiskMonitor $monitor;
+    /** AUTOMATIC KILL SWITCH — the only kill switch in the product (no manual control exists). */
+    public readonly AutomaticProtection $protection;
+    /** AUTOMATIC KILL SWITCH — MT4/MT5 Expert Advisor deployments (spec §10). */
+    public readonly EaProtection $eaProtection;
+    public readonly EaBridgeClient $eaBridge;
     public readonly \AIWorkforce\Notifications\Notifier $notifications;
     public readonly \AIWorkforce_model $model;
     public \AIWorkforce\LangLearn\LangLearnService $langlearn;
@@ -176,6 +185,21 @@ class Platform
             $model->paper, $this->paper, $this->risk, $this->brokers, $model->audit, $model->state,
             $this->notifications
         );
+
+        // AUTOMATIC KILL SWITCH — constructed after the paper engine (it reads
+        // account equity/P&L), then injected into the two order paths so every
+        // new trade is checked against the current protection state.
+        $this->protection = new AutomaticProtection(
+            $model->state, $model->paper, $this->paper, $this->brokers,
+            $model->audit, $this->notifications, new EconomicCalendar($model->state), $this->providers
+        );
+        $this->paper->protection = $this->protection;
+        $this->execution->protection = $this->protection;
+
+        // Expert Advisors (§10) — the same policy, enforced inside MT4/MT5 and
+        // reconciled with the platform through the MT5 bridge.
+        $this->eaProtection = new EaProtection($model->state, $model->audit, $this->notifications);
+        $this->eaBridge = new EaBridgeClient();
 
         // ── Cloudflare AI Agent Platform ───────────────────────────
         $this->cloudflare = new \AIWorkforce\Cloudflare\AgentPlatform(
@@ -491,7 +515,7 @@ class Platform
         if ($limits['updatedAt'] === null) $reasons[] = 'automation limits were never explicitly configured';
         if ($mode === 'FULLY_AUTOMATED') {
             if ($this->brokers->tradingConnector() === null) $reasons[] = 'no broker connector is READY with effective order submission';
-            if (($state['killSwitch']['active'] ?? true) === true) $reasons[] = 'kill switch is ACTIVE — release it before enabling fully-automated trading';
+            if (KillSwitchScope::blocks('automation_modes', $state)) $reasons[] = 'kill switch is ACTIVE — release it before enabling fully-automated trading';
         }
         return ['ok' => count($reasons) === 0, 'reasons' => $reasons];
     }
@@ -533,14 +557,20 @@ class Platform
         return $limits;
     }
 
+    /**
+     * INTERNAL — the order gate is owned by the Automatic Kill Switch engine
+     * (`TradingProtection\AutomaticProtection::driveKillSwitch()`). No UI or
+     * API exposes this: there is no manual kill switch in the product. It
+     * remains public only for the engine and for test fixtures.
+     */
     public function setKillSwitch(bool $active, ?string $reason = null): array
     {
         $state = $this->model->state->load();
         $state['killSwitch'] = ['active' => $active, 'activatedAt' => gmdate('c'), 'reason' => $reason ?? ($active ? 'engaged' : 'released')];
         $this->model->state->save($state);
-        $this->model->audit->emit($active ? 'KILL_SWITCH_ACTIVATED' : 'KILL_SWITCH_DEACTIVATED', 'Kill switch ' . ($active ? 'ACTIVATED' : 'deactivated') . ($reason ? ": {$reason}" : ''), ['reason' => $reason], 'user');
+        $this->model->audit->emit($active ? 'KILL_SWITCH_ACTIVATED' : 'KILL_SWITCH_DEACTIVATED', 'Kill switch ' . ($active ? 'ACTIVATED' : 'deactivated') . ($reason ? ": {$reason}" : ''), ['reason' => $reason, 'automatic' => true], 'system');
         if ($active) {
-            $this->notifications->notify('KILL_SWITCH', 'critical', 'KILL SWITCH ACTIVATED — all order placement blocked', ['reason' => $reason], 'kill-switch:active');
+            $this->notifications->notify('KILL_SWITCH', 'critical', 'KILL SWITCH ACTIVATED — broker and paper orders blocked (market data and non-trading modules unaffected)', ['reason' => $reason], 'kill-switch:active');
         }
         return $state['killSwitch'];
     }

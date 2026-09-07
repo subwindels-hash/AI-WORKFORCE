@@ -50,11 +50,8 @@ $biasClass = static function (?string $bias): string {
       </select>
       <button class="btn small">Set</button>
     </form>
-    <?php if (!empty($status['killSwitch']['active'])): ?>
-      <form method="post" action="/kill-switch"><input type="hidden" name="active" value="0"><button class="btn small danger">Release kill switch</button></form>
-    <?php else: ?>
-      <form method="post" action="/kill-switch"><input type="hidden" name="active" value="1"><button class="btn small danger">Activate kill switch</button></form>
-    <?php endif; ?>
+    <?php /* §8 — no manual kill switch control exists; the Automatic
+             Protection panel on Risk Center shows the current state. */ ?>
   </div>
 </div>
 

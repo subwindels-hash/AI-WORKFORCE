@@ -7,12 +7,11 @@
  *  - console form POSTs self-guard with the session CSRF token (platform
  *    csrf_protection is off; privileged endpoints guard themselves — the
  *    same token the JSON API verifies as X-CSRF-Token)
- *  - approval (new exposure) fails closed under an ACTIVE kill switch —
- *    like paper order placement
- *  - settlement (unwind/finalize) stays available under the kill switch —
- *    like position close
- *  - the gate reads LIVE platform state (round trip verified) and fresh
- *    installs boot fail-closed
+ *  - approval and settlement are OUT OF SCOPE for the kill switch, which is
+ *    now scoped to broker + trading-intelligence surfaces (no broker order
+ *    and no money movement happens on a sports ticket in this deployment),
+ *    so the gate on approval is RBAC (sports.approve) alone
+ *  - the kill switch still boots fail-closed for the surfaces it does gate
  */
 
 /** Method body between two markers in a source file (to assert on one method precisely). */
@@ -41,20 +40,24 @@ test('sports prod review: console mutation forms carry the session CSRF token', 
     }
 });
 
-test('sports prod review: approval fails closed under the kill switch; settlement stays open', function () {
+test('sports prod review: approval and settlement are out of scope for the broker/trading kill switch', function () {
     $c = file_get_contents(FCPATH . 'application/controllers/Sports.php');
-    assert_contains('killSwitchActive()', fx_prod_body($c, 'public function decide(', 'public function settle('), 'console approval is gated on the kill switch');
+    assert_true(!str_contains(fx_prod_body($c, 'public function decide(', 'public function settle('), 'killSwitch'), 'console approval is NOT gated by the trading kill switch');
+    assert_contains("requireSportsPermission('sports.approve'", fx_prod_body($c, 'public function decide(', 'public function settle('), 'console approval is still gated on sports.approve');
     assert_true(!str_contains(fx_prod_body($c, 'public function settle(', 'private function requireSportsPermission('), 'killSwitch'), 'console settlement (unwind path) stays open under the kill switch');
 
     $a = file_get_contents(FCPATH . 'application/controllers/Api_sports.php');
-    assert_contains('killSwitch', fx_prod_body($a, 'public function decide_ticket(', 'public function settle_ticket('), 'API approval is gated on the kill switch');
+    $approve = fx_prod_body($a, 'public function decide_ticket(', 'public function verify_result(');
+    assert_true(!str_contains($approve, 'killSwitch'), 'API approval is NOT gated by the trading kill switch');
+    assert_contains("requirePermission('sports.approve')", $approve, 'API approval is still gated on sports.approve');
     assert_true(!str_contains(fx_prod_body($a, 'public function settle_ticket(', ''), 'killSwitch'), 'API settlement stays open under the kill switch');
 });
 
-test('sports prod review: kill switch gate reads live platform state and boots fail-closed', function () {
+test('sports prod review: kill switch stays fail-closed for trading and never leaks into sports', function () {
     $p = platform();
     $p->setKillSwitch(true, 'prod review: gate check');
     assert_true((bool) ($p->state()['killSwitch']['active'] ?? false), 'engaged kill switch persists and reloads');
+    assert_true(\AIWorkforce\KillSwitchScope::blocks('sports_tickets', $p->state()) === false, 'an engaged kill switch never gates sports tickets');
     $p->setKillSwitch(false, 'prod review: release');
     assert_true(empty($p->state()['killSwitch']['active']), 'released kill switch reloads inactive');
     assert_contains('Default state at boot', file_get_contents(FCPATH . 'application/models/AIWorkforce_model.php'), 'fresh installs boot with the kill switch ACTIVE (fail closed)');

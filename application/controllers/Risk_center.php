@@ -58,6 +58,7 @@ class Risk_center extends App_Controller
         $state = $this->platform->state();
         return [
             'title' => $title, 'active' => 'risk',
+            'isAdmin' => $this->platform->identity->can($this->identity, 'admin.settings.manage'),
             'status' => ['tradingMode' => $state['tradingMode'], 'killSwitch' => $state['killSwitch'],
                 'providers' => $this->platform->providers->getAllHealth()],
             'notice' => $this->flashGet('notice'), 'error' => $this->flashGet('error'),

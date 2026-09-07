@@ -57,6 +57,12 @@ final class ApiProviders
                 'kind' => 'data',
                 'drivers' => ['oanda_v20', 'frankfurter', 'custom_http'],
             ],
+            'economic_calendar' => [
+                'label' => 'Economic Calendar',
+                'group' => 'AI Trading',
+                'kind' => 'data',
+                'drivers' => ['economic_calendar_feed'],
+            ],
             'stock_market' => [
                 'label' => 'Stock / ETF / Futures Market Data',
                 'group' => 'AI Trading',
@@ -192,6 +198,14 @@ final class ApiProviders
                     $f('token', 'API token', true, false),
                     $f('timeout', 'Timeout (seconds)', false, false),
                     $f('sports', 'Sports covered', false, false, 'e.g. football,basketball,tennis'),
+                ],
+            ],
+            'economic_calendar_feed' => [
+                'label' => 'Economic calendar feed (JSON)',
+                'fields' => [
+                    $f('base_url', 'Feed URL', false, true, 'HTTPS endpoint returning {"events":[{"at":"2026-09-04T12:30:00Z","name":"Nonfarm Payrolls","impact":"high","currency":"USD"}]} — a bare JSON array also works'),
+                    $f('token', 'API token', true, false, 'Sent as an X-Api-Key header when set'),
+                    $f('timeout', 'Timeout (seconds)', false, false),
                 ],
             ],
             'loteriasapi' => [

@@ -103,6 +103,7 @@ spl_autoload_register(static function (string $class) use ($ai_workforceDir): vo
     'AIWorkforce\\IdentitySchema' => 'IdentitySchema.php',
     'AIWorkforce\\Indicators' => 'Indicators.php',
     'AIWorkforce\\Journal\\Analytics' => 'Journal/Analytics.php',
+    'AIWorkforce\\KillSwitchScope' => 'KillSwitchScope.php',
     'AIWorkforce\\LangLearn\\AdaptiveLearningService' => 'LangLearn/AdaptiveLearningService.php',
     'AIWorkforce\\LangLearn\\AudioPracticeService' => 'LangLearn/AudioPracticeService.php',
     'AIWorkforce\\LangLearn\\Curriculum' => 'LangLearn/Curriculum.php',
@@ -263,6 +264,11 @@ spl_autoload_register(static function (string $class) use ($ai_workforceDir): vo
     'AIWorkforce\\Strategies\\VersionedStrategyDecorator' => 'Strategies/BuiltinStrategies.php',
     'AIWorkforce\\Timeframes' => 'Timeframes.php',
     'AIWorkforce\\TradingIntelligenceEngine' => 'TradingIntelligenceEngine.php',
+    'AIWorkforce\\TradingProtection\\AutomaticProtection' => 'TradingProtection/AutomaticProtection.php',
+    'AIWorkforce\\TradingProtection\\EaBridgeClient' => 'TradingProtection/EaBridgeClient.php',
+    'AIWorkforce\\TradingProtection\\EaProtection' => 'TradingProtection/EaProtection.php',
+    'AIWorkforce\\TradingProtection\\EconomicCalendar' => 'TradingProtection/EconomicCalendar.php',
+    'AIWorkforce\\TradingProtection\\ProtectionPolicy' => 'TradingProtection/ProtectionPolicy.php',
     ];
     $class = ltrim($class, '\\');
     if (!isset($map[$class])) return;

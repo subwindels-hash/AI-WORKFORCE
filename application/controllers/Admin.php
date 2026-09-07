@@ -767,6 +767,308 @@ class Admin extends App_Controller
         $this->render('admin/settings', $data);
     }
 
+    /** Parse "EURUSD=12, XAUUSD=40" into a symbol => points map. */
+    private static function parseSpreadOverrides(string $raw): array
+    {
+        $out = [];
+        foreach (explode(',', $raw) as $pair) {
+            $pair = trim($pair);
+            if ($pair === '' || !str_contains($pair, '=')) continue;
+            [$symbol, $points] = array_map('trim', explode('=', $pair, 2));
+            if ($symbol === '' || !is_numeric($points)) continue;
+            $out[strtoupper($symbol)] = $points;
+        }
+        return $out;
+    }
+
+    /**
+     * §9 — Automatic Kill Switch configuration. Administrators configure the
+     * thresholds; nobody can switch protection on or off by hand.
+     */
+    public function protection()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        $data = $this->base('Automatic Kill Switch', 'protection');
+        $data['policy'] = $this->platform->protection->policy();
+        $data['protection'] = $this->platform->protection->status();
+        $data['calendar'] = $this->platform->protection->calendarStatus();
+        $data['defaults'] = \AIWorkforce\TradingProtection\ProtectionPolicy::DEFAULTS;
+        // §10 — MT4/MT5 Expert Advisors report through the bridge; the same
+        // policy is evaluated for each deployment and pushed back as a decision.
+        $data['ea'] = $this->platform->eaProtection->status();
+        $data['eaBridge'] = [
+            'configured' => $this->platform->eaBridge->configured(),
+            'error' => $this->platform->eaBridge->lastError(),
+        ];
+        $this->render('admin/protection', $data);
+    }
+
+    public function protection_save()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/protection'); return; }
+
+        $patch = [
+            'enabled' => $this->input->post('enabled') === '1',
+            'news' => [
+                'enabled' => $this->input->post('news_enabled') === '1',
+                'minutesBefore' => $this->input->post('news_minutes_before'),
+                'minutesAfter' => $this->input->post('news_minutes_after'),
+                'warningLeadMinutes' => $this->input->post('news_lead'),
+                'impacts' => $this->input->post('news_impacts'),
+                'onFeedFailure' => $this->input->post('news_on_failure'),
+                'pauseWhenNoProvider' => $this->input->post('news_pause_no_provider') === '1',
+                'feedMaxAgeMinutes' => $this->input->post('news_feed_max_age'),
+            ],
+            'dailyLoss' => [
+                'enabled' => $this->input->post('loss_enabled') === '1',
+                'percentLimit' => \AIWorkforce\TradingProtection\ProtectionPolicy::fromPercent($this->input->post('loss_pct')),
+                'fixedLimitUsd' => $this->input->post('loss_fixed'),
+                'warnAtFraction' => $this->input->post('loss_warn'),
+            ],
+            'drawdown' => [
+                'enabled' => $this->input->post('dd_enabled') === '1',
+                'percentLimit' => \AIWorkforce\TradingProtection\ProtectionPolicy::fromPercent($this->input->post('dd_pct')),
+                'warnAtFraction' => $this->input->post('dd_warn'),
+            ],
+            'technical' => [
+                'brokerDisconnect' => $this->input->post('tech_broker') === '1',
+                'staleData' => $this->input->post('tech_stale') === '1',
+                'dataFeedTimeoutSeconds' => $this->input->post('tech_feed_timeout'),
+                'maxConsecutiveOrderFailures' => $this->input->post('tech_order_failures'),
+                'escalateToKill' => $this->input->post('tech_escalate') === '1',
+            ],
+            'spread' => [
+                'enabled' => $this->input->post('spread_enabled') === '1',
+                'maxPoints' => $this->input->post('spread_points'),
+                'perSymbol' => self::parseSpreadOverrides((string) $this->input->post('spread_per_symbol')),
+                'requireReading' => $this->input->post('spread_require') === '1',
+            ],
+            'slippage' => [
+                'enabled' => $this->input->post('slip_enabled') === '1',
+                'maxPoints' => $this->input->post('slip_points'),
+                'sampleWindow' => $this->input->post('slip_window'),
+            ],
+            'emergency' => [
+                'closePositionsOnKill' => $this->input->post('emergency_close') === '1',
+                'cancelPendingOrdersOnKill' => $this->input->post('emergency_cancel') === '1',
+            ],
+            'recovery' => [
+                'enabled' => $this->input->post('recovery_enabled') === '1',
+                'requireAllClear' => $this->input->post('recovery_all_clear') === '1',
+                'consecutiveClearScans' => $this->input->post('recovery_scans'),
+                'maxStatusAgeSeconds' => $this->input->post('recovery_max_age'),
+            ],
+        ];
+
+        try {
+            $policy = $this->platform->protection->updatePolicy($patch);
+            $this->portal->log($actor, 'PROTECTION_POLICY_CHANGED', 'ok', [
+                'type' => 'protection', 'id' => 'policy', 'label' => 'Automatic Kill Switch policy',
+            ], [
+                'enabled' => $policy['enabled'],
+                'news' => $policy['news']['enabled'],
+                'dailyLossPct' => $policy['dailyLoss']['percentLimit'],
+                'dailyLossUsd' => $policy['dailyLoss']['fixedLimitUsd'],
+                'drawdownPct' => $policy['drawdown']['percentLimit'],
+                'maxSpreadPoints' => $policy['spread']['maxPoints'],
+                'maxSlippagePoints' => $policy['slippage']['maxPoints'],
+                'emergency' => $policy['emergency'],
+            ], $this->ip());
+            $this->flash('notice', 'Automatic Kill Switch policy saved and applied.');
+        } catch (\Throwable $e) {
+            $this->portal->log($actor, 'PROTECTION_POLICY_CHANGED', 'error', [
+                'type' => 'protection', 'id' => 'policy', 'label' => 'Automatic Kill Switch policy',
+            ], ['error' => $e->getMessage()], $this->ip());
+            $this->flash('error', 'Policy not saved: ' . $e->getMessage());
+        }
+        redirect('/admin/protection');
+    }
+
+    /** Reset the drawdown high-water mark (administrator action, audited). */
+    public function protection_reset_peak()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/protection'); return; }
+        $this->platform->protection->resetPeakEquity();
+        $this->portal->log($actor, 'PROTECTION_PEAK_RESET', 'ok', [
+            'type' => 'protection', 'id' => 'peak', 'label' => 'Drawdown high-water mark',
+        ], [], $this->ip());
+        $this->flash('notice', 'Drawdown high-water mark reset.');
+        redirect('/admin/protection');
+    }
+
+    /**
+     * §10 — override the Expert Advisor limits for one deployment. These are
+     * terminal-side limits (heartbeat timeout, tick age, margin floor), not
+     * risk limits: the risk policy itself stays shared so an EA cannot be
+     * quietly given more room than the platform.
+     */
+    public function protection_ea_limits()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/protection'); return; }
+        $id = trim((string) $this->input->post('ea_id'));
+        $limits = [
+            'enabled' => $this->input->post('ea_enabled') === '1',
+            'heartbeatTimeoutSeconds' => $this->input->post('ea_heartbeat_timeout'),
+            'marginLevelFloorPercent' => $this->input->post('ea_margin_floor'),
+            'maxTickAgeSeconds' => $this->input->post('ea_tick_age'),
+            'abnormalPriceMovePercent' => $this->input->post('ea_price_move'),
+            'requirePlatformDecision' => $this->input->post('ea_require_decision') === '1',
+        ];
+        try {
+            $saved = $this->platform->eaProtection->setOverride($id, $limits);
+            $this->platform->eaProtection->evaluateAll();
+            $this->portal->log($actor, 'EA_PROTECTION_LIMITS_UPDATED', 'ok', [
+                'type' => 'protection', 'id' => 'ea:' . $id, 'label' => 'Expert Advisor limits (' . $id . ')',
+            ], ['eaId' => $id, 'limits' => $saved], $this->ip());
+            $this->flash('notice', 'Expert Advisor limits saved and re-evaluated.');
+        } catch (\Throwable $e) {
+            $this->flash('error', 'Limits not saved: ' . $e->getMessage());
+        }
+        redirect('/admin/protection');
+    }
+
+    /**
+     * §9 — override the risk policy for one terminal account. Blank fields
+     * inherit the platform policy, so an account only pins what differs: a
+     * later change to the platform policy still reaches the account.
+     * Keys look like "mt5:5123456".
+     */
+    public function protection_ea_account()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/protection'); return; }
+
+        $key = trim((string) $this->input->post('account_key'));
+        $remove = $this->input->post('remove') === '1';
+        try {
+            if ($remove) {
+                $this->platform->eaProtection->removeAccountOverride($key);
+                $this->flash('notice', 'Account override removed — it inherits the platform policy again.');
+            } else {
+                $patch = $this->eaPolicyPatchFromPost();
+                if ($patch === []) {
+                    $this->flash('notice', 'Nothing overridden: every field was left blank, so the account keeps inheriting the platform policy.');
+                } else {
+                    $saved = $this->platform->eaProtection->setAccountOverride($key, $patch);
+                    $this->platform->eaProtection->evaluateAll();
+                    $this->flash('notice', sprintf('Account %s now overrides %d policy value(s).', $key, count($saved)));
+                }
+            }
+            $this->portal->log($actor, 'EA_ACCOUNT_POLICY_OVERRIDE', 'ok', [
+                'type' => 'protection', 'id' => 'ea-account:' . $key, 'label' => 'Expert Advisor account policy (' . $key . ')',
+            ], ['accountKey' => $key, 'removed' => $remove], $this->ip());
+        } catch (\Throwable $e) {
+            $this->flash('error', 'Account override not saved: ' . $e->getMessage());
+        }
+        redirect('/admin/protection');
+    }
+
+    /**
+     * §9 — override the risk policy for one deployment. Narrowest scope: a
+     * deployment override beats its account's override, which beats the
+     * platform policy. Blank fields inherit from the wider scope.
+     */
+    public function protection_ea_policy()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/protection'); return; }
+
+        $id = trim((string) $this->input->post('ea_id'));
+        try {
+            $patch = $this->eaPolicyPatchFromPost();
+            $saved = $this->platform->eaProtection->setPolicyOverride($id, $patch);
+            $this->platform->eaProtection->evaluateAll();
+            $this->portal->log($actor, 'EA_PROTECTION_POLICY_OVERRIDE', 'ok', [
+                'type' => 'protection', 'id' => 'ea-policy:' . $id, 'label' => 'Expert Advisor policy (' . $id . ')',
+            ], ['eaId' => $id, 'override' => $saved], $this->ip());
+            $this->flash('notice', $patch === []
+                ? 'Overrides cleared — this Expert Advisor inherits its account policy again.'
+                : sprintf('%d policy value(s) overridden for this Expert Advisor.', count($saved)));
+        } catch (\Throwable $e) {
+            $this->flash('error', 'Policy override not saved: ' . $e->getMessage());
+        }
+        redirect('/admin/protection');
+    }
+
+    /**
+     * Risk-policy fields for an override form. BLANK MEANS INHERIT: only the
+     * fields the administrator filled in are stored, so the rest keep tracking
+     * the wider scope.
+     *
+     * @return array<string,mixed>
+     */
+    private function eaPolicyPatchFromPost(): array
+    {
+        $patch = [];
+        $percent = static fn(mixed $value): ?float => (is_string($value) && trim($value) === '') ? null : \AIWorkforce\TradingProtection\ProtectionPolicy::fromPercent($value);
+        $number = static fn(mixed $value): ?float => (is_string($value) && trim($value) === '') ? null : (float) $value;
+        $integer = static fn(mixed $value): ?int => (is_string($value) && trim($value) === '') ? null : (int) $value;
+
+        $daily = array_filter([
+            'percentLimit' => $percent($this->input->post('ov_loss_pct')),
+            'fixedLimitUsd' => $number($this->input->post('ov_loss_fixed')),
+        ], static fn($v): bool => $v !== null);
+        if ($daily !== []) $patch['dailyLoss'] = $daily;
+
+        $dd = array_filter(['percentLimit' => $percent($this->input->post('ov_dd_pct'))], static fn($v): bool => $v !== null);
+        if ($dd !== []) $patch['drawdown'] = $dd;
+
+        $spread = array_filter(['maxPoints' => $number($this->input->post('ov_spread_points'))], static fn($v): bool => $v !== null);
+        if ($spread !== []) $patch['spread'] = $spread;
+
+        $slip = array_filter(['maxPoints' => $number($this->input->post('ov_slip_points'))], static fn($v): bool => $v !== null);
+        if ($slip !== []) $patch['slippage'] = $slip;
+
+        $news = array_filter([
+            'enabled' => ($this->input->post('ov_news_enabled') === '' || $this->input->post('ov_news_enabled') === null) ? null : ($this->input->post('ov_news_enabled') === '1'),
+            'minutesBefore' => $integer($this->input->post('ov_news_before')),
+            'minutesAfter' => $integer($this->input->post('ov_news_after')),
+        ], static fn($v): bool => $v !== null);
+        if ($news !== []) $patch['news'] = $news;
+
+        $emergency = array_filter([
+            'closePositionsOnKill' => ($this->input->post('ov_emergency_close') === '' || $this->input->post('ov_emergency_close') === null) ? null : ($this->input->post('ov_emergency_close') === '1'),
+            'cancelPendingOrdersOnKill' => ($this->input->post('ov_emergency_cancel') === '' || $this->input->post('ov_emergency_cancel') === null) ? null : ($this->input->post('ov_emergency_cancel') === '1'),
+        ], static fn($v): bool => $v !== null);
+        if ($emergency !== []) $patch['emergency'] = $emergency;
+
+        return $patch;
+    }
+
+    /** §10 — stop protecting a deployment that no longer exists. */
+    public function protection_ea_remove()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/protection'); return; }
+        $id = trim((string) $this->input->post('ea_id'));
+        $this->platform->eaProtection->unregister($id);
+        $this->portal->log($actor, 'EA_PROTECTION_UNREGISTERED', 'ok', [
+            'type' => 'protection', 'id' => 'ea:' . $id, 'label' => 'Expert Advisor deployment removed (' . $id . ')',
+        ], ['eaId' => $id], $this->ip());
+        $this->flash('notice', 'Expert Advisor deployment removed.');
+        redirect('/admin/protection');
+    }
+
+    /** §10 — pull heartbeats from the bridge and publish decisions now. */
+    public function protection_ea_sync()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/protection'); return; }
+        $report = $this->platform->eaBridge->sync($this->platform->eaProtection);
+        $this->portal->log($actor, 'EA_PROTECTION_SYNC', ($report['ok'] ?? false) ? 'ok' : 'error', [
+            'type' => 'protection', 'id' => 'ea-sync', 'label' => 'Expert Advisor sync',
+        ], $report, $this->ip());
+        if (($report['skipped'] ?? false) || !($report['ok'] ?? false)) {
+            $this->flash('error', 'Sync did not complete: ' . (string) ($report['reason'] ?? 'unknown error'));
+        } else {
+            $this->flash('notice', sprintf('Synced %d heartbeat(s); %d Expert Advisor(s) blocked by policy.', (int) $report['accepted'], (int) $report['blocked']));
+        }
+        redirect('/admin/protection');
+    }
+
     public function settings_save()
     {
         $actor = $this->gate('admin.settings.manage'); if (!$actor) return;

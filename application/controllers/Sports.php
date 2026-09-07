@@ -49,11 +49,10 @@ class Sports extends App_Controller
     public function decide(string $id)
     {
         if (!$this->requireSportsPermission('sports.approve', 'approve/reject')) return;
-        if ($this->killSwitchActive()) {
-            $this->flash('error', 'Refused: platform kill switch is ACTIVE — release it before approving odds prediction tickets (settlement remains available).');
-            redirect('/sports/odds-prediction-ticket');
-            return;
-        }
+        // Kill switch scope: sports odds-prediction tickets are NOT an
+        // order-bound surface (no broker, no money movement in this
+        // deployment), so an engaged trading kill switch does not gate
+        // approval or settlement here. Governance is RBAC (sports.approve).
         $approve = $this->input->post('approve') === '1';
         $reason = trim((string) $this->input->post('reason'));
         try {
@@ -287,13 +286,6 @@ class Sports extends App_Controller
             return false;
         }
         return true;
-    }
-
-    /** True while the platform kill switch is ACTIVE (it boots ACTIVE — fail closed). */
-    private function killSwitchActive(): bool
-    {
-        $ks = $this->platform->state()['killSwitch'] ?? [];
-        return !empty($ks['active']);
     }
 
     private function actor(): string

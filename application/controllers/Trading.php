@@ -197,8 +197,10 @@ class Trading extends App_Controller
             }
         } catch (\Throwable $e) { /* graceful */ }
         arsort($concentrations);
+        $protection = $this->platform->protection->status();
         $this->json([
             'killSwitch' => !empty($state['killSwitch']['active']),
+            'automaticProtection' => $protection,
             'tradingMode' => $state['tradingMode'],
             'automationLimits' => $limits,
             'alerts' => $alerts,
@@ -239,17 +241,6 @@ class Trading extends App_Controller
         }
     }
 
-    // ─── API: Kill switch control ─────────────────────────────────────
-    public function toggle_kill_switch()
-    {
-        if (strtoupper($this->input->server('REQUEST_METHOD')) !== 'POST') { show_404(); return; }
-        $body = $this->jsonBody() ?: [];
-        $active = !empty($body['active']);
-        $reason = (string) ($body['reason'] ?? ($active ? 'Engaged from My Trading' : 'Released from My Trading'));
-        $result = $this->platform->setKillSwitch($active, $reason);
-        $this->json(['ok' => true, 'killSwitch' => $result]);
-    }
-
     // ─── Existing endpoints ───────────────────────────────────────────
     public function submit_order()
     {
@@ -265,7 +256,7 @@ class Trading extends App_Controller
                 'broker' => $this->input->post('broker'),
             ];
             $state = $this->platform->state();
-            if (!empty($state['killSwitch']['active'])) { $this->jsonError('Kill switch is active — all order placement is blocked.', 409); return; }
+            if (\AIWorkforce\KillSwitchScope::blocks('broker_orders', $state)) { $this->jsonError('Kill switch is active — all order placement is blocked.', 409); return; }
             $result = $this->platform->execution->propose([
                 'symbol' => strtoupper((string) ($input['symbol'] ?? '')), 'side' => $input['side'] ?? 'BUY',
                 'volume' => max(0.01, (float) ($input['volume'] ?? 0.01)),

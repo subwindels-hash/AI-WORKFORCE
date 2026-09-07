@@ -64,6 +64,17 @@ class CronScheduler
             'description' => 'Fixtures, live scores, results, statistics, predictions, settlement, performance and cleanup. Each job runs only when RefreshPolicy says it is due, so the sweep is cheap when nothing is due; it never implies a fixed polling rate for the provider.',
             'defaultEnabled' => true,
         ],
+        'protection' => [
+            'label' => 'Automatic Kill Switch scan',
+            'group' => 'Trading Protection',
+            // Protection must notice a breach within a minute of it happening:
+            // the gate also re-evaluates inline when the snapshot is stale, so
+            // this job keeps the snapshot fresh and drives the audit trail.
+            'interval' => 60,
+            'schedule' => 'Every minute',
+            'description' => 'Evaluates news, daily loss, drawdown, broker/data connectivity, spread, slippage and order-failure conditions and applies the automatic protection state. No manual kill switch exists — this job is what stops trading.',
+            'defaultEnabled' => true,
+        ],
         'lottery' => [
             'label' => 'Lottery sweep',
             'group' => 'Lottery Intelligence',

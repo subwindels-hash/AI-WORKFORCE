@@ -5,7 +5,9 @@
 // (~150-300px), so a wrapper that forgets its CSS size gets a giant icon.
 // CSS still wins wherever a wrapper sets one (.btn, .qa-icon, .ra-icon, …).
 $ic = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">';
-$ks = !empty($killSwitchActive);
+$protection = ai_workforce_protection_status();
+$protectionChip = ai_workforce_protection_chip($protection);
+$ksBlocked = !empty($protectionChip['blocking']);
 $totalEq = (float)($totalEquity ?? 0);
 $totalPnl = (float)($totalUnrealizedPnl ?? 0);
 $fmt = fn(float $v) => number_format($v, 2, '.', ',');
@@ -130,14 +132,14 @@ $overall = $perfSummary['overall'] ?? [];
   </div>
 </div>
 
-<?php if ($ks): ?>
-<div class="ks-banner"><?= $ic ?><path d="M12 3 4 6v6c0 4 3.5 7.5 8 9 4.5-1.5 8-5 8-9V6z"/></svg><span>Kill switch is ACTIVE — all order placement is blocked until released.</span></div>
+<?php if ($ksBlocked): ?>
+<div class="ks-banner"><?= $ic ?><path d="M12 3 4 6v6c0 4 3.5 7.5 8 9 4.5-1.5 8-5 8-9V6z"/></svg><span><?= e($protectionChip['label']) ?> — <?= e((string) ($protection['reason'] ?? '')) ?></span></div>
 <?php endif; ?>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 
 <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
-  <span class="statuspill <?= $ks ? 'warn' : '' ?>"><i class="pill-dot"></i><?= $ks ? 'Kill switch active' : 'Safeguards active' ?></span>
+  <span class="statuspill <?= $protectionChip['tone'] === 'ok' ? '' : 'warn' ?>"><i class="pill-dot"></i><?= e($protectionChip['icon'] . ' ' . $protectionChip['label']) ?></span>
   <span class="statuspill"><i class="pill-dot"></i>Mode: <?= e($tradingMode ?? 'ANALYSIS_ONLY') ?></span>
   <span class="statuspill"><i class="pill-dot"></i><?= count($connections ?? []) ?> connection(s)</span>
   <span class="statuspill"><i class="pill-dot"></i><?= $openPositions ?? 0 ?> position(s)</span>
@@ -208,8 +210,8 @@ $overall = $perfSummary['overall'] ?? [];
 <!-- ═══════════ TAB 2: TRADE ═══════════ -->
 <section class="tab-panel" id="tab-trade">
   <div class="panel" style="margin-bottom:16px"><div class="body">
-    <p class="dim" style="margin-bottom:10px">Submit a trade proposal. The AI risk engine, kill switch, account gates and approval workflow all run before any order reaches a broker.</p>
-    <?php if ($ks): ?><div class="ks-banner" style="margin-bottom:12px"><?= $ic ?><path d="M12 3 4 6v6c0 4 3.5 7.5 8 9 4.5-1.5 8-5 8-9V6z"/></svg> Trading blocked — kill switch active.</div><?php endif; ?>
+    <p class="dim" style="margin-bottom:10px">Submit a trade proposal. The AI risk engine, the Automatic Kill Switch, account gates and the approval workflow all run before any order reaches a broker.</p>
+    <?php if ($ksBlocked): ?><div class="ks-banner" style="margin-bottom:12px"><?= $ic ?><path d="M12 3 4 6v6c0 4 3.5 7.5 8 9 4.5-1.5 8-5 8-9V6z"/></svg> New trades blocked — <?= e((string) ($protection['reason'] ?? 'automatic protection is active.')) ?></div><?php endif; ?>
     <form id="trade-form" class="trade-form" onsubmit="return submitTrade(event)">
       <div><label>Symbol</label><input name="symbol" id="tf-symbol" placeholder="EURUSD, BTCUSD, AAPL…" required></div>
       <div><label>Side</label><select name="side" id="tf-side" required><option value="BUY">Buy (Long)</option><option value="SELL">Sell (Short)</option></select></div>
@@ -220,7 +222,7 @@ $overall = $perfSummary['overall'] ?? [];
       <div><label>AI Confidence</label><input name="confidence" type="number" step="0.05" min="0" max="1" value="0.50"></div>
       <div><label>Reason</label><input name="reason" placeholder="Why this trade?"></div>
       <div class="full" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-        <button type="submit" class="btn primary" <?=$ks?'disabled':''?>><?= $ic ?><path d="M5 12h14M13 6l6 6-6 6"/></svg> Submit Proposal</button>
+        <button type="submit" class="btn primary" <?=$ksBlocked?'disabled':''?>><?= $ic ?><path d="M5 12h14M13 6l6 6-6 6"/></svg> Submit Proposal</button>
         <a class="btn" href="/analysis">Get AI recommendation</a>
       </div>
     </form>
@@ -347,8 +349,10 @@ $overall = $perfSummary['overall'] ?? [];
       <h3 style="margin-bottom:10px">Risk Controls</h3>
       <div class="panel"><div class="body">
         <div class="risk-toggle">
-          <label class="toggle-switch"><input type="checkbox" id="ks-toggle" <?=$ks?'checked':''?> onchange="toggleKillSwitch(this.checked)"><span class="toggle-slider"></span></label>
-          <label style="font-weight:600;color:<?=$ks?'var(--red)':'var(--text)'?>">Kill Switch <?= $ks ? '(ACTIVE)' : '' ?></label>
+          <?php $prot = ai_workforce_protection_status(); $chip = ai_workforce_protection_chip($prot); ?>
+          <span class="statuspill <?= $chip['tone'] === 'ok' ? '' : 'warn' ?>"><i class="pill-dot"></i><?= e($chip['icon'] . ' ' . $chip['label']) ?></span>
+          <p class="dim" style="margin:8px 0 0;font-size:12px"><?= e((string) ($prot['reason'] ?? '')) ?></p>
+          <p class="dim" style="margin:6px 0 0;font-size:12px">Automatic only — there is no manual switch. Protection is evaluated continuously and overrides every strategy, agent and manual request.</p>
         </div>
         <div style="border-top:1px solid var(--line);margin:10px 0;padding-top:10px">
           <div class="bc-row"><span>Max daily trades</span><b><?=e((string)($riskLimits['maxDailyTrades']??'—'))?></b></div>
@@ -550,13 +554,6 @@ function loadRiskDashboard(){
 }
 loadRiskDashboard();
 
-window.toggleKillSwitch=function(active){
-  if(!confirm(active?'Activate kill switch? All trading will be blocked.':'Release kill switch? Trading will resume.'))return;
-  fetch('/app/trading/toggle_kill_switch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:active,reason:active?'Toggled from My Trading':'Released from My Trading'})})
-  .then(function(r){return r.json()}).then(function(d){
-    if(d.ok){location.reload();}else{alert('Error: '+(d.error||'Unknown'));}
-  }).catch(function(e){alert('Network error: '+e.message);});
-};
 
 /* ═══════════════════════════════════════════════════════════════
    COMPONENT 4: TradingPerformance

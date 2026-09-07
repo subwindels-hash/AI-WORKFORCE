@@ -102,7 +102,9 @@ test('pipeline rejects at step 1 when the kill switch is active', function () {
     $connector = new FakeTradingConnector();
     $result = es_supervisor($connector)->evaluate(es_intent(), false);
     assert_equals('REJECTED', $result['status']);
-    assert_contains('kill switch', $result['reason']);
+    // The gate is driven by the Automatic Kill Switch engine — there is no
+    // manual switch left — so the reason names the mechanism, not a person.
+    assert_contains('Kill Switch', $result['reason']);
     assert_equals('kill-switch', $result['checks'][0]['check']);
     assert_equals([], $connector->placed);
 });

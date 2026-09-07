@@ -32,6 +32,13 @@ class ExecutionSupervisor
     private const MARGIN_RATE = 0.033;
     private const EXECUTION_MODES = ['HUMAN_APPROVAL', 'SEMI_AUTONOMOUS', 'FULLY_AUTOMATED'];
 
+    /**
+     * Automatic Kill Switch. Wired by the Platform container; null only when a
+     * caller builds the supervisor by hand (tests), where protection is out of
+     * scope for the pipeline under test.
+     */
+    public ?\AIWorkforce\TradingProtection\AutomaticProtection $protection = null;
+
     public function __construct(
         private AuditRepository $audit,
         private PlatformStateRepository $stateRepo,
@@ -80,9 +87,18 @@ class ExecutionSupervisor
         if ($intent === null) return $reject('intent', 'intent requires symbol, side BUY|SELL, type MARKET|LIMIT, positive volume, a stopLoss on the correct side, and a price for LIMIT orders');
         $safe = $this->safeIntent($intent);
 
-        // 1 — kill switch
-        if (($state['killSwitch']['active'] ?? true) === true) return $reject('kill-switch', 'kill switch is active');
+        // 1 — order gate driven by the Automatic Kill Switch engine (scoped:
+        // broker + trading intelligence surfaces only). It has no manual control.
+        if (KillSwitchScope::blocks('execution_supervisor', $state)) return $reject('kill-switch', 'Automatic Kill Switch is active — no new trades');
         $pass('kill-switch', 'inactive');
+
+        // 1b — Automatic Kill Switch (§11). The protection state outranks AI
+        // agents, strategies, signals and manual requests; nothing bypasses it.
+        if ($this->protection !== null) {
+            $gate = $this->protection->gate((string) ($intent['symbol'] ?? ''));
+            if (!($gate['allowed'] ?? false)) return $reject('automatic-protection', (string) $gate['reason']);
+            $pass('automatic-protection', (string) $gate['state']);
+        }
 
         // 2 — trading mode
         $mode = (string) ($state['tradingMode'] ?? 'ANALYSIS_ONLY');
@@ -128,7 +144,7 @@ class ExecutionSupervisor
         if ($age > $freshLimit) {
             return $reject('data-freshness', "quote is {$age}s old (limit {$freshLimit}s for {$intent['marketClass']}) — data is stale");
         }
-        $pass('data-freshness', "quote age {$age}s (limit {$freshLimit}s), " . ($quote['delayed'] ? 'DELAYED' : 'live'));
+        $pass('data-freshness', "quote age {$age}s (limit {$freshLimit}s), " . (!empty($quote['delayed']) ? 'DELAYED' : 'live'));
 
         // 7 — duplicate orders (one net position per symbol, broker-wide)
         try {
@@ -272,7 +288,13 @@ class ExecutionSupervisor
         $automated = $proposal['actor'] === 'system' || $state['tradingMode'] !== 'HUMAN_APPROVAL';
 
         // Routing gates (steps 1–2 re-verified at routing time).
-        if (($state['killSwitch']['active'] ?? true) === true) return $this->routingBlocked($proposal, 'kill switch is active');
+        if (KillSwitchScope::blocks('broker_orders', $state)) return $this->routingBlocked($proposal, 'kill switch is active');
+        // Automatic Kill Switch re-checked at routing time (§11) — protection
+        // may have engaged between approval and routing.
+        if ($this->protection !== null) {
+            $gate = $this->protection->gate((string) ($proposal['symbol'] ?? ''));
+            if (!($gate['allowed'] ?? false)) return $this->routingBlocked($proposal, 'automatic protection: ' . (string) $gate['reason']);
+        }
         if (!in_array((string) $state['tradingMode'], self::EXECUTION_MODES, true)) return $this->routingBlocked($proposal, "trading mode is {$state['tradingMode']}");
         if ($state['tradingMode'] === 'HUMAN_APPROVAL' && $proposal['status'] !== 'APPROVED') return $this->routingBlocked($proposal, 'proposal is not human-approved');
         if (!in_array($proposal['status'], ['APPROVED', 'READY_TO_ROUTE'], true)) return $this->routingBlocked($proposal, "proposal status is {$proposal['status']}");
@@ -298,6 +320,7 @@ class ExecutionSupervisor
             $this->setStatus($proposal, 'FAILED', "broker rejected: {$e->getMessage()}", $actor);
             $this->audit->emit('EXECUTION_FAILED', "Broker rejected proposal {$id}: {$e->getMessage()}", ['proposalId' => $id], $actor);
             $this->notify('EXECUTION_FAILED', 'critical', "Broker rejected proposal for {$order['symbol']}", ['proposalId' => $id, 'error' => $e->getMessage()], "proposal:{$id}:failed");
+            $this->protection?->recordOrderFailure('broker rejected: ' . $e->getMessage());
             return ['status' => 'FAILED', 'reason' => $e->getMessage(), 'execution' => $execution, 'brokerOrderCreated' => false];
         }
 
@@ -305,11 +328,20 @@ class ExecutionSupervisor
         if (($placed['ticket'] ?? 0) <= 0 || ($placed['price'] ?? 0) <= 0) {
             $execution = $this->recordExecution($proposal, $connector->id(), null, $automated, 'FAILED', ['error' => 'invalid broker result contract', 'raw' => $placed]);
             $this->setStatus($proposal, 'FAILED', 'invalid broker result contract', $actor);
+            $this->protection?->recordOrderFailure('invalid broker result contract');
             return ['status' => 'FAILED', 'reason' => 'invalid broker result contract', 'execution' => $execution, 'brokerOrderCreated' => false];
         }
         $execution = $this->recordExecution($proposal, $connector->id(), (string) $placed['ticket'], $automated, 'EXECUTED', $placed);
         $this->audit->emit('ORDER_FILLED', sprintf('Broker filled %s %.2f %s @ %s (ticket %s)', $order['side'], $order['volume'], $order['symbol'], number_format($placed['price'], 5), $placed['ticket']), ['proposalId' => $id, 'ticket' => $placed['ticket']], $actor);
         $this->notify('ORDER_FILLED', 'info', sprintf('Filled %s %.2f %s @ %s', $order['side'], $order['volume'], $order['symbol'], number_format($placed['price'], 5)), ['proposalId' => $id, 'ticket' => $placed['ticket']], "proposal:{$id}:filled");
+        $this->protection?->recordOrderSuccess();
+        // §6 slippage: compare the requested price with the fill we got.
+        if (isset($order['price']) && $order['price'] > 0) {
+            $points = \AIWorkforce\TradingProtection\ProtectionPolicy::toPoints(
+                abs((float) $placed['price'] - (float) $order['price']), (string) $order['symbol'], (float) $placed['price']
+            );
+            if ($points !== null) $this->protection?->recordSlippage($points);
+        }
 
         // 15 — portfolio update (post-trade snapshot on the execution record)
         try {

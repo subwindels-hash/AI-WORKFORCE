@@ -64,6 +64,53 @@
   </div>
 </div>
 
+<?php /* §8 — Automatic Kill Switch status. There is deliberately no manual
+         switch here: the state is derived by the protection engine. */ ?>
+<?php $prot = ai_workforce_protection_status(); $chip = ai_workforce_protection_chip($prot); $pm = $prot['metrics'] ?? []; ?>
+<div class="panel" style="margin-top:14px">
+  <h3>Automatic Kill Switch
+    <span class="statuspill <?= $chip['tone'] === 'ok' ? '' : 'warn' ?>"><i class="pill-dot"></i><?= e($chip['icon'] . ' ' . $chip['label']) ?></span>
+  </h3>
+  <div class="body" style="padding-top:12px">
+    <p style="margin:0 0 10px;font-weight:600;color:<?= $chip['tone'] === 'ok' ? 'var(--text)' : 'var(--red)' ?>"><?= e((string) ($prot['reason'] ?? '')) ?></p>
+    <div class="bc-row"><span>New trades</span><b><?= $chip['blocking'] ? 'BLOCKED' : 'Allowed' ?></b></div>
+    <div class="bc-row"><span>Since</span><b><?= e((string) ($prot['since'] ?? '—')) ?></b></div>
+    <div class="bc-row"><span>Last evaluated</span><b><?= e((string) ($prot['evaluatedAt'] ?? 'never')) ?></b></div>
+    <div class="bc-row"><span>Previous state</span><b><?= e((string) ($prot['previousState'] ?? '—')) ?></b></div>
+    <div class="bc-row"><span>Equity / balance</span><b><?= e(number_format((float) ($pm['equity'] ?? 0), 2)) ?> / <?= e(number_format((float) ($pm['balance'] ?? 0), 2)) ?></b></div>
+    <div class="bc-row"><span>Daily P&amp;L</span><b><?= e(number_format((float) ($pm['dailyPnl'] ?? 0), 2)) ?></b></div>
+    <div class="bc-row"><span>Drawdown</span><b><?= e(number_format((float) ($pm['drawdownPct'] ?? 0), 2)) ?>% (peak <?= e(number_format((float) ($pm['peakEquity'] ?? 0), 2)) ?>)</b></div>
+    <div class="bc-row"><span>Open positions</span><b><?= (int) ($pm['openPositions'] ?? 0) ?></b></div>
+
+    <?php if (!empty($prot['triggers'])): ?>
+      <h4 style="margin:14px 0 6px">Active conditions</h4>
+      <table class="tbl mono">
+        <thead><tr><th>State</th><th>Trigger</th><th>Reason</th></tr></thead>
+        <tbody>
+          <?php foreach ($prot['triggers'] as $t): ?>
+            <tr>
+              <td><span class="badge <?= ($t['state'] ?? '') === 'AUTOMATIC_KILL' ? 'b-red' : 'b-amber' ?>"><?= e((string) ($t['state'] ?? '')) ?></span></td>
+              <td><?= e((string) ($t['code'] ?? '')) ?></td>
+              <td><?= e((string) ($t['reason'] ?? '')) ?></td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    <?php endif; ?>
+
+    <p class="dim" style="margin:12px 0 0">
+      Continuously monitored: high-impact news, daily loss, maximum drawdown, broker
+      and MT4/MT5 connectivity, market-data availability, spread, slippage and repeated
+      order failures. Protection overrides AI agents, strategies, signals and manual
+      requests. There is no manual on/off switch — only an administrator can change
+      the thresholds.
+    </p>
+    <?php if (!empty($isAdmin)): ?>
+      <a class="btn" href="/admin/protection" style="margin-top:10px">Configure protection</a>
+    <?php endif; ?>
+  </div>
+</div>
+
 <div class="panel" style="margin-top:14px">
   <h3>Audit trail (latest)</h3>
   <div class="body scroll" style="padding-top:12px">
