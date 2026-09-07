@@ -696,7 +696,9 @@ class Auth extends MY_Controller
 
     private function renderPage(string $title, string $active, array $data = []): void
     {
-        $state = ['tradingMode' => 'ANALYSIS_ONLY', 'killSwitch' => ['active' => true]];
+        // Fallback only: the account pages are not a governed kill-switch
+        // surface, so the safe default here is the scoped released state.
+        $state = ['tradingMode' => 'ANALYSIS_ONLY', 'killSwitch' => \AIWorkforce\KillSwitchPolicy::defaultState()];
         try { $state = $this->platform->state(); } catch (Throwable $e) { log_message('error', 'account state failed: ' . $e->getMessage()); }
         $data = array_merge($data, [
             'title' => $title, 'active' => $active,

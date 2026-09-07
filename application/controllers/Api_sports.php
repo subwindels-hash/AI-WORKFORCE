@@ -534,9 +534,9 @@ class Api_sports extends Api_controller
     {
         $user = $this->requirePermission('sports.approve');
         if (!$user) return;
-        if (!empty($this->platform->state()['killSwitch']['active'] ?? null)) {
-            return $this->jsonError('kill switch is ACTIVE — approving new tickets is blocked until it is released (settlement remains available)', 409);
-        }
+        // The kill switch is scoped to broker + trading-intelligence order paths
+        // (AIWorkforce\KillSwitchPolicy) — Sports Intelligence is not governed
+        // by it, so ticket approval is protected by sports.approve + CSRF only.
         $body = $this->jsonBody();
         if (!isset($body['approve']) || !is_bool($body['approve'])) return $this->jsonError('body must include approve: boolean');
         try {

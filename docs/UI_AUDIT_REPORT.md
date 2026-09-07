@@ -140,5 +140,5 @@ Legend: ✅ tested & works · ⚠️ tested, issue found and fixed · ❌ tested
 
 - **Forgot password** intentionally does not mint reset tokens in this installation ("Password resets are issued by an administrator") — documented on the page and in `Auth::forgot_submit()`.
 - **Lead Discovery / Pipeline** render as a standalone workspace with its own header (by design) — it boots from the platform session and links back to `/dashboard`.
-- **Trading surfaces** (Execution, Brokers, Risk Center, kill switch) are analysis-only by default with the kill switch on; gated actions require the corresponding RBAC permission — role checks verified in code.
+- **Trading surfaces** (Execution, Brokers, Risk Center, kill switch) are analysis-only by default (`ANALYSIS_ONLY`); the kill switch ships RELEASED and is scoped to broker + trading-intelligence order paths, so its indicator renders only on trading/broker pages and gated actions require the corresponding RBAC permission — role checks verified in code.
 - The offline dev runtime (php-wasm) answers each request with a fresh PHP instance, so page loads take ~0.3–2 s; production (Apache + PHP-FPM + MariaDB) does not have this latency.

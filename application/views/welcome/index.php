@@ -55,6 +55,7 @@ $biasClass = static function (?string $bias): string {
     <?php else: ?>
       <form method="post" action="/kill-switch"><input type="hidden" name="active" value="1"><button class="btn small danger">Activate kill switch</button></form>
     <?php endif; ?>
+    <p class="dim" style="font-size:11px;margin-top:6px">Scoped control: engaging it blocks broker + trading-intelligence order paths (MT5, MT4, crypto, forex, stock/ETF, execution supervisor, paper trading). Sports, EuroMillions, languages, leads, multiplier, messages and market-data reads keep working.</p>
   </div>
 </div>
 

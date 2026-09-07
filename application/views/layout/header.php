@@ -7,6 +7,11 @@ if (!function_exists('e')) {
 $status = $status ?? null;
 $mode = $status['tradingMode'] ?? '…';
 $ks = $status['killSwitch'] ?? null;
+// The kill switch is a TRADING control (AIWorkforce\KillSwitchPolicy): it
+// governs broker + trading-intelligence order paths only, so its indicator
+// belongs on those pages and nowhere else. Sports, lottery, languages, leads,
+// multiplier, messages and the workforce consoles never render it.
+$ksScoped = \AIWorkforce\KillSwitchPolicy::governsPage($active ?? '');
 $ci = get_instance();
 $identity = $ci->session->userdata('identity');
 $identity = is_array($identity) ? $identity : null;
@@ -111,7 +116,7 @@ $isActive = function(array $keys) use ($active): bool {
     </div>
   </div>
   <div class="top-right">
-    <?php if ($ks && !empty($ks['active'])): ?><span class="statuspill warn"><i class="pill-dot" aria-hidden="true"></i>Kill switch on</span>
+    <?php if ($ksScoped && $ks && !empty($ks['active'])): ?><span class="statuspill warn" title="Scoped to broker + trading-intelligence order paths"><i class="pill-dot" aria-hidden="true"></i>Kill switch on</span>
     <?php else: ?><span class="statuspill"><i class="pill-dot" aria-hidden="true"></i>Mode <?= e($mode) ?></span><?php endif; ?>
     <a class="icon-btn" href="/notifications" title="Notifications" aria-label="Notifications" data-dashboard-link>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg>

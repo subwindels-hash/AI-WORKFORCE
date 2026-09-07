@@ -80,9 +80,10 @@ class ExecutionSupervisor
         if ($intent === null) return $reject('intent', 'intent requires symbol, side BUY|SELL, type MARKET|LIMIT, positive volume, a stopLoss on the correct side, and a price for LIMIT orders');
         $safe = $this->safeIntent($intent);
 
-        // 1 — kill switch
-        if (($state['killSwitch']['active'] ?? true) === true) return $reject('kill-switch', 'kill switch is active');
-        $pass('kill-switch', 'inactive');
+        // 1 — kill switch (scoped by KillSwitchPolicy to broker + trading
+        // intelligence order paths; fail closed when the state row is absent)
+        if (KillSwitchPolicy::blocks($state, 'execution.propose')) return $reject('kill-switch', 'kill switch is active');
+        $pass('kill-switch', 'inactive — scope: broker + trading-intelligence order paths');
 
         // 2 — trading mode
         $mode = (string) ($state['tradingMode'] ?? 'ANALYSIS_ONLY');
@@ -272,7 +273,7 @@ class ExecutionSupervisor
         $automated = $proposal['actor'] === 'system' || $state['tradingMode'] !== 'HUMAN_APPROVAL';
 
         // Routing gates (steps 1–2 re-verified at routing time).
-        if (($state['killSwitch']['active'] ?? true) === true) return $this->routingBlocked($proposal, 'kill switch is active');
+        if (KillSwitchPolicy::blocks($state, 'execution.route')) return $this->routingBlocked($proposal, 'kill switch is active');
         if (!in_array((string) $state['tradingMode'], self::EXECUTION_MODES, true)) return $this->routingBlocked($proposal, "trading mode is {$state['tradingMode']}");
         if ($state['tradingMode'] === 'HUMAN_APPROVAL' && $proposal['status'] !== 'APPROVED') return $this->routingBlocked($proposal, 'proposal is not human-approved');
         if (!in_array($proposal['status'], ['APPROVED', 'READY_TO_ROUTE'], true)) return $this->routingBlocked($proposal, "proposal status is {$proposal['status']}");

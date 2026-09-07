@@ -108,7 +108,7 @@ class Trading extends App_Controller
     {
         $history = $this->platform->model->analysis->history(30);
         $state = $this->platform->state();
-        $killSwitch = !empty($state['killSwitch']['active']);
+        $killSwitch = $this->platform->killSwitchBlocks('trading.signals', $state);
         $signals = [];
         foreach ($history as $h) {
             $bias = strtolower($h['bias'] ?? 'neutral');
@@ -247,7 +247,7 @@ class Trading extends App_Controller
         $active = !empty($body['active']);
         $reason = (string) ($body['reason'] ?? ($active ? 'Engaged from My Trading' : 'Released from My Trading'));
         $result = $this->platform->setKillSwitch($active, $reason);
-        $this->json(['ok' => true, 'killSwitch' => $result]);
+        $this->json(['ok' => true, 'killSwitch' => $result, 'scope' => $this->platform->killSwitchScope()]);
     }
 
     // ─── Existing endpoints ───────────────────────────────────────────
@@ -265,7 +265,10 @@ class Trading extends App_Controller
                 'broker' => $this->input->post('broker'),
             ];
             $state = $this->platform->state();
-            if (!empty($state['killSwitch']['active'])) { $this->jsonError('Kill switch is active — all order placement is blocked.', 409); return; }
+            // My Trading submits broker-bound intents — a governed surface, so
+            // the scoped kill switch blocks it (everything else on the platform
+            // keeps working while the switch is engaged).
+            if ($this->platform->killSwitchBlocks('trading.submit_order', $state)) { $this->jsonError('Kill switch is active — broker + trading-intelligence order placement is blocked.', 409); return; }
             $result = $this->platform->execution->propose([
                 'symbol' => strtoupper((string) ($input['symbol'] ?? '')), 'side' => $input['side'] ?? 'BUY',
                 'volume' => max(0.01, (float) ($input['volume'] ?? 0.01)),

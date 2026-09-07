@@ -15,7 +15,10 @@ final class AIWorkforce_PlatformStateHelper
             if (isset($ci->platform)) {
                 self::$state = $ci->platform->state();
             } else {
-                self::$state = ['tradingMode' => 'ANALYSIS_ONLY', 'killSwitch' => ['active' => true]];
+                // No platform container available: fall back to the scoped
+                // default state (kill switch released — it only governs broker
+                // + trading-intelligence order paths, see KillSwitchPolicy).
+                self::$state = ['tradingMode' => 'ANALYSIS_ONLY', 'killSwitch' => \AIWorkforce\KillSwitchPolicy::defaultState()];
             }
         }
         return self::$state;

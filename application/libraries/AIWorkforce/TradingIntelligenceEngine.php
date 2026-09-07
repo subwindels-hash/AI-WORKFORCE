@@ -106,7 +106,10 @@ class TradingIntelligenceEngine
         $riskDecision = null;
         if ($setup !== null) {
             $riskDecision = $this->risk->evaluate($setup, [
-                'killSwitchActive' => $this->state['killSwitch']['active'],
+                // Trading intelligence is a governed surface: while the scoped
+                // kill switch is engaged its setups are vetoed (analysis and
+                // market data themselves keep running — see KillSwitchPolicy).
+                'killSwitchActive' => KillSwitchPolicy::blocks($this->state, 'trading.intelligence'),
                 'dataQuality' => $dataQuality,
                 'syntheticData' => $series['provenance']['synthetic'],
                 'staleData' => $series['provenance']['stale'],

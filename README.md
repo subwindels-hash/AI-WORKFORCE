@@ -255,6 +255,38 @@ approved symbols) → 11 human approval (HUMAN_APPROVAL mode) → 12 place order
   requires the PAPER_TRADING stage plus ≥10 closed paper trades with
   profit factor > 1 and positive expectancy.
 
+### Kill-switch scope (broker + trading intelligence only)
+
+The kill switch is a **trading control, not a platform-wide mute button**.
+`application/libraries/AIWorkforce/KillSwitchPolicy.php` is the single source
+of truth; every enforcement point and the UI indicator go through it.
+
+| Governed (blocked while engaged) | Never governed |
+|---|---|
+| Broker connectors — MT5 bridge, MT4 bridge, cryptocurrency exchanges (Binance, Bybit, OKX, Coinbase, Kraken), forex/stock brokers (OANDA, Alpaca, IBKR), per-user connections | Sports Intelligence, Football Predictions, EuroMillions |
+| Trade Execution Supervisor — propose, approve, route | Language Learning, Lead Discovery, Multiplier AI |
+| Trading Intelligence Engine — the risk decision attached to an analysis | Messages, Notifications, Windels AI Agents, account/admin pages |
+| Paper Trading engine — simulated order placement | Read-only market data: Crypto / Forex / Stock-ETF-Futures feeds, charts, quotes |
+| Trading-mode automation gate (`FULLY_AUTOMATED` needs it released) | Unwind paths: position close, order cancel, settlement |
+
+- **Boot default: RELEASED** (`killSwitch.active = false`, reason
+  `KillSwitchPolicy::BOOT_REASON`). A stored state that still carries the
+  pre-scope installer default is migrated once on load; an operator engagement
+  always records its own reason and survives untouched. Hosts that want the
+  previous posture can set `AI_WORKFORCE_KILL_SWITCH_BOOT_ACTIVE=1` to install
+  the switch ENGAGED — that changes the boot flag only, never the scope.
+- Trading stays **fail-closed** through the gates that are always on:
+  `ANALYSIS_ONLY` boot mode, an order-capable bridge-verified connector,
+  `AI_WORKFORCE_MT5_TRADING_ENABLED` + demo-account authorization, and the
+  configured automation envelope.
+- Inside the governed scope a missing/invalid state row is still treated as
+  **ACTIVE** (`KillSwitchPolicy::isActive()` fails closed).
+- The header indicator renders only on trading and broker pages
+  (`KillSwitchPolicy::TRADING_PAGES`) — the switch's state is not shown as a
+  warning on modules it does not govern.
+- `GET /api/system/status` reports `killSwitch` plus `killSwitchScope`
+  (governs / neverGoverns / alwaysAvailableActions / bootDefault).
+
 ### Operator access control, notifications, scheduled operations
 
 - **RBAC** (seeded by the installer, shared matrix in `tools/rbac.php`):
@@ -592,10 +624,10 @@ rather than reporting a mysterious all-synthetic registry.
 | Agents never call brokers | Agents see only `AnalysisContext`; every order path (paper AND broker) runs through the Risk Engine + Execution Supervisor; only the supervisor holds a TradingConnector |
 | Never silently use fake data | `provenance.synthetic` flows end-to-end; paper fills on synthetic prices require the explicit, audited `allowSyntheticPaperData` dev flag |
 | No integration claimed unless tested | `GET /api/system/features` renders the same matrix; unverified integrations are listed as PLANNED (Broker Center) |
-| Live trading disabled by default | Boot state: `ANALYSIS_ONLY` + kill switch ACTIVE; broker routing needs an explicitly deployed bridge + `AI_WORKFORCE_MT5_TRADING_ENABLED=1` + demo account; automated modes need a configured automation envelope |
+| Live trading disabled by default | Boot state: `ANALYSIS_ONLY` with the scoped kill switch RELEASED; broker routing needs an explicitly deployed bridge + `AI_WORKFORCE_MT5_TRADING_ENABLED=1` + demo account; automated modes need a configured automation envelope |
 | Every trade auditable | `audit_logs` table + UI trail; every order/position/journal row is linked |
 | Risk Engine veto power | `RiskEngine::evaluate()` sits in every order path |
-| Kill switch blocks orders | Checked first in `submitOrder()`, in the supervisor pipeline (step 1) and re-verified at routing time |
+| Kill switch blocks trading orders (scoped) | Checked first in `submitOrder()`, in the supervisor pipeline (step 1) and re-verified at routing time — through `KillSwitchPolicy`, so it governs broker connectors (MT5/MT4, crypto, forex, stock/ETF), the execution supervisor, trading intelligence and paper orders only. Sports, football, lottery, languages, leads, multiplier, messages, the workforce agents and read-only market data are never blocked, and position close / cancel / settlement stay available |
 
 ## Unfinished-module scaffolds
 

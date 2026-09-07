@@ -15,7 +15,7 @@
   <div class="notice warnbox"><b>Trading mode is <?= e($status['tradingMode']) ?></b> — paper orders are blocked until you switch to PAPER_TRADING on the Dashboard. The kill switch must also be released.</div>
 <?php endif; ?>
 <?php if (!empty($status['killSwitch']['active'])): ?>
-  <div class="notice err"><b>Kill switch ACTIVE</b> — all order placement (paper included) is vetoed.</div>
+  <div class="notice err"><b>Kill switch ACTIVE</b> — all order placement (paper included) is vetoed. Scope: broker + trading-intelligence order paths; closing a position stays available.</div>
 <?php endif; ?>
 
 <div class="grid cols-main">

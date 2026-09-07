@@ -12,7 +12,9 @@ class Workspace extends App_Controller
         // Every fetch below is independently guarded: the dashboard is an
         // aggregate page and a single failing/slow subsystem must never 500
         // the whole page. Widgets already degrade to NO_DATA/empty states.
-        $state = ['tradingMode' => 'ANALYSIS_ONLY', 'killSwitch' => ['active' => true]];
+        // Fallback only (the dashboard aggregates every module, most of which
+        // the scoped kill switch does not govern) — see KillSwitchPolicy.
+        $state = ['tradingMode' => 'ANALYSIS_ONLY', 'killSwitch' => \AIWorkforce\KillSwitchPolicy::defaultState()];
         try { $state = $this->platform->state(); } catch (Throwable $e) { log_message('error', 'dashboard state failed: ' . $e->getMessage()); }
         $inbox = ['unread' => 0, 'notifications' => []];
         try { $inbox = $this->platform->notifications->inbox($userId, false, 8); } catch (Throwable $e) { log_message('error', 'dashboard inbox failed: ' . $e->getMessage()); }

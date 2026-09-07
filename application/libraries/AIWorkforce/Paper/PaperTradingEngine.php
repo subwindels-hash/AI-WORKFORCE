@@ -2,6 +2,7 @@
 namespace AIWorkforce\Paper;
 
 use AIWorkforce\Backtest\Backtester;
+use AIWorkforce\KillSwitchPolicy;
 use AIWorkforce\Persistence\AuditRepository;
 use AIWorkforce\Persistence\JournalRepository;
 use AIWorkforce\Persistence\PaperRepository;
@@ -127,7 +128,10 @@ class PaperTradingEngine
     {
         $state = $this->stateRepo->load();
         $syntheticAllowed = !empty($state['allowSyntheticPaperData']);
-        if ($state['killSwitch']['active']) {
+        // Scoped kill switch (KillSwitchPolicy): paper order placement is a
+        // governed trading surface, so it stays blocked while the switch is
+        // engaged. Position close below is an unwind and stays available.
+        if (KillSwitchPolicy::blocks($state, 'paper.submit_order')) {
             return $this->reject($accountId, $input, 'Kill switch is ACTIVE — all order placement is blocked');
         }
         if ($state['tradingMode'] !== 'PAPER_TRADING') {

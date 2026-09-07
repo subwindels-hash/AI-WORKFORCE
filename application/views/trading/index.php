@@ -131,7 +131,7 @@ $overall = $perfSummary['overall'] ?? [];
 </div>
 
 <?php if ($ks): ?>
-<div class="ks-banner"><?= $ic ?><path d="M12 3 4 6v6c0 4 3.5 7.5 8 9 4.5-1.5 8-5 8-9V6z"/></svg><span>Kill switch is ACTIVE — all order placement is blocked until released.</span></div>
+<div class="ks-banner"><?= $ic ?><path d="M12 3 4 6v6c0 4 3.5 7.5 8 9 4.5-1.5 8-5 8-9V6z"/></svg><span>Kill switch is ACTIVE — broker + trading order placement is blocked until released. Other modules and market data keep running.</span></div>
 <?php endif; ?>
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
@@ -209,7 +209,7 @@ $overall = $perfSummary['overall'] ?? [];
 <section class="tab-panel" id="tab-trade">
   <div class="panel" style="margin-bottom:16px"><div class="body">
     <p class="dim" style="margin-bottom:10px">Submit a trade proposal. The AI risk engine, kill switch, account gates and approval workflow all run before any order reaches a broker.</p>
-    <?php if ($ks): ?><div class="ks-banner" style="margin-bottom:12px"><?= $ic ?><path d="M12 3 4 6v6c0 4 3.5 7.5 8 9 4.5-1.5 8-5 8-9V6z"/></svg> Trading blocked — kill switch active.</div><?php endif; ?>
+    <?php if ($ks): ?><div class="ks-banner" style="margin-bottom:12px"><?= $ic ?><path d="M12 3 4 6v6c0 4 3.5 7.5 8 9 4.5-1.5 8-5 8-9V6z"/></svg> Trading blocked — kill switch active (broker + trading-intelligence order paths; other modules keep working).</div><?php endif; ?>
     <form id="trade-form" class="trade-form" onsubmit="return submitTrade(event)">
       <div><label>Symbol</label><input name="symbol" id="tf-symbol" placeholder="EURUSD, BTCUSD, AAPL…" required></div>
       <div><label>Side</label><select name="side" id="tf-side" required><option value="BUY">Buy (Long)</option><option value="SELL">Sell (Short)</option></select></div>
@@ -551,7 +551,7 @@ function loadRiskDashboard(){
 loadRiskDashboard();
 
 window.toggleKillSwitch=function(active){
-  if(!confirm(active?'Activate kill switch? All trading will be blocked.':'Release kill switch? Trading will resume.'))return;
+  if(!confirm(active?'Activate kill switch? Broker + trading order placement will be blocked (other modules keep working).':'Release kill switch? Broker + trading order placement will resume.'))return;
   fetch('/app/trading/toggle_kill_switch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:active,reason:active?'Toggled from My Trading':'Released from My Trading'})})
   .then(function(r){return r.json()}).then(function(d){
     if(d.ok){location.reload();}else{alert('Error: '+(d.error||'Unknown'));}

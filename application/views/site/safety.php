@@ -31,7 +31,7 @@
         <li>Build AI software for analysis, learning, and research</li>
         <li>Show you market data from providers you connect</li>
         <li>Simulate strategies with paper trading before you risk anything</li>
-        <li>Guard every action with risk checks, a kill switch, and audit logs</li>
+        <li>Guard every trading action with risk checks, a scoped kill switch, and audit logs</li>
         <li>Charge only for software subscriptions and services</li>
       </ul>
     </article>
@@ -72,7 +72,7 @@
   <div class="cards two">
     <article class="card"><h3>Authentication</h3><p>Sessions live server-side. Passwords are hashed. Login is rate-limited. Logout requires the CSRF token issued at sign-in.</p></article>
     <article class="card"><h3>Authorization</h3><p>Hiding a menu is not enough. Pages call requireLogin / requireAdminPage. APIs return 401 or 403. Writes re-check RBAC and CSRF.</p></article>
-    <article class="card"><h3>Kill switch</h3><p>The platform boots with the kill switch active. Paper and broker orders are blocked until an authorized operator releases it.</p></article>
+    <article class="card"><h3>Kill switch (scoped)</h3><p>One switch, aimed at trading: engaging it blocks broker and trading-intelligence order paths — MT5, MT4, crypto, forex and stock/ETF connectors, the execution supervisor and paper orders. Analysis, market data and every non-trading module keep running, and closing a position always stays available. Trading itself still boots fail-closed in ANALYSIS_ONLY.</p></article>
     <article class="card"><h3>Honest data</h3><p>Synthetic candles, sandbox sports and missing providers are labelled. Missing values stay null. CSV export is formula-safe.</p></article>
     <article class="card"><h3>Audit</h3><p>Logins, contact inquiries, user creation and trading events are written to audit_logs with an actor.</p></article>
     <article class="card"><h3>Broker writes</h3><p>Order submission needs an authenticated bridge, TRADING_ENABLED, and a demo account unless live is explicitly allowed.</p></article>

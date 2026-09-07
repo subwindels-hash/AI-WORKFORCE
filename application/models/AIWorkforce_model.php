@@ -799,7 +799,16 @@ class AIWorkforce_model extends CI_Model
                 if ($d === null) {
                     $d = [
                         'tradingMode' => 'ANALYSIS_ONLY',
-                        'killSwitch' => ['active' => true, 'activatedAt' => null, 'reason' => 'Default state at boot — orders blocked until explicitly released'],
+                        // Scoped kill switch (AIWorkforce\KillSwitchPolicy): it governs the
+                        // broker + trading-intelligence ORDER PATHS only — MT5/MT4, crypto,
+                        // forex and stock/ETF connectors, the execution supervisor, the
+                        // trading intelligence engine and paper trading. It boots RELEASED
+                        // so Sports, Football, EuroMillions, Languages, Leads, Multiplier,
+                        // Messages and read-only market data are never blocked by a trading
+                        // control. Trading stays fail-closed through the gates that are
+                        // always on: ANALYSIS_ONLY boot mode, an order-capable verified
+                        // connector, demo/live authorization and the automation envelope.
+                        'killSwitch' => AIWorkforce\KillSwitchPolicy::defaultState(),
                         // Dev/offline switch: allow paper fills on clearly-labeled
                         // synthetic prices (production keeps this false).
                         'allowSyntheticPaperData' => (getenv('AI_WORKFORCE_ALLOW_SYNTHETIC_PAPER') === '1'),
@@ -814,7 +823,16 @@ class AIWorkforce_model extends CI_Model
                     return self::defaults();
                 }
                 $v = json_decode($row['v'], true);
-                return array_merge(self::defaults(), is_array($v) ? $v : []);
+                $state = array_merge(self::defaults(), is_array($v) ? $v : []);
+                // normalize() fills in the scope fields and migrates the
+                // pre-scope installer default (which blocked everything) to the
+                // scoped released default. An operator-engaged switch records
+                // its own reason and is preserved exactly as stored.
+                $stored = is_array($state['killSwitch'] ?? null) ? $state['killSwitch'] : null;
+                $migrated = AIWorkforce\KillSwitchPolicy::isLegacyBootDefault($stored);
+                $state['killSwitch'] = AIWorkforce\KillSwitchPolicy::normalize($stored);
+                if ($migrated) $this->save($state);
+                return $state;
             }
             public function save(array $state): void {
                 $exists = $this->db->from('platform_state')->where('k', 'state')->count_all_results() > 0;

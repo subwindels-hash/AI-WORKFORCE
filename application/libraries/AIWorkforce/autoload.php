@@ -103,6 +103,7 @@ spl_autoload_register(static function (string $class) use ($ai_workforceDir): vo
     'AIWorkforce\\IdentitySchema' => 'IdentitySchema.php',
     'AIWorkforce\\Indicators' => 'Indicators.php',
     'AIWorkforce\\Journal\\Analytics' => 'Journal/Analytics.php',
+    'AIWorkforce\\KillSwitchPolicy' => 'KillSwitchPolicy.php',
     'AIWorkforce\\LangLearn\\AdaptiveLearningService' => 'LangLearn/AdaptiveLearningService.php',
     'AIWorkforce\\LangLearn\\AudioPracticeService' => 'LangLearn/AudioPracticeService.php',
     'AIWorkforce\\LangLearn\\Curriculum' => 'LangLearn/Curriculum.php',

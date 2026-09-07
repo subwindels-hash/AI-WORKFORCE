@@ -1,7 +1,9 @@
 # Sports Intelligence — Production Review (Integration Plan Step 6)
 
-**Status:** code-level review **complete** — both findings remediated and pinned by
-tests (`tests/cases/51-sports-production-review.php`). Process-level cutover items
+**Status:** code-level review **complete** — finding 1 (CSRF) remediated and
+finding 2 (kill-switch gate) superseded by the scoped kill-switch policy; both
+postures are pinned by tests
+(`tests/cases/51-sports-production-review.php`). Process-level cutover items
 remain (checklist at the bottom).
 
 ## Scope
@@ -22,7 +24,12 @@ credentials, no automated external execution):
 - **Audit attribution** — ticket recorded / approved / rejected / settled events carry the acting identity and reason; `decide()` and `settlePending()` always emit through the `AuditRepository`. Pinned by case 43.
 - **Environment-only credentials** — provider credentials live in env only; provider payloads are untrusted and pass normalizers; the sandbox provider is online only when `WINDELS_SPORTS_MODE=SANDBOX` **and** `WINDELS_SPORTS_SANDBOX=1`.
 - **Honest disable** — with no provider the module boots `DISABLED_NO_PROVIDER` and fabricates no fixtures, odds, predictions or tickets; demo data is always bannered (`DEMO / SANDBOX DATA`). Pinned by cases 47/50.
-- **Kill switch boot default** — platform state defaults to `killSwitch.active = true` ("orders blocked until explicitly released") — fail closed on fresh installs.
+- **Kill switch boot default** — platform state defaults to the scoped
+  `KillSwitchPolicy::defaultState()`: `killSwitch.active = false` (RELEASED)
+  with the scope recorded on the row. The switch governs broker +
+  trading-intelligence **order paths** only, so it is not a sports control —
+  see finding 2 (superseded). Trading itself still boots fail-closed in
+  `ANALYSIS_ONLY`.
 - **No external execution** — approval never places a bet; there is no execution connector in this deployment (stated in every UI surface and every audit event).
 - **Calibration gate** — a calibration is only usable after administrator approval; until then ticket-grade decisions report `MODEL_NOT_CALIBRATED` (case 46).
 
@@ -42,22 +49,42 @@ the API path), and `base()` passes `csrfToken` to the views. All six console
 mutation forms (dashboard approve/reject/settle, tickets-console inline
 approve/reject/settle) submit the hidden field.
 
-### 2. Approval could proceed while the kill switch was ACTIVE (FIXED)
+### 2. Approval could proceed while the kill switch was ACTIVE (FIXED, then SUPERSEDED)
 
 The paper engine blocks order placement while the kill switch is active
 (`PaperTradingEngine::submitOrder`), but the sports mutation paths ignored the
 switch — an operator could open new ticket exposure after tripping the kill
 switch.
 
-**Fix** — console `decide()` and API `decide_ticket()` now refuse (flash /
-HTTP 409) while the switch is active, reading the live persisted state.
-**Settlement is deliberately not gated** — it is the unwind/finalize path (it
+**Original fix** — console `decide()` and API `decide_ticket()` refused (flash /
+HTTP 409) while the switch was active, reading the live persisted state.
+**Settlement was deliberately not gated** — it is the unwind/finalize path (it
 records results on already-approved tickets), mirroring
 `PaperTradingEngine::closePosition()`, which is also not kill-switch-gated.
 
-Both fixes are pinned by case 51 (per-method source assertions so a refactor
-that drops the guard fails the suite) plus a behavioral round trip of the kill
-switch through the live platform state.
+**Superseded by the kill-switch scope policy.** The switch is now a *trading*
+control: `AIWorkforce\KillSwitchPolicy` limits it to broker and
+trading-intelligence **order paths** (MT5/MT4, cryptocurrency, forex and
+stock/ETF connectors, the Trade Execution Supervisor, the Trading Intelligence
+Engine risk decision and paper order placement), and it boots RELEASED. Sports
+Intelligence is explicitly out of scope (`UNGOVERNED_SURFACES`), so the two
+sports gates were removed rather than kept as dead weight — a trading emergency
+stop must not silently disable sports research, and a sports approval must not
+be blocked by a control that cannot affect it.
+
+What still protects sports approval:
+
+- `sports.approve` RBAC on both console and API paths (finding 1 + case 49),
+- the session CSRF token on every console mutation form (finding 1),
+- full audit attribution on every decision (case 43),
+- the calibration gate — ticket-grade decisions report `MODEL_NOT_CALIBRATED`
+  until an administrator approves a calibration (case 46),
+- **no external execution exists in this deployment** — approval records a
+  decision, it never places a bet.
+
+Case 51 pins the new posture: the sports mutation surface must NOT gate on the
+kill switch, the scoped policy must govern the trading surfaces and leave the
+non-trading ones alone, and the boot default must be the released scoped state.
 
 ### 3. The console handed out controls the signed-in identity could not use (FIXED)
 
@@ -106,15 +133,17 @@ the missing permission is named).
    failures, calibration ECE/Brier drift (`api/sports/models/performance`),
    and settlement anomalies; alert on repeated `SPORTS_...` audit errors.
 4. **Rollback** — unset the provider env credentials (module drops back to
-   `DISABLED_NO_PROVIDER`) or re-engage the kill switch; no external state to
-   unwind because no external execution exists.
+   `DISABLED_NO_PROVIDER`) or disable the provider rows with `sports.manage`;
+   no external state to unwind because no external execution exists. The
+   platform kill switch is **not** a sports rollback lever — it is scoped to
+   broker + trading-intelligence order paths (`KillSwitchPolicy`).
 
 ## Go / no-go checklist
 
 - [ ] Migrations applied (`tools install`); sports tables verified in target DB
 - [ ] Provider credentials set in environment only; provider payload sample passed through normalizer
 - [ ] RBAC users provisioned (`bootstrap_admin`); `sports.approve` / `sports.settle` granted only to named operators — grants apply on the next action, no sign-out needed
-- [ ] Kill switch deliberately released for the trading window (it boots ACTIVE)
+- [ ] Kill switch state reviewed for the trading window — it governs broker + trading-intelligence order paths only and boots RELEASED, so it is **not** a sports cutover item
 - [ ] Mode set deliberately: `WINDELS_SPORTS_MODE` = `PAPER` (or `PRODUCTION`) — not left on `SANDBOX` in production
 - [ ] Backfill + approved calibration in place (no `MODEL_NOT_CALIBRATED` on a live day)
 - [ ] `sports-cron` scheduled; `monitoring` job observed healthy for ≥ 1 full match day

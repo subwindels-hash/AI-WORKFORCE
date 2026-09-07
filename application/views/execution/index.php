@@ -12,7 +12,7 @@
   <div class="notice warnbox"><b>SIMULATED BRIDGE ACTIVE</b> — routing will reach the in-process demo mock and fills are <b>SIMULATION</b>. No real broker, no real order.</div>
 <?php endif; ?>
 <?php if (!empty($status['killSwitch']['active'])): ?>
-  <div class="notice err"><b>Kill switch ACTIVE</b> — every proposal is rejected at step 1 and no order can be routed.</div>
+  <div class="notice err"><b>Kill switch ACTIVE</b> — every proposal is rejected at step 1 and no order can be routed. Scope: broker + trading-intelligence order paths only; other modules and read-only market data are unaffected.</div>
 <?php endif; ?>
 <?php if (!in_array($status['tradingMode'], ['HUMAN_APPROVAL', 'SEMI_AUTONOMOUS', 'FULLY_AUTOMATED'], true)): ?>
   <div class="notice warnbox"><b>Trading mode is <?= e($status['tradingMode']) ?></b> — broker execution requires HUMAN_APPROVAL, SEMI_AUTONOMOUS or FULLY_AUTOMATED (switch modes on the Dashboard).</div>

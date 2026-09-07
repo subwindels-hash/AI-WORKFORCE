@@ -458,6 +458,31 @@ class Platform
         return $this->model->state->load();
     }
 
+    /**
+     * True when the kill switch currently blocks the given surface.
+     *
+     * The switch is SCOPED (see KillSwitchPolicy): only broker and
+     * trading-intelligence order paths are governed — MT5/MT4, cryptocurrency
+     * and forex execution, the stock/ETF connectors, the execution supervisor,
+     * the trading intelligence engine and paper trading. Sports, football,
+     * lottery, languages, leads, multiplier, messages, the workforce agents and
+     * read-only market data are never blocked by it, so callers outside that
+     * scope must not gate on the raw state flag.
+     *
+     * @param string $surface e.g. 'broker.mt5-bridge', 'execution.propose', 'paper.submit_order'
+     * @param array|null $state already-loaded platform state (avoids a second read)
+     */
+    public function killSwitchBlocks(string $surface, ?array $state = null): bool
+    {
+        return KillSwitchPolicy::blocks($state ?? $this->state(), $surface);
+    }
+
+    /** Machine + human readable kill-switch scope (for APIs and the UI). */
+    public function killSwitchScope(): array
+    {
+        return KillSwitchPolicy::scope();
+    }
+
     public function setTradingMode(string $mode): array
     {
         $supported = ['ANALYSIS_ONLY', 'PAPER_TRADING', 'HUMAN_APPROVAL', 'SEMI_AUTONOMOUS', 'FULLY_AUTOMATED'];
@@ -491,7 +516,7 @@ class Platform
         if ($limits['updatedAt'] === null) $reasons[] = 'automation limits were never explicitly configured';
         if ($mode === 'FULLY_AUTOMATED') {
             if ($this->brokers->tradingConnector() === null) $reasons[] = 'no broker connector is READY with effective order submission';
-            if (($state['killSwitch']['active'] ?? true) === true) $reasons[] = 'kill switch is ACTIVE — release it before enabling fully-automated trading';
+            if (KillSwitchPolicy::blocks($state, 'trading.automation_mode')) $reasons[] = 'kill switch is ACTIVE — release it before enabling fully-automated trading';
         }
         return ['ok' => count($reasons) === 0, 'reasons' => $reasons];
     }
@@ -533,14 +558,28 @@ class Platform
         return $limits;
     }
 
+    /**
+     * Engage or release the kill switch. The switch is scoped by
+     * KillSwitchPolicy: engaging it blocks broker + trading-intelligence order
+     * placement (MT5/MT4, cryptocurrency, forex, stock/ETF connectors, the
+     * execution supervisor, trading intelligence and paper trading) and leaves
+     * every other module — plus read-only market data — working. Position
+     * close / cancel / settlement stay available so exposure can always be
+     * unwound.
+     */
     public function setKillSwitch(bool $active, ?string $reason = null): array
     {
         $state = $this->model->state->load();
-        $state['killSwitch'] = ['active' => $active, 'activatedAt' => gmdate('c'), 'reason' => $reason ?? ($active ? 'engaged' : 'released')];
+        $state['killSwitch'] = KillSwitchPolicy::stateFor($active, $reason);
         $this->model->state->save($state);
-        $this->model->audit->emit($active ? 'KILL_SWITCH_ACTIVATED' : 'KILL_SWITCH_DEACTIVATED', 'Kill switch ' . ($active ? 'ACTIVATED' : 'deactivated') . ($reason ? ": {$reason}" : ''), ['reason' => $reason], 'user');
+        $this->model->audit->emit(
+            $active ? 'KILL_SWITCH_ACTIVATED' : 'KILL_SWITCH_DEACTIVATED',
+            'Kill switch ' . ($active ? 'ACTIVATED' : 'deactivated') . ' — scope: ' . KillSwitchPolicy::scopeLabel() . ($reason ? " ({$reason})" : ''),
+            ['reason' => $reason, 'scope' => KillSwitchPolicy::GOVERNED_SURFACES],
+            'user'
+        );
         if ($active) {
-            $this->notifications->notify('KILL_SWITCH', 'critical', 'KILL SWITCH ACTIVATED — all order placement blocked', ['reason' => $reason], 'kill-switch:active');
+            $this->notifications->notify('KILL_SWITCH', 'critical', 'KILL SWITCH ACTIVATED — broker + trading-intelligence order placement blocked', ['reason' => $reason, 'scope' => KillSwitchPolicy::GOVERNED_SURFACES], 'kill-switch:active');
         }
         return $state['killSwitch'];
     }
