@@ -216,3 +216,29 @@ test('inline icon svgs are sized twice over: intrinsic floor plus a wrapper rule
     assert_contains('.chart-svg{width:100%;height:240px', $trading, 'chart keeps its own size');
     assert_contains('.equity-curve{width:100%;height:160px', $trading, 'equity curve keeps its own size');
 });
+
+test('sidebar is pinned for the whole page, not just until its container ends', function () {
+    $css = (string) file_get_contents(FCPATH . 'assets/css/ai_workforce.css');
+    // The sidebar must be anchored to the viewport edge so it stays in view from
+    // the top of the page through the very end of the scroll. position: sticky
+    // was previously used but can stop pinning when an ancestor becomes a scroll
+    // container or the grid area ends before the page bottom.
+    assert_contains('.sidebar {', $css, 'sidebar rule exists');
+    assert_contains('position: fixed;', $css, 'sidebar is pinned with position: fixed');
+    assert_contains('left: 0;', $css, 'sidebar is anchored to the left edge');
+    assert_contains('width: var(--sidebar-w);', $css, 'sidebar keeps the shared sidebar width');
+    // The main column must stay clear of the fixed sidebar (out of flow item
+    // must not disturb the two-column grid on desktop).
+    assert_contains('.app-main { grid-column: 2;', $css, 'main column is pinned to column 2 on desktop');
+    // Old sticky-only pinning must not come back for the sidebar.
+    assert_false(
+        (bool) preg_match('/\.sidebar\s*\{[^}]*position:\s*sticky/', $css),
+        'sidebar must not rely on position: sticky'
+    );
+    // Full-width announcement / impersonation banners keep reading above the
+    // pinned sidebar, but the mobile drawer still opens on top of them.
+    assert_contains('.app-shell > .ann-bar,', $css, 'announcement banner is lifted above the sidebar');
+    assert_contains('z-index: 35;', $css, 'banner layer sits between sidebar (30) and drawer (40)');
+    assert_contains('.sidebar { display: none; position: fixed; z-index: 40; width: min(280px, 86vw);', $css, 'mobile drawer keeps its off-canvas behavior');
+    assert_contains('.app-main { grid-column: auto; }', $css, 'main column returns to one column on mobile');
+});
