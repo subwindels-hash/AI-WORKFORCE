@@ -47,9 +47,17 @@ $selectedProvider = strtoupper(trim((string) ($provider ?? '')));
 // Auto / Smart only and is disabled, because the backend ignores overrides.
 $providerLocked = !empty($providerLocked) || !empty($providers['locked']);
 $providerMode = (string) ($providerMode ?? ($providers['mode'] ?? 'AUTO'));
-$adminManagedBadge = '<span class="badge b-green" title="AUTO: this selector is managed by the administrator.">AUTO · managed by admin</span>';
-$adminManagedTitle = 'AUTO: this selector is managed by the administrator.';
-$selectorsLockedByAdmin = true;
+// MANUAL mode explicitly unlocks the complete selection flow. AUTO keeps the
+// provider locked, but must not unnecessarily disable competition, market, or
+// date filters (those are read-only stored-data filters).
+$selectorsLockedByAdmin = strtoupper($providerMode) !== 'MANUAL';
+$selectorDisabled = $selectorsLockedByAdmin ? ' disabled' : '';
+$adminManagedBadge = $selectorsLockedByAdmin
+    ? '<span class="badge b-green" title="AUTO: this selector is managed by the administrator.">AUTO · managed by admin</span>'
+    : '<span class="badge b-amber" title="MANUAL: administrator enabled operator selection.">MANUAL · selectable</span>';
+$adminManagedTitle = $selectorsLockedByAdmin
+    ? 'AUTO: this selector is managed by the administrator.'
+    : 'MANUAL: administrator enabled this selector.';
 $windelsModelId = 'Windels Model id: 1520863';
 $carry = [];
 if ($selectedExternal !== '') $carry['competition'] = (string) ($selectedCompetition['requested'] ?? $selectedExternal);
@@ -214,10 +222,16 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                 <input type="hidden" name="provider" value="AUTO">
               <?php else: ?>
                 <select name="provider" style="min-width:200px" title="Which feed answers this request. Auto / Smart picks from health, coverage, odds availability and rate limits; Multi-Provider takes each piece of data from the feed that has it.">
+                  <?php $providerNumber = 0; ?>
                   <?php foreach ($providerOptions as $option): ?>
-                    <?php $value = strtoupper((string) ($option['value'] ?? '')); ?>
+                    <?php
+                    $value = strtoupper((string) ($option['value'] ?? ''));
+                    $isAuto = in_array($value, ['AUTO', 'SMART'], true);
+                    if (!$isAuto) $providerNumber++;
+                    $providerLabel = $isAuto ? 'Windels Smart Model' : 'Model ' . $providerNumber;
+                    ?>
                     <option value="<?= e((string) ($option['value'] ?? '')) ?>"<?= $selectedProvider === $value ? ' selected' : '' ?>>
-                      <?= e((string) ($option['label'] ?? $value)) ?>
+                      <?= e($providerLabel) ?>
                     </option>
                   <?php endforeach; ?>
                 </select>
@@ -225,8 +239,8 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
             </div>
             <div>
               <label class="dim" style="font-size:11px;display:block">Select Competition <?= $adminManagedBadge ?></label>
-              <input type="hidden" name="competition" value="<?= e((string) ($carry['competition'] ?? '')) ?>">
-              <select name="competition" disabled style="min-width:210px" title="<?= e($adminManagedTitle) ?>">
+              <?php if ($selectorsLockedByAdmin): ?><input type="hidden" name="competition" value="<?= e((string) ($carry['competition'] ?? '')) ?>"><?php endif; ?>
+              <select name="competition"<?= $selectorDisabled ?> style="min-width:210px" title="<?= e($adminManagedTitle) ?>">
                 <option value=""<?= $selectedExternal === '' ? ' selected' : '' ?>>All competitions (<?= (int) ($summary['fixtures'] ?? 0) ?> matches)</option>
                 <?php foreach ($competitions as $competition): ?>
                   <?php $external = (string) ($competition['externalId'] ?? ''); ?>
@@ -238,8 +252,8 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
             </div>
             <div>
               <label class="dim" style="font-size:11px;display:block">Premium League <?= $adminManagedBadge ?></label>
-              <input type="hidden" name="premium" value="<?= e($selectedExternal) ?>">
-              <select name="premium" disabled style="min-width:200px" title="<?= e($adminManagedTitle) ?>" onchange="if(this.value!==''){this.form.competition.value=this.value;this.form.submit();}">
+              <?php if ($selectorsLockedByAdmin): ?><input type="hidden" name="premium" value="<?= e($selectedExternal) ?>"><?php endif; ?>
+              <select name="premium"<?= $selectorDisabled ?> style="min-width:200px" title="<?= e($adminManagedTitle) ?>" onchange="if(this.value!==''){this.form.competition.value=this.value;this.form.submit();}">
                 <option value=""><?= $premiumOptions === [] ? 'No premium competition stored' : '— featured —' ?></option>
                 <?php foreach ($premiumOptions as $entry): ?>
                   <?php $externalId = (string) ($entry['externalId'] ?? ''); ?>
@@ -251,8 +265,8 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
             </div>
             <div>
               <label class="dim" style="font-size:11px;display:block">Select Odds Prediction <?= $adminManagedBadge ?></label>
-              <input type="hidden" name="market" value="<?= e($selectedMarket) ?>">
-              <select name="market" disabled style="min-width:230px" title="<?= e($adminManagedTitle) ?>">
+              <?php if ($selectorsLockedByAdmin): ?><input type="hidden" name="market" value="<?= e($selectedMarket) ?>"><?php endif; ?>
+              <select name="market"<?= $selectorDisabled ?> style="min-width:230px" title="<?= e($adminManagedTitle) ?>">
                 <?php foreach ($marketList as $entry): ?>
                   <?php $key = (string) ($entry['key'] ?? ''); ?>
                   <option value="<?= e($key) ?>"<?= $selectedMarket === $key ? ' selected' : '' ?>>
@@ -263,13 +277,13 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
             </div>
             <div>
               <label class="dim" style="font-size:11px;display:block">Date <?= $adminManagedBadge ?></label>
-              <input type="hidden" name="date" value="<?= e($dateParam) ?>">
-              <input type="date" name="date" value="<?= e($dateParam) ?>" disabled title="<?= e($adminManagedTitle) ?>">
+              <?php if ($selectorsLockedByAdmin): ?><input type="hidden" name="date" value="<?= e($dateParam) ?>"><?php endif; ?>
+              <input type="date" name="date" value="<?= e($dateParam) ?>"<?= $selectorDisabled ?> title="<?= e($adminManagedTitle) ?>">
             </div>
             <button class="btn small primary">Apply</button>
           </form>
           <p class="dim" style="font-size:11px;margin:8px 0 0">
-            These selections are set to AUTO and managed by the administrator; the visible controls are locked for operators.
+            <?= $selectorsLockedByAdmin ? 'These selections are set to AUTO and managed by the administrator; the visible controls are locked for operators.' : 'MANUAL mode is enabled by the administrator; operators may choose the provider, competition, premium league, market, and date.' ?>
             Competitions are listed from the provider feed — no league is offered that has no stored match.
             The market is a view over the predictions already stored: changing it never regenerates a match.
             The provider chosen here is the one a sync or a fetch reads; paging and market changes read stored rows and cost no provider call.
@@ -307,6 +321,8 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                     <td style="padding:6px">
                       <a href="/football/match/<?= (int) ($row['fixtureId'] ?? 0) ?>" style="font-weight:600"><?= e((string) ($row['homeTeam'] ?? '—')) ?> vs <?= e((string) ($row['awayTeam'] ?? '—')) ?></a>
                       <div class="dim mono" style="font-size:10px"><?= e($windelsModelId) ?></div>
+                      <div class="dim mono" style="font-size:10px">Match ID: <?= e((string) ($row['matchId'] ?? '—')) ?></div>
+                      <div class="dim mono" style="font-size:10px"><?= e((string) ($row['providerLabel'] ?? 'Model unavailable')) ?> · Provider ID: <?= e((string) ($row['providerId'] ?? '—')) ?> · Provider Match ID: <?= e((string) ($row['providerMatchId'] ?? '—')) ?></div>
                     </td>
                     <td style="padding:6px"><?= e((string) ($row['competition'] ?? '—')) ?></td>
                     <td style="padding:6px" class="mono"><?= e((string) ($row['kickoffLabel'] ?? '—')) ?></td>

@@ -385,6 +385,11 @@ final class MatchFeed
         $prediction = $match['prediction'] ?? null;
         return $market + [
             'matchId' => (string) ($match['matchId'] ?? ''),
+            // Keep match identity and provider identity separate. matchId is the
+            // canonical match key; providerId/providerMatchId identify the feed
+            // row and must never be treated as the same identifier.
+            'providerId' => isset($fixture['provider_id']) ? (int) $fixture['provider_id'] : null,
+            'providerMatchId' => ((string) ($fixture['external_id'] ?? '')) ?: null,
             'modelVersion' => is_array($prediction) ? ($prediction['modelVersionId'] ?? null) : null,
             'generatedAt' => is_array($prediction) ? ($prediction['generatedAt'] ?? null) : null,
             // A prediction is frozen at kickoff: past that moment the numbers
@@ -630,6 +635,12 @@ final class MatchFeed
             'fixtureId' => (int) ($fixture['id'] ?? 0),
             'externalId' => (string) ($fixture['external_id'] ?? ''),
             'provider' => $fixture['provider_code'] ?? null,
+            // Provider identity is numeric and independent from the match ID.
+            // The UI presents this as Model 1, Model 2, etc.
+            'providerId' => isset($fixture['provider_id']) ? (int) $fixture['provider_id'] : null,
+            'providerLabel' => isset($fixture['provider_id']) && (int) $fixture['provider_id'] > 0
+                ? 'Model ' . (int) $fixture['provider_id'] : 'Model unavailable',
+            'providerMatchId' => ((string) ($fixture['external_id'] ?? '')) ?: null,
             'competition' => (string) ($fixture['competition'] ?? DataState::UNAVAILABLE),
             'country' => $fixture['country'] ?? null,
             'season' => $fixture['season'] ?? null,
