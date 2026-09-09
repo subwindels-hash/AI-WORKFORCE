@@ -17,7 +17,7 @@ test('ticket optimizer never combines same-match selections', function () {
 test('ticket optimizer enforces WINDELS daily ticket hard floors', function () {
     $out = (new TicketOptimizer())->optimize([
         fx_candidate(1, 4.9, .50),
-        array_merge(fx_candidate(2, 5.5, .50), ['confidence' => ['confidence' => 79.99]]),
+        array_merge(fx_candidate(2, 5.5, .50), ['confidence' => ['confidence' => 69.99]]),
         array_merge(fx_candidate(3, 5.6, .50), ['quality' => ['score' => 74]]),
         fx_candidate(4, 8.01, .50),
         fx_candidate(5, 6.0, .50),

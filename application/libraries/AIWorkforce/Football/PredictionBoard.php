@@ -131,8 +131,8 @@ final class PredictionBoard
         unset($card);
         usort($cards, static fn(array $a, array $b) => [$b['confidence'], $b['dataQuality']['score']] <=> [$a['confidence'], $a['dataQuality']['score']]);
         $tiers = $this->config->confidenceTiers();
-        $lowest = 70.0;
-        foreach ($tiers as $tier) $lowest = min($lowest, (float) ($tier['min'] ?? 70));
+        $lowest = 60.0;
+        foreach ($tiers as $tier) $lowest = min($lowest, (float) ($tier['min'] ?? 60));
         // Every card lands in exactly one category — including a card whose data
         // quality cleared the threshold while its confidence sits below the
         // lowest tier. Such a card is reported, not dropped: paging through a
@@ -387,7 +387,7 @@ final class PredictionBoard
             'confidenceLabel' => $confidence === null ? DataState::UNAVAILABLE
                 : ($calibrated ? number_format($confidence, 1) . '%' : number_format($confidence, 1) . '% (uncalibrated)'),
             'tier' => $tierLabel,
-            'highConfidence' => $band === QualityBand::QUALIFIED && $calibrated && $confidence !== null && $confidence >= (float) ($tiers[0]['min'] ?? 80) ? 'HIGH_CONFIDENCE' : null,
+            'highConfidence' => $band === QualityBand::QUALIFIED && $calibrated && $confidence !== null && $confidence >= (float) ($tiers[0]['min'] ?? 70) ? 'HIGH_CONFIDENCE' : null,
             'expectedTotalGoals' => $prediction['expected_total_goals'] ?? null,
             'alternativeScores' => is_array($alternatives) ? array_slice($alternatives, 0, 3) : [],
             'matrixRows' => is_array($matrix['rows'] ?? null) ? array_slice($matrix['rows'], 0, 4) : [],

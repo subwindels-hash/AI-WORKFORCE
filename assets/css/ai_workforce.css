@@ -686,6 +686,7 @@ label.choice {
 }
 .notice.err { background: #fb5d6b14; border-color: #fb5d6b44; color: #ffb3b9; }
 .notice.ok { background: #22c55e14; border-color: #22c55e44; color: #9fe9b6; }
+.notice.info { background: #38bdf814; border-color: #38bdf844; color: #bae6fd; }
 .notice.warnbox { background: #f5a62314; border-color: #f5a62344; color: #fcd28a; }
 .empty-state { text-align: center; padding: 36px 16px; color: var(--dim); }
 .empty-state svg { width: 32px; height: 32px; opacity: .4; margin: 0 auto 10px; }

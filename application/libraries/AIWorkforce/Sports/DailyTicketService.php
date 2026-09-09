@@ -213,7 +213,8 @@ class DailyTicketService
                             $message = 'NO VALUE TICKET TODAY — ' . ($optimized['reason'] ?? 'no compliant combination');
                         }
                     } else {
-                        $message = $evaluated === 0 ? 'NO VALUE TICKET TODAY — no verified fixtures received for ' . $date : 'NO VALUE TICKET TODAY — no candidate passed the eligibility, odds, confidence, quality, risk/value and correlation gates';
+                        $confidenceFloor = number_format((float) ($config['min_confidence'] ?? 70.0), 0);
+                        $message = $evaluated === 0 ? 'NO VALUE TICKET TODAY — no verified fixtures received for ' . $date : 'NO VALUE TICKET TODAY — no candidate passed the eligibility, odds, ' . $confidenceFloor . '%+ confidence, quality, risk/value and correlation gates';
                     }
                 }
             }

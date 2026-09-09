@@ -74,7 +74,7 @@ final class SchemaInstaller
      * Persistent cache version for the request-time schema guard. Bump whenever
      * idempotent upgrade logic changes without a matching SQL-file mtime change.
      */
-    private const STAMP_VERSION = '2026-09-06-request-schema-guard-v1';
+    private const STAMP_VERSION = '2026-09-09-sports-confidence-floor-v1';
 
     public static function databaseDir(): string
     {
@@ -219,6 +219,13 @@ final class SchemaInstaller
         foreach ($alters as $sql) {
             try { $exec($sql); } catch (\Throwable $e) { /* column already exists */ }
         }
+
+        // Lower the built-in sports ticket confidence floor from 80% to 70%.
+        // Only the untouched system default row is amended; operator-authored
+        // configuration versions remain append-only and under admin control.
+        try {
+            $exec("UPDATE sports_configurations SET min_confidence = 70 WHERE version = 0 AND updated_by = 'system' AND reason = 'built-in defaults' AND min_confidence > 70");
+        } catch (\Throwable $e) { /* table may not exist yet on partial installs */ }
 
         $userBrokers = $pick(
             "CREATE TABLE IF NOT EXISTS user_broker_connections (

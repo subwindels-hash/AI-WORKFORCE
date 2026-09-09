@@ -21,7 +21,7 @@ class TicketOptimizer
         $min = max(5.0, (float) ($config['targetOddsMin'] ?? 5.0));
         $max = min(8.0, (float) ($config['targetOddsMax'] ?? 8.0));
         $limit = min(6, max(1, (int) ($config['maxSelections'] ?? 6)));
-        $minConfidence = max(80.0, isset($config['minConfidence']) && is_numeric($config['minConfidence']) ? (float) $config['minConfidence'] : 80.0);
+        $minConfidence = max(70.0, isset($config['minConfidence']) && is_numeric($config['minConfidence']) ? (float) $config['minConfidence'] : 70.0);
         $minQuality = max(75, isset($config['minDataQuality']) && is_numeric($config['minDataQuality']) ? (int) $config['minDataQuality'] : 75);
         $maxCorrelation = strtoupper((string) ($config['maxCorrelation'] ?? 'MEDIUM'));
         $allowedMarkets = (array) ($config['allowedMarkets'] ?? []);
@@ -70,7 +70,8 @@ class TicketOptimizer
         $search([], 0, 1.0);
 
         if ($best === null) {
-            return ['status' => 'NO_QUALIFIED_TICKET', 'reason' => 'NO VALUE TICKET TODAY — no verified candidate combination satisfies the 5.00–8.00 odds, confidence, quality, risk, value, freshness and correlation constraints', 'poolSize' => count($pool), 'config' => $config];
+            $confidenceFloor = number_format($minConfidence, 0);
+            return ['status' => 'NO_QUALIFIED_TICKET', 'reason' => 'NO VALUE TICKET TODAY — no verified candidate combination satisfies the 5.00–8.00 odds, ' . $confidenceFloor . '%+ confidence, quality, risk, value, freshness and correlation constraints', 'poolSize' => count($pool), 'config' => $config];
         }
         return ['status' => 'QUALIFIED', 'ticketId' => 'tkt_' . bin2hex(random_bytes(8)), 'totalOdds' => round($best['totalOdds'], 4), 'selectionCount' => count($best['selections']), 'selections' => $best['selections'], 'optimizationScore' => round($best['score'], 6), 'poolSize' => count($pool), 'config' => $config];
     }

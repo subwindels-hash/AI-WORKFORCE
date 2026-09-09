@@ -44,7 +44,7 @@ class SportsBacktester
         if (($toTs - $fromTs) > self::MAX_RANGE_DAYS * 86400) throw new \InvalidArgumentException('range must not exceed ' . self::MAX_RANGE_DAYS . ' days');
 
         $league = $params['league'] ?? null;
-        $minConfidence = is_numeric($params['minConfidence'] ?? null) ? (float) $params['minConfidence'] : 75.0;
+        $minConfidence = is_numeric($params['minConfidence'] ?? null) ? (float) $params['minConfidence'] : 70.0;
         $oddsMin = is_numeric($params['oddsMin'] ?? null) ? (float) $params['oddsMin'] : 0.0;
         $oddsMax = is_numeric($params['oddsMax'] ?? null) ? (float) $params['oddsMax'] : 100.0;
         $minQuality = is_numeric($params['minDataQuality'] ?? null) ? (int) $params['minDataQuality'] : 60;

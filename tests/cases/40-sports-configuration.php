@@ -11,7 +11,7 @@ test('configuration returns safe defaults before any admin change', function () 
     [, , $svc] = fx_config_audit();
     $c = $svc->active();
     assert_equals('USER_APPROVAL_REQUIRED', $c['engine_mode']);
-    assert_equals(80.0, (float) $c['min_confidence']);
+    assert_equals(70.0, (float) $c['min_confidence']);
     assert_equals(75, (int) $c['min_data_quality']);
     assert_equals(['MATCH_RESULT', 'TOTAL_GOALS', 'BTTS', 'DOUBLE_CHANCE'], $c['allowed_markets']);
     assert_equals('RESTITUTE_ODDS', $c['void_policy']);
@@ -38,6 +38,8 @@ test('configuration validation rejects malformed values', function () {
     [, , $svc] = fx_config_audit();
     assert_false($svc->update(['target_odds_min' => 8, 'target_odds_max' => 5], 'a')['ok']);
     assert_false($svc->update(['max_selections' => 0], 'a')['ok']);
+    assert_true($svc->update(['min_confidence' => 70.0], 'a', 'allow 70 percent floor')['ok']);
+    assert_false($svc->update(['min_confidence' => 69.99], 'a')['ok']);
     assert_false($svc->update(['min_data_quality' => 10], 'a')['ok']);
     assert_false($svc->update(['stake_amount' => 500, 'max_exposure' => 10], 'a')['ok']);
     assert_false($svc->update(['platform_mode' => 'MOON'], 'a')['ok']);

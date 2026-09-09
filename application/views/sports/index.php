@@ -7,6 +7,7 @@ $engine = $d['ticketEngine'] ?? [];
 $perf = $d['performance'] ?? [];
 $models = $d['models'] ?? [];
 $ticket = $engine['ticket'] ?? null;
+$windelsModelId = 'Windels Model id: 1520863';
 $selByName = [];
 foreach (array_merge($today['upcoming'] ?? [], $today['live'] ?? []) as $m) {
     $selByName[(int) ($m['id'] ?? 0)] = ($m['home_team'] ?? '?') . ' vs ' . ($m['away_team'] ?? '?');
@@ -122,7 +123,7 @@ $kickoffStamp = static function (mixed $iso): string {
   <?php if ($operator): ?>
   <div class="notice err"><b>Prediction engine BLOCKED — 0/<?= (int) ($readiness['total'] ?? 0) ?> sports data providers operational.</b>
     Every configured feed is currently failing (see <i>Data feed</i>). Odds prediction tickets cannot be generated until at least one provider recovers; an empty day in this state is a <b>data outage</b>, not "no qualified games".
-    <?php foreach (($readiness['providers'] ?? []) as $pid => $pr): ?><br><span class="mono" style="font-size:11px"><?= e((string) $pid) ?> → <?= e((string) ($pr['status'] ?? 'UNKNOWN')) ?><?php if (!empty($pr['retryAt'])): ?> (retry after <?= e(substr((string) $pr['retryAt'], 0, 16)) ?>Z)<?php endif; ?></span><?php endforeach; ?>
+    <?php foreach (array_values((array) ($readiness['providers'] ?? [])) as $i => $pr): ?><br><span class="mono" style="font-size:11px"><?= e($windelsModelId) ?> · feed <?= (int) $i + 1 ?> → <?= e((string) ($pr['status'] ?? 'UNKNOWN')) ?><?php if (!empty($pr['retryAt'])): ?> (retry after <?= e(substr((string) $pr['retryAt'], 0, 16)) ?>Z)<?php endif; ?></span><?php endforeach; ?>
   </div>
   <?php else: ?>
   <div class="notice err"><b>Sports data temporarily unavailable.</b> Odds prediction tickets cannot be generated until the data feed recovers — an empty day in this state is a data outage, not "no qualified games".</div>
@@ -291,12 +292,12 @@ $kickoffStamp = static function (mixed $iso): string {
           <p class="dim" style="font-size:11px;margin:0 0 8px">Operational providers: <b><?= (int) ($readiness['operational'] ?? 0) ?>/<?= (int) ($readiness['total'] ?? 0) ?></b> · Prediction engine: <b><?= e((string) ($readiness['engine'] ?? '—')) ?></b></p>
           <div class="table-scroll">
             <table class="tbl">
-              <thead><tr><th>Provider</th><th>Health</th><th>Circuit</th></tr></thead>
+              <thead><tr><th>Model</th><th>Health</th><th>Circuit</th></tr></thead>
               <tbody>
-                <?php foreach ($configuredIds as $pid): $h = is_array($live[$pid] ?? null) ? $live[$pid] : []; $st = (string) ($h['status'] ?? 'UNKNOWN'); $c = is_array($h['circuit'] ?? null) ? $h['circuit'] : []; ?>
+                <?php foreach (array_values($configuredIds) as $i => $pid): $h = is_array($live[$pid] ?? null) ? $live[$pid] : []; $st = (string) ($h['status'] ?? 'UNKNOWN'); $c = is_array($h['circuit'] ?? null) ? $h['circuit'] : []; ?>
                   <tr>
-                    <td class="mono" style="font-weight:700"><?= e((string) $pid) ?><?php if (isset($h['rateLimitRemaining']) || isset($h['requestsToday'])): ?><br><span class="dim" style="font-size:10px;font-weight:400">quota <?= isset($h['requestsToday']) ? e((string) $h['requestsToday']) . '/' . e((string) ($h['limitDaily'] ?? '?')) . ' used' : e((string) $h['rateLimitRemaining']) . ' left' ?></span><?php endif; ?></td>
-                    <td><span class="dot <?= $statusDot($st) ?>"></span> <?= e($statusLabel($st)) ?><?php if (!empty($h['detail'])): ?> <span class="dim" style="font-size:10px"><?= e(mb_substr((string) $h['detail'], 0, 140)) ?></span><?php endif; ?><?php if (!empty($h['endpoint']) && in_array($st, ['BAD_REQUEST', 'NOT_FOUND'], true)): ?><br><span class="mono dim" style="font-size:10px"><?= e(mb_substr((string) $h['endpoint'], 0, 120)) ?></span><?php endif; ?></td>
+                    <td class="mono" style="font-weight:700"><?= e($windelsModelId) ?><br><span class="dim" style="font-size:10px;font-weight:400">feed <?= (int) $i + 1 ?><?php if (isset($h['rateLimitRemaining']) || isset($h['requestsToday'])): ?> · quota <?= isset($h['requestsToday']) ? e((string) $h['requestsToday']) . '/' . e((string) ($h['limitDaily'] ?? '?')) . ' used' : e((string) $h['rateLimitRemaining']) . ' left' ?><?php endif; ?></span></td>
+                    <td><span class="dot <?= $statusDot($st) ?>"></span> <?= e($statusLabel($st)) ?><?php if (!empty($h['detail'])): ?> <span class="dim" style="font-size:10px">provider detail hidden</span><?php endif; ?></td>
                     <td style="font-size:11px"><?php $cs = (string) ($c['state'] ?? 'CLOSED'); ?><span class="badge <?= $cs === 'OPEN' ? 'b-red' : ($cs === 'HALF_OPEN' ? 'b-gray' : 'b-green') ?>"><?= e($cs) ?></span><?php if ($cs === 'OPEN' && !empty($c['retryAt'])): ?><br><span class="dim" style="font-size:10px">retry <?= e(substr((string) $c['retryAt'], 11, 5)) ?>Z</span><?php endif; ?></td>
                   </tr>
                 <?php endforeach; ?>

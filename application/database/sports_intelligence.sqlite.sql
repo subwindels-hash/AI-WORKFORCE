@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS sports_configurations (
   target_odds_max REAL NOT NULL DEFAULT 8.0,
   max_selections INTEGER NOT NULL DEFAULT 6,
   risk_level TEXT NOT NULL DEFAULT 'CONSERVATIVE',
-  min_confidence REAL NOT NULL DEFAULT 80,
+  min_confidence REAL NOT NULL DEFAULT 70,
   min_expected_value REAL NOT NULL DEFAULT 0.02,
   max_correlation TEXT NOT NULL DEFAULT 'MEDIUM',
   min_data_quality INTEGER NOT NULL DEFAULT 75,

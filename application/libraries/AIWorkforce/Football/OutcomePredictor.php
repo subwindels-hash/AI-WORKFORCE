@@ -174,7 +174,7 @@ final class OutcomePredictor
     /** Tier cut lines, read from configuration so the board and the model agree. */
     private function tiers(): array
     {
-        $thresholds = ['highest' => 80.0, 'strong' => 75.0, 'standard' => (float) QualityBand::QUALIFIED_MIN];
+        $thresholds = ['highest' => 70.0, 'strong' => 65.0, 'standard' => 60.0];
         foreach ($this->config->confidenceTiers() as $tier) {
             $key = (string) ($tier['key'] ?? '');
             if ($key !== '' && isset($tier['min']) && is_numeric($tier['min'])) $thresholds[$key] = (float) $tier['min'];
