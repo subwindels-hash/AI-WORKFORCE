@@ -49,7 +49,7 @@ class ConfigurationService
             'target_odds_max' => 8.0,
             'max_selections' => 6,
             'risk_level' => 'CONSERVATIVE',
-            'min_confidence' => 80.0,
+            'min_confidence' => 70.0,
             'min_expected_value' => 0.02,
             'max_correlation' => 'MEDIUM',
             'min_data_quality' => 75,
@@ -141,7 +141,7 @@ class ConfigurationService
         $maxSel = (int) $c['max_selections'];
         if ($maxSel < 1 || $maxSel > 12) return 'max_selections must be within [1, 12]';
         $conf = (float) $c['min_confidence'];
-        if ($conf < 80 || $conf > 100) return 'min_confidence must be within [80, 100]';
+        if ($conf < 70 || $conf > 100) return 'min_confidence must be within [70, 100]';
         if ((float) $c['min_expected_value'] < 0) return 'min_expected_value must be >= 0';
         $dq = (int) $c['min_data_quality'];
         if ($dq < 75 || $dq > 100) return 'min_data_quality must be within [75, 100]';

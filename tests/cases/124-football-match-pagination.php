@@ -462,8 +462,8 @@ test('football: the feed payload is complete, finite and honest about what it di
 test('football: a card below the lowest confidence tier is still reported, not dropped', function () {
     // Paging reads the board page by page, so a card that silently falls out of
     // every category would look like a match the pager lost. The four fixtures
-    // below are deliberately unevenly matched: one clears the 80% tier, the
-    // others sit at ~70%, ~63% and ~54% — qualified on data quality, below the
+    // below are deliberately unevenly matched: one clears the 70% tier, the
+    // others sit at ~70%, ~63% and ~54% — qualified on data quality, below some
     // confidence cut lines. None of them may disappear.
     $day = gmdate('Y-m-d', time() + 2 * 86400);
     $combos = [['10', '30'], ['30', '20'], ['40', '30'], ['20', '10']];
@@ -493,8 +493,8 @@ test('football: a card below the lowest confidence tier is still reported, not d
     assert_equals(count($placed), count(array_unique($placed)), 'and in no category twice');
 
     $tiers = $module->config()->confidenceTiers();
-    $lowest = 70.0;
-    foreach ($tiers as $tier) $lowest = min($lowest, (float) ($tier['min'] ?? 70));
+    $lowest = 60.0;
+    foreach ($tiers as $tier) $lowest = min($lowest, (float) ($tier['min'] ?? 60));
     $qualifiedBelow = array_values(array_filter($cards, static fn(array $c): bool =>
         (string) $c['band'] === QualityBand::QUALIFIED && $c['confidence'] !== null && (float) $c['confidence'] < $lowest));
     assert_true(count($qualifiedBelow) >= 1, 'the fixtures really do include a qualified card below the cut line');

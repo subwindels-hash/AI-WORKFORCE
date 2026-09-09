@@ -373,7 +373,7 @@ CREATE TABLE IF NOT EXISTS sports_configurations (
   target_odds_max DECIMAL(10,4) NOT NULL DEFAULT 8.0,
   max_selections INT NOT NULL DEFAULT 5,
   risk_level VARCHAR(16) NOT NULL DEFAULT 'CONSERVATIVE',
-  min_confidence DECIMAL(5,2) NOT NULL DEFAULT 75,
+  min_confidence DECIMAL(5,2) NOT NULL DEFAULT 70,
   min_expected_value DECIMAL(8,5) NOT NULL DEFAULT 0.02,
   max_correlation VARCHAR(8) NOT NULL DEFAULT 'MEDIUM',
   min_data_quality SMALLINT NOT NULL DEFAULT 80,
@@ -1365,7 +1365,7 @@ INSERT INTO user_roles (user_id,role_id) VALUES (1,1) ON DUPLICATE KEY UPDATE us
 INSERT INTO lead_organizations (id,name,created_at) VALUES ('org-1','Administrator workspace','2026-08-24T00:00:00Z') ON DUPLICATE KEY UPDATE name=VALUES(name);
 INSERT INTO lead_organization_members (organization_id,user_id,role,created_at) VALUES ('org-1',1,'owner','2026-08-24T00:00:00Z') ON DUPLICATE KEY UPDATE role=VALUES(role);
 INSERT INTO sports_data_sources (provider_code,display_name,enabled,created_at,updated_at) VALUES ('manual','Manual / approved source',0,'2026-08-24T00:00:00Z','2026-08-24T00:00:00Z') ON DUPLICATE KEY UPDATE display_name=VALUES(display_name);
-INSERT INTO sports_configurations (version,module_enabled,ticket_engine_enabled,platform_mode,engine_mode,target_odds_min,target_odds_max,max_selections,risk_level,min_confidence,min_expected_value,max_correlation,min_data_quality,min_liquidity,allowed_markets,allowed_leagues,max_exposure,stake_amount,void_policy,require_calibration,updated_by,reason,created_at) VALUES (0,1,1,'SANDBOX','USER_APPROVAL_REQUIRED',5.0,8.0,5,'CONSERVATIVE',75,0.02,'MEDIUM',80,NULL,'[]','[]',100,10,'RESTITUTE_ODDS',1,'system','built-in defaults','2026-08-24 00:00:00') ON DUPLICATE KEY UPDATE version=VALUES(version);
+INSERT INTO sports_configurations (version,module_enabled,ticket_engine_enabled,platform_mode,engine_mode,target_odds_min,target_odds_max,max_selections,risk_level,min_confidence,min_expected_value,max_correlation,min_data_quality,min_liquidity,allowed_markets,allowed_leagues,max_exposure,stake_amount,void_policy,require_calibration,updated_by,reason,created_at) VALUES (0,1,1,'SANDBOX','USER_APPROVAL_REQUIRED',5.0,8.0,5,'CONSERVATIVE',70,0.02,'MEDIUM',80,NULL,'[]','[]',100,10,'RESTITUTE_ODDS',1,'system','built-in defaults','2026-08-24 00:00:00') ON DUPLICATE KEY UPDATE version=VALUES(version), min_confidence=VALUES(min_confidence);
 INSERT INTO lotteries (code,name,enabled,rules_version,created_at,updated_at) VALUES ('EUROMILLIONS','EuroMillions',1,'1.0','2026-08-24T00:00:00Z','2026-08-24T00:00:00Z') ON DUPLICATE KEY UPDATE name=VALUES(name),rules_version=VALUES(rules_version);
 INSERT INTO lottery_rules (lottery_code,version,main_count,main_min,main_max,star_count,star_min,star_max,schedule,active,created_at) VALUES ('EUROMILLIONS','1.0',5,1,50,2,1,12,'{"days":[2,5],"time":"21:00","timezone":"UTC"}',1,'2026-08-24T00:00:00Z') ON DUPLICATE KEY UPDATE active=VALUES(active);
 INSERT INTO lottery_data_sources (provider_code,display_name,enabled,synthetic,created_at,updated_at) VALUES ('official-euromillions','Authorized EuroMillions feed',0,0,'2026-08-24T00:00:00Z','2026-08-24T00:00:00Z'),('unconfigured','No lottery data provider configured',0,0,'2026-08-24T00:00:00Z','2026-08-24T00:00:00Z') ON DUPLICATE KEY UPDATE display_name=VALUES(display_name);

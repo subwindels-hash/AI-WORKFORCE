@@ -17,6 +17,7 @@ $calibration = $models['calibration'] ?? [];
 $versions = $models['versions'] ?? [];
 $calibrationVersions = $models['calibrationVersions'] ?? [];
 $caps = $caps ?? ['sync' => false, 'calibrate' => false, 'approve' => false, 'settle' => false];
+$windelsModelId = '1520863';
 
 $dash = static fn(mixed $v, int $dp = 4): string => is_numeric($v) ? number_format((float) $v, $dp) : '—';
 $pct = static fn(mixed $v): string => is_numeric($v) ? number_format((float) $v * 100, 1) . '%' : '—';
@@ -57,7 +58,7 @@ $stateClass = static fn(string $state): string => match (strtoupper($state)) {
             <table class="tbl">
               <tbody>
                 <?php foreach ([
-                  ['Model id', $active['modelId'] ?? null], ['Model name', $active['name'] ?? null], ['Model version', $active['version'] ?? null],
+                  ['Windels Model id', $windelsModelId], ['Model name', $active['name'] ?? null], ['Model version', $active['version'] ?? null],
                   ['Algorithm', $active['algorithm'] ?? null], ['Feature version', $active['featureVersion'] ?? null],
                   ['Training dataset version', $active['trainingDatasetVersion'] ?? null],
                   ['Status', $active['status'] ?? null],

@@ -33,6 +33,7 @@ $bandClass = static fn(string $band): string => match (strtoupper($band)) {
 };
 $score = static fn(mixed $row, string $side): string => is_array($row) && isset($row[$side]) && is_numeric($row[$side])
     ? (string) (int) $row[$side] : '—';
+$windelsModelId = 'Windels Model id: 1520863';
 ?>
 <div class="page-head">
   <div>
@@ -42,7 +43,7 @@ $score = static fn(mixed $row, string $side): string => is_array($row) && isset(
       · kickoff <?= e(!empty($fixture['kickoff']) ? gmdate('D M j, H:i', (int) strtotime((string) $fixture['kickoff'])) . ' UTC' : 'DATA_UNAVAILABLE') ?>
       · status <b><?= e((string) ($fixture['status'] ?? 'UNKNOWN')) ?></b>
       <?php if (isset($fixture['minute']) && is_numeric($fixture['minute'])): ?><?= (int) $fixture['minute'] ?>'+<?php endif; ?>
-      · external id <span class="mono dim"><?= e($state($fixture['externalId'] ?? null)) ?></span>
+      · <span class="mono dim"><?= e($windelsModelId) ?></span>
     </p>
     <p style="margin-top:6px"><a class="btn small" href="/football">← Back to the board</a></p>
   </div>
@@ -258,7 +259,7 @@ $score = static fn(mixed $row, string $side): string => is_array($row) && isset(
     <div class="panel">
       <h3>Provenance</h3>
       <div class="body" style="padding-top:12px">
-        <p class="dim" style="margin-top:0;font-size:11px">Provider <b><?= e((string) ($analysis['provider']['name'] ?? 'DATA_UNAVAILABLE')) ?></b> (<?= e((string) ($analysis['provider']['status'] ?? 'NOT_CONFIGURED')) ?>).</p>
+        <p class="dim" style="margin-top:0;font-size:11px">Football odds prediction is shown under <b><?= e($windelsModelId) ?></b>. Provider identifiers are hidden from the operator view.</p>
         <div class="table-scroll">
           <table class="tbl">
             <thead><tr><th>Input</th><th>Coverage</th><th>Source</th></tr></thead>
@@ -267,7 +268,7 @@ $score = static fn(mixed $row, string $side): string => is_array($row) && isset(
                 <tr>
                   <td><?= e($pretty((string) $key)) ?></td>
                   <td class="mono"><?= is_bool($value) ? ($value ? 'yes' : 'no') : (is_numeric($value) ? (int) $value : e($state($value))) ?></td>
-                  <td class="dim" style="font-size:11px"><?= e($state($provenance[$key] ?? null)) ?></td>
+                  <td class="dim mono" style="font-size:11px"><?= e($windelsModelId) ?></td>
                 </tr>
               <?php endforeach; ?>
               <?php if ($coverage === []): ?><tr><td colspan="3" class="dim">no coverage record stored</td></tr><?php endif; ?>

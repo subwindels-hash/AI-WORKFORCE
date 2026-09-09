@@ -46,6 +46,10 @@ $selectedProvider = strtoupper(trim((string) ($provider ?? '')));
 // Auto / Smart only and is disabled, because the backend ignores overrides.
 $providerLocked = !empty($providerLocked) || !empty($providers['locked']);
 $providerMode = (string) ($providerMode ?? ($providers['mode'] ?? 'AUTO'));
+$adminManagedBadge = '<span class="badge b-green" title="AUTO: this selector is managed by the administrator.">AUTO · managed by admin</span>';
+$adminManagedTitle = 'AUTO: this selector is managed by the administrator.';
+$selectorsLockedByAdmin = true;
+$windelsModelId = 'Windels Model id: 1520863';
 $carry = [];
 if ($selectedExternal !== '') $carry['competition'] = (string) ($selectedCompetition['requested'] ?? $selectedExternal);
 if ($selectedMarket !== '') $carry['market'] = $selectedMarket;
@@ -60,7 +64,7 @@ $bandClass = static fn(string $band): string => match (strtoupper($band)) {
 };
 $stateClass = static fn(string $state): string => match (strtoupper($state)) {
     'READY', 'CONNECTED', 'AVAILABLE', 'ACTIVE', 'MEASURED', 'CALIBRATED', 'ONLINE', 'POPULATED' => 'up',
-    'DEGRADED', 'LIMITED_DATA', 'LIMITED', 'PENDING', 'CADENCE' => 'synth',
+    'DEGRADED', 'LIMITED_DATA', 'LIMITED', 'PENDING', 'CADENCE', 'DRAFT', 'TRAINED', 'VALIDATED', 'CALIBRATED', 'APPROVED' => 'synth',
     default => 'down',
 };
 $kickoffLabel = static fn(?string $iso): string => $iso === null || $iso === '' ? '—' : gmdate('M j, H:i', (int) strtotime($iso)) . ' UTC';
@@ -171,7 +175,8 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
           Generated <?= e($kickoffLabel($d['generatedAt'] ?? null)) ?>.
         </p>
         <?php if (!empty($board['model']['note'])): ?>
-          <div class="notice warnbox" style="margin-top:10px"><b><?= e((string) ($board['model']['state'] ?? 'MODEL')) ?></b> — <?= e((string) $board['model']['note']) ?></div>
+          <?php $modelNoticeState = (string) ($board['model']['state'] ?? 'MODEL') === 'ACTIVE' ? 'ACTIVE MODEL' : 'AUTO MODEL'; ?>
+          <div class="notice info" style="margin-top:10px"><b><?= e($modelNoticeState) ?></b> — <?= e((string) $board['model']['note']) ?></div>
         <?php endif; ?>
         <?php if (in_array((string) ($board['state'] ?? ''), ['NO_FIXTURES_STORED', 'NO_PREDICTIONS_STORED', 'PAGE_BEYOND_LAST'], true)): ?>
           <p class="dim" style="margin-top:12px"><?= e((string) ($board['message'] ?? '')) ?></p>
@@ -197,17 +202,12 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
           <form method="get" action="/football" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
             <input type="hidden" name="page" value="1">
             <div>
-              <label class="dim" style="font-size:11px;display:block">Data Provider<?= $providerLocked ? ' <span class="badge b-green" title="The administrator locked provider selection to Auto / Smart (Admin → System Settings → Football).">AUTO · managed by admin</span>' : '' ?></label>
+              <label class="dim" style="font-size:11px;display:block">Data Provider <?= $adminManagedBadge ?></label>
               <?php if ($providerOptions === []): ?>
                 <select disabled style="min-width:200px"><option>No feed connected</option></select>
-              <?php elseif ($providerLocked): ?>
-                <select name="provider" disabled style="min-width:200px" title="Locked by the administrator to Auto / Smart. Switch to Manual in Admin → System Settings → Football to choose a feed.">
-                  <?php foreach ($providerOptions as $option): ?>
-                    <?php $value = strtoupper((string) ($option['value'] ?? '')); ?>
-                    <option value="<?= e((string) ($option['value'] ?? '')) ?>"<?= $selectedProvider === $value ? ' selected' : '' ?>>
-                      <?= e((string) ($option['label'] ?? $value)) ?>
-                    </option>
-                  <?php endforeach; ?>
+              <?php elseif ($providerLocked || $selectorsLockedByAdmin): ?>
+                <select name="provider" disabled style="min-width:200px" title="<?= e($adminManagedTitle) ?>">
+                  <option value="AUTO" selected>Windels Smart Model</option>
                 </select>
                 <input type="hidden" name="provider" value="AUTO">
               <?php else: ?>
@@ -222,8 +222,9 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
               <?php endif; ?>
             </div>
             <div>
-              <label class="dim" style="font-size:11px;display:block">Select Competition</label>
-              <select name="competition" style="min-width:210px">
+              <label class="dim" style="font-size:11px;display:block">Select Competition <?= $adminManagedBadge ?></label>
+              <input type="hidden" name="competition" value="<?= e((string) ($carry['competition'] ?? '')) ?>">
+              <select name="competition" disabled style="min-width:210px" title="<?= e($adminManagedTitle) ?>">
                 <option value=""<?= $selectedExternal === '' ? ' selected' : '' ?>>All competitions (<?= (int) ($summary['fixtures'] ?? 0) ?> matches)</option>
                 <?php foreach ($competitions as $competition): ?>
                   <?php $external = (string) ($competition['externalId'] ?? ''); ?>
@@ -234,8 +235,9 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
               </select>
             </div>
             <div>
-              <label class="dim" style="font-size:11px;display:block">Premium League</label>
-              <select name="premium" style="min-width:200px" onchange="if(this.value!==''){this.form.competition.value=this.value;this.form.submit();}">
+              <label class="dim" style="font-size:11px;display:block">Premium League <?= $adminManagedBadge ?></label>
+              <input type="hidden" name="premium" value="<?= e($selectedExternal) ?>">
+              <select name="premium" disabled style="min-width:200px" title="<?= e($adminManagedTitle) ?>" onchange="if(this.value!==''){this.form.competition.value=this.value;this.form.submit();}">
                 <option value=""><?= $premiumOptions === [] ? 'No premium competition stored' : '— featured —' ?></option>
                 <?php foreach ($premiumOptions as $entry): ?>
                   <?php $externalId = (string) ($entry['externalId'] ?? ''); ?>
@@ -246,8 +248,9 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
               </select>
             </div>
             <div>
-              <label class="dim" style="font-size:11px;display:block">Select Odds Prediction</label>
-              <select name="market" style="min-width:230px">
+              <label class="dim" style="font-size:11px;display:block">Select Odds Prediction <?= $adminManagedBadge ?></label>
+              <input type="hidden" name="market" value="<?= e($selectedMarket) ?>">
+              <select name="market" disabled style="min-width:230px" title="<?= e($adminManagedTitle) ?>">
                 <?php foreach ($marketList as $entry): ?>
                   <?php $key = (string) ($entry['key'] ?? ''); ?>
                   <option value="<?= e($key) ?>"<?= $selectedMarket === $key ? ' selected' : '' ?>>
@@ -257,12 +260,14 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
               </select>
             </div>
             <div>
-              <label class="dim" style="font-size:11px;display:block">Date</label>
-              <input type="date" name="date" value="<?= e($dateParam) ?>">
+              <label class="dim" style="font-size:11px;display:block">Date <?= $adminManagedBadge ?></label>
+              <input type="hidden" name="date" value="<?= e($dateParam) ?>">
+              <input type="date" name="date" value="<?= e($dateParam) ?>" disabled title="<?= e($adminManagedTitle) ?>">
             </div>
             <button class="btn small primary">Apply</button>
           </form>
           <p class="dim" style="font-size:11px;margin:8px 0 0">
+            These selections are set to AUTO and managed by the administrator; the visible controls are locked for operators.
             Competitions are listed from the provider feed — no league is offered that has no stored match.
             The market is a view over the predictions already stored: changing it never regenerates a match.
             The provider chosen here is the one a sync or a fetch reads; paging and market changes read stored rows and cost no provider call.
@@ -298,7 +303,7 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                   <tr style="border-bottom:1px solid var(--line)">
                     <td style="padding:6px">
                       <a href="/football/match/<?= (int) ($row['fixtureId'] ?? 0) ?>" style="font-weight:600"><?= e((string) ($row['homeTeam'] ?? '—')) ?> vs <?= e((string) ($row['awayTeam'] ?? '—')) ?></a>
-                      <div class="dim" style="font-size:10px"><?= e((string) ($row['matchId'] ?? '')) ?></div>
+                      <div class="dim mono" style="font-size:10px"><?= e($windelsModelId) ?></div>
                     </td>
                     <td style="padding:6px"><?= e((string) ($row['competition'] ?? '—')) ?></td>
                     <td style="padding:6px" class="mono"><?= e((string) ($row['kickoffLabel'] ?? '—')) ?></td>
@@ -354,31 +359,14 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                               <div class="dim"><?= e((string) ($row['prediction']['generatedAt'] ?? '')) ?></div>
                             </div>
                             <div>
-                              <div class="dim">Source</div>
-                              <div><?= e((string) ($m['source'] ?? '—')) ?></div>
+                              <div class="dim">Model source</div>
+                              <div class="mono"><?= e($windelsModelId) ?></div>
                               <div class="dim"><?= e((string) ($m['basis'] ?? '')) ?></div>
                             </div>
                             <div>
-                              <div class="dim">Data providers</div>
-                              <?php $sources = (array) ($m['dataSources'] ?? []); ?>
-                              <?php if ($sources === []): ?>
-                                <div class="dim">No provider recorded</div>
-                              <?php else: ?>
-                                <?php foreach ($sources as $source): ?>
-                                  <div>
-                                    <?= e((string) ($source['provider'] ?? '—')) ?>
-                                    <?php if (!empty($source['providerMatchId'])): ?>
-                                      <span class="dim mono">#<?= e((string) $source['providerMatchId']) ?></span>
-                                    <?php endif; ?>
-                                    <?php if (!empty($source['matchedBy'])): ?>
-                                      <span class="dim" title="How this feed's match was recognized as the same match"><?= e(strtolower(str_replace('_', ' ', (string) $source['matchedBy']))) ?></span>
-                                    <?php endif; ?>
-                                  </div>
-                                <?php endforeach; ?>
-                                <div class="dim" style="margin-top:2px">
-                                  <?= count($sources) > 1 ? 'the same match, recognized across ' . count($sources) . ' feeds — one prediction' : 'odds fall back to another provider when this one has no price' ?>
-                                </div>
-                              <?php endif; ?>
+                              <div class="dim">Windels model</div>
+                              <div class="mono"><?= e($windelsModelId) ?></div>
+                              <div class="dim" style="margin-top:2px">Provider match identifiers are hidden from the operator view.</div>
                             </div>
                             <div>
                               <div class="dim">Valid until</div>

@@ -285,9 +285,9 @@ final class FootballConfiguration
     public function confidenceTiers(): array
     {
         return [
-            ['key' => 'highest', 'label' => 'Highest Confidence', 'min' => 80.0, 'max' => 100.0],
-            ['key' => 'strong', 'label' => 'Strong Predictions', 'min' => 75.0, 'max' => 79.99],
-            ['key' => 'standard', 'label' => 'Standard Predictions', 'min' => 70.0, 'max' => 74.99],
+            ['key' => 'highest', 'label' => 'Highest Confidence', 'min' => 70.0, 'max' => 100.0],
+            ['key' => 'strong', 'label' => 'Strong Predictions', 'min' => 65.0, 'max' => 69.99],
+            ['key' => 'standard', 'label' => 'Standard Predictions', 'min' => 60.0, 'max' => 64.99],
         ];
     }
 
