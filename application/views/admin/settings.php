@@ -2,6 +2,9 @@
 $set = $settings ?? [];
 $general = $set['general'] ?? [];
 $ai = $set['ai'] ?? [];
+$football = $set['football'] ?? [];
+$footballMode = strtoupper(trim((string) ($football['football_provider_mode'] ?? 'AUTO'))) === 'MANUAL' ? 'MANUAL' : 'AUTO';
+$footballManual = (string) ($football['football_manual_provider'] ?? '');
 $security = $set['security'] ?? [];
 $accounts = $set['accounts'] ?? [];
 $seo = $set['seo'] ?? [];
@@ -43,6 +46,43 @@ $signupWarnings = is_array($signupWarnings ?? null) ? $signupWarnings : [];
       <label class="choice"><input type="checkbox" name="ai_analysis_enabled" value="1" <?= ($ai['ai_analysis_enabled'] ?? '1') === '1' ? 'checked' : '' ?>> AI analysis marked available</label>
       <label class="choice"><input type="checkbox" name="language_learning_enabled" value="1" <?= ($ai['language_learning_enabled'] ?? '1') === '1' ? 'checked' : '' ?>> Language learning marked available</label>
       <button class="btn primary" type="submit">Save AI flags</button>
+    </form>
+  </div>
+</section>
+
+<section class="panel" id="football" style="margin-top:14px">
+  <h3>Football Data Provider</h3>
+  <div class="body">
+    <p class="dim">Controls the <span class="mono">Data Provider</span> selector on the <a href="/football">/football</a> console and the matching API parameters. The switch takes effect on the next request — no deploy needed.</p>
+    <div class="stat-grid" style="margin:10px 0">
+      <div class="stat"><div class="k">Current mode</div><div class="v"><span class="badge <?= $footballMode === 'AUTO' ? 'b-green' : 'b-amber' ?>"><?= e($footballMode) ?></span></div><div class="trend" style="font-size:11px"><?= $footballMode === 'AUTO' ? 'locked to Auto / Smart' : 'operator may choose the feed' ?></div></div>
+      <div class="stat"><div class="k">Manual default</div><div class="v" style="font-size:13px"><?= $footballManual === '' ? 'Auto / Smart' : e($footballManual) ?></div><div class="trend" style="font-size:11px">pre-selection when MANUAL</div></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <form method="post" action="/admin/settings/football-toggle" style="display:inline">
+        <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+        <input type="hidden" name="mode" value="AUTO">
+        <button class="btn <?= $footballMode === 'AUTO' ? 'primary' : '' ?>" type="submit" <?= $footballMode === 'AUTO' ? 'disabled title="Already in Auto mode"' : '' ?>>⚙️ Auto (default)</button>
+      </form>
+      <form method="post" action="/admin/settings/football-toggle" style="display:inline">
+        <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+        <input type="hidden" name="mode" value="MANUAL">
+        <button class="btn <?= $footballMode === 'MANUAL' ? 'primary' : '' ?>" type="submit" <?= $footballMode === 'MANUAL' ? 'disabled title="Already in Manual mode"' : '' ?>>✋ Manual</button>
+      </form>
+    </div>
+    <form method="post" action="/admin/settings/save" class="admin-form">
+      <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+      <input type="hidden" name="category" value="football">
+      <label>Mode<select name="football_provider_mode">
+        <option value="AUTO" <?= $footballMode === 'AUTO' ? 'selected' : '' ?>>AUTO — lock /football to Auto / Smart (default)</option>
+        <option value="MANUAL" <?= $footballMode === 'MANUAL' ? 'selected' : '' ?>>MANUAL — operators can choose the feed</option>
+      </select></label>
+      <label>Default provider when MANUAL (pre-selected in the dropdown)<select name="football_manual_provider">
+        <?php foreach (['' => 'Auto / Smart', 'MULTI' => 'Multi-Provider', 'api-football' => 'API-Football', 'thesportsdb' => 'TheSportsDB', 'sportmonks' => 'SportMonks', 'http-provider' => 'HTTP-Provider'] as $pv => $pl): ?>
+        <option value="<?= e($pv) ?>" <?= $footballManual === $pv ? 'selected' : '' ?>><?= e($pl) ?></option>
+        <?php endforeach; ?>
+      </select></label>
+      <button class="btn primary" type="submit">Save football provider</button>
     </form>
   </div>
 </section>

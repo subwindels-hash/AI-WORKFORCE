@@ -48,6 +48,14 @@ class AdminPortal
             'announcement_enabled' => '1',
             'announcement_messages' => '',
         ],
+        // Football data-provider mode. AUTO (default) locks the console's Data
+        // Provider selector to Auto / Smart; MANUAL lets the operator choose,
+        // with football_manual_provider as the pre-selected default (''
+        // means Auto / Smart). See FootballConfiguration::providerMode().
+        'football' => [
+            'football_provider_mode' => 'AUTO',
+            'football_manual_provider' => '',
+        ],
     ];
 
     public function __construct(private \AIWorkforce_model $model) {}

@@ -98,9 +98,16 @@ final class PredictionBoard
         $entries = [];
         foreach ($fixtures as $fixture) {
             $row = $this->predictions->existing($fixture, $modelVersionId, PredictionService::KIND_PRE_MATCH);
-            if ($row === null) continue;
-            $onPagePredicted++;
-            $cards[] = $this->card($row, $fixture, $model);
+            if ($row !== null) {
+                $onPagePredicted++;
+                $cards[] = $this->card($row, $fixture, $model);
+            }
+            // Every fixture gets a market entry — analyzed or not. Skipping the
+            // unanalyzed ones here used to shrink the table to the analyzed few
+            // AND pair the wrong fixture with the wrong market block, because
+            // the rows below are matched to $fixtures by position. attachMarkets()
+            // answers a null prediction with the same shape in a DATA_UNAVAILABLE
+            // state, so an unanalyzed match renders as a row that says so.
             $entries[] = ['prediction' => $row, 'matchId' => MatchFeed::matchId($fixture)];
         }
         // The selected market is a view over the same stored rows: one batched

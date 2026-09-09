@@ -1091,6 +1091,17 @@ class Admin extends App_Controller
             $values['login_max_attempts'] = (string) max(3, min(20, (int) ($values['login_max_attempts'] ?? 5)));
             $values['login_lockout_seconds'] = (string) max(60, min(86400, (int) ($values['login_lockout_seconds'] ?? 900)));
         }
+        if ($category === 'football') {
+            // Provider mode is a strict two-state switch: anything that is not
+            // MANUAL is AUTO, so a tampered POST fails closed to the default.
+            $values['football_provider_mode'] = strtoupper(trim((string) ($values['football_provider_mode'] ?? 'AUTO'))) === 'MANUAL' ? 'MANUAL' : 'AUTO';
+            $manual = strtolower(trim((string) ($values['football_manual_provider'] ?? '')));
+            if ($manual === 'auto' || $manual === 'smart') $manual = '';
+            if ($manual === 'apifootball') $manual = 'api-football';
+            $allowedManual = ['', 'MULTI', 'api-football', 'thesportsdb', 'sportmonks', 'http-provider'];
+            $values['football_manual_provider'] = in_array($manual === 'multi' ? 'MULTI' : $manual, $allowedManual, true)
+                ? ($manual === 'multi' ? 'MULTI' : $manual) : '';
+        }
         $logged = array_keys($values);
         if ($category === 'signup') {
             // The secret is sealed before it touches the database; a blank
@@ -1114,6 +1125,36 @@ class Admin extends App_Controller
             $this->flash('error', 'Unable to save your changes. Please try again.');
         }
         redirect('/admin/settings#' . $category);
+    }
+
+    /**
+     * One-click Auto / Manual toggle for the football Data Provider selector.
+     *
+     * POST /admin/settings/football-toggle with `mode=AUTO|MANUAL` (+ CSRF).
+     * AUTO (default) locks /football to Auto / Smart; MANUAL unlocks the
+     * operator dropdown. The switch takes effect on the next request — no
+     * deploy, no cache clear — because Platform injects the stored value into
+     * FootballConfiguration on every bootstrap.
+     */
+    public function football_provider_toggle()
+    {
+        $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
+        if ($this->input->method(true) !== 'POST') { redirect('/admin/settings#football'); return; }
+        if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/settings#football'); return; }
+        $mode = strtoupper(trim((string) $this->input->post('mode'))) === 'MANUAL' ? 'MANUAL' : 'AUTO';
+        try {
+            $this->portal->saveSettings(['football_provider_mode' => $mode], 'football', (int) $actor['id']);
+            $this->portal->log($actor, 'SETTINGS_CHANGED', 'ok',
+                ['type' => 'settings', 'id' => 'football', 'label' => 'football'],
+                ['football_provider_mode' => $mode], $this->ip());
+            $this->flash('notice', $mode === 'AUTO'
+                ? '✓ Football data provider is now AUTO — the /football selector is locked to Auto / Smart.'
+                : '✓ Football data provider is now MANUAL — operators can choose the feed on /football.');
+        } catch (Throwable $e) {
+            log_message('error', 'admin football_provider_toggle failed: ' . $e->getMessage());
+            $this->flash('error', 'Unable to save your changes. Please try again.');
+        }
+        redirect('/admin/settings#football');
     }
 
     public function test_email()
