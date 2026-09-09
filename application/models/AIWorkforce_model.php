@@ -137,8 +137,24 @@ class AIWorkforce_model extends CI_Model
         };
 
         $this->audit = new class($db) implements AIWorkforce\Persistence\AuditRepository {
+            /**
+             * In-process trail of everything emitted since the process started,
+             * oldest first (`audit_logs` is the durable copy). The detail payload
+             * stays an array here — callers (reports, tests, the cron summary)
+             * read it without decoding JSON. An event is remembered even when
+             * the database write fails: audit must never break the pipeline, and
+             * must never silently lose an event either.
+             *
+             * @var array<int, array<string, mixed>>
+             */
+            public array $rows = [];
+
             public function __construct(private object $db) {}
             public function emit(string $type, string $summary, array $detail = [], string $actor = 'system'): void {
+                $this->rows[] = [
+                    'type' => $type, 'at' => gmdate('c'), 'actor' => $actor,
+                    'summary' => mb_substr($summary, 0, 500), 'detail' => $detail,
+                ];
                 try {
                     $this->db->insert('audit_logs', [
                         'type' => $type, 'at' => gmdate('c'), 'actor' => $actor,
