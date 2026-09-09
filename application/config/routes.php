@@ -63,6 +63,7 @@ $route['admin/notifications/send'] = 'admin/notification_send';
 $route['admin/reports'] = 'admin/reports';
 $route['admin/settings'] = 'admin/settings';
 $route['admin/settings/save'] = 'admin/settings_save';
+$route['admin/settings/football-toggle'] = 'admin/football_provider_toggle';
 $route['admin/api'] = 'admin/api';
 $route['admin/api/create'] = 'admin/api_create';
 $route['admin/api/save'] = 'admin/api_save';

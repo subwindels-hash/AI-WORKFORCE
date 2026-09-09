@@ -42,6 +42,10 @@ $selectedMarket = (string) ($marketBlock['key'] ?? 'MATCH_WINNER');
 // selector full of modes nobody can honour is a lie dressed as a choice.
 $providerOptions = is_array($providers['options'] ?? null) ? $providers['options'] : [];
 $selectedProvider = strtoupper(trim((string) ($provider ?? '')));
+// Admin-controlled mode (AUTO by default): when locked, the selector offers
+// Auto / Smart only and is disabled, because the backend ignores overrides.
+$providerLocked = !empty($providerLocked) || !empty($providers['locked']);
+$providerMode = (string) ($providerMode ?? ($providers['mode'] ?? 'AUTO'));
 $carry = [];
 if ($selectedExternal !== '') $carry['competition'] = (string) ($selectedCompetition['requested'] ?? $selectedExternal);
 if ($selectedMarket !== '') $carry['market'] = $selectedMarket;
@@ -193,9 +197,19 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
           <form method="get" action="/football" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
             <input type="hidden" name="page" value="1">
             <div>
-              <label class="dim" style="font-size:11px;display:block">Data Provider</label>
+              <label class="dim" style="font-size:11px;display:block">Data Provider<?= $providerLocked ? ' <span class="badge b-green" title="The administrator locked provider selection to Auto / Smart (Admin → System Settings → Football).">AUTO · managed by admin</span>' : '' ?></label>
               <?php if ($providerOptions === []): ?>
                 <select disabled style="min-width:200px"><option>No feed connected</option></select>
+              <?php elseif ($providerLocked): ?>
+                <select name="provider" disabled style="min-width:200px" title="Locked by the administrator to Auto / Smart. Switch to Manual in Admin → System Settings → Football to choose a feed.">
+                  <?php foreach ($providerOptions as $option): ?>
+                    <?php $value = strtoupper((string) ($option['value'] ?? '')); ?>
+                    <option value="<?= e((string) ($option['value'] ?? '')) ?>"<?= $selectedProvider === $value ? ' selected' : '' ?>>
+                      <?= e((string) ($option['label'] ?? $value)) ?>
+                    </option>
+                  <?php endforeach; ?>
+                </select>
+                <input type="hidden" name="provider" value="AUTO">
               <?php else: ?>
                 <select name="provider" style="min-width:200px" title="Which feed answers this request. Auto / Smart picks from health, coverage, odds availability and rate limits; Multi-Provider takes each piece of data from the feed that has it.">
                   <?php foreach ($providerOptions as $option): ?>

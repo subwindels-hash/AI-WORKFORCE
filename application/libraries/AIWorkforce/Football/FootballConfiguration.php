@@ -37,6 +37,50 @@ final class FootballConfiguration
         return $this->flag('DEMO_MODE', false) || $this->flag('WINDELS_FOOTBALL_DEMO_MODE', false);
     }
 
+    /**
+     * Data-provider selection mode for the football console + API.
+     *
+     *  - AUTO (default): the Data Provider selector is locked to Auto / Smart —
+     *    any operator-supplied `provider` is ignored and the engine picks the
+     *    feed per request from health, coverage, odds and rate limits.
+     *  - MANUAL: the operator may choose Auto / Smart, a named feed or
+     *    Multi-Provider; manualProvider() is the pre-selected default.
+     *
+     * Admin-controlled (Admin → System Settings → Football, stored in
+     * `platform_settings` and injected as an override by Platform), with
+     * WINDELS_FOOTBALL_PROVIDER_MODE as the environment fallback. Any value
+     * other than MANUAL is AUTO — an unreadable mode must fail closed to the
+     * supervised default, never to an operator free-for-all nobody chose.
+     */
+    public function providerMode(): string
+    {
+        return strtoupper($this->text('WINDELS_FOOTBALL_PROVIDER_MODE', 'AUTO')) === 'MANUAL' ? 'MANUAL' : 'AUTO';
+    }
+
+    /** True when the admin locked provider selection to Auto / Smart. */
+    public function providerLockedToAuto(): bool
+    {
+        return $this->providerMode() !== 'MANUAL';
+    }
+
+    /**
+     * Default pre-selection for the Data Provider dropdown when the mode is
+     * MANUAL: AUTO, MULTI, a feed id (api-football, thesportsdb, sportmonks,
+     * http-provider) or '' (= Auto / Smart). Unknown values collapse to '' —
+     * a default nobody can honour must not be offered as selected.
+     */
+    public function manualProvider(): string
+    {
+        $value = strtoupper(trim($this->text('WINDELS_FOOTBALL_MANUAL_PROVIDER', '')));
+        if ($value === '' || $value === 'AUTO' || $value === 'SMART') return '';
+        if ($value === 'MULTI') return 'MULTI';
+        $lower = strtolower($value);
+        foreach (['api-football', 'apifootball', 'thesportsdb', 'sportmonks', 'http-provider'] as $known) {
+            if ($lower === $known) return $known === 'apifootball' ? 'api-football' : $known;
+        }
+        return '';
+    }
+
     /** Interval (seconds) between refresh sweeps per freshness bucket. */
     public function refreshInterval(string $bucket): int
     {
@@ -318,6 +362,8 @@ final class FootballConfiguration
         return [
             'enabled' => $this->enabled(),
             'demoMode' => $this->demoMode(),
+            'providerMode' => $this->providerMode(),
+            'manualProvider' => $this->manualProvider(),
             'refreshIntervals' => [
                 'fixtures' => $this->refreshInterval('fixtures'),
                 'upcoming' => $this->refreshInterval('upcoming'),

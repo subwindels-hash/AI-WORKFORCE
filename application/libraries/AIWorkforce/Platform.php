@@ -128,11 +128,15 @@ class Platform
         );
         // Football Intelligence shares the sports provider registry (one
         // credential layer, one health history) and its own repository, model
-        // registry and settlement ledger.
+        // registry and settlement ledger. The admin-controlled provider mode
+        // (Admin → System Settings → Football) is injected as a configuration
+        // override so it takes effect without a deploy; the environment keeps
+        // working as the fallback on installs that never open that panel.
         $this->football = new \AIWorkforce\Football\FootballIntelligence(
             $model->football,
             $this->sports->providers,
-            $model->audit
+            $model->audit,
+            new \AIWorkforce\Football\FootballConfiguration($this->footballConfigOverrides($model))
         );
         // Lottery provider selection (first configured wins):
         //   1. LoteriasAPI (loteriasapi.com) — real EuroMillions results feed
@@ -345,6 +349,38 @@ class Platform
         foreach ($this->userBrokers->connectorsForUser($userId) as $connector) {
             $this->brokers->register($connector);
         }
+    }
+
+    /**
+     * Admin-controlled football overrides (platform_settings → env-keyed map).
+     *
+     * Only keys the admin panel actually stored are returned, so the
+     * environment keeps working as the fallback and a fresh install without a
+     * platform_settings table boots exactly as before. Never throws: settings
+     * must not be able to break platform construction.
+     *
+     * @return array<string,mixed>
+     */
+    private function footballConfigOverrides(\AIWorkforce_model $model): array
+    {
+        try {
+            if (!$model->db->table_exists('platform_settings')) return [];
+            $query = $model->db->where_in('k', ['football_provider_mode', 'football_manual_provider'])
+                ->get('platform_settings');
+            $rows = $query === false ? [] : $query->result_array();
+        } catch (\Throwable $_) {
+            return [];
+        }
+        $byKey = [];
+        foreach ($rows as $row) $byKey[(string) ($row['k'] ?? '')] = (string) ($row['v'] ?? '');
+        $out = [];
+        if (isset($byKey['football_provider_mode']) && trim($byKey['football_provider_mode']) !== '') {
+            $out['WINDELS_FOOTBALL_PROVIDER_MODE'] = $byKey['football_provider_mode'];
+        }
+        if (array_key_exists('football_manual_provider', $byKey)) {
+            $out['WINDELS_FOOTBALL_MANUAL_PROVIDER'] = $byKey['football_manual_provider'];
+        }
+        return $out;
     }
 
     /**

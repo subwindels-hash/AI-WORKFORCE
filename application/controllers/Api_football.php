@@ -243,8 +243,22 @@ class Api_football extends Api_controller
     {
         if (!$this->requirePermission('sports.view', false)) return;
         $payload = $this->football()->intelligence()->providers();
+        // Admin-controlled mode (AUTO by default): when locked, only Auto is
+        // honoured, so only Auto is advertised — the console and the API agree.
+        $mode = $this->football()->config()->providerMode();
+        $locked = $mode !== 'MANUAL';
+        if ($locked && ($payload['options'] ?? []) !== []) {
+            $payload['options'] = array_values(array_filter(
+                (array) $payload['options'],
+                static fn($o): bool => strtoupper((string) ($o['value'] ?? '')) === \AIWorkforce\Football\ProviderSelector::AUTO));
+            $payload['default'] = \AIWorkforce\Football\ProviderSelector::AUTO;
+        }
+        $payload['mode'] = $mode;
+        $payload['locked'] = $locked;
         $payload['generatedAt'] = gmdate('c');
-        $payload['note'] = 'Auto / Smart picks the provider per request from health, competition coverage, fixture availability, odds availability and rate limits. Multi-Provider takes each piece of data from the feed that has it and combines them into one match.';
+        $payload['note'] = $locked
+            ? 'Provider selection is locked to Auto / Smart by the administrator (Admin → System Settings → Football). Auto picks the provider per request from health, competition coverage, fixture availability, odds availability and rate limits.'
+            : 'Auto / Smart picks the provider per request from health, competition coverage, fixture availability, odds availability and rate limits. Multi-Provider takes each piece of data from the feed that has it and combines them into one match.';
         $this->json($payload);
     }
 
@@ -280,8 +294,17 @@ class Api_football extends Api_controller
         if (!$this->requirePermission('sports.view', false)) return;
         $g = $this->input->get(NULL, true) ?: [];
         $notes = [];
+        $requestedProvider = trim((string) ($g['provider'] ?? ''));
+        if ($this->football()->config()->providerLockedToAuto()
+            && $requestedProvider !== ''
+            && strtoupper($requestedProvider) !== \AIWorkforce\Football\ProviderSelector::AUTO
+            && strtoupper($requestedProvider) !== 'SMART') {
+            $notes[] = 'provider=' . \AIWorkforce\Football\RequestParams::preview($requestedProvider)
+                . ' was ignored: the administrator locked provider selection to Auto / Smart.';
+            $requestedProvider = '';
+        }
         $query = [
-            'provider' => trim((string) ($g['provider'] ?? '')),
+            'provider' => $requestedProvider,
             'competition' => trim((string) ($g['competition'] ?? '')),
             'date' => trim((string) ($g['date'] ?? '')),
             'dateFrom' => trim((string) ($g['dateFrom'] ?? '')),
@@ -557,6 +580,11 @@ class Api_football extends Api_controller
         $notes = [];
         $date = \AIWorkforce\Football\RequestParams::date($body, 'date', gmdate('Y-m-d'), $notes);
         $providerId = $provider === null ? null : (string) $provider;
+        if ($providerId !== null && $providerId !== '' && $this->football()->config()->providerLockedToAuto()) {
+            $notes[] = 'provider=' . \AIWorkforce\Football\RequestParams::preview($providerId)
+                . ' was ignored: the administrator locked provider selection to Auto / Smart.';
+            $providerId = null;
+        }
         $this->json([
             'sync' => $this->football()->syncDate($date, $providerId),
             'date' => $date,

@@ -60,9 +60,43 @@ class Football extends App_Controller
         // Multi-Provider lets each piece of data come from the feed that has
         // it. The catalogue is what the dropdown is populated from — no mode is
         // offered that no connected feed can honour.
+        //
+        // Admin-controlled mode (Admin → System Settings → Football, AUTO by
+        // default): in AUTO the selector is locked to Auto / Smart and any
+        // operator-supplied provider is ignored; in MANUAL the operator may
+        // choose, with the admin's manual default pre-selected.
+        $providerMode = $this->platform->football->config()->providerMode();
+        $providerLocked = $providerMode !== 'MANUAL';
         $provider = isset($get['provider']) ? trim((string) $get['provider']) : null;
+        if ($providerLocked) {
+            if ($provider !== null && $provider !== '' && strtoupper($provider) !== 'AUTO' && strtoupper($provider) !== 'SMART') {
+                $lockNote = 'provider=' . \AIWorkforce\Football\RequestParams::preview($provider)
+                    . ' was ignored: the administrator locked provider selection to Auto / Smart.';
+                $notes[] = $lockNote;
+                // The notice line was already assembled above; extend it so the
+                // ignored override is reported rather than applied silently.
+                $data['notice'] = trim((string) ($data['notice'] ?? '') . ' ' . $lockNote);
+            }
+            $provider = \AIWorkforce\Football\ProviderSelector::AUTO;
+        } elseif ($provider === null || $provider === '') {
+            $manualDefault = $this->platform->football->config()->manualProvider();
+            $provider = $manualDefault !== '' ? $manualDefault : \AIWorkforce\Football\ProviderSelector::AUTO;
+        }
         $data['provider'] = $provider;
-        $data['providers'] = $this->platform->football->intelligence()->providers();
+        $data['providerMode'] = $providerMode;
+        $data['providerLocked'] = $providerLocked;
+        $providers = $this->platform->football->intelligence()->providers();
+        if ($providerLocked && ($providers['options'] ?? []) !== []) {
+            // Locked: offer only what is honoured — a dropdown full of modes
+            // the backend would silently discard is a lie dressed as a choice.
+            $providers['options'] = array_values(array_filter(
+                (array) $providers['options'],
+                static fn($o): bool => strtoupper((string) ($o['value'] ?? '')) === \AIWorkforce\Football\ProviderSelector::AUTO));
+            $providers['default'] = \AIWorkforce\Football\ProviderSelector::AUTO;
+        }
+        $providers['mode'] = $providerMode;
+        $providers['locked'] = $providerLocked;
+        $data['providers'] = $providers;
         $data['competition'] = $competition;
         $data['market'] = $market;
         $data['line'] = $line;
