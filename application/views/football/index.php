@@ -40,6 +40,32 @@ $kickoffStamp = static function (mixed $iso): string {
     $ts = is_string($iso) && trim($iso) !== '' ? strtotime($iso) : false;
     return $ts === false ? 'DATA_UNAVAILABLE' : gmdate('D j M Y · H:i', $ts) . ' UTC';
 };
+// The pager moves through the matches that are already stored. It is rendered
+// above and below the list from one function so the two cannot drift, and every
+// link carries the date — a page number without a date is a different request.
+$pager = static function (array $pagination, string $date): string {
+    $total = (int) ($pagination['totalMatches'] ?? 0);
+    if ($total === 0) return '';
+    $page = (int) ($pagination['page'] ?? 1);
+    $pages = (int) ($pagination['totalPages'] ?? 1);
+    $size = (int) ($pagination['pageSize'] ?? 50);
+    $href = static fn(int $target): string => '/football?date=' . rawurlencode($date) . '&page=' . $target;
+    $previous = !empty($pagination['hasPrevious'])
+        ? '<a class="btn small" href="' . e($href((int) $pagination['previousPage'])) . '">&larr; Previous</a>'
+        : '<span class="btn small" aria-disabled="true" style="opacity:.45;cursor:default">&larr; Previous</span>';
+    $next = !empty($pagination['hasNext'])
+        ? '<a class="btn small" href="' . e($href((int) $pagination['nextPage'])) . '">Next &rarr;</a>'
+        : '<span class="btn small" aria-disabled="true" style="opacity:.45;cursor:default">Next &rarr;</span>';
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
+        . '<div>' . $previous . '</div>'
+        . '<div style="text-align:center">'
+        . '<div style="font-weight:700">Page ' . $page . ' of ' . $pages . '</div>'
+        . '<div class="dim" style="font-size:11px">' . $size . ' matches per page &middot; showing '
+        . (int) ($pagination['from'] ?? 0) . '&ndash;' . (int) ($pagination['to'] ?? 0) . ' of ' . $total . '</div>'
+        . '</div>'
+        . '<div>' . $next . '</div>'
+        . '</div>';
+};
 ?>
 <div class="page-head">
   <div>
@@ -61,16 +87,16 @@ $kickoffStamp = static function (mixed $iso): string {
           <button class="btn small" disabled title="Requires the sports.manage permission">Sync this date</button>
         <?php endif; ?>
       </form>
-      <form method="post" action="/football/predict" style="display:inline">
+      <form method="post" action="/football/predict" style="display:inline" onsubmit="return confirm('Generate predictions for the matches on this page that do not have one yet? At most 50 new predictions are created, and matches that already have one are reused, not regenerated.')">
         <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
         <input type="hidden" name="date" value="<?= e((string) ($date ?? gmdate('Y-m-d'))) ?>">
+        <input type="hidden" name="page" value="<?= (int) ($page ?? 1) ?>">
         <?php if (!empty($caps['sync'])): ?>
-          <button class="btn small">Rebuild board from stored data</button>
+          <button class="btn small">Generate this page (max 50)</button>
         <?php else: ?>
-          <button class="btn small" disabled title="Requires the sports.manage permission">Rebuild board from stored data</button>
+          <button class="btn small" disabled title="Requires the sports.manage permission">Generate this page (max 50)</button>
         <?php endif; ?>
       </form>
-      <a class="btn small" href="/football?date=<?= e((string) ($date ?? gmdate('Y-m-d'))) ?>&refresh=1">Re-analyze stored data</a>
       <a class="btn small" href="/football/live">Live view</a>
       <a class="btn small" href="/football/models">Models &amp; calibration</a>
       <a class="btn small" href="/sports" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700">🎯 Odds Prediction Ticket →</a>
@@ -108,8 +134,23 @@ $kickoffStamp = static function (mixed $iso): string {
         <?php if (!empty($board['model']['note'])): ?>
           <div class="notice warnbox" style="margin-top:10px"><b><?= e((string) ($board['model']['state'] ?? 'MODEL')) ?></b> — <?= e((string) $board['model']['note']) ?></div>
         <?php endif; ?>
-        <?php if (($board['state'] ?? '') === 'NO_FIXTURES_STORED' || ($board['state'] ?? '') === 'NO_PREDICTIONS_STORED'): ?>
+        <?php if (in_array((string) ($board['state'] ?? ''), ['NO_FIXTURES_STORED', 'NO_PREDICTIONS_STORED', 'PAGE_BEYOND_LAST'], true)): ?>
           <p class="dim" style="margin-top:12px"><?= e((string) ($board['message'] ?? '')) ?></p>
+        <?php endif; ?>
+
+        <?php
+        $pagination = is_array($board['pagination'] ?? null) ? $board['pagination'] : [];
+        $dateParam = (string) ($date ?? gmdate('Y-m-d'));
+        ?>
+        <?php if ($pagination !== []): ?>
+          <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+            <?= $pager($pagination, $dateParam) ?>
+            <p class="dim" style="font-size:11px;margin:8px 0 0">
+              <?= (int) ($summary['analyzed'] ?? 0) ?> of <?= (int) ($summary['fixtures'] ?? 0) ?> matches on this date have a stored prediction ·
+              <?= (int) ($pagination['awaiting'] ?? 0) ?> of the <?= (int) ($pagination['returned'] ?? 0) ?> on this page are still unanalyzed.
+              Paging reads stored rows: it never regenerates a prediction, and generating a page creates at most <?= (int) ($pagination['maxLimit'] ?? 50) ?> new ones.
+            </p>
+          </div>
         <?php endif; ?>
 
         <?php foreach ($board['categories'] ?? [] as $category): ?>
@@ -242,6 +283,12 @@ $kickoffStamp = static function (mixed $iso): string {
           <div class="notice warnbox" style="margin-top:14px">
             <b>No fixtures currently satisfy the required prediction and data-quality thresholds.</b>
             <?= $board['message'] !== null && (string) ($board['state'] ?? '') === 'NONE_QUALIFIED' ? '' : 'Fixtures below the threshold stay listed as limited data or rejected instead of being promoted into a prediction tier.' ?>
+          </div>
+        <?php endif; ?>
+
+        <?php if ($pagination !== []): ?>
+          <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--line)">
+            <?= $pager($pagination, $dateParam) ?>
           </div>
         <?php endif; ?>
       </div>

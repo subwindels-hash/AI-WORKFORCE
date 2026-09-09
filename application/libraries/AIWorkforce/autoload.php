@@ -84,6 +84,7 @@ spl_autoload_register(static function (string $class) use ($ai_workforceDir): vo
     'AIWorkforce\\Football\\FootballDiagnostics' => 'Football/FootballDiagnostics.php',
     'AIWorkforce\\Football\\FootballIntelligence' => 'Football/FootballIntelligence.php',
     'AIWorkforce\\Football\\LiveMatchService' => 'Football/LiveMatchService.php',
+    'AIWorkforce\\Football\\MatchFeed' => 'Football/MatchFeed.php',
     'AIWorkforce\\Football\\ModelRegistry' => 'Football/ModelRegistry.php',
     'AIWorkforce\\Football\\OutcomePredictor' => 'Football/OutcomePredictor.php',
     'AIWorkforce\\Football\\PerformanceService' => 'Football/PerformanceService.php',

@@ -94,6 +94,21 @@ final class FootballConfiguration
         return max(1, min(500, (int) $this->num('WINDELS_FOOTBALL_ANALYSIS_LIMIT', 120)));
     }
 
+    /**
+     * Matches per page — and therefore matches per generation request.
+     *
+     * The page size is deliberately small and hard-capped: the module pages
+     * through *persisted* matches 50 at a time, and a generation request may
+     * never produce more than one page of new predictions. Raising it above
+     * `MatchFeed::MAX_PAGE_SIZE` cannot happen here — the ceiling is enforced
+     * again in the service, so an operator cannot talk the module into asking
+     * for a thousand predictions in one call.
+     */
+    public function matchPageSize(): int
+    {
+        return max(1, min(MatchFeed::MAX_PAGE_SIZE, (int) $this->num('WINDELS_FOOTBALL_MATCH_PAGE_SIZE', MatchFeed::DEFAULT_PAGE_SIZE)));
+    }
+
     /** Scoreline grid: goals per team. 8 covers >99.9% of real football scores. */
     public function maxGoals(): int
     {
@@ -214,6 +229,8 @@ final class FootballConfiguration
             'maxDataAgeSeconds' => $this->maxDataAgeSummary(),
             'minRequestSpacingMs' => $this->minRequestSpacingMs(),
             'analysisLimit' => $this->analysisLimit(),
+            'matchPageSize' => $this->matchPageSize(),
+            'maxMatchPageSize' => MatchFeed::MAX_PAGE_SIZE,
             'model' => [
                 'maxGoals' => $this->maxGoals(),
                 'dixonColesRho' => $this->dixonColesRho(),

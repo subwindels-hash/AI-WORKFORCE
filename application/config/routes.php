@@ -264,6 +264,7 @@ $route['football/match/(:num)'] = 'football/match/$1';
 $route['football/live'] = 'football/live';
 $route['football/models'] = 'football/models';
 $route['football/sync'] = 'football/sync';
+// Generate the missing predictions for one page of matches (max 50).
 $route['football/predict'] = 'football/predict';
 $route['football/settle'] = 'football/settle';
 $route['football/calibrate'] = 'football/calibrate';
@@ -277,6 +278,9 @@ $route['api/football/fixtures'] = 'api_football/fixtures';
 $route['api/football/fixtures/today'] = 'api_football/fixtures_today';
 $route['api/football/fixtures/tomorrow'] = 'api_football/fixtures_tomorrow';
 $route['api/football/fixtures/live'] = 'api_football/fixtures_live';
+// The paginated match feed: 50 matches per page, 50 per generation request.
+$route['api/football/matches'] = 'api_football/matches';
+$route['api/football/matches/generate'] = 'api_football/generate_matches';
 $route['api/football/matches/(:num)'] = 'api_football/show_match/$1';
 $route['api/football/matches/(:num)/analysis'] = 'api_football/analysis/$1';
 $route['api/football/matches/(:num)/prediction'] = 'api_football/prediction/$1';

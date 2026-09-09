@@ -90,6 +90,60 @@ class Api_football extends Api_controller
         ]);
     }
 
+    /**
+     * The paginated match feed (50 matches per page).
+     *
+     * `GET /api/football/matches?page=1&limit=50` reads the stored fixtures for
+     * a date and returns one page with the predictions that already exist — it
+     * never runs the engine and never touches the provider, so moving between
+     * pages costs nothing. `?generate=1` (or the POST form below) asks for the
+     * page's *missing* predictions to be created, up to a hard maximum of 50
+     * new predictions per request; matches that already have one are returned,
+     * not regenerated.
+     *
+     * `limit` is clamped server-side to `MatchFeed::MAX_PAGE_SIZE` (50) and the
+     * clamp is reported in `request.notes`; no caller can ask for a thousand.
+     */
+    public function matches()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        $date = \AIWorkforce\Football\RequestParams::date($g, 'date', gmdate('Y-m-d'), $notes);
+        $page = \AIWorkforce\Football\RequestParams::int($g, 'page', 1, 1, \AIWorkforce\Football\MatchFeed::MAX_PAGE, $notes);
+        $limit = \AIWorkforce\Football\RequestParams::int($g, 'limit', \AIWorkforce\Football\MatchFeed::DEFAULT_PAGE_SIZE,
+            1, \AIWorkforce\Football\MatchFeed::MAX_PAGE_SIZE, $notes);
+        $generate = in_array(strtolower((string) ($g['generate'] ?? '')), ['1', 'true', 'yes'], true);
+        // Generation writes prediction rows, so it is a managed action even
+        // though it rides on a read endpoint — the same rule
+        // `/matches/:id/prediction?generate=1` already follows.
+        if ($generate && !$this->requirePermission('sports.manage', false)) return;
+        $payload = $this->football()->feed()->page($date, $page, $limit, $generate);
+        $payload['request']['notes'] = array_values(array_merge($notes, (array) ($payload['request']['notes'] ?? [])));
+        $payload['request']['limitMaximum'] = \AIWorkforce\Football\MatchFeed::MAX_PAGE_SIZE;
+        $this->json($payload);
+    }
+
+    /**
+     * Generate the missing predictions for one page (sports.manage + CSRF) and
+     * return that page. At most 50 new predictions are written per call, and a
+     * match that already has one is never regenerated.
+     */
+    public function generate_matches()
+    {
+        if (!$this->requirePermission('sports.manage')) return;
+        $body = array_merge($this->input->post() ?: [], $this->jsonBody());
+        $notes = [];
+        $date = \AIWorkforce\Football\RequestParams::date($body, 'date', gmdate('Y-m-d'), $notes);
+        $page = \AIWorkforce\Football\RequestParams::int($body, 'page', 1, 1, \AIWorkforce\Football\MatchFeed::MAX_PAGE, $notes);
+        $limit = \AIWorkforce\Football\RequestParams::int($body, 'limit', \AIWorkforce\Football\MatchFeed::DEFAULT_PAGE_SIZE,
+            1, \AIWorkforce\Football\MatchFeed::MAX_PAGE_SIZE, $notes);
+        $providerId = \AIWorkforce\Football\RequestParams::int($body, 'providerId', 0, 0, 1000000, $notes) ?: null;
+        $payload = $this->football()->feed()->generate($date, $page, $limit, $providerId);
+        $payload['request']['notes'] = array_values(array_merge($notes, (array) ($payload['request']['notes'] ?? [])));
+        $this->json($payload);
+    }
+
     public function fixtures_today()
     {
         if (!$this->requirePermission('sports.view', false)) return;

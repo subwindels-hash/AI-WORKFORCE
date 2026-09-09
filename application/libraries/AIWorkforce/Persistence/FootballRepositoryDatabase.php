@@ -235,7 +235,24 @@ class FootballRepositoryDatabase implements FootballRepository
         return $rows[0] ?? null;
     }
 
-    public function listFixtures(array $filter = [], int $limit = 500): array
+    public function listFixtures(array $filter = [], int $limit = 500, int $offset = 0): array
+    {
+        $this->applyFixtureFilter($filter);
+        // id breaks ties between two fixtures with the same kickoff: without a
+        // total order the same match can appear on two pages, or on neither.
+        $rows = $this->db->order_by('kickoff_at', 'ASC')->order_by('id', 'ASC')
+            ->limit(min(2000, max(1, $limit)), max(0, $offset))->get('football_fixtures')->result_array();
+        return $this->withCompetitionRef(array_map(fn(array $r) => $this->decode($r), $rows));
+    }
+
+    public function countFixtures(array $filter = []): int
+    {
+        $this->applyFixtureFilter($filter);
+        return (int) $this->db->count_all_results('football_fixtures');
+    }
+
+    /** @param array<string,mixed> $filter */
+    private function applyFixtureFilter(array $filter): void
     {
         if (!empty($filter['providerId'])) $this->db->where('provider_id', (int) $filter['providerId']);
         if (!empty($filter['status'])) $this->db->where('status', strtoupper((string) $filter['status']));
@@ -257,8 +274,6 @@ class FootballRepositoryDatabase implements FootballRepository
             $this->db->where('status', 'FINISHED');
             $this->db->where('settled_at', null);
         }
-        $rows = $this->db->order_by('kickoff_at', 'ASC')->limit(min(2000, max(1, $limit)))->get('football_fixtures')->result_array();
-        return $this->withCompetitionRef(array_map(fn(array $r) => $this->decode($r), $rows));
     }
 
     public function markFixtureSettled(int $id, string $at): void
@@ -570,7 +585,45 @@ class FootballRepositoryDatabase implements FootballRepository
         return $row ? $this->decode($row) : null;
     }
 
-    public function listPredictions(array $filter = [], int $limit = 500): array
+    public function listPredictions(array $filter = [], int $limit = 500, int $offset = 0): array
+    {
+        $this->applyPredictionFilter($filter);
+        $rows = $this->db->order_by('generated_at', 'DESC')->order_by('id', 'DESC')
+            ->limit(min(2000, max(1, $limit)), max(0, $offset))->get('football_match_predictions')->result_array();
+        return array_map(fn(array $r) => $this->decode($r), $rows);
+    }
+
+    public function countPredictions(array $filter = []): int
+    {
+        $this->applyPredictionFilter($filter);
+        return (int) $this->db->count_all_results('football_match_predictions');
+    }
+
+    public function listPredictionsForFixtures(array $fixtureIds, string $kind, ?int $modelVersionId = null): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $fixtureIds), static fn(int $id): bool => $id > 0)));
+        if ($ids === []) return [];
+        $this->db->where_in('fixture_id', $ids)->where('prediction_kind', $kind);
+        if ($modelVersionId !== null) {
+            // A NULL model version is a real state (a prediction made before a
+            // model row existed), so it is matched as NULL rather than skipped.
+            $modelVersionId > 0
+                ? $this->db->where('model_version_id', $modelVersionId)
+                : $this->db->where('model_version_id IS NULL');
+        }
+        $rows = $this->db->order_by('generated_at', 'DESC')->get('football_match_predictions')->result_array();
+        $out = [];
+        foreach ($rows as $row) {
+            $row = $this->decode($row);
+            // One row per match: the newest prediction for that match wins,
+            // which is also the row the unique key protects from duplicating.
+            $out[(int) $row['fixture_id']] ??= $row;
+        }
+        return $out;
+    }
+
+    /** @param array<string,mixed> $filter */
+    private function applyPredictionFilter(array $filter): void
     {
         if (!empty($filter['fixtureId'])) $this->db->where('fixture_id', (int) $filter['fixtureId']);
         if (!empty($filter['kind'])) $this->db->where('prediction_kind', (string) $filter['kind']);
@@ -584,8 +637,6 @@ class FootballRepositoryDatabase implements FootballRepository
         }
         if (!empty($filter['from'])) $this->db->where('generated_at >=', (string) $filter['from']);
         if (!empty($filter['to'])) $this->db->where('generated_at <=', (string) $filter['to']);
-        $rows = $this->db->order_by('generated_at', 'DESC')->limit(min(2000, max(1, $limit)))->get('football_match_predictions')->result_array();
-        return array_map(fn(array $r) => $this->decode($r), $rows);
     }
 
     public function saveScoreProbabilities(string $predictionId, array $rows): void
@@ -834,17 +885,16 @@ class FootballRepositoryDatabase implements FootballRepository
     private function withCompetitionRef(array $rows): array
     {
         $ids = array_values(array_unique(array_filter(array_map(static fn(array $r) => (int) ($r['competition_id'] ?? 0), $rows))));
-        if ($ids === []) {
-            return array_map(static function (array $row) {
-                $row['competition_external_id'] = null;
-                $row['competition_country'] = null;
-                return $row;
-            }, $rows);
-        }
-        $this->db->where_in('id', $ids);
         $lookup = [];
-        foreach ($this->db->get('football_competitions')->result_array() as $competition) {
-            $lookup[(int) $competition['id']] = $competition;
+        // A fixture the sync has not linked to a competition yet still has to
+        // come back with its provider: `match_id` is provider-scoped, so a row
+        // without `provider_code` would identify itself differently from the
+        // same match once the competition is linked.
+        if ($ids !== []) {
+            $this->db->where_in('id', $ids);
+            foreach ($this->db->get('football_competitions')->result_array() as $competition) {
+                $lookup[(int) $competition['id']] = $competition;
+            }
         }
         $providerIds = array_values(array_unique(array_filter(array_map(static fn(array $r) => (int) ($r['provider_id'] ?? 0), $rows))));
         $providers = [];

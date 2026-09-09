@@ -31,6 +31,7 @@ final class FootballIntelligence
     private ?SettlementService $settlements = null;
     private ?PerformanceService $performance = null;
     private ?PredictionBoard $board = null;
+    private ?MatchFeed $feed = null;
     private ?RefreshPolicy $refresh = null;
     private ?FootballDiagnostics $diagnostics = null;
     private ?FootballCronService $cron = null;
@@ -135,7 +136,16 @@ final class FootballIntelligence
 
     public function board(): PredictionBoard
     {
-        return $this->board ??= new PredictionBoard($this->repo, $this->predictions(), $this->models(), $this->config);
+        return $this->board ??= new PredictionBoard($this->repo, $this->predictions(), $this->models(), $this->config, $this->feed());
+    }
+
+    /**
+     * The paginated match feed: 50 matches per page, and at most 50 new
+     * predictions per generation request.
+     */
+    public function feed(): MatchFeed
+    {
+        return $this->feed ??= new MatchFeed($this->repo, $this->predictions(), $this->models(), $this->config);
     }
 
     public function refresh(): RefreshPolicy
@@ -166,13 +176,15 @@ final class FootballIntelligence
      *
      * @return array<string,mixed>
      */
-    public function dashboard(?string $date = null, bool $refresh = false): array
+    public function dashboard(?string $date = null, bool $refresh = false, int $page = 1, int $limit = MatchFeed::MAX_PAGE_SIZE): array
     {
         $date = $date ?? gmdate('Y-m-d');
         $diagnostics = $this->diagnostics()->snapshot();
         return [
             'date' => $date,
-            'board' => $this->board()->forDate($date, $refresh),
+            // One page of the board. The pager moves through stored matches; the
+            // summary counts above the cards still describe the whole date.
+            'board' => $this->board()->forDate($date, $refresh, $page, $limit),
             'diagnostics' => $diagnostics,
             'performance' => $this->performance()->report(30),
             'live' => $this->live()->board(false),

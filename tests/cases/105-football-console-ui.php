@@ -38,6 +38,9 @@ test('football: every documented endpoint is routed to a real controller method'
         'api/football/fixtures' => 'api_football/fixtures',
         'api/football/fixtures/today' => 'api_football/fixtures_today',
         'api/football/fixtures/live' => 'api_football/fixtures_live',
+        // The paginated feed: 50 matches per page, 50 per generation request.
+        'api/football/matches' => 'api_football/matches',
+        'api/football/matches/generate' => 'api_football/generate_matches',
         'api/football/matches/(:num)' => 'api_football/show_match/$1',
         'api/football/matches/(:num)/analysis' => 'api_football/analysis/$1',
         'api/football/matches/(:num)/prediction' => 'api_football/prediction/$1',

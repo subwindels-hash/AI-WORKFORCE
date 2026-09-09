@@ -49,9 +49,23 @@ interface FootballRepository
     public function findFixtureById(int $id): ?array;
     /** @return array<string,mixed>|null */
     public function findFixture(int $providerId, string $externalId): ?array;
-    /** Filter keys: date, from, to, status, competition, team, providerId,
-     *  unsettledOnly. @return array<int,array<string,mixed>> */
-    public function listFixtures(array $filter = [], int $limit = 500): array;
+    /**
+     * Filter keys: date, from, to, status, competition, team, providerId,
+     * unsettledOnly. Rows are ordered by kickoff then id, so a page boundary is
+     * stable: match 51 of a date is the same row on every call.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public function listFixtures(array $filter = [], int $limit = 500, int $offset = 0): array;
+
+    /**
+     * How many fixtures a filter matches, without loading them. Pagination
+     * needs the total to answer "Page 1 of 20" — it must never be guessed from
+     * the size of one page.
+     *
+     * @param array<string,mixed> $filter
+     */
+    public function countFixtures(array $filter = []): int;
     public function markFixtureSettled(int $id, string $at): void;
     /** Point a stored fixture at its competition row without touching provider facts. */
     public function linkFixtureCompetition(int $fixtureId, int $competitionId): void;
@@ -108,7 +122,30 @@ interface FootballRepository
     public function findPrediction(string $id): ?array;
     /** Filter keys: fixtureId, date, from, to, kind, eligibility, modelVersionId,
      *  settlementState. @return array<int,array<string,mixed>> */
-    public function listPredictions(array $filter = [], int $limit = 500): array;
+    public function listPredictions(array $filter = [], int $limit = 500, int $offset = 0): array;
+
+    /**
+     * How many stored predictions a filter matches. The board's date-wide
+     * counts (analyzed / qualified / limited) are read from here rather than
+     * counted in PHP over one page, so the summary describes the whole date
+     * while the page shows 50 rows.
+     *
+     * @param array<string,mixed> $filter
+     */
+    public function countPredictions(array $filter = []): int;
+
+    /**
+     * The stored predictions for a specific set of fixtures — one query for a
+     * whole page of matches instead of one per match.
+     *
+     * This is the "check match_id against the database" step: the caller hands
+     * it the page's fixture ids and gets back only the predictions that already
+     * exist, so the generation stage is handed the difference.
+     *
+     * @param list<int> $fixtureIds
+     * @return array<int,array<string,mixed>> keyed by fixture id
+     */
+    public function listPredictionsForFixtures(array $fixtureIds, string $kind, ?int $modelVersionId = null): array;
     /** Replaces the score grid of a NOT-yet-settled prediction. */
     public function saveScoreProbabilities(string $predictionId, array $rows): void;
     /** @return array<int,array<string,mixed>> */

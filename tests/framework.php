@@ -898,7 +898,19 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
         return $row === null ? null : $this->decorate($row);
     }
 
-    public function listFixtures(array $filter = [], int $limit = 500): array
+    public function listFixtures(array $filter = [], int $limit = 500, int $offset = 0): array
+    {
+        $rows = $this->filterFixtures($filter);
+        return array_map(fn(array $row) => $this->decorate($row), array_slice($rows, max(0, $offset), max(1, $limit)));
+    }
+
+    public function countFixtures(array $filter = []): int
+    {
+        return count($this->filterFixtures($filter));
+    }
+
+    /** @param array<string,mixed> $filter @return list<array<string,mixed>> */
+    private function filterFixtures(array $filter): array
     {
         $rows = array_values(array_filter($this->fixtures, function (array $row) use ($filter) {
             if (!empty($filter['providerId']) && (int) $row['provider_id'] !== (int) $filter['providerId']) return false;
@@ -913,8 +925,13 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
             if (!empty($filter['unsettledFinished']) && ((string) ($row['status'] ?? '') !== 'FINISHED' || !empty($row['settled_at']))) return false;
             return true;
         }));
-        usort($rows, fn(array $a, array $b) => strcmp((string) ($a['kickoff_at'] ?? ''), (string) ($b['kickoff_at'] ?? '')));
-        return array_map(fn(array $row) => $this->decorate($row), array_slice($rows, 0, max(1, $limit)));
+        // Kickoff, then id: a total order, so page N holds the same rows every
+        // time and a match can never appear on two pages or on neither.
+        usort($rows, static function (array $a, array $b): int {
+            $byKickoff = strcmp((string) ($a['kickoff_at'] ?? ''), (string) ($b['kickoff_at'] ?? ''));
+            return $byKickoff !== 0 ? $byKickoff : ((int) ($a['id'] ?? 0) <=> (int) ($b['id'] ?? 0));
+        });
+        return $rows;
     }
 
     private function decorate(array $row): array
@@ -1166,7 +1183,35 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
         return $this->find($this->predictions, fn(array $r) => (string) ($r['id'] ?? '') === $id);
     }
 
-    public function listPredictions(array $filter = [], int $limit = 500): array
+    public function listPredictions(array $filter = [], int $limit = 500, int $offset = 0): array
+    {
+        $rows = $this->filterPredictions($filter);
+        return array_slice($rows, max(0, $offset), max(1, $limit));
+    }
+
+    public function countPredictions(array $filter = []): int
+    {
+        return count($this->filterPredictions($filter));
+    }
+
+    public function listPredictionsForFixtures(array $fixtureIds, string $kind, ?int $modelVersionId = null): array
+    {
+        $ids = [];
+        foreach ($fixtureIds as $id) { $id = (int) $id; if ($id > 0) $ids[$id] = true; }
+        if ($ids === []) return [];
+        $out = [];
+        foreach ($this->filterPredictions(['kind' => $kind]) as $row) {
+            $fixtureId = (int) ($row['fixture_id'] ?? 0);
+            if (!isset($ids[$fixtureId])) continue;
+            if ($modelVersionId === null) { $out[$fixtureId] ??= $row; continue; }
+            if ((int) ($row['model_version_id'] ?? 0) !== $modelVersionId) continue;
+            $out[$fixtureId] ??= $row;
+        }
+        return $out;
+    }
+
+    /** @param array<string,mixed> $filter @return list<array<string,mixed>> */
+    private function filterPredictions(array $filter): array
     {
         $rows = array_values(array_filter($this->predictions, function (array $row) use ($filter) {
             if (!empty($filter['fixtureId']) && (int) ($row['fixture_id'] ?? 0) !== (int) $filter['fixtureId']) return false;
@@ -1179,8 +1224,13 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
             if (!empty($filter['to']) && (string) ($row['generated_at'] ?? '') > (string) $filter['to']) return false;
             return true;
         }));
-        usort($rows, fn(array $a, array $b) => strcmp((string) ($b['generated_at'] ?? ''), (string) ($a['generated_at'] ?? '')));
-        return array_slice($rows, 0, max(1, min(2000, $limit)));
+        // Newest first, id as the tie-break so the order is total and a page
+        // boundary cannot repeat or skip a row.
+        usort($rows, static function (array $a, array $b): int {
+            $byGenerated = strcmp((string) ($b['generated_at'] ?? ''), (string) ($a['generated_at'] ?? ''));
+            return $byGenerated !== 0 ? $byGenerated : strcmp((string) ($b['id'] ?? ''), (string) ($a['id'] ?? ''));
+        });
+        return $rows;
     }
 
     public function saveScoreProbabilities(string $predictionId, array $rows): void

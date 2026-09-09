@@ -45,8 +45,9 @@ each panel exists exactly once in the product.
 | `OutcomePredictor.php` | probabilities, most likely scoreline, alternatives, confidence ceiling, evidence rows, reasons |
 | `CalibrationService.php` | temperature scaling fitted from settled predictions only; `CALIBRATION_PENDING` otherwise |
 | `ModelRegistry.php` | lifecycle states, transition guards, registration from the deployed fingerprint |
-| `PredictionService.php` | prediction storage, the §output contract, the post-kickoff freeze |
-| `PredictionBoard.php` | the daily board: summary counts, confidence categories, match cards |
+| `PredictionService.php` | prediction storage, the §output contract, the post-kickoff freeze; `predictMissing()` generates only matches that have no prediction, `predictDay()` sweeps a date in 50-match batches and reuses what exists |
+| `MatchFeed.php` | the paginated feed: 50 matches per page, at most 50 NEW predictions per generation request, `match_id` de-duplication |
+| `PredictionBoard.php` | the daily board for one page: date-wide summary counts, confidence categories, match cards, pager |
 | `LiveMatchService.php` | in-play board and `LIVE` estimate rows, never rewriting the pre-match row |
 | `SettlementService.php` | grading on `FINISHED`, voiding on postponement, idempotent sweeps |
 | `PerformanceService.php` | 30-day metrics from stored settlements, snapshots, per-model evaluation |
@@ -126,7 +127,10 @@ settled rows and says so, and `PerformanceService::report()` returns
 * Displayed confidence is the calibrated value when a calibration exists, and the
   raw share capped by `50 + 45 × (dq/100)` when it does not. It is never 100%.
 * Board categories: `Highest Confidence` (≥ 80), `Strong Predictions` (75–79.99),
-  `Standard Predictions` (70–74.99), `Limited Data` (below threshold).
+  `Standard Predictions` (70–74.99), `Limited Data` (below 70 — both data that did
+  not clear the qualified threshold and qualified cards whose confidence sits
+  under the lowest cut line). Every card sits in exactly one category: paging
+  never makes an analyzed match disappear from the board.
 
 ## Model lifecycle
 
@@ -174,6 +178,67 @@ Stored per version: `model_id`, `model_name`, `model_version`, `algorithm`,
   Brier, ECE, log loss, average data quality, average goal error, plus the
   per-model breakdown over the same window.
 
+## Paging: 50 matches at a time
+
+The module never asks for thousands of matches, and it never regenerates a match
+because someone changed page.
+
+```text
+← Previous       Page 1 of 20       Next →
+                 50 Matches
+```
+
+**Reading** pages through the *persisted* matches. `GET /api/football/matches`
+slices the stored fixtures for a date (`ORDER BY kickoff_at, id`, so match 51 is
+the same row on every call) and attaches the predictions that already exist. A
+page read runs no model, makes no provider request and writes nothing.
+
+**Generating** is a separate, bounded stage. The two stages, in order:
+
+```text
+1. fixtures stored for a date
+       ↓  check every match_id against the database (one query per page)
+       ↓  new matches only
+       ↓  at most 50 sent for prediction generation
+2. prediction engine
+       ↓  features → quality gate → score model → calibration
+       ↓  save prediction + model version + timestamp
+       ↓  display the page from those stored rows
+```
+
+The rules, and where each one is enforced:
+
+| Rule | Enforced by |
+| --- | --- |
+| 50 matches per page; `limit > 50` is clamped | `MatchFeed::MAX_PAGE_SIZE`, `MatchFeed::resolve()`, `RequestParams::int()` in the endpoints |
+| at most 50 **new** predictions per generation request | `PredictionService::predictMissing()` — a `$limit` of 9,999 still yields 50, and the rest are reported `DEFERRED` |
+| a match that already has a prediction is never regenerated | `PredictionService::existing()` → the stored row is returned; `predictDay()` counts it as `skipped` |
+| moving between pages costs nothing | the read path touches only `listFixtures`/`listPredictionsForFixtures`/`countFixtures` |
+| one prediction per match | `UNIQUE(fixture_id, prediction_kind, model_version_id)` in every schema, plus `UNIQUE(provider_id, external_id)` on fixtures |
+
+**`match_id`.** A match is identified by `providerCode:externalId`
+(`MatchFeed::matchId()`), which the provider guarantees unique and
+`football_fixtures` enforces. A prediction is distinguished from a later refresh
+of the same match by three things together — the match, the prediction kind
+(pre-match or live), and `model_version_id` — plus `generated_at` as
+`predictionDate`. Every match row in the feed carries `matchId`,
+`predictionSource` (`STORED` / `GENERATED` / `DEFERRED` / `REFUSED` / `FAILED`)
+and, when there is no prediction, a `predictionRefusal` naming the reason.
+
+**Worked example** (120 matches on a date, 3 pages):
+
+```text
+Page 1 → matches 1–50    generate these 50 → save      (50 stored, 70 outstanding)
+Page 2 → matches 51–100  generate these 50 → save      (100 stored, 20 outstanding)
+Page 3 → matches 101–120 generate these 20 → save      (120 stored, 0 outstanding)
+Back to page 1 → the 50 rows are read back. Nothing is regenerated.
+```
+
+The scheduled `predict` job fills a partly-predicted date the same way: it
+sweeps in 50-match batches (up to its `analysisLimit` budget) and skips every
+match that already has a row, so re-running it costs nothing for work already
+done.
+
 ## Output contract
 
 `GET /api/football/matches/:id/prediction` and the console share this shape:
@@ -213,6 +278,7 @@ GET /api/football/fixtures            ?date= | ?from=&to=&limit=&status=&competi
 GET /api/football/fixtures/today
 GET /api/football/fixtures/tomorrow
 GET /api/football/fixtures/live
+GET /api/football/matches                 ?date=&page=1&limit=50   the paginated feed (50 per page)
 GET /api/football/matches/:id            fixture + statistics + H2H as stored
 GET /api/football/matches/:id/analysis
 GET /api/football/matches/:id/prediction
@@ -231,6 +297,7 @@ Mutations require the native session plus the CSRF token (header or body field),
 then the capability named. They take a JSON body:
 
 ```
+POST /api/football/matches/generate  sports.manage   {"date":"2026-09-05","page":2}  (max 50 NEW predictions)
 POST /api/football/sync            sports.manage   {"date":"2026-09-05","provider":"apifootball"}
 POST /api/football/sync/live       sports.manage   {}
 POST /api/football/settle          sports.settle   {"fixtureId":1234}  (omit to sweep)
@@ -253,6 +320,55 @@ seeded **Sports administrator** role (`sports_admin`, `tools/rbac.php`) already 
 all four, so a fresh install needs no new grants — and no screen or message may name a
 role or permission the seed does not define, which `tests/cases/105` checks by reading
 that catalogue.
+
+### The paged feed, page by page
+
+```jsonc
+// GET /api/football/matches?date=2026-09-05&page=2&limit=50
+{
+  "state": "AVAILABLE",
+  "date": "2026-09-05",
+  "matches": [
+    {
+      "matchId": "apifootball:1204831",   // the unique match identity
+      "fixtureId": 318,                   // database id
+      "homeTeam": "Manchester City", "awayTeam": "Everton",
+      "kickoff": "2026-09-05T14:00:00+00:00", "status": "SCHEDULED",
+      "analysisState": "ANALYZED",
+      "predictionSource": "STORED",       // STORED | GENERATED | DEFERRED | REFUSED | FAILED
+      "prediction": {
+        "predictionId": "fpx-9f3c2a71…", "result": "HOME",
+        "predictedScore": { "home": 2, "away": 0, "label": "2–0" },
+        "probabilities": { "home": 0.71, "draw": 0.19, "away": 0.10 },
+        "confidence": 71.4, "band": "QUALIFIED",
+        "modelVersionId": 7, "predictionDate": "2026-09-05",
+        "generatedAt": "2026-09-05T09:14:02+00:00"
+      },
+      "predictionRefusal": null            // { "code": "NOT_GENERATED", "reason": "…" } when there is none
+    }
+    // … 49 more
+  ],
+  "pagination": {
+    "page": 2, "limit": 50, "maxLimit": 50,
+    "totalMatches": 137, "totalPages": 3, "returned": 50,
+    "from": 51, "to": 100,
+    "hasPrevious": true, "hasNext": true, "previousPage": 1, "nextPage": 3
+  },
+  "generation": {
+    "requested": false, "batchLimit": 50,
+    "generated": 0,            // new predictions written by THIS request
+    "reused": 50,              // served from storage
+    "remainingOnDate": 87,     // matches on the date with no prediction yet
+    "predictionModelVersion": "v1+9f3c2a71", "predictionDate": "2026-09-05"
+  }
+}
+```
+
+`?generate=1` on the read endpoint (or `POST /api/football/matches/generate`)
+fills in the page's missing predictions first; `generation.requested` and
+`generation.generated` then report what the request actually produced. A clamp
+(`limit=1000` → 50) or a fallback (`page=abc` → 1) is always listed in
+`request.notes`, so a caller can see that the response is not the request.
 
 ## Refresh model
 
@@ -336,6 +452,7 @@ WINDELS_FOOTBALL_BUDGET_<JOB>=n              requests one sweep may spend; 0 = d
 WINDELS_FOOTBALL_MIN_REQUEST_SPACING_MS=250  spacing between provider requests
 WINDELS_FOOTBALL_DAILY_REQUEST_CEILING=0     fallback daily ceiling when a feed reports none
 WINDELS_FOOTBALL_ANALYSIS_LIMIT=120          fixtures one analysis pass may evaluate (1..500)
+WINDELS_FOOTBALL_MATCH_PAGE_SIZE=50          matches per page and per generation request (1..50, hard-capped in code)
 WINDELS_FOOTBALL_MAX_GOALS=8                 scoreline grid width per team (4..12)
 WINDELS_FOOTBALL_DC_RHO=-0.06                Dixon–Coles low-score adjustment (±0.25, 0 = plain Poisson)
 WINDELS_FOOTBALL_MARKET_BLEND=0.35           weight for market-implied probabilities (0 disables)
@@ -359,7 +476,7 @@ simulated rows.
 ## Testing
 
 ```
-php index.php tools tests            # includes tests/cases/101…107-football-*.php
+php index.php tools tests            # includes tests/cases/101…107 and 124-football-*.php
 ```
 
 The football cases run on `tests/football_support.php`: an in-memory repository, a

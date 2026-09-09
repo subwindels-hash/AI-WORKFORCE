@@ -23,16 +23,24 @@ class Football extends App_Controller
         $get = $this->input->get(NULL, true) ?: [];
         $notes = [];
         $date = \AIWorkforce\Football\RequestParams::date($get, 'date', gmdate('Y-m-d'), $notes);
+        // The board is paged 50 matches at a time. `page` is clamped server-side
+        // and the clamp is reported rather than applied silently — a pager that
+        // quietly showed a different page is the same lie as a silently
+        // reinterpreted date.
+        $page = \AIWorkforce\Football\RequestParams::int($get, 'page', 1, 1, \AIWorkforce\Football\MatchFeed::MAX_PAGE, $notes);
         // A typo'd date must not be answered with a silently different day: the
         // page shows today, and says that is what it did and why.
         if ($notes !== []) $data['notice'] = trim(implode(' ', array_filter([(string) ($data['notice'] ?? ''), ...$notes])));
         $data['date'] = $date;
+        $data['page'] = $page;
+        $data['pageSize'] = $this->platform->football->config()->matchPageSize();
         $data['yesterday'] = gmdate('Y-m-d', strtotime($date . ' -1 day'));
         $data['tomorrow'] = gmdate('Y-m-d', strtotime($date . ' +1 day'));
-        // `refresh=1` rebuilds the board from the rows already stored. It never
-        // pulls the provider: that stays an explicit, permission-checked action.
+        // `refresh=1` fills in the missing predictions for the page on screen,
+        // from the rows already stored. It never pulls the provider: that stays
+        // an explicit, permission-checked action.
         $data['refresh'] = !empty($get['refresh']);
-        $data['dashboard'] = $this->platform->football->dashboard($date, $data['refresh']);
+        $data['dashboard'] = $this->platform->football->dashboard($date, $data['refresh'], $page, (int) $data['pageSize']);
         $this->render('football/index', $data);
     }
 
@@ -113,36 +121,41 @@ class Football extends App_Controller
     }
 
     /**
-     * Rebuild today's board from stored data only. This never calls a provider:
-     * analysis reads what the sync jobs stored, and fixtures that already kicked
-     * off are refused rather than rewritten.
+     * Generate the predictions that are missing for one page of matches — the
+     * console form behind the "Generate this page" button.
+     *
+     * Three rules shape it, and they are the reason the module pages at all:
+     * analysis reads only the rows the sync jobs already stored (no provider
+     * call), only matches without a stored prediction are sent to the engine,
+     * and one request never writes more than one page — 50 new predictions.
+     * A match that already has one keeps it, so pressing the button twice in a
+     * row does nothing the second time and says so.
      */
     public function predict()
     {
         if ($this->input->method(true) !== 'POST') { redirect('/football'); return; }
-        if (!$this->requireFootballPermission('sports.manage', 'board rebuild')) return;
-        $supplied = $this->input->post('date');
-        // Rebuilding writes prediction rows for the date it is given, so an
-        // unreadable one must not be answered by picking a different day.
-        if (\AIWorkforce\Football\RequestParams::suppliedButInvalidDate(['date' => $supplied])) {
-            $this->flash('error', 'Board rebuild refused: date=' . \AIWorkforce\Football\RequestParams::preview($supplied)
-                . ' is not a real YYYY-MM-DD calendar date, and no other day will be predicted in its place.');
-            redirect('/football');
-            return;
-        }
-        $date = \AIWorkforce\Football\RequestParams::date(['date' => $supplied], 'date', gmdate('Y-m-d'));
+        if (!$this->requireFootballPermission('sports.manage', 'prediction generation')) return;
+        $date = $this->postedDate();
+        if ($date === null) return;
+        $page = max(1, min(\AIWorkforce\Football\MatchFeed::MAX_PAGE, (int) $this->input->post('page')));
+        $limit = (int) $this->platform->football->config()->matchPageSize();
         try {
-            $result = $this->platform->football->predictions()->predictDay($date);
-            if (($result['status'] ?? '') === \AIWorkforce\Football\DataState::UNAVAILABLE) {
-                $this->flash('error', (string) ($result['reason'] ?? 'No stored fixture exists for this date, so nothing can be analyzed.'));
-            } else {
-                $this->flash('notice', sprintf('Board rebuilt from stored data: %d fixture(s) analyzed — %d qualified, %d limited data, %d rejected on data quality (see Data feed).',
-                    (int) ($result['analyzed'] ?? 0), (int) ($result['qualified'] ?? 0), (int) ($result['limited'] ?? 0), (int) ($result['rejected'] ?? 0)));
-            }
+            $result = $this->platform->football->feed()->generate($date, $page, $limit);
+            $generation = (array) ($result['generation'] ?? []);
+            $generated = (int) ($generation['generated'] ?? 0);
+            $reused = (int) ($generation['reused'] ?? 0);
+            $remaining = (int) ($generation['remainingOnDate'] ?? 0);
+            $refused = (int) ($generation['refused'] ?? 0) + (int) ($generation['frozen'] ?? 0);
+            $this->flash('notice', $generated === 0
+                ? sprintf('Page %d of %s already had predictions for all %d of its matches — nothing was regenerated. %d match(es) on this date still have no prediction.',
+                    $page, $date, $reused, $remaining)
+                : sprintf('Generated %d new prediction(s) for page %d of %s; %d already-stored prediction(s) were reused, not regenerated. %d match(es) on this date still have no prediction%s.',
+                    $generated, $page, $date, $reused, $remaining,
+                    $refused > 0 ? ' (' . $refused . ' on this page were refused on data quality or kickoff — see the cards below)' : ''));
         } catch (Throwable $e) {
-            $this->flash('error', 'Prediction run refused: ' . $e->getMessage());
+            $this->flash('error', 'Prediction generation refused: ' . $e->getMessage());
         }
-        redirect('/football?date=' . $date);
+        redirect('/football?date=' . $date . '&page=' . $page);
     }
 
     /** Pull final results and settle the fixtures that reported them (sports.settle). */
@@ -199,6 +212,23 @@ class Football extends App_Controller
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    /**
+     * The date a POST asked for. An unreadable one refuses the action: writing
+     * predictions for a different day than the operator named is worse than
+     * writing none.
+     */
+    private function postedDate(): ?string
+    {
+        $supplied = $this->input->post('date');
+        if (\AIWorkforce\Football\RequestParams::suppliedButInvalidDate(['date' => $supplied])) {
+            $this->flash('error', 'Refused: date=' . \AIWorkforce\Football\RequestParams::preview($supplied)
+                . ' is not a real YYYY-MM-DD calendar date, and no other day will be predicted in its place.');
+            redirect('/football');
+            return null;
+        }
+        return \AIWorkforce\Football\RequestParams::date(['date' => $supplied], 'date', gmdate('Y-m-d'));
+    }
 
     private function headline(array $analysis): string
     {
