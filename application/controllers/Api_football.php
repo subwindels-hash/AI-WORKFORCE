@@ -118,10 +118,85 @@ class Api_football extends Api_controller
         // though it rides on a read endpoint — the same rule
         // `/matches/:id/prediction?generate=1` already follows.
         if ($generate && !$this->requirePermission('sports.manage', false)) return;
-        $payload = $this->football()->feed()->page($date, $page, $limit, $generate);
+        $options = $this->feedOptions($g, $notes);
+        $payload = $this->football()->feed()->page($date, $page, $limit, $generate, $options);
         $payload['request']['notes'] = array_values(array_merge($notes, (array) ($payload['request']['notes'] ?? [])));
         $payload['request']['limitMaximum'] = \AIWorkforce\Football\MatchFeed::MAX_PAGE_SIZE;
         $this->json($payload);
+    }
+
+    /**
+     * The competitions a date can be narrowed to, listed from the rows the
+     * provider sent, with the premium (featured) competition marked. Available
+     * to any identity that may read the board: a league list is not a
+     * privileged fact.
+     */
+    public function competitions()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        $date = \AIWorkforce\Football\RequestParams::date($g, 'date', gmdate('Y-m-d'), $notes);
+        $providerId = \AIWorkforce\Football\RequestParams::int($g, 'providerId', 0, 0, 1000000, $notes) ?: null;
+        $payload = $this->football()->competitions($date, $providerId);
+        $payload['request'] = ['date' => $date, 'providerId' => $providerId, 'notes' => array_values($notes)];
+        $payload['generatedAt'] = gmdate('c');
+        $this->json($payload);
+    }
+
+    /**
+     * The odds-prediction markets, with whether each one can currently be
+     * answered. A market that has no stored input and no quoted price is
+     * reported as DATA_UNAVAILABLE rather than left off the list.
+     */
+    public function markets()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        $date = \AIWorkforce\Football\RequestParams::date($g, 'date', gmdate('Y-m-d'), $notes);
+        $available = $this->football()->markets()->available([]);
+        $selected = $this->football()->markets()->resolve($g['market'] ?? null, $notes);
+        $this->json([
+            'status' => 'OK',
+            'date' => $date,
+            'defaultMarket' => $this->football()->config()->defaultMarket(),
+            'selected' => $selected['key'],
+            'markets' => $available,
+            'total' => count($available),
+            'note' => 'Selecting a market is a view over the stored prediction: it never regenerates a match and never costs a provider call.',
+            'request' => ['date' => $date, 'market' => $g['market'] ?? null, 'notes' => array_values($notes)],
+            'generatedAt' => gmdate('c'),
+        ]);
+    }
+
+    /**
+     * `competition` and `market` from a request. Both are selections over rows
+     * that are already stored; an unusable value is reported through `$notes`
+     * rather than silently becoming a different selection.
+     *
+     * @param array<string,mixed> $input
+     * @param list<string> $notes
+     * @return array<string,mixed>
+     */
+    private function feedOptions(array $input, array &$notes): array
+    {
+        $options = [];
+        $competition = trim((string) ($input['competition'] ?? ''));
+        if ($competition !== '') $options['competition'] = $competition;
+        $market = trim((string) ($input['market'] ?? ''));
+        if ($market !== '') $options['market'] = $market;
+        if (isset($input['line']) && trim((string) $input['line']) !== '') {
+            if (is_numeric($input['line'])) {
+                $options['line'] = max(-10.0, min(10.0, (float) $input['line']));
+            } else {
+                $notes[] = 'line=' . \AIWorkforce\Football\RequestParams::preview($input['line'])
+                    . ' is not a number; the market\'s own default line was used.';
+            }
+        }
+        $providerId = \AIWorkforce\Football\RequestParams::int($input, 'providerId', 0, 0, 1000000, $notes);
+        if ($providerId > 0) $options['providerId'] = $providerId;
+        return $options;
     }
 
     /**
@@ -138,8 +213,8 @@ class Api_football extends Api_controller
         $page = \AIWorkforce\Football\RequestParams::int($body, 'page', 1, 1, \AIWorkforce\Football\MatchFeed::MAX_PAGE, $notes);
         $limit = \AIWorkforce\Football\RequestParams::int($body, 'limit', \AIWorkforce\Football\MatchFeed::DEFAULT_PAGE_SIZE,
             1, \AIWorkforce\Football\MatchFeed::MAX_PAGE_SIZE, $notes);
-        $providerId = \AIWorkforce\Football\RequestParams::int($body, 'providerId', 0, 0, 1000000, $notes) ?: null;
-        $payload = $this->football()->feed()->generate($date, $page, $limit, $providerId);
+        $options = $this->feedOptions($body, $notes);
+        $payload = $this->football()->feed()->generate($date, $page, $limit, $options);
         $payload['request']['notes'] = array_values(array_merge($notes, (array) ($payload['request']['notes'] ?? [])));
         $this->json($payload);
     }

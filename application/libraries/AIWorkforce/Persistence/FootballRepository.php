@@ -76,6 +76,19 @@ interface FootballRepository
      */
     public function listFixturesAwaitingResult(int $limit = 200, ?int $providerId = null): array;
 
+    /**
+     * The competitions the feed can be narrowed to, each with how many matches
+     * it has. This is the dropdown's source: competitions the provider has
+     * actually sent, never a hard-coded league list. `date` narrows the count to
+     * one day; without it the count is everything stored.
+     *
+     * Filter keys: date, providerId.
+     *
+     * @param array<string,mixed> $filter
+     * @return list<array<string,mixed>> rows of externalId, name, country, season, matches
+     */
+    public function listCompetitions(array $filter = [], int $limit = 200): array;
+
     // ── statistics ──────────────────────────────────────────────────────────
     /** @return array<string,mixed> */
     public function saveTeamStatistics(int $providerId, array $row): array;
@@ -150,6 +163,28 @@ interface FootballRepository
     public function saveScoreProbabilities(string $predictionId, array $rows): void;
     /** @return array<int,array<string,mixed>> */
     public function listScoreProbabilities(string $predictionId, int $limit = 20): array;
+
+    /**
+     * The score grids of many predictions at once. Evaluating an odds market
+     * for a page is 50 grids, and 50 queries per page is exactly the kind of
+     * cost this module exists to avoid: one batched read keeps market
+     * selection free of database amplification.
+     *
+     * @param list<string> $predictionIds
+     * @return array<string,list<array{home:int,away:int,probability:float}>> keyed by prediction id
+     */
+    public function listScoreProbabilitiesFor(array $predictionIds, int $limitPerPrediction = 200): array;
+
+    /**
+     * The prices the connected odds feed has quoted, keyed by `matchId`
+     * (`providerCode:externalId`) — the same identity a prediction is stored
+     * under. A match with no quoted row is absent from the result, which the
+     * caller reports as DATA_UNAVAILABLE rather than as a price of 0.
+     *
+     * @param list<string> $matchIds
+     * @return array<string,list<array{market:string,selection:string,decimalOdds:float,observedAt:?string}>>
+     */
+    public function listMarketOdds(array $matchIds): array;
 
     // ── settlements + performance ───────────────────────────────────────────
     /** Insert-once keyed by prediction_id; a second call returns the existing

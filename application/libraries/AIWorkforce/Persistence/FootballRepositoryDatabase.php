@@ -254,6 +254,19 @@ class FootballRepositoryDatabase implements FootballRepository
     /** @param array<string,mixed> $filter */
     private function applyFixtureFilter(array $filter): void
     {
+        // Resolved before anything else is added: CodeIgniter resets the query
+        // builder when a query runs, so a lookup squeezed between two `where`
+        // calls would silently drop the conditions that came before it.
+        $competitionIds = null;
+        if (!empty($filter['competitionExternalId'])) {
+            // Narrowing the page to one league is a filter on the competition
+            // row, not a free-text match on a name a provider may spell
+            // differently: two competitions whose names share a prefix must not
+            // end up on the same page.
+            $rows = $this->db->select('id')->where('external_id', (string) $filter['competitionExternalId'])
+                ->get('football_competitions')->result_array();
+            $competitionIds = array_map(static fn(array $row): int => (int) $row['id'], $rows);
+        }
         if (!empty($filter['providerId'])) $this->db->where('provider_id', (int) $filter['providerId']);
         if (!empty($filter['status'])) $this->db->where('status', strtoupper((string) $filter['status']));
         if (!empty($filter['matchState'])) $this->db->where('match_state', strtoupper((string) $filter['matchState']));
@@ -265,6 +278,7 @@ class FootballRepositoryDatabase implements FootballRepository
         if (!empty($filter['from'])) $this->db->where('kickoff_at >=', (string) $filter['from']);
         if (!empty($filter['to'])) $this->db->where('kickoff_at <=', (string) $filter['to']);
         if (!empty($filter['competition'])) $this->db->like('competition', (string) $filter['competition'], 'after');
+        if ($competitionIds !== null) $this->db->where_in('competition_id', $competitionIds === [] ? [0] : $competitionIds);
         if (!empty($filter['team'])) {
             $team = (string) $filter['team'];
             $this->db->group_start()->like('home_team', $team)->or_like('away_team', $team)->group_end();
@@ -279,6 +293,49 @@ class FootballRepositoryDatabase implements FootballRepository
     public function markFixtureSettled(int $id, string $at): void
     {
         $this->db->where('id', $id)->update('football_fixtures', ['settled_at' => $at, 'updated_at' => gmdate('c')]);
+    }
+
+    /**
+     * Competitions come from the rows the provider sent, with the match count
+     * for the requested date counted separately. A competition with no match on
+     * that date is still listed — with 0, which is a real answer — so the
+     * dropdown never silently shrinks to "what happens to be on today".
+     *
+     * @param array<string,mixed> $filter
+     * @return list<array<string,mixed>>
+     */
+    public function listCompetitions(array $filter = [], int $limit = 200): array
+    {
+        $this->db->order_by('name', 'ASC');
+        if (!empty($filter['providerId'])) $this->db->where('provider_id', (int) $filter['providerId']);
+        $competitions = $this->db->get('football_competitions', max(1, min(500, $limit)))->result_array();
+        if ($competitions === []) return [];
+
+        $this->db->select('competition_id, COUNT(*) AS matches')->where('competition_id IS NOT NULL');
+        if (!empty($filter['date'])) {
+            $date = (string) $filter['date'];
+            $this->db->where('kickoff_at >=', $date . 'T00:00:00+00:00');
+            $this->db->where('kickoff_at <=', $date . 'T23:59:59+00:00');
+        }
+        $counts = [];
+        foreach ($this->db->group_by('competition_id')->get('football_fixtures')->result_array() as $row) {
+            $counts[(int) $row['competition_id']] = (int) $row['matches'];
+        }
+        $out = [];
+        foreach ($competitions as $row) {
+            $row = $this->decode($row);
+            $out[] = [
+                'id' => (int) $row['id'],
+                'providerId' => (int) $row['provider_id'],
+                'externalId' => (string) $row['external_id'],
+                'name' => (string) $row['name'],
+                'country' => $row['country'] ?? null,
+                'season' => $row['season'] ?? null,
+                'matches' => $counts[(int) $row['id']] ?? 0,
+            ];
+        }
+        usort($out, static fn(array $a, array $b) => [$b['matches'], $a['name']] <=> [$a['matches'], $b['name']]);
+        return $out;
     }
 
     public function linkFixtureCompetition(int $fixtureId, int $competitionId): void
@@ -625,6 +682,22 @@ class FootballRepositoryDatabase implements FootballRepository
     /** @param array<string,mixed> $filter */
     private function applyPredictionFilter(array $filter): void
     {
+        // Resolved first, for the same reason as the fixture filter: a query
+        // run in the middle of building this one would reset the builder and
+        // drop every condition added before it.
+        $fixtureIds = null;
+        if (!empty($filter['competitionExternalId'])) {
+            // A prediction stores its kickoff but not its league, so the
+            // competition is resolved through the fixture it belongs to. A
+            // date-wide count taken without this would report the whole date
+            // while the page shows one league.
+            $competitions = $this->db->select('id')->where('external_id', (string) $filter['competitionExternalId'])
+                ->get('football_competitions')->result_array();
+            $competitionIds = array_map(static fn(array $row): int => (int) $row['id'], $competitions);
+            $fixtures = $competitionIds === [] ? [] : $this->db->select('id')->where_in('competition_id', $competitionIds)
+                ->get('football_fixtures')->result_array();
+            $fixtureIds = array_map(static fn(array $row): int => (int) $row['id'], $fixtures);
+        }
         if (!empty($filter['fixtureId'])) $this->db->where('fixture_id', (int) $filter['fixtureId']);
         if (!empty($filter['kind'])) $this->db->where('prediction_kind', (string) $filter['kind']);
         if (!empty($filter['eligibility'])) $this->db->where('eligibility', (string) $filter['eligibility']);
@@ -637,6 +710,7 @@ class FootballRepositoryDatabase implements FootballRepository
         }
         if (!empty($filter['from'])) $this->db->where('generated_at >=', (string) $filter['from']);
         if (!empty($filter['to'])) $this->db->where('generated_at <=', (string) $filter['to']);
+        if ($fixtureIds !== null) $this->db->where_in('fixture_id', $fixtureIds === [] ? [0] : $fixtureIds);
     }
 
     public function saveScoreProbabilities(string $predictionId, array $rows): void
@@ -667,6 +741,89 @@ class FootballRepositoryDatabase implements FootballRepository
             $row['probability'] = $row['probability'] !== null ? (float) $row['probability'] : null;
         }
         return $rows;
+    }
+
+    /**
+     * One batched read for a page of grids. The rows are grouped in PHP rather
+     * than with a dialect-specific aggregate so the same statement runs on all
+     * three supported databases.
+     *
+     * @param list<string> $predictionIds
+     * @return array<string,list<array{home:int,away:int,probability:float}>>
+     */
+    public function listScoreProbabilitiesFor(array $predictionIds, int $limitPerPrediction = 200): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map(static fn($id): string => (string) $id, $predictionIds))));
+        if ($ids === []) return [];
+        $cap = max(1, min(400, $limitPerPrediction));
+        $out = [];
+        foreach (array_chunk($ids, 200) as $chunk) {
+            $rows = $this->db->where_in('prediction_id', $chunk)->order_by('probability', 'DESC')
+                ->get('football_score_probabilities')->result_array();
+            foreach ($rows as $row) {
+                $predictionId = (string) $row['prediction_id'];
+                if (count($out[$predictionId] ?? []) >= $cap) continue;
+                $out[$predictionId][] = ['home' => (int) $row['home_goals'], 'away' => (int) $row['away_goals'],
+                    'probability' => (float) $row['probability']];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Prices the connected odds feed has quoted, read across the sports tables
+     * by the one identity both modules share: the provider's own match id.
+     *
+     * The join is deliberately careful — football fixtures and sports matches
+     * live in different tables with different provider ids, so a match is only
+     * matched when the *provider code* and the *external id* agree. Anything it
+     * cannot match comes back absent, which the caller prints as
+     * DATA_UNAVAILABLE rather than as a price.
+     *
+     * @param list<string> $matchIds `providerCode:externalId`
+     * @return array<string,list<array{market:string,selection:string,decimalOdds:float,observedAt:?string}>>
+     */
+    public function listMarketOdds(array $matchIds): array
+    {
+        $wanted = [];
+        foreach ($matchIds as $matchId) {
+            $matchId = trim((string) $matchId);
+            if ($matchId === '') continue;
+            $parts = explode(':', $matchId, 2);
+            $external = $parts[1] ?? $parts[0];
+            $code = $parts[1] ?? '' ? $parts[0] : '';
+            if ($external === '') continue;
+            $wanted[$code][] = $external;
+        }
+        if ($wanted === []) return [];
+        foreach (['sports_data_sources', 'sports_matches', 'sports_odds'] as $table) {
+            if (!$this->db->table_exists($table)) return [];
+        }
+
+        $out = [];
+        foreach ($wanted as $code => $externals) {
+            $sources = $this->db->where('provider_code', (string) $code)->get('sports_data_sources', 1)->result_array();
+            if ($sources === []) continue;
+            $providerId = (int) $sources[0]['id'];
+            $matches = $this->db->select('id, external_id')->where('provider_id', $providerId)
+                ->where_in('external_id', array_values(array_unique($externals)))->get('sports_matches')->result_array();
+            if ($matches === []) continue;
+            $ids = array_map(static fn(array $row): int => (int) $row['id'], $matches);
+            $externalById = [];
+            foreach ($matches as $row) $externalById[(int) $row['id']] = (string) $row['external_id'];
+            $rows = $this->db->where_in('match_id', $ids)->order_by('observed_at', 'DESC')
+                ->limit(4000)->get('sports_odds')->result_array();
+            foreach ($rows as $row) {
+                $external = $externalById[(int) $row['match_id']] ?? null;
+                if ($external === null) continue;
+                $price = is_numeric($row['decimal_odds'] ?? null) ? (float) $row['decimal_odds'] : null;
+                if ($price === null || $price <= 0) continue;
+                $key = $code === '' ? $external : $code . ':' . $external;
+                $out[$key][] = ['market' => (string) $row['market'], 'selection' => (string) $row['selection'],
+                    'decimalOdds' => $price, 'observedAt' => $row['observed_at'] ?? null];
+            }
+        }
+        return $out;
     }
 
     // ── settlements + performance ─────────────────────────────────────────────

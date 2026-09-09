@@ -109,6 +109,48 @@ final class FootballConfiguration
         return max(1, min(MatchFeed::MAX_PAGE_SIZE, (int) $this->num('WINDELS_FOOTBALL_MATCH_PAGE_SIZE', MatchFeed::DEFAULT_PAGE_SIZE)));
     }
 
+    /**
+     * The premium (featured) competition — the league the console offers first
+     * and processes by default. It is configuration, not a constant, so an
+     * operator running a different flagship league does not have to fork the
+     * module; the default is the English Premier League.
+     *
+     * @return array{name:string,externalId:?string}
+     */
+    public function premiumCompetition(): array
+    {
+        $name = $this->text('WINDELS_FOOTBALL_PREMIUM_COMPETITION', '');
+        $external = $this->text('WINDELS_FOOTBALL_PREMIUM_COMPETITION_ID', '');
+        return [
+            'name' => $name !== '' ? $name : 'English Premier League',
+            'externalId' => $external !== '' ? $external : null,
+        ];
+    }
+
+    /**
+     * The default odds-prediction market, i.e. the market a request is answered
+     * in when it does not name one. Every market in
+     * `PredictionMarkets::catalog()` is accepted; an unknown name is reported
+     * and falls back to this.
+     */
+    public function defaultMarket(): string
+    {
+        $value = strtoupper($this->text('WINDELS_FOOTBALL_DEFAULT_MARKET', ''));
+        return $value !== '' ? $value : PredictionMarkets::DEFAULT_MARKET;
+    }
+
+    /**
+     * Share of a match's goal expectancy the model attributes to the first
+     * half, used only by the two first-half markets. It is an assumption rather
+     * than a stored input, so it is configurable and named in the market's
+     * `basis` (`FIRST_HALF_SHARE_0.45`) wherever it is used.
+     */
+    public function firstHalfGoalShare(): float
+    {
+        $value = (float) $this->num('WINDELS_FOOTBALL_FIRST_HALF_SHARE', 0.45);
+        return max(0.2, min(0.8, $value));
+    }
+
     /** Scoreline grid: goals per team. 8 covers >99.9% of real football scores. */
     public function maxGoals(): int
     {
@@ -242,6 +284,14 @@ final class FootballConfiguration
                 'limitedDataQuality' => QualityBand::LIMITED_MIN,
             ],
         ];
+    }
+
+    /** A free-text setting: overrides win, then the environment, then the default. */
+    private function text(string $name, string $default): string
+    {
+        if (array_key_exists($name, $this->overrides)) return trim((string) $this->overrides[$name]);
+        $value = getenv($name);
+        return $value === false ? $default : trim((string) $value);
     }
 
     private function num(string $name, int|float $default): int|float

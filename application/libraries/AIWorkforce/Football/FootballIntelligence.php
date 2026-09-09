@@ -32,6 +32,7 @@ final class FootballIntelligence
     private ?PerformanceService $performance = null;
     private ?PredictionBoard $board = null;
     private ?MatchFeed $feed = null;
+    private ?PredictionMarkets $markets = null;
     private ?RefreshPolicy $refresh = null;
     private ?FootballDiagnostics $diagnostics = null;
     private ?FootballCronService $cron = null;
@@ -145,7 +146,27 @@ final class FootballIntelligence
      */
     public function feed(): MatchFeed
     {
-        return $this->feed ??= new MatchFeed($this->repo, $this->predictions(), $this->models(), $this->config);
+        return $this->feed ??= new MatchFeed($this->repo, $this->predictions(), $this->models(), $this->config, $this->markets());
+    }
+
+    /**
+     * The odds-prediction markets: the catalogue, and the evaluation of one
+     * market over a stored prediction. Choosing a market is a view, never a
+     * regeneration.
+     */
+    public function markets(): PredictionMarkets
+    {
+        return $this->markets ??= new PredictionMarkets($this->config);
+    }
+
+    /**
+     * The competitions a date can be narrowed to, with the premium (featured)
+     * competition marked. Listed from the provider's own rows — the module never
+     * offers a league it has no data for.
+     */
+    public function competitions(string $date, ?int $providerId = null): array
+    {
+        return $this->feed()->competitions($date, $providerId);
     }
 
     public function refresh(): RefreshPolicy
@@ -176,7 +197,7 @@ final class FootballIntelligence
      *
      * @return array<string,mixed>
      */
-    public function dashboard(?string $date = null, bool $refresh = false, int $page = 1, int $limit = MatchFeed::MAX_PAGE_SIZE): array
+    public function dashboard(?string $date = null, bool $refresh = false, int $page = 1, int $limit = MatchFeed::MAX_PAGE_SIZE, array $options = []): array
     {
         $date = $date ?? gmdate('Y-m-d');
         $diagnostics = $this->diagnostics()->snapshot();
@@ -184,7 +205,9 @@ final class FootballIntelligence
             'date' => $date,
             // One page of the board. The pager moves through stored matches; the
             // summary counts above the cards still describe the whole date.
-            'board' => $this->board()->forDate($date, $refresh, $page, $limit),
+            // `options` narrow it (`competition`, `market`) without generating
+            // anything — both are selections over rows that are already stored.
+            'board' => $this->board()->forDate($date, $refresh, $page, $limit, $options),
             'diagnostics' => $diagnostics,
             'performance' => $this->performance()->report(30),
             'live' => $this->live()->board(false),

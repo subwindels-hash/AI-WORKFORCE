@@ -40,7 +40,25 @@ class Football extends App_Controller
         // from the rows already stored. It never pulls the provider: that stays
         // an explicit, permission-checked action.
         $data['refresh'] = !empty($get['refresh']);
-        $data['dashboard'] = $this->platform->football->dashboard($date, $data['refresh'], $page, (int) $data['pageSize']);
+        // Competition and market are selections over stored rows: narrowing the
+        // page to one league or reading it in another market re-reads the same
+        // predictions, so neither one regenerates a match.
+        $competition = isset($get['competition']) ? trim((string) $get['competition']) : null;
+        $market = isset($get['market']) ? trim((string) $get['market']) : null;
+        $line = null;
+        if (isset($get['line']) && trim((string) $get['line']) !== '') {
+            if (is_numeric($get['line'])) {
+                $line = max(-10.0, min(10.0, (float) $get['line']));
+            } else {
+                $notes[] = 'line=' . \AIWorkforce\Football\RequestParams::preview($get['line'])
+                    . ' is not a number; the market\'s own default line was used.';
+            }
+        }
+        $data['competition'] = $competition;
+        $data['market'] = $market;
+        $data['line'] = $line;
+        $data['dashboard'] = $this->platform->football->dashboard($date, $data['refresh'], $page, (int) $data['pageSize'],
+            ['competition' => $competition, 'market' => $market, 'line' => $line]);
         $this->render('football/index', $data);
     }
 
@@ -139,8 +157,14 @@ class Football extends App_Controller
         if ($date === null) return;
         $page = max(1, min(\AIWorkforce\Football\MatchFeed::MAX_PAGE, (int) $this->input->post('page')));
         $limit = (int) $this->platform->football->config()->matchPageSize();
+        // The competition the page is narrowed to is part of the request: the
+        // 50-match budget is spent inside the selected league, never across
+        // every league the provider happens to have sent.
+        $competition = trim((string) $this->input->post('competition')) ?: null;
+        $market = trim((string) $this->input->post('market')) ?: null;
         try {
-            $result = $this->platform->football->feed()->generate($date, $page, $limit);
+            $result = $this->platform->football->feed()->generate($date, $page, $limit,
+                ['competition' => $competition, 'market' => $market]);
             $generation = (array) ($result['generation'] ?? []);
             $generated = (int) ($generation['generated'] ?? 0);
             $reused = (int) ($generation['reused'] ?? 0);
@@ -155,7 +179,10 @@ class Football extends App_Controller
         } catch (Throwable $e) {
             $this->flash('error', 'Prediction generation refused: ' . $e->getMessage());
         }
-        redirect('/football?date=' . $date . '&page=' . $page);
+        $query = ['date' => $date, 'page' => $page];
+        if ($competition !== null) $query['competition'] = $competition;
+        if ($market !== null) $query['market'] = $market;
+        redirect('/football?' . http_build_query($query));
     }
 
     /** Pull final results and settle the fixtures that reported them (sports.settle). */

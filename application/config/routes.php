@@ -281,6 +281,8 @@ $route['api/football/fixtures/live'] = 'api_football/fixtures_live';
 // The paginated match feed: 50 matches per page, 50 per generation request.
 $route['api/football/matches'] = 'api_football/matches';
 $route['api/football/matches/generate'] = 'api_football/generate_matches';
+$route['api/football/competitions'] = 'api_football/competitions';
+$route['api/football/markets'] = 'api_football/markets';
 $route['api/football/matches/(:num)'] = 'api_football/show_match/$1';
 $route['api/football/matches/(:num)/analysis'] = 'api_football/analysis/$1';
 $route['api/football/matches/(:num)/prediction'] = 'api_football/prediction/$1';

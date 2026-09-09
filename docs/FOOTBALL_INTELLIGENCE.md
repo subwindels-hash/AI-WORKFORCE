@@ -46,7 +46,8 @@ each panel exists exactly once in the product.
 | `CalibrationService.php` | temperature scaling fitted from settled predictions only; `CALIBRATION_PENDING` otherwise |
 | `ModelRegistry.php` | lifecycle states, transition guards, registration from the deployed fingerprint |
 | `PredictionService.php` | prediction storage, the §output contract, the post-kickoff freeze; `predictMissing()` generates only matches that have no prediction, `predictDay()` sweeps a date in 50-match batches and reuses what exists |
-| `MatchFeed.php` | the paginated feed: 50 matches per page, at most 50 NEW predictions per generation request, `match_id` de-duplication |
+| `MatchFeed.php` | the paginated feed: 50 matches per page, at most 50 NEW predictions per generation request, `match_id` de-duplication, competition and premium-league selection |
+| `PredictionMarkets.php` | the odds-prediction markets: the catalogue, the evaluation of one market from the stored score distribution, and the odds a feed actually quoted |
 | `PredictionBoard.php` | the daily board for one page: date-wide summary counts, confidence categories, match cards, pager |
 | `LiveMatchService.php` | in-play board and `LIVE` estimate rows, never rewriting the pre-match row |
 | `SettlementService.php` | grading on `FINISHED`, voiding on postponement, idempotent sweeps |
@@ -239,6 +240,83 @@ sweeps in 50-match batches (up to its `analysisLimit` budget) and skips every
 match that already has a row, so re-running it costs nothing for work already
 done.
 
+## Selecting a competition, a premium league and a market
+
+The console and the API are driven by one flow:
+
+```text
+Football Intelligence
+        ↓
+Select Competition            (the leagues the provider actually sent)
+        ↓
+Select Premium League         (the featured competition — default: English Premier League)
+        ↓
+Select Odds Prediction        (the market Football Intelligence answers in)
+        ↓
+Select date
+        ↓
+Generate predictions          (at most 50 NEW matches, inside the selected competition)
+        ↓
+Page 1 → Next → Page 2        (stored rows; nothing is regenerated)
+```
+
+**Competitions are data, not a constant.** `GET /api/football/competitions` lists
+the competitions stored for a date — `football_competitions` rows the sync wrote
+from the provider payload — each with how many matches it has on that date. A
+league with no stored match is never offered, and a provider that cannot list
+leagues is never filled in with a guessed catalogue.
+
+**The premium league is the featured competition**, configured with
+`WINDELS_FOOTBALL_PREMIUM_COMPETITION` (name, or
+`WINDELS_FOOTBALL_PREMIUM_COMPETITION_ID` for an exact provider id). It defaults
+to the **English Premier League**. Selecting it narrows generation to that
+league; the day's other competitions are left untouched. If the configured
+premium league has no match on the date, the competition with the most matches is
+featured instead and the payload says so (`source: MOST_MATCHES_ON_DATE`) rather
+than silently featuring nothing.
+
+A competition that is named but not stored is **reported, not widened**: the page
+is narrowed to it (and is therefore empty) and the note names the competitions
+that are available. Widening it to "every league" would answer a different
+question than the one that was asked.
+
+**A market is a view, not a prediction.** `PredictionMarkets` evaluates the
+selected market from what is already stored:
+
+| Market | Answered from |
+| --- | --- |
+| Match Winner (1X2), Double Chance, Draw No Bet | the 1X2 row stored with the prediction |
+| Over/Under 0.5–3.5, BTTS, BTTS + Over 2.5, Correct Score, Asian Handicap | sums over the score distribution |
+| First Half Winner, First Half Over/Under | the same score model on `WINDELS_FOOTBALL_FIRST_HALF_SHARE` of the goal expectancy |
+| Half Time / Full Time, Corners, Cards | nothing — `DATA_UNAVAILABLE` unless the odds provider priced them |
+
+The displayed grid is deliberately truncated (scorelines below 1% are not
+persisted), and a truncated grid is unfit for summing: draws, handicaps and
+both-teams-to-score are spread across many small cells, so the tail would be
+under-reported. A market that needs sums is therefore evaluated over the
+**complete** distribution recomputed from the expected goals stored with the
+prediction — the same model on the same inputs, with the cut removed — and the
+`basis` of every market block says which one was used
+(`SCORE_GRID`, `SCORE_MODEL_FROM_STORED_EXPECTED_GOALS`, `FIRST_HALF_SHARE_0.45`).
+
+**Odds are quoted, never derived.** A price appears only when the connected odds
+feed has a row for that match, market, selection and line — matched on the one
+identity both modules share, the provider's own match id. When it has one, the
+block carries `odds`, `impliedProbability` (`1/odds`) and `edge` (model minus
+implied). When it does not, the field is `DATA_UNAVAILABLE` with a reason; the
+model's own probability is still shown, because that one is computed from stored
+data. An "Over 3.5" price is never used as the price of "Over 2.5".
+
+**Changing the market cannot regenerate a match.** Every market reads the same
+stored prediction and the same score grid, so switching from *Match Winner* to
+*Over 2.5 Goals* and back writes nothing and costs no provider call. The
+50-match ceiling is likewise unaffected by a selection: `limit=500` with a
+competition chosen is still 50 new predictions, inside that competition.
+
+The market list is exposed by `GET /api/football/markets`, and the page payload
+carries the same `market.available` array, with `state` and `oddsAvailable` per
+market so the console can mark the ones that have a real price behind them.
+
 ## Output contract
 
 `GET /api/football/matches/:id/prediction` and the console share this shape:
@@ -278,7 +356,9 @@ GET /api/football/fixtures            ?date= | ?from=&to=&limit=&status=&competi
 GET /api/football/fixtures/today
 GET /api/football/fixtures/tomorrow
 GET /api/football/fixtures/live
-GET /api/football/matches                 ?date=&page=1&limit=50   the paginated feed (50 per page)
+GET /api/football/matches                 ?date=&page=1&limit=50&competition=&market=&line=   the paginated feed (50 per page)
+GET /api/football/competitions          ?date=&providerId=   competitions stored for the date, premium marked
+GET /api/football/markets               ?date=   the odds-prediction markets and which can be answered
 GET /api/football/matches/:id            fixture + statistics + H2H as stored
 GET /api/football/matches/:id/analysis
 GET /api/football/matches/:id/prediction
@@ -297,7 +377,7 @@ Mutations require the native session plus the CSRF token (header or body field),
 then the capability named. They take a JSON body:
 
 ```
-POST /api/football/matches/generate  sports.manage   {"date":"2026-09-05","page":2}  (max 50 NEW predictions)
+POST /api/football/matches/generate  sports.manage   {"date":"2026-09-05","page":2,"competition":"39","market":"OVER_2_5"}  (max 50 NEW predictions)
 POST /api/football/sync            sports.manage   {"date":"2026-09-05","provider":"apifootball"}
 POST /api/football/sync/live       sports.manage   {}
 POST /api/football/settle          sports.settle   {"fixtureId":1234}  (omit to sweep)
@@ -453,6 +533,10 @@ WINDELS_FOOTBALL_MIN_REQUEST_SPACING_MS=250  spacing between provider requests
 WINDELS_FOOTBALL_DAILY_REQUEST_CEILING=0     fallback daily ceiling when a feed reports none
 WINDELS_FOOTBALL_ANALYSIS_LIMIT=120          fixtures one analysis pass may evaluate (1..500)
 WINDELS_FOOTBALL_MATCH_PAGE_SIZE=50          matches per page and per generation request (1..50, hard-capped in code)
+WINDELS_FOOTBALL_PREMIUM_COMPETITION=English Premier League   the featured ("Premium") league the console offers first
+WINDELS_FOOTBALL_PREMIUM_COMPETITION_ID=39   optional: pin it to a provider competition id instead of matching the name
+WINDELS_FOOTBALL_DEFAULT_MARKET=MATCH_WINNER the market a request is answered in when it names none
+WINDELS_FOOTBALL_FIRST_HALF_SHARE=0.45       goal expectancy attributed to the first half (0.20..0.80); named in the market basis
 WINDELS_FOOTBALL_MAX_GOALS=8                 scoreline grid width per team (4..12)
 WINDELS_FOOTBALL_DC_RHO=-0.06                Dixon–Coles low-score adjustment (±0.25, 0 = plain Poisson)
 WINDELS_FOOTBALL_MARKET_BLEND=0.35           weight for market-implied probabilities (0 disables)
@@ -476,7 +560,7 @@ simulated rows.
 ## Testing
 
 ```
-php index.php tools tests            # includes tests/cases/101…107 and 124-football-*.php
+php index.php tools tests            # includes tests/cases/101…107, 124- and 125-football-*.php
 ```
 
 The football cases run on `tests/football_support.php`: an in-memory repository, a

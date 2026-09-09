@@ -737,6 +737,8 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
     public array $calibrations = [];
     public array $predictions = [];
     public array $scoreProbabilities = [];
+    /** @var list<array{matchId:string,market:string,selection:string,decimalOdds:float,observedAt:?string}> odds the feed quoted */
+    public array $marketOdds = [];
     public array $settlements = [];
     public array $performance = [];
     public array $syncRuns = [];
@@ -923,6 +925,15 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
             if (!empty($filter['team']) && stripos((string) ($row['home_team'] ?? '') . ' ' . (string) ($row['away_team'] ?? ''), (string) $filter['team']) === false) return false;
             if (!empty($filter['settledOnly']) && empty($row['settled_at'])) return false;
             if (!empty($filter['unsettledFinished']) && ((string) ($row['status'] ?? '') !== 'FINISHED' || !empty($row['settled_at']))) return false;
+            // Narrowing to one competition filters on the competition row's
+            // external id, the same way the SQL repository does — a name prefix
+            // would put two leagues whose names overlap on the same page.
+            if (!empty($filter['competitionExternalId'])) {
+                $competitionId = (int) ($row['competition_id'] ?? 0);
+                $competition = $competitionId > 0
+                    ? $this->find($this->competitions, fn(array $c) => (int) $c['id'] === $competitionId) : null;
+                if ($competition === null || (string) ($competition['external_id'] ?? '') !== (string) $filter['competitionExternalId']) return false;
+            }
             return true;
         }));
         // Kickoff, then id: a total order, so page N holds the same rows every
@@ -1222,6 +1233,15 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
             if (!empty($filter['date']) && !str_starts_with((string) ($row['kickoff_at'] ?? ''), (string) $filter['date'])) return false;
             if (!empty($filter['from']) && (string) ($row['generated_at'] ?? '') < (string) $filter['from']) return false;
             if (!empty($filter['to']) && (string) ($row['generated_at'] ?? '') > (string) $filter['to']) return false;
+            // A competition is resolved through the fixture the prediction
+            // belongs to, so a narrowed page reports the league it shows.
+            if (!empty($filter['competitionExternalId'])) {
+                $fixture = $this->find($this->fixtures, fn(array $f) => (int) ($f['id'] ?? 0) === (int) ($row['fixture_id'] ?? 0));
+                $competitionId = (int) ($fixture['competition_id'] ?? 0);
+                $competition = $competitionId > 0
+                    ? $this->find($this->competitions, fn(array $c) => (int) $c['id'] === $competitionId) : null;
+                if ($competition === null || (string) ($competition['external_id'] ?? '') !== (string) $filter['competitionExternalId']) return false;
+            }
             return true;
         }));
         // Newest first, id as the tie-break so the order is total and a page
@@ -1244,6 +1264,67 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
                 'probability' => (float) ($row['probability'] ?? 0), 'rank' => (int) ($row['rank'] ?? 0),
                 'is_prediction' => !empty($row['isPrediction']) ? 1 : 0, 'created_at' => gmdate('c')];
         }
+    }
+
+    public function listScoreProbabilitiesFor(array $predictionIds, int $limitPerPrediction = 200): array
+    {
+        $wanted = [];
+        foreach ($predictionIds as $id) $wanted[(string) $id] = true;
+        $out = [];
+        $rows = $this->scoreProbabilities;
+        usort($rows, static fn(array $a, array $b) => (float) $b['probability'] <=> (float) $a['probability']);
+        foreach ($rows as $row) {
+            $id = (string) $row['prediction_id'];
+            if (!isset($wanted[$id])) continue;
+            if (count($out[$id] ?? []) >= max(1, $limitPerPrediction)) continue;
+            $out[$id][] = ['home' => (int) $row['home_goals'], 'away' => (int) $row['away_goals'],
+                'probability' => (float) $row['probability']];
+        }
+        return $out;
+    }
+
+    /**
+     * Odds the connected feed quoted, seeded by a test through `$marketOdds`.
+     * A match with no row stays absent — the caller reports DATA_UNAVAILABLE,
+     * never a price of zero.
+     *
+     * @param list<string> $matchIds
+     * @return array<string,list<array{market:string,selection:string,decimalOdds:float,observedAt:?string}>>
+     */
+    public function listMarketOdds(array $matchIds): array
+    {
+        $wanted = [];
+        foreach ($matchIds as $matchId) $wanted[(string) $matchId] = true;
+        $out = [];
+        foreach ($this->marketOdds as $row) {
+            $key = (string) ($row['matchId'] ?? '');
+            if ($key === '' || !isset($wanted[$key])) continue;
+            $price = is_numeric($row['decimalOdds'] ?? null) ? (float) $row['decimalOdds'] : null;
+            if ($price === null || $price <= 0) continue;
+            $out[$key][] = ['market' => (string) ($row['market'] ?? ''), 'selection' => (string) ($row['selection'] ?? ''),
+                'decimalOdds' => $price, 'observedAt' => $row['observedAt'] ?? null];
+        }
+        return $out;
+    }
+
+    public function listCompetitions(array $filter = [], int $limit = 200): array
+    {
+        $fixtures = $this->filterFixtures(!empty($filter['date']) ? ['date' => (string) $filter['date']] : []);
+        $counts = [];
+        foreach ($fixtures as $row) {
+            $id = (int) ($row['competition_id'] ?? 0);
+            if ($id > 0) $counts[$id] = ($counts[$id] ?? 0) + 1;
+        }
+        $out = [];
+        foreach ($this->competitions as $row) {
+            if (!empty($filter['providerId']) && (int) ($row['provider_id'] ?? 0) !== (int) $filter['providerId']) continue;
+            $out[] = ['id' => (int) ($row['id'] ?? 0), 'providerId' => (int) ($row['provider_id'] ?? 0),
+                'externalId' => (string) ($row['external_id'] ?? ''), 'name' => (string) ($row['name'] ?? ''),
+                'country' => $row['country'] ?? null, 'season' => $row['season'] ?? null,
+                'matches' => $counts[(int) ($row['id'] ?? 0)] ?? 0];
+        }
+        usort($out, static fn(array $a, array $b) => [$b['matches'], $a['name']] <=> [$a['matches'], $b['name']]);
+        return array_slice($out, 0, max(1, min(500, $limit)));
     }
 
     public function listScoreProbabilities(string $predictionId, int $limit = 20): array

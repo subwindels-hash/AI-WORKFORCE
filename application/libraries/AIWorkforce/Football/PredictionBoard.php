@@ -36,18 +36,29 @@ final class PredictionBoard
      * generates at most one page's worth of missing predictions — it never
      * rebuilds matches that already have one.
      *
+     * `options` narrow the board the same way the feed narrows a page:
+     * `competition` (an external id, a name, or `premium`) and `market` (a key
+     * from `PredictionMarkets::catalog()`). Both are selections over stored
+     * rows — neither one generates anything.
+     *
+     * @param array<string,mixed> $options
      * @return array{heading:string, date:string, dateLabel:string, status:string, state:string,
      *               summary:array<string,int>, categories:list<array>, emptyReason:?string,
      *               message:?string, model:array, performance:array, generatedAt:string,
      *               pagination:array<string,mixed>}
      */
-    public function forDate(string $date, bool $refresh = false, int $page = 1, int $limit = MatchFeed::MAX_PAGE_SIZE): array
+    public function forDate(string $date, bool $refresh = false, int $page = 1, int $limit = MatchFeed::MAX_PAGE_SIZE, array $options = []): array
     {
         $date = $this->validDate($date);
         $notes = [];
         [$page, $limit] = $this->feed->resolve($page, $limit, $notes);
+        $competition = $this->feed->resolveCompetition($options['competition'] ?? null, $date, null, $notes);
+        $market = $this->feed->markets()->resolve($options['market'] ?? $this->config->defaultMarket(), $notes);
+        $line = isset($options['line']) && is_numeric($options['line'])
+            ? max(-10.0, min(10.0, (float) $options['line'])) : null;
 
         $filter = ['date' => $date];
+        if ($competition['externalId'] !== null) $filter['competitionExternalId'] = $competition['externalId'];
         $totalFixtures = $this->repo->countFixtures($filter);
         $totalPages = max(1, (int) ceil($totalFixtures / $limit));
         $fixtures = $this->repo->listFixtures($filter, $limit, ($page - 1) * $limit);
@@ -70,9 +81,12 @@ final class PredictionBoard
             $this->predictions->predictMissing($fixtures, $limit, PredictionService::KIND_PRE_MATCH);
         }
 
-        // Date-wide counts, so the panel describes the day while the page shows
-        // 50 rows. `eligibility` stores the band the prediction was written with.
+        // Counts over the selection — the day, or the day narrowed to the chosen
+        // competition — so the panel describes what the page is showing rather
+        // than every league the provider sent that day. `eligibility` stores the
+        // band the prediction was written with.
         $dateWide = ['date' => $date, 'kind' => PredictionService::KIND_PRE_MATCH];
+        if ($competition['externalId'] !== null) $dateWide['competitionExternalId'] = $competition['externalId'];
         $analyzed = $this->repo->countPredictions($dateWide);
         $qualified = $this->repo->countPredictions($dateWide + ['eligibility' => QualityBand::QUALIFIED]);
         $limited = $this->repo->countPredictions($dateWide + ['eligibility' => QualityBand::LIMITED]);
@@ -81,12 +95,33 @@ final class PredictionBoard
 
         $cards = [];
         $onPagePredicted = 0;
+        $entries = [];
         foreach ($fixtures as $fixture) {
             $row = $this->predictions->existing($fixture, $modelVersionId, PredictionService::KIND_PRE_MATCH);
             if ($row === null) continue;
             $onPagePredicted++;
             $cards[] = $this->card($row, $fixture, $model);
+            $entries[] = ['prediction' => $row, 'matchId' => MatchFeed::matchId($fixture)];
         }
+        // The selected market is a view over the same stored rows: one batched
+        // read for the grids, one for the quoted prices, and each card is
+        // annotated. Choosing another market cannot regenerate a match.
+        $markets = $this->feed->attachMarkets($entries, $market['market'], $line);
+        $marketsByPrediction = [];
+        $rows = [];
+        foreach ($markets as $index => $block) {
+            $prediction = $entries[$index]['prediction'] ?? null;
+            $predictionId = is_array($prediction) ? (string) ($prediction['id'] ?? '') : '';
+            if ($predictionId !== '') $marketsByPrediction[$predictionId] = $block;
+            // One table row per match on the page, analyzed or not: a match
+            // without a prediction is a row that says so, not a row that is
+            // missing.
+            $rows[] = $this->row($fixtures[$index] ?? [], $prediction, $block);
+        }
+        foreach ($cards as &$card) {
+            $card['market'] = $marketsByPrediction[(string) ($card['predictionId'] ?? '')] ?? null;
+        }
+        unset($card);
         usort($cards, static fn(array $a, array $b) => [$b['confidence'], $b['dataQuality']['score']] <=> [$a['confidence'], $a['dataQuality']['score']]);
         $tiers = $this->config->confidenceTiers();
         $lowest = 70.0;
@@ -155,6 +190,10 @@ final class PredictionBoard
             'summary' => $counts,
             'categories' => $categories,
             'cards' => $cards,
+            // The page as a table: one row per match, in kickoff order, with the
+            // selected market's answer. The cards below group the same matches
+            // by confidence; both read the identical stored prediction.
+            'rows' => $rows,
             'emptyReason' => $emptyReason,
             'message' => $message,
             'model' => [
@@ -188,9 +227,95 @@ final class PredictionBoard
                 'firstPage' => 1,
                 'lastPage' => $totalPages,
             ],
-            'request' => ['date' => $date, 'page' => $page, 'limit' => $limit, 'refresh' => $refresh, 'notes' => array_values($notes)],
+            // What the page was narrowed to. The board lists the competitions
+            // the provider actually sent, so a league that is not in the feed is
+            // never offered as an option.
+            'filters' => [
+                'date' => $date,
+                'competition' => $competition,
+                'competitions' => $this->feed->competitions($date),
+            ],
+            'market' => [
+                'key' => (string) $market['key'],
+                'label' => (string) $market['market']['label'],
+                'group' => (string) $market['market']['group'],
+                'line' => $line ?? ($market['market']['line'] ?? null),
+                'available' => $this->feed->markets()->available($this->quotedMarketCodes($cards)),
+            ],
+            'request' => ['date' => $date, 'page' => $page, 'limit' => $limit, 'refresh' => $refresh,
+                'competition' => $competition['requested'], 'market' => $market['key'], 'line' => $line,
+                'notes' => array_values($notes)],
             'generatedAt' => gmdate('c'),
         ];
+    }
+
+    /**
+     * The market codes the odds feed has actually priced on this page, so the
+     * market dropdown can mark the markets that have a real price behind them.
+     *
+     * @param list<array<string,mixed>> $cards
+     * @return list<string>
+     */
+    private function quotedMarketCodes(array $cards): array
+    {
+        $codes = [];
+        foreach ($cards as $card) {
+            foreach ((array) ($card['market']['outcomes'] ?? []) as $outcome) {
+                if (($outcome['oddsState'] ?? '') === PredictionMarkets::STATE_AVAILABLE) $codes[] = (string) ($card['market']['key'] ?? '');
+            }
+        }
+        return array_values(array_unique(array_filter($codes)));
+    }
+
+    /**
+     * One row of the market table: match, competition, kickoff, the selected
+     * market's prediction, the price the odds feed quoted (DATA_UNAVAILABLE
+     * when it quoted none) and the model's confidence.
+     *
+     * @param array<string,mixed> $fixture
+     * @param array<string,mixed>|null $prediction
+     * @param array<string,mixed> $market
+     * @return array<string,mixed>
+     */
+    private function row(array $fixture, ?array $prediction, array $market): array
+    {
+        $kickoff = (string) ($fixture['kickoff_at'] ?? '');
+        $confidence = $prediction !== null && is_numeric($prediction['confidence'] ?? null)
+            ? round((float) $prediction['confidence'], 1) : null;
+        $band = (string) ($prediction['data_quality_band'] ?? QualityBand::REJECTED);
+        return [
+            'matchId' => MatchFeed::matchId($fixture),
+            'fixtureId' => (int) ($fixture['id'] ?? 0),
+            'homeTeam' => (string) ($fixture['home_team'] ?? DataState::UNAVAILABLE),
+            'awayTeam' => (string) ($fixture['away_team'] ?? DataState::UNAVAILABLE),
+            'competition' => (string) ($fixture['competition'] ?? DataState::UNAVAILABLE),
+            'country' => $fixture['country'] ?? null,
+            'kickoff' => $kickoff !== '' ? $kickoff : null,
+            'kickoffLabel' => $kickoff !== '' ? gmdate('H:i', (int) strtotime($kickoff)) . ' UTC' : DataState::UNAVAILABLE,
+            'status' => (string) ($fixture['status'] ?? 'UNKNOWN'),
+            'analysisState' => $prediction === null ? 'NOT_ANALYZED' : 'ANALYZED',
+            'prediction' => $prediction === null ? null : MatchFeed::predictionSummary($prediction),
+            'resultLabel' => $prediction === null ? null : self::resultLabel($prediction, $fixture),
+            'confidence' => $confidence,
+            'band' => $band,
+            'dataQuality' => (int) ($prediction['data_quality_score'] ?? 0),
+            // Risk is derived, not invented: it names the two stored facts it
+            // was derived from so the label can never be read as a judgment the
+            // data does not support.
+            'risk' => $this->risk($band, $confidence),
+            'market' => $market,
+        ];
+    }
+
+    /** @return array{level:string,basis:string} */
+    private function risk(string $band, ?float $confidence): array
+    {
+        if ($confidence === null) return ['level' => 'UNKNOWN', 'basis' => 'no prediction is stored for this match'];
+        if ($band !== QualityBand::QUALIFIED || $confidence < 55.0) {
+            return ['level' => 'HIGH', 'basis' => 'data quality ' . $band . ' and model confidence ' . number_format($confidence, 1) . '%'];
+        }
+        if ($confidence < 70.0) return ['level' => 'MEDIUM', 'basis' => 'model confidence ' . number_format($confidence, 1) . '%'];
+        return ['level' => 'LOW', 'basis' => 'qualified data and model confidence ' . number_format($confidence, 1) . '%'];
     }
 
     /**
