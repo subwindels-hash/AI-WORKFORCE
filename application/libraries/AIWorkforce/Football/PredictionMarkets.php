@@ -44,6 +44,18 @@ final class PredictionMarkets
     public const STATE_UNAVAILABLE = 'DATA_UNAVAILABLE';
 
     /**
+     * Risk levels attached to every prediction result. They are a reading of
+     * the inputs, not a mood: each level names the factors that produced it, so
+     * "why is this high risk" has an answer in the payload itself.
+     */
+    public const RISK_LOW = 'LOW';
+    public const RISK_MEDIUM = 'MEDIUM';
+    public const RISK_HIGH = 'HIGH';
+
+    /** Bands that make a prediction a weaker basis for a selection. */
+    private const WEAK_BANDS = [QualityBand::REJECTED];
+
+    /**
      * The catalogue. `derivation` says which stored input answers the market,
      * `line` carries the goal line or handicap line where one applies, and
      * `assumed` marks a market that rests on a stated, configurable assumption
@@ -132,6 +144,51 @@ final class PredictionMarkets
     }
 
     /**
+     * The risk level of one prediction result.
+     *
+     * Deterministic, and derived only from what is actually known about the
+     * selection: whether the market could be answered at all, how much of the
+     * score distribution it saw, the data-quality band the prediction was
+     * admitted under, how likely the selection is, what the market is charging
+     * for it, and whether the model sees value against that price. Each factor
+     * that counted is named, so the level can be argued with.
+     *
+     * @return array{level:string, factors:list<string>}
+     */
+    public function risk(
+        string $state,
+        float $coverage,
+        string $band,
+        ?float $probability,
+        ?float $odds,
+        ?float $edge,
+        string $source = self::SOURCE_GRID,
+    ): array {
+        if ($state === self::STATE_UNAVAILABLE) {
+            return ['level' => self::RISK_HIGH,
+                'factors' => ['The market could not be evaluated from stored data, so no selection is being offered.']];
+        }
+        $factors = [];
+        $points = 0;
+        if (in_array($band, self::WEAK_BANDS, true)) { $points += 3; $factors[] = 'data quality band ' . $band; }
+        elseif ($band === QualityBand::LIMITED) { $points += 1; $factors[] = 'data quality band ' . $band; }
+        if ($coverage < 0.9) { $points += 1; $factors[] = 'score-grid coverage ' . round($coverage * 100, 1) . '%'; }
+        if ($probability !== null) {
+            if ($probability < 0.45) { $points += 2; $factors[] = 'selection probability ' . round($probability * 100, 1) . '%'; }
+            elseif ($probability < 0.55) { $points += 1; $factors[] = 'selection probability ' . round($probability * 100, 1) . '%'; }
+        }
+        if ($odds !== null) {
+            if ($odds >= 5.0) { $points += 2; $factors[] = 'price ' . $odds; }
+            elseif ($odds >= 3.0) { $points += 1; $factors[] = 'price ' . $odds; }
+        }
+        if ($edge !== null && $edge < 0) { $points += 1; $factors[] = 'model sees no edge against the quoted price'; }
+        if ($source === self::SOURCE_ASSUMED) { $points += 1; $factors[] = 'the market rests on a stated assumption'; }
+        if ($factors === []) $factors[] = 'stored data supports the selection and the price, if any, is not against it';
+        return ['level' => $points >= 4 ? self::RISK_HIGH : ($points >= 2 ? self::RISK_MEDIUM : self::RISK_LOW),
+            'factors' => $factors];
+    }
+
+    /**
      * Evaluate one market for one stored prediction.
      *
      * @param array<string,mixed> $prediction the stored prediction row
@@ -171,6 +228,8 @@ final class PredictionMarkets
             if (!is_numeric($row['probability'])) continue;
             if ($best === null || (float) $row['probability'] > (float) $best['probability']) $best = $row;
         }
+        $risk = $this->risk($state, $coverage, (string) ($prediction['data_quality_band'] ?? QualityBand::REJECTED),
+            $best['probability'] ?? null, $best['odds'] ?? null, $best['edge'] ?? null, $source);
         return [
             'key' => $key,
             'label' => (string) $market['label'],
@@ -180,6 +239,8 @@ final class PredictionMarkets
             'reason' => $state === self::STATE_UNAVAILABLE ? $this->unavailableReason($key, $grid) : null,
             'source' => $source,
             'basis' => $basis,
+            'riskLevel' => $risk['level'],
+            'riskFactors' => $risk['factors'],
             // How much of the score distribution the market could see. A sum
             // over a partial grid would under-report draws, handicaps and
             // both-teams-to-score, so the share is stated rather than assumed.

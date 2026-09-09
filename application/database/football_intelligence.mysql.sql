@@ -382,3 +382,50 @@ CREATE TABLE IF NOT EXISTS football_provider_sync_logs (
   UNIQUE KEY uq_football_sync_key (execution_key),
   INDEX idx_football_sync_job (job_type, started_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Cross-provider identity. One real match can arrive from three feeds under
+-- three different ids ("Man Utd" vs "Manchester United"), and the module must
+-- recognise it as one fixture: one canonical row, one prediction. The mapping
+-- keeps every provider's own id, so nothing is thrown away — the same match is
+-- simply addressable by the identity each provider uses.
+CREATE TABLE IF NOT EXISTS football_provider_matches (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  internal_match_id VARCHAR(190) NOT NULL,
+  provider_id INT NULL,
+  provider_code VARCHAR(64) NOT NULL,
+  provider_match_id VARCHAR(190) NOT NULL,
+  home_team_normalized VARCHAR(190) NOT NULL,
+  away_team_normalized VARCHAR(190) NOT NULL,
+  kickoff_date VARCHAR(10) NOT NULL,
+  competition_internal_id VARCHAR(190) NULL,
+  matched_by VARCHAR(32) NOT NULL DEFAULT 'PROVIDER_ID',
+  confidence DECIMAL(5,4) NULL,
+  first_seen_at VARCHAR(32) NOT NULL,
+  last_seen_at VARCHAR(32) NOT NULL,
+  UNIQUE KEY uq_football_provider_match (provider_code, provider_match_id),
+  UNIQUE KEY uq_football_match_provider (internal_match_id, provider_code),
+  INDEX idx_football_match_internal (internal_match_id),
+  INDEX idx_football_match_teams (home_team_normalized, away_team_normalized, kickoff_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Competition mapping. A premium league is an application-level classification,
+-- not a provider id: every feed numbers the Premier League differently, so the
+-- mapping carries the internal id, the name, the country, the tier and whether
+-- this deployment treats the competition as premium.
+CREATE TABLE IF NOT EXISTS football_competition_mapping (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  internal_id VARCHAR(190) NOT NULL,
+  provider_id INT NULL,
+  provider_code VARCHAR(64) NOT NULL,
+  provider_competition_id VARCHAR(190) NOT NULL,
+  competition_name VARCHAR(190) NOT NULL,
+  country VARCHAR(96) NULL,
+  tier VARCHAR(24) NOT NULL DEFAULT 'STANDARD',
+  premium TINYINT(1) NOT NULL DEFAULT 0,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at VARCHAR(32) NOT NULL,
+  updated_at VARCHAR(32) NOT NULL,
+  UNIQUE KEY uq_football_competition_map (provider_code, provider_competition_id),
+  UNIQUE KEY uq_football_competition_internal (internal_id, provider_code),
+  INDEX idx_football_competition_premium (premium, active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

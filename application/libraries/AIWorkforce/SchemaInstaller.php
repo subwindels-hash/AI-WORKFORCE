@@ -47,6 +47,7 @@ final class SchemaInstaller
         'football_model_versions', 'football_calibration_versions', 'football_match_predictions',
         'football_score_probabilities', 'football_prediction_settlements',
         'football_model_performance', 'football_provider_sync_logs',
+        'football_provider_matches', 'football_competition_mapping',
         'languages', 'user_language_profiles', 'language_assessments', 'learning_paths',
         'learning_modules', 'lesson_attempts', 'study_sessions', 'language_progress',
         'conversation_sessions', 'writing_attempts', 'vocabulary', 'user_vocabulary',

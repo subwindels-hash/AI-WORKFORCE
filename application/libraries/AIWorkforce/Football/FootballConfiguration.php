@@ -88,6 +88,26 @@ final class FootballConfiguration
         return max(0, (int) $this->num('WINDELS_FOOTBALL_DAILY_REQUEST_CEILING', 0));
     }
 
+    /**
+     * How long a stored prediction stays valid before new data may justify
+     * replacing it. Regeneration is the exception, not the rule — this is what
+     * puts a bound on the exception.
+     */
+    public function predictionTtlSeconds(): int
+    {
+        return max(0, (int) $this->num('WINDELS_FOOTBALL_PREDICTION_TTL_SECONDS', 6 * 3600));
+    }
+
+    /**
+     * How far a price has to move, in implied-probability points, before the
+     * move is material enough to warrant regenerating a prediction. A tick is
+     * not a reason; a five-point swing is.
+     */
+    public function oddsMovementThreshold(): float
+    {
+        return max(0.0, min(1.0, (float) $this->num('WINDELS_FOOTBALL_ODDS_MOVEMENT_THRESHOLD', 0.05)));
+    }
+
     /** How many fixtures one analysis pass may evaluate (bounded, never "all"). */
     public function analysisLimit(): int
     {

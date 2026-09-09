@@ -31,9 +31,15 @@ $selectedExternal = (string) ($selectedCompetition['externalId'] ?? '');
 $marketBlock = is_array($board['market'] ?? null) ? $board['market'] : [];
 $marketList = is_array($marketBlock['available'] ?? null) ? $marketBlock['available'] : [];
 $selectedMarket = (string) ($marketBlock['key'] ?? 'MATCH_WINNER');
+// The data provider, offered only when the catalogue has something to offer:
+// with no feed connected the dropdown is replaced by the reason, because a
+// selector full of modes nobody can honour is a lie dressed as a choice.
+$providerOptions = is_array($providers['options'] ?? null) ? $providers['options'] : [];
+$selectedProvider = strtoupper(trim((string) ($provider ?? '')));
 $carry = [];
 if ($selectedExternal !== '') $carry['competition'] = (string) ($selectedCompetition['requested'] ?? $selectedExternal);
 if ($selectedMarket !== '') $carry['market'] = $selectedMarket;
+if ($selectedProvider !== '') $carry['provider'] = $selectedProvider;
 
 $dash = static fn(mixed $v, int $dp = 1): string => is_numeric($v) ? number_format((float) $v, $dp) : '—';
 $percent = static fn(mixed $v, int $dp = 1): string => is_numeric($v) ? number_format((float) $v * 100, $dp) . '%' : '—';
@@ -113,6 +119,7 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
         <input type="hidden" name="page" value="<?= (int) ($page ?? 1) ?>">
         <input type="hidden" name="competition" value="<?= e((string) ($carry['competition'] ?? '')) ?>">
         <input type="hidden" name="market" value="<?= e((string) ($carry['market'] ?? '')) ?>">
+        <input type="hidden" name="provider" value="<?= e((string) ($carry['provider'] ?? '')) ?>">
         <?php if (!empty($caps['sync'])): ?>
           <button class="btn small">Generate this page (max 50)</button>
         <?php else: ?>
@@ -180,6 +187,21 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
           <form method="get" action="/football" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
             <input type="hidden" name="page" value="1">
             <div>
+              <label class="dim" style="font-size:11px;display:block">Data Provider</label>
+              <?php if ($providerOptions === []): ?>
+                <select disabled style="min-width:200px"><option>No feed connected</option></select>
+              <?php else: ?>
+                <select name="provider" style="min-width:200px" title="Which feed answers this request. Auto / Smart picks from health, coverage, odds availability and rate limits; Multi-Provider takes each piece of data from the feed that has it.">
+                  <?php foreach ($providerOptions as $option): ?>
+                    <?php $value = strtoupper((string) ($option['value'] ?? '')); ?>
+                    <option value="<?= e((string) ($option['value'] ?? '')) ?>"<?= $selectedProvider === $value ? ' selected' : '' ?>>
+                      <?= e((string) ($option['label'] ?? $value)) ?>
+                    </option>
+                  <?php endforeach; ?>
+                </select>
+              <?php endif; ?>
+            </div>
+            <div>
               <label class="dim" style="font-size:11px;display:block">Select Competition</label>
               <select name="competition" style="min-width:210px">
                 <option value=""<?= $selectedExternal === '' ? ' selected' : '' ?>>All competitions (<?= (int) ($summary['fixtures'] ?? 0) ?> matches)</option>
@@ -222,6 +244,7 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
           <p class="dim" style="font-size:11px;margin:8px 0 0">
             Competitions are listed from the provider feed — no league is offered that has no stored match.
             The market is a view over the predictions already stored: changing it never regenerates a match.
+            The provider chosen here is the one a sync or a fetch reads; paging and market changes read stored rows and cost no provider call.
           </p>
         </div>
 
@@ -313,6 +336,33 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                               <div class="dim">Source</div>
                               <div><?= e((string) ($m['source'] ?? '—')) ?></div>
                               <div class="dim"><?= e((string) ($m['basis'] ?? '')) ?></div>
+                            </div>
+                            <div>
+                              <div class="dim">Data providers</div>
+                              <?php $sources = (array) ($m['dataSources'] ?? []); ?>
+                              <?php if ($sources === []): ?>
+                                <div class="dim">No provider recorded</div>
+                              <?php else: ?>
+                                <?php foreach ($sources as $source): ?>
+                                  <div>
+                                    <?= e((string) ($source['provider'] ?? '—')) ?>
+                                    <?php if (!empty($source['providerMatchId'])): ?>
+                                      <span class="dim mono">#<?= e((string) $source['providerMatchId']) ?></span>
+                                    <?php endif; ?>
+                                    <?php if (!empty($source['matchedBy'])): ?>
+                                      <span class="dim" title="How this feed's match was recognized as the same match"><?= e(strtolower(str_replace('_', ' ', (string) $source['matchedBy']))) ?></span>
+                                    <?php endif; ?>
+                                  </div>
+                                <?php endforeach; ?>
+                                <div class="dim" style="margin-top:2px">
+                                  <?= count($sources) > 1 ? 'the same match, recognized across ' . count($sources) . ' feeds — one prediction' : 'odds fall back to another provider when this one has no price' ?>
+                                </div>
+                              <?php endif; ?>
+                            </div>
+                            <div>
+                              <div class="dim">Valid until</div>
+                              <div><?= e($kickoffStamp($m['expiresAt'] ?? null)) ?></div>
+                              <div class="dim">frozen at kickoff · model v<?= e((string) ($m['modelVersion'] ?? '—')) ?></div>
                             </div>
                           </div>
                         </details>

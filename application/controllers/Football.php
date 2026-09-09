@@ -54,6 +54,15 @@ class Football extends App_Controller
                     . ' is not a number; the market\'s own default line was used.';
             }
         }
+        // The data provider is a selection over the feeds that are connected:
+        // Auto / Smart reads the provider whose health, coverage and quota say
+        // it should answer, a named provider pins the whole request to it, and
+        // Multi-Provider lets each piece of data come from the feed that has
+        // it. The catalogue is what the dropdown is populated from — no mode is
+        // offered that no connected feed can honour.
+        $provider = isset($get['provider']) ? trim((string) $get['provider']) : null;
+        $data['provider'] = $provider;
+        $data['providers'] = $this->platform->football->intelligence()->providers();
         $data['competition'] = $competition;
         $data['market'] = $market;
         $data['line'] = $line;

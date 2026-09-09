@@ -364,3 +364,41 @@ CREATE TABLE IF NOT EXISTS "football_provider_sync_logs" (
   CONSTRAINT "uq_football_sync_key" UNIQUE ("execution_key")
 );
 CREATE INDEX IF NOT EXISTS "idx_football_sync_job" ON "football_provider_sync_logs" ("job_type", "started_at");
+
+CREATE TABLE IF NOT EXISTS "football_provider_matches" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "internal_match_id" VARCHAR(190) NOT NULL,
+  "provider_id" INTEGER NULL,
+  "provider_code" VARCHAR(64) NOT NULL,
+  "provider_match_id" VARCHAR(190) NOT NULL,
+  "home_team_normalized" VARCHAR(190) NOT NULL,
+  "away_team_normalized" VARCHAR(190) NOT NULL,
+  "kickoff_date" VARCHAR(10) NOT NULL,
+  "competition_internal_id" VARCHAR(190) NULL,
+  "matched_by" VARCHAR(32) NOT NULL DEFAULT 'PROVIDER_ID',
+  "confidence" NUMERIC(5,4) NULL,
+  "first_seen_at" VARCHAR(32) NOT NULL,
+  "last_seen_at" VARCHAR(32) NOT NULL,
+  CONSTRAINT "uq_football_provider_match" UNIQUE ("provider_code", "provider_match_id"),
+  CONSTRAINT "uq_football_match_provider" UNIQUE ("internal_match_id", "provider_code")
+);
+CREATE INDEX IF NOT EXISTS "idx_football_match_internal" ON "football_provider_matches" ("internal_match_id");
+CREATE INDEX IF NOT EXISTS "idx_football_match_teams" ON "football_provider_matches" ("home_team_normalized", "away_team_normalized", "kickoff_date");
+
+CREATE TABLE IF NOT EXISTS "football_competition_mapping" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "internal_id" VARCHAR(190) NOT NULL,
+  "provider_id" INTEGER NULL,
+  "provider_code" VARCHAR(64) NOT NULL,
+  "provider_competition_id" VARCHAR(190) NOT NULL,
+  "competition_name" VARCHAR(190) NOT NULL,
+  "country" VARCHAR(96) NULL,
+  "tier" VARCHAR(24) NOT NULL DEFAULT 'STANDARD',
+  "premium" SMALLINT NOT NULL DEFAULT 0,
+  "active" SMALLINT NOT NULL DEFAULT 1,
+  "created_at" VARCHAR(32) NOT NULL,
+  "updated_at" VARCHAR(32) NOT NULL,
+  CONSTRAINT "uq_football_competition_map" UNIQUE ("provider_code", "provider_competition_id"),
+  CONSTRAINT "uq_football_competition_internal" UNIQUE ("internal_id", "provider_code")
+);
+CREATE INDEX IF NOT EXISTS "idx_football_competition_premium" ON "football_competition_mapping" ("premium", "active");

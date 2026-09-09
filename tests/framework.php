@@ -739,6 +739,10 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
     public array $scoreProbabilities = [];
     /** @var list<array{matchId:string,market:string,selection:string,decimalOdds:float,observedAt:?string}> odds the feed quoted */
     public array $marketOdds = [];
+    /** @var list<array<string,mixed>> canonical match rows, one per (provider, provider match id) */
+    public array $providerMatches = [];
+    /** @var list<array<string,mixed>> competition mapping rows, one per (provider, provider competition id) */
+    public array $competitionMappings = [];
     public array $settlements = [];
     public array $performance = [];
     public array $syncRuns = [];
@@ -1266,6 +1270,142 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
         }
     }
 
+    /**
+     * Competition mapping: the internal id a provider's league id stands for.
+     * Keyed by (provider code, provider competition id) — one row per provider.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    public function saveCompetitionMapping(array $row): array
+    {
+        $code = trim((string) ($row['providerCode'] ?? ''));
+        $external = trim((string) ($row['providerCompetitionId'] ?? ''));
+        if ($code === '' || $external === '') throw new \InvalidArgumentException('competition mapping requires providerCode and providerCompetitionId');
+        $now = gmdate('c');
+        $data = ['internal_id' => trim((string) ($row['internalId'] ?? '')), 'provider_id' => (int) ($row['providerId'] ?? 0) ?: null,
+            'provider_code' => $code, 'provider_competition_id' => $external,
+            'competition_name' => trim((string) ($row['competitionName'] ?? '')), 'country' => $row['country'] ?? null,
+            'tier' => strtoupper((string) ($row['tier'] ?? 'STANDARD')), 'premium' => !empty($row['premium']) ? 1 : 0,
+            'active' => array_key_exists('active', $row) ? (!empty($row['active']) ? 1 : 0) : 1, 'updated_at' => $now];
+        $existing = $this->findCompetitionMapping($code, $external);
+        if ($existing !== null) {
+            foreach ($this->competitionMappings as &$row) {
+                if ((int) $row['id'] === (int) $existing['id']) $row = array_merge($row, $data);
+            }
+            unset($row);
+            return array_merge($existing, $data);
+        }
+        $stored = array_merge(['id' => $this->id(), 'created_at' => $now], $data);
+        $this->competitionMappings[] = $stored;
+        return $stored;
+    }
+
+    public function findCompetitionMapping(string $providerCode, string $providerCompetitionId): ?array
+    {
+        return $this->find($this->competitionMappings, fn(array $r) => (string) $r['provider_code'] === $providerCode
+            && (string) $r['provider_competition_id'] === $providerCompetitionId);
+    }
+
+    /** @param array<string,mixed> $filter */
+    public function listCompetitionMappings(array $filter = [], int $limit = 500): array
+    {
+        $rows = array_values(array_filter($this->competitionMappings, function (array $row) use ($filter): bool {
+            if (array_key_exists('premium', $filter) && (int) $row['premium'] !== (!empty($filter['premium']) ? 1 : 0)) return false;
+            if (array_key_exists('active', $filter) && (int) $row['active'] !== (!empty($filter['active']) ? 1 : 0)) return false;
+            if (!empty($filter['internalId']) && (string) $row['internal_id'] !== (string) $filter['internalId']) return false;
+            if (!empty($filter['providerCode']) && (string) $row['provider_code'] !== (string) $filter['providerCode']) return false;
+            return true;
+        }));
+        usort($rows, static fn(array $a, array $b) => [(int) $b['premium'], (string) $a['competition_name']] <=> [(int) $a['premium'], (string) $b['competition_name']]);
+        return array_slice($rows, 0, max(1, min(2000, $limit)));
+    }
+
+    /** @param array<string,mixed> $row */
+    public function saveProviderMatch(array $row): array
+    {
+        $code = trim((string) ($row['providerCode'] ?? ''));
+        $external = trim((string) ($row['providerMatchId'] ?? ''));
+        $internal = trim((string) ($row['internalMatchId'] ?? ''));
+        if ($code === '' || $external === '' || $internal === '') {
+            throw new \InvalidArgumentException('provider match requires providerCode, providerMatchId and internalMatchId');
+        }
+        $now = gmdate('c');
+        $data = ['internal_match_id' => $internal, 'provider_id' => (int) ($row['providerId'] ?? 0) ?: null,
+            'provider_code' => $code, 'provider_match_id' => $external,
+            'home_team_normalized' => \AIWorkforce\Football\CanonicalMatch::normalizeTeam((string) ($row['homeTeam'] ?? '')),
+            'away_team_normalized' => \AIWorkforce\Football\CanonicalMatch::normalizeTeam((string) ($row['awayTeam'] ?? '')),
+            'kickoff_date' => \AIWorkforce\Football\CanonicalMatch::kickoffDate((string) ($row['kickoff'] ?? '')),
+            'competition_internal_id' => $row['competitionInternalId'] ?? null,
+            'matched_by' => (string) ($row['matchedBy'] ?? \AIWorkforce\Football\CanonicalMatch::MATCH_PROVIDER_ID),
+            'confidence' => is_numeric($row['confidence'] ?? null) ? (float) $row['confidence'] : null,
+            'last_seen_at' => $now];
+        $existing = $this->findProviderMatch($code, $external);
+        if ($existing !== null) {
+            foreach ($this->providerMatches as &$stored) {
+                if ((int) $stored['id'] === (int) $existing['id']) $stored = array_merge($stored, $data);
+            }
+            unset($stored);
+            return array_merge($existing, $data);
+        }
+        $stored = array_merge(['id' => $this->id(), 'first_seen_at' => $now], $data);
+        $this->providerMatches[] = $stored;
+        return $stored;
+    }
+
+    public function findProviderMatch(string $providerCode, string $providerMatchId): ?array
+    {
+        return $this->find($this->providerMatches, fn(array $r) => (string) $r['provider_code'] === $providerCode
+            && (string) $r['provider_match_id'] === $providerMatchId);
+    }
+
+    public function listProviderMatches(string $internalMatchId): array
+    {
+        $rows = array_values(array_filter($this->providerMatches, fn(array $r) => (string) $r['internal_match_id'] === $internalMatchId));
+        usort($rows, static fn(array $a, array $b) => strcmp((string) $a['provider_code'], (string) $b['provider_code']));
+        return $rows;
+    }
+
+    /** @param list<string> $internalMatchIds */
+    public function listProviderMatchesFor(array $internalMatchIds): array
+    {
+        $wanted = array_fill_keys(array_map('strval', $internalMatchIds), true);
+        $out = [];
+        foreach ($this->providerMatches as $row) {
+            $id = (string) ($row['internal_match_id'] ?? '');
+            if (!isset($wanted[$id])) continue;
+            $out[$id][] = $row;
+        }
+        foreach ($out as &$rows) {
+            usort($rows, static fn(array $a, array $b) => strcmp((string) $a['provider_code'], (string) $b['provider_code']));
+        }
+        unset($rows);
+        return $out;
+    }
+
+    /** @param array<string,mixed> $candidate */
+    public function resolveCanonicalMatch(array $candidate): ?array
+    {
+        $internal = trim((string) ($candidate['internalMatchId'] ?? ''));
+        if ($internal !== '') {
+            $rows = $this->listProviderMatches($internal);
+            if ($rows !== []) return ['row' => $rows[0], 'score' => 1.0, 'matchedBy' => \AIWorkforce\Football\CanonicalMatch::MATCH_TEAMS_DATE];
+        }
+        $best = null;
+        foreach ($this->providerMatches as $row) {
+            $score = \AIWorkforce\Football\CanonicalMatch::matchScore($candidate, [
+                'providerCode' => (string) ($row['provider_code'] ?? ''),
+                'providerMatchId' => (string) ($row['provider_match_id'] ?? ''),
+                'homeTeam' => (string) ($row['home_team_normalized'] ?? ''),
+                'awayTeam' => (string) ($row['away_team_normalized'] ?? ''),
+                'kickoff' => (string) ($row['kickoff_date'] ?? ''),
+            ]);
+            if ($score['score'] < \AIWorkforce\Football\CanonicalMatch::FUZZY_THRESHOLD) continue;
+            if ($best === null || $score['score'] > $best['score']) $best = ['row' => $row, 'score' => $score['score'], 'matchedBy' => $score['matchedBy']];
+        }
+        return $best;
+    }
+
     public function listScoreProbabilitiesFor(array $predictionIds, int $limitPerPrediction = 200): array
     {
         $wanted = [];
@@ -1304,6 +1444,11 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
             $out[$key][] = ['market' => (string) ($row['market'] ?? ''), 'selection' => (string) ($row['selection'] ?? ''),
                 'decimalOdds' => $price, 'observedAt' => $row['observedAt'] ?? null];
         }
+        // Newest first, as the database read returns them.
+        foreach ($out as &$rows) {
+            usort($rows, static fn(array $a, array $b): int => strcmp((string) ($b['observedAt'] ?? ''), (string) ($a['observedAt'] ?? '')));
+        }
+        unset($rows);
         return $out;
     }
 

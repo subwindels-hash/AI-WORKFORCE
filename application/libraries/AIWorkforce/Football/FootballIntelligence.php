@@ -32,6 +32,7 @@ final class FootballIntelligence
     private ?PerformanceService $performance = null;
     private ?PredictionBoard $board = null;
     private ?MatchFeed $feed = null;
+    private ?MatchIntelligenceService $intelligence = null;
     private ?PredictionMarkets $markets = null;
     private ?RefreshPolicy $refresh = null;
     private ?FootballDiagnostics $diagnostics = null;
@@ -147,6 +148,19 @@ final class FootballIntelligence
     public function feed(): MatchFeed
     {
         return $this->feed ??= new MatchFeed($this->repo, $this->predictions(), $this->models(), $this->config, $this->markets());
+    }
+
+    /**
+     * The Match Intelligence Engine: provider selection, normalization and
+     * canonical identity across API-Football, TheSportsDB and SportMonks.
+     *
+     * This is the only door to a provider for the football module — the
+     * prediction engine reads matches, never feeds.
+     */
+    public function intelligence(): MatchIntelligenceService
+    {
+        return $this->intelligence ??= new MatchIntelligenceService(
+            $this->gateway(), new ProviderSelector($this->gateway(), $this->config), $this->repo, $this->config);
     }
 
     /**

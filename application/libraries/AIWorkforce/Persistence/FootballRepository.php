@@ -35,6 +35,58 @@ interface FootballRepository
     public function saveCompetition(int $providerId, array $row): array;
     /** @return array<string,mixed>|null */
     public function findCompetition(int $providerId, string $externalId, ?string $season = null): ?array;
+
+    /**
+     * Competition mapping: the internal competition id a provider's own league
+     * id stands for, with the deployment's own classification (tier, premium,
+     * active). A premium league is an application-level label — no provider
+     * numbers competitions the same way, so the mapping is what makes the
+     * premium league resolvable whichever feed answered.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,mixed> stored row
+     */
+    public function saveCompetitionMapping(array $row): array;
+    /** @return array<string,mixed>|null */
+    public function findCompetitionMapping(string $providerCode, string $providerCompetitionId): ?array;
+    /**
+     * @param array<string,mixed> $filter keys: premium, active, internalId, providerCode
+     * @return array<int,array<string,mixed>>
+     */
+    public function listCompetitionMappings(array $filter = [], int $limit = 500): array;
+
+    /**
+     * Record that a provider's own match id is this canonical match. One
+     * internal match may carry a row per provider; the same match from a second
+     * feed links to the identity it already has instead of becoming a second
+     * fixture.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,mixed> stored row
+     */
+    public function saveProviderMatch(array $row): array;
+    /** @return array<string,mixed>|null */
+    public function findProviderMatch(string $providerCode, string $providerMatchId): ?array;
+    /** @return array<int,array<string,mixed>> every provider row behind one internal match */
+    public function listProviderMatches(string $internalMatchId): array;
+    /**
+     * The provider rows behind a whole page of internal matches, in one read —
+     * source attribution is part of every prediction result, and it must not
+     * cost one query per match.
+     *
+     * @param list<string> $internalMatchIds
+     * @return array<string,list<array<string,mixed>>> keyed by internal match id
+     */
+    public function listProviderMatchesFor(array $internalMatchIds): array;
+    /**
+     * The canonical match a provider row belongs to, searched by identity and
+     * then by normalized teams + kickoff date. Returns null when nothing
+     * matches — the caller then creates a new identity.
+     *
+     * @param array<string,mixed> $candidate keys: providerCode, providerMatchId, homeTeam, awayTeam, kickoff
+     * @return array{row:array<string,mixed>, score:float, matchedBy:string}|null
+     */
+    public function resolveCanonicalMatch(array $candidate): ?array;
     /** @return array<string,mixed> */
     public function saveTeam(int $providerId, array $row): array;
     /** @return array<string,mixed>|null */

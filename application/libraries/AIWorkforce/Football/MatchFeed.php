@@ -252,8 +252,13 @@ final class MatchFeed
         // batched reads — the score grids and the quoted prices — so choosing a
         // market costs two queries for the page, not one query per match.
         $markets = $this->attachMarkets($entries, $market['market'], $line);
+        // Provenance is a third batched read: which provider (or providers)
+        // this match came from is part of the prediction result, and it is
+        // answered for the whole page in one query.
+        $sources = $this->dataSources($fixtures);
         foreach ($matches as $index => $match) {
-            $matches[$index]['market'] = $markets[$index];
+            $matches[$index]['market'] = $this->predictionResult($markets[$index], $match, $fixtures[$index] ?? [],
+                $sources[(string) ($match['matchId'] ?? '')] ?? []);
         }
 
         // Counted with the same filter as the page: with a competition selected,
@@ -297,6 +302,10 @@ final class MatchFeed
                 'generated' => (int) $generation['generated'],
                 'reused' => $reused,
                 'skippedStored' => (int) $generation['skipped'],
+                // A prediction that was replaced because a stated reason
+                // justified it — counted apart from generation, because it is
+                // not a second prediction for the match, it is a new one.
+                'refreshed' => (int) ($generation['refreshed'] ?? 0),
                 'deferred' => (int) ($generation['deferred'] ?? 0),
                 'refused' => (int) ($generation['refused'] ?? 0),
                 'frozen' => (int) $generation['frozen'],
@@ -346,6 +355,95 @@ final class MatchFeed
     }
 
     /**
+     * The prediction result for one match, in the shape the console and the API
+     * both return.
+     *
+     * Alongside the market answer it carries what an operator needs to judge
+     * it: the match it belongs to, who supplied the data (`dataSources`), the
+     * model version, when it was produced, and when it stops being valid — a
+     * prediction is frozen at kickoff, so that is its expiry. Nothing here is
+     * recomputed: every field is read off the stored prediction.
+     *
+     * @param array<string,mixed> $market
+     * @param array<string,mixed> $match
+     * @param array<string,mixed> $fixture
+     * @param list<array<string,mixed>> $providerRows
+     * @return array<string,mixed>
+     */
+    private function predictionResult(array $market, array $match, array $fixture, array $providerRows): array
+    {
+        $kickoff = (string) ($fixture['kickoff_at'] ?? '');
+        $prediction = $match['prediction'] ?? null;
+        return $market + [
+            'matchId' => (string) ($match['matchId'] ?? ''),
+            'modelVersion' => is_array($prediction) ? ($prediction['modelVersionId'] ?? null) : null,
+            'generatedAt' => is_array($prediction) ? ($prediction['generatedAt'] ?? null) : null,
+            // A prediction is frozen at kickoff: past that moment the numbers
+            // describe a match that has started, so kickoff is the expiry.
+            'expiresAt' => $kickoff !== '' ? $kickoff : null,
+            'expiryBasis' => $kickoff !== '' ? 'FROZEN_AT_KICKOFF' : 'KICKOFF_UNKNOWN',
+            'dataSources' => $this->matchSources($fixture, $providerRows),
+        ];
+    }
+
+    /**
+     * Where the data behind one match came from.
+     *
+     * The provider that supplied the fixture is always named. When a match has
+     * been recognized across feeds, every feed behind it is named with the id
+     * it uses and the rule that matched — "this is SportMonks 88012, matched to
+     * the record API-Football calls 1201 by teams and kickoff".
+     *
+     * @param array<string,mixed> $fixture
+     * @param list<array<string,mixed>> $providerRows
+     * @return list<array<string,mixed>>
+     */
+    private function matchSources(array $fixture, array $providerRows): array
+    {
+        $out = [];
+        foreach ($providerRows as $row) {
+            $out[] = [
+                'provider' => (string) ($row['provider_code'] ?? DataState::UNAVAILABLE),
+                'providerMatchId' => ((string) ($row['provider_match_id'] ?? '')) ?: null,
+                'matchedBy' => ((string) ($row['matched_by'] ?? '')) ?: null,
+                'confidence' => isset($row['confidence']) ? round((float) $row['confidence'], 3) : null,
+            ];
+        }
+        if ($out === []) {
+            $provider = (string) ($fixture['provider_code'] ?? '');
+            if ($provider === '') return [];
+            $out[] = ['provider' => $provider, 'providerMatchId' => ((string) ($fixture['external_id'] ?? '')) ?: null,
+                'matchedBy' => null, 'confidence' => null];
+        }
+        return $out;
+    }
+
+    /**
+     * The provider rows for a whole page, keyed by the match identity the feed
+     * returns — one read for the page.
+     *
+     * @param list<array<string,mixed>> $fixtures
+     * @return array<string,list<array<string,mixed>>>
+     */
+    private function dataSources(array $fixtures): array
+    {
+        $ids = [];
+        foreach ($fixtures as $fixture) {
+            $canonical = CanonicalMatch::identity((string) ($fixture['home_team'] ?? ''),
+                (string) ($fixture['away_team'] ?? ''), (string) ($fixture['kickoff_at'] ?? ''));
+            if ($canonical !== '') $ids[self::matchId($fixture)] = $canonical;
+        }
+        if ($ids === []) return [];
+        $rows = $this->repo->listProviderMatchesFor(array_values(array_unique($ids)));
+        $out = [];
+        foreach ($ids as $matchId => $canonical) {
+            if (!isset($rows[$canonical])) continue;
+            $out[$matchId] = $rows[$canonical];
+        }
+        return $out;
+    }
+
+    /**
      * The market codes the connected odds feed has priced on this page, so the
      * market list can say which markets have a real price behind them.
      *
@@ -388,10 +486,14 @@ final class MatchFeed
         foreach ($entries as $entry) {
             $prediction = $entry['prediction'] ?? null;
             if (!is_array($prediction)) {
+                // The shape is identical to an evaluated market — an empty slot
+                // is the same object with an empty answer, not another format.
                 $out[] = ['key' => (string) $market['key'], 'label' => (string) $market['label'],
                     'state' => DataState::UNAVAILABLE, 'reason' => 'No prediction is stored for this match, so no market can be derived from it.',
                     'selection' => null, 'selectionLabel' => null, 'probability' => null, 'odds' => null,
-                    'impliedProbability' => null, 'edge' => null, 'outcomes' => []];
+                    'impliedProbability' => null, 'edge' => null, 'outcomes' => [], 'coverage' => 0.0,
+                    'riskLevel' => PredictionMarkets::RISK_HIGH,
+                    'riskFactors' => ['No prediction is stored, so there is nothing to assess.']];
                 continue;
             }
             $out[] = $this->markets->evaluate($prediction, $grids[(string) ($prediction['id'] ?? '')] ?? [],
@@ -508,6 +610,11 @@ final class MatchFeed
      */
     private function match(array $fixture, ?array $prediction, string $source, array $outcome, int $modelVersionId): array
     {
+        // Why a stored prediction was kept or replaced, when the engine had to
+        // decide. Reuse is the default, so the block is only carried when the
+        // decision was actually taken — an absent decision is not a blank one.
+        $regeneration = isset($outcome['regeneration']) && is_array($outcome['regeneration'])
+            ? $outcome['regeneration'] : null;
         $kickoff = (string) ($fixture['kickoff_at'] ?? '');
         return [
             'matchId' => self::matchId($fixture),
@@ -535,6 +642,7 @@ final class MatchFeed
                 'reason' => (string) ($outcome['reason'] ?? $this->refusalReason($source)),
             ] : null,
             'modelVersionId' => $modelVersionId ?: null,
+            'regeneration' => $regeneration,
         ];
     }
 

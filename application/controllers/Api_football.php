@@ -231,6 +231,80 @@ class Api_football extends Api_controller
         $this->listForDate(gmdate('Y-m-d', strtotime('+1 day')), 'tomorrow');
     }
 
+    /**
+     * The providers behind the "Data Provider" selector.
+     *
+     * `GET /api/football/providers` lists Auto / Smart, every configured feed
+     * and — when more than one feed is connected — Multi-Provider, each with
+     * the capabilities and health the choice was derived from. A mode nobody
+     * can honour (Multi with one provider) is not offered.
+     */
+    public function providers()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $payload = $this->football()->intelligence()->providers();
+        $payload['generatedAt'] = gmdate('c');
+        $payload['note'] = 'Auto / Smart picks the provider per request from health, competition coverage, fixture availability, odds availability and rate limits. Multi-Provider takes each piece of data from the feed that has it and combines them into one match.';
+        $this->json($payload);
+    }
+
+    /**
+     * Per-provider health.
+     *
+     * `GET /api/football/providers/health` reports, for each feed: status,
+     * response time, the last successful request, rate-limit state, available
+     * competitions, whether odds and statistics are available, and what the
+     * provider cannot supply. It is the record behind automatic fallback — a
+     * feed that is offline or in backoff is skipped, not retried.
+     */
+    public function providers_health()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $this->json($this->football()->intelligence()->health());
+    }
+
+    /**
+     * Matches read straight from the selected provider.
+     *
+     * `GET /api/football/matches/fetch?provider=AUTO&competition=39&dateFrom=…&dateTo=…&limit=50`
+     * runs the documented pipeline — validate → load provider config →
+     * retrieve fixtures → normalize → deduplicate → resolve the canonical match
+     * — and returns the canonical matches with the provider (or providers) each
+     * one came from. The same match seen by two feeds is returned once.
+     *
+     * This is the only football endpoint that spends provider calls; the paged
+     * feed at `/api/football/matches` reads stored rows and costs none.
+     */
+    public function fetch_matches()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        $query = [
+            'provider' => trim((string) ($g['provider'] ?? '')),
+            'competition' => trim((string) ($g['competition'] ?? '')),
+            'date' => trim((string) ($g['date'] ?? '')),
+            'dateFrom' => trim((string) ($g['dateFrom'] ?? '')),
+            'dateTo' => trim((string) ($g['dateTo'] ?? '')),
+            'limit' => \AIWorkforce\Football\RequestParams::int($g, 'limit',
+                \AIWorkforce\Football\MatchIntelligenceService::MAX_GENERATION_BATCH, 1,
+                \AIWorkforce\Football\MatchIntelligenceService::MAX_GENERATION_BATCH, $notes),
+        ];
+        $result = $this->football()->intelligence()->matches($query, $notes);
+        $this->json([
+            'state' => $result['state'],
+            'message' => $result['message'],
+            'matches' => array_map(static fn($match): array => $match->toArray(), $result['matches']),
+            'count' => $result['counts']['returned'],
+            'counts' => $result['counts'],
+            'selection' => $result['selection'],
+            'calls' => $result['calls'],
+            'request' => array_merge($query, ['notes' => array_values($notes)]),
+            'limitMaximum' => \AIWorkforce\Football\MatchIntelligenceService::MAX_GENERATION_BATCH,
+            'generatedAt' => gmdate('c'),
+        ]);
+    }
+
     /** Fixtures currently in play, with live score/minute/red cards as stored. */
     public function fixtures_live()
     {

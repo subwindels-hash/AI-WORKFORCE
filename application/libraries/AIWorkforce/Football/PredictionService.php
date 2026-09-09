@@ -41,6 +41,7 @@ final class PredictionService
      * @var array<string,array<string,mixed>|null>
      */
     private array $resolved = [];
+    private ?RegenerationPolicy $regeneration = null;
 
     public function __construct(
         private FootballRepository $repo,
@@ -279,6 +280,88 @@ final class PredictionService
         }];
     }
 
+    /** The rule that decides whether a stored prediction may be replaced. */
+    public function regeneration(): RegenerationPolicy
+    {
+        return $this->regeneration ??= new RegenerationPolicy($this->config);
+    }
+
+    /**
+     * The regeneration signals for the matches that already have a prediction.
+     *
+     * Only one signal is derived here — how far the quoted price has moved
+     * since the prediction was written — because it is the one that is already
+     * stored and can therefore be measured rather than assumed. It is read in
+     * a single batched query for the page, and it is only computed when a
+     * prediction exists to compare against. Lineup, injury and news signals
+     * come from the caller (`$signals`) when it has them; when it does not,
+     * they stay unknown, and an unknown is never a reason to regenerate.
+     *
+     * @param array<int,array<string,mixed>> $fixtures
+     * @param array<string,array<string,mixed>> $signals keyed by match id
+     * @return array<string,array<string,mixed>> keyed by match id
+     */
+    private function oddsHistory(array $fixtures, int $modelVersionId, string $kind, array $signals): array
+    {
+        $matchIds = [];
+        foreach ($fixtures as $fixture) {
+            $matchId = MatchFeed::matchId($fixture);
+            if ($matchId === '') continue;
+            if ($this->existing($fixture, $modelVersionId, $kind) === null) continue;
+            $matchIds[$matchId] = (string) ($this->existing($fixture, $modelVersionId, $kind)['generated_at'] ?? '');
+        }
+        if ($matchIds === []) return [];
+        $rows = $this->repo->listMarketOdds(array_keys($matchIds));
+        $out = [];
+        foreach ($matchIds as $matchId => $generatedAt) {
+            $movement = $this->priceMovement($rows[$matchId] ?? [], $generatedAt);
+            $signal = (array) ($signals[$matchId] ?? []);
+            if ($movement !== null && !array_key_exists('oddsMovement', $signal)) $signal['oddsMovement'] = $movement;
+            if (array_key_exists('oddsMovement', $signal)) $signal['oddsMovementMeasured'] = true;
+            $out[$matchId] = $signal;
+        }
+        return $out;
+    }
+
+    /**
+     * The largest move in implied probability between the price that stood when
+     * the prediction was written and the latest price the feed has quoted.
+     *
+     * @param list<array{market:string,selection:string,decimalOdds:float,observedAt:?string}> $rows
+     */
+    private function priceMovement(array $rows, string $generatedAt): ?float
+    {
+        if ($rows === []) return null;
+        $generated = $generatedAt !== '' ? strtotime($generatedAt) : null;
+        if ($generated === null || $generated === false) return null;
+        $latest = [];
+        $latestAt = [];
+        $baseline = [];
+        $baselineAt = [];
+        foreach ($rows as $row) {
+            $price = (float) ($row['decimalOdds'] ?? 0);
+            if ($price <= 0) continue;
+            $key = (string) ($row['market'] ?? '') . '|' . (string) ($row['selection'] ?? '');
+            $observed = strtotime((string) ($row['observedAt'] ?? ''));
+            if ($observed === false) continue;
+            // Chosen by the timestamp on the row, not by the order it arrived
+            // in: which quote is the newest and which one stood when the
+            // prediction was written must not depend on the query's ordering.
+            if (!isset($latestAt[$key]) || $observed > $latestAt[$key]) { $latestAt[$key] = $observed; $latest[$key] = $price; }
+            if ($observed <= $generated && (!isset($baselineAt[$key]) || $observed > $baselineAt[$key])) {
+                $baselineAt[$key] = $observed; $baseline[$key] = $price;
+            }
+        }
+        if ($latest === [] || $baseline === []) return null;
+        $worst = 0.0;
+        foreach ($latest as $key => $price) {
+            if (!isset($baseline[$key])) continue;
+            $move = abs((1 / $price) - (1 / $baseline[$key]));
+            if ($move > $worst) $worst = $move;
+        }
+        return round($worst, 6);
+    }
+
     /**
      * Generate predictions for the matches that do not have one yet — never
      * more than `$limit` of them, and never more than one page
@@ -292,29 +375,64 @@ final class PredictionService
      * @param array<int,array<string,mixed>> $fixtures candidate rows, already paged
      * @return array{requested:int, limit:int, generated:int, skipped:int, deferred:int, frozen:int, failed:int, matches:array<int,array<string,mixed>>, errors:list<string>, modelVersionId:int|null, modelVersion:string|null}
      */
-    public function predictMissing(array $fixtures, int $limit = MatchFeed::MAX_PAGE_SIZE, string $kind = self::KIND_PRE_MATCH): array
+    public function predictMissing(array $fixtures, int $limit = MatchFeed::MAX_PAGE_SIZE, string $kind = self::KIND_PRE_MATCH, array $signals = []): array
     {
         $limit = max(0, min(MatchFeed::MAX_PAGE_SIZE, $limit));
         $model = $this->models->usable();
         $modelVersionId = (int) ($model['model']['id'] ?? 0);
+        $policy = $this->regeneration();
         $out = [
             'requested' => count($fixtures),
             // The ceiling is repeated back to the caller: what was asked for and
             // what was allowed are both visible, and they are not the same thing
             // when someone asks for 500.
             'limit' => $limit,
-            'generated' => 0, 'skipped' => 0, 'refused' => 0, 'deferred' => 0, 'frozen' => 0, 'failed' => 0,
+            'generated' => 0, 'skipped' => 0, 'refreshed' => 0, 'refused' => 0, 'deferred' => 0, 'frozen' => 0, 'failed' => 0,
             'matches' => [], 'errors' => [],
             'modelVersionId' => $modelVersionId ?: null,
             'modelVersion' => $model['model']['model_version'] ?? null,
         ];
         $budget = $limit;
+        // One batched read of the quoted prices for the matches that already
+        // have a prediction: it is what lets a real price move — rather than a
+        // reload, a page change or a second sweep — be the reason a prediction
+        // is replaced.
+        $history = $this->oddsHistory($fixtures, $modelVersionId, $kind, $signals);
         foreach ($fixtures as $index => $fixture) {
             $identity = ['fixtureId' => (int) ($fixture['id'] ?? 0), 'externalId' => $fixture['external_id'] ?? null,
                 'matchId' => MatchFeed::matchId($fixture)];
-            if ($this->existing($fixture, $modelVersionId, $kind) !== null) {
+            $stored = $this->existing($fixture, $modelVersionId, $kind);
+            if ($stored !== null) {
+                $decision = $policy->decide($stored, $fixture, $history[$identity['matchId']] ?? [], $modelVersionId);
+                if ($decision['action'] === RegenerationPolicy::REFRESH && $budget > 0) {
+                    // A reason that justifies it, and budget left for it: the
+                    // stored row is replaced by a fresh one, and both counts
+                    // say so — this is a regeneration, not a second prediction.
+                    $budget--;
+                    $payload = $this->predict($fixture, true, $kind);
+                    $replaced = $this->existing($fixture, $modelVersionId, $kind, true);
+                    if ($replaced !== null) {
+                        $out['refreshed']++;
+                        $out['matches'][$index] = $identity + ['state' => self::MISSING_GENERATED,
+                            'source' => MatchFeed::SOURCE_GENERATED, 'regenerated' => true,
+                            'regeneration' => ['codes' => $decision['codes'], 'reasons' => $decision['reasons']],
+                            'predictionId' => (string) ($replaced['id'] ?? ''),
+                            'reason' => 'The stored prediction was replaced because: ' . implode(' ', $decision['reasons'])];
+                        continue;
+                    }
+                    $out['failed']++;
+                    $out['errors'][] = 'fixture ' . ($fixture['external_id'] ?? $fixture['id'])
+                        . ': regeneration was justified but the engine stored no new row.';
+                    $out['matches'][$index] = $identity + ['state' => self::MISSING_FAILED, 'source' => MatchFeed::SOURCE_FAILED,
+                        'code' => 'REGENERATION_NOT_STORED',
+                        'reason' => 'Regeneration was justified (' . implode(', ', $decision['codes'])
+                            . ') but no replacement prediction was stored; the existing one is shown.'];
+                    continue;
+                }
                 $out['skipped']++;
                 $out['matches'][$index] = $identity + ['state' => self::MISSING_STORED, 'source' => MatchFeed::SOURCE_STORED,
+                    'regeneration' => ['action' => $decision['action'], 'codes' => $decision['codes'],
+                        'reasons' => $decision['reasons']],
                     'reason' => 'A prediction for this match is already stored; it was reused instead of being generated again.'];
                 continue;
             }

@@ -37,6 +37,11 @@ each panel exists exactly once in the product.
 | `RequestParams.php` | query-parameter reading for the read models and the console: absent ⇒ documented default, unusable ⇒ default **plus a note in the response**, out of range ⇒ clamped **and stated**; a mutation with an unreadable `date` refuses instead of refreshing another day |
 | `DataState.php` | `DataState` (`DATA_UNAVAILABLE` / `LIMITED_DATA` / `AVAILABLE`) and `QualityBand` (`QUALIFIED` ≥ 70, `LIMITED` 50–69, `REJECTED` < 50) |
 | `ProviderGateway.php` | provider selection, per-sweep request budget, daily quota, request spacing, persisted backoff |
+| `ProviderSelector.php` | Auto / Smart scoring, named-provider plans, Multi-Provider class assignment (with the load-spread penalty) |
+| `MatchIntelligenceService.php` | the Match Intelligence Engine: retrieve → normalize → deduplicate → canonical identity; also the provider catalogue and per-provider health |
+| `CanonicalMatch.php` | canonical identity (`HOME_AWAY_YYYY-MM-DD`), team normalization and deterministic cross-provider matching |
+| `FootballMatch.php` | the one normalized match model every layer downstream of a provider reads |
+| `RegenerationPolicy.php` | when a stored prediction may be replaced, and the reason |
 | `FixtureSyncService.php` | fixture/live/result sweeps, normalization, idempotent upserts, per-run sync log |
 | `StatisticsCollector.php` | team statistics, league tables, head-to-head snapshots, in-match statistics |
 | `FeatureBuilder.php` | normalized feature vector per fixture + `dataQualityScore` with weighted components and provenance |
@@ -73,7 +78,9 @@ columns arrive through its idempotent ALTER list.
 ## Data flow
 
 ```
-provider (api-football / thesportsdb / sportmonks via SportsProviderManager)
+three providers (api-football / thesportsdb / sportmonks via SportsProviderManager)
+  → ProviderSelector        Auto / Smart, a named feed, or Multi-Provider
+  → MatchIntelligenceService  retrieve → normalize → deduplicate → canonical identity
   → FixtureSyncService      fixtures for today, the upcoming window, live, results
   → StatisticsCollector      team stats, league table, head-to-head, match stats
   → FeatureBuilder           features + dataQualityScore (0–100) + provenance
@@ -317,6 +324,141 @@ The market list is exposed by `GET /api/football/markets`, and the page payload
 carries the same `market.available` array, with `state` and `oddsAvailable` per
 market so the console can mark the ones that have a real price behind them.
 
+## Multi-provider: three feeds, one canonical match
+
+Three providers can be connected at once, and any of them — or all of them — can
+answer a request. The rule the module is built on:
+
+> Three providers, one normalized football intelligence system, one canonical
+> match record, one prediction record, maximum 50 new predictions per
+> generation, and zero unnecessary regeneration.
+
+### The layers
+
+```
+provider adapters (ApiFootball · TheSportsDB · SportMonks)
+   → ProviderSelector          which feed answers which part of the request
+   → SportsDataNormalizer      every row into the one FootballMatch model
+   → MatchIntelligenceService  deduplicate + resolve canonical identity
+   → prediction engine         (never knows which provider answered)
+   → database / cache
+   → 50 matches per page
+```
+
+The prediction engine never sees a provider-specific shape. Every adapter's
+output is normalized into `FootballMatch` — id, provider(s), competition,
+season, home/away team (id, name, logo), kickoff, status, venue, odds,
+statistics, injuries, lineups, form, H2H — before anything downstream reads it.
+
+### Selecting a provider
+
+`provider` accepts `AUTO` (default), `api-football`, `thesportsdb`,
+`sportmonks`, or `MULTI`:
+
+| Mode | Behaviour |
+| --- | --- |
+| `AUTO` | One provider serves everything, chosen by a score over what is observable: health, circuit-breaker and backoff state, quota head-room, reliability, response time, competition coverage, odds availability and statistics availability. The score and its components are returned in `selection.scores`, so the choice can be argued with. |
+| named | That provider serves everything it can; a data class it has no data for falls back to another feed rather than coming back empty. An unknown name is reported and Auto is used — never silently substituted. |
+| `MULTI` | One provider per data class: fixtures from the feed that covers the competition, statistics and odds from the feeds that have them, metadata from whichever supplies it. A feed already holding a class is penalised, so the work spreads across feeds instead of spending one provider's whole quota. |
+
+No mode calls a provider that is offline, in backoff or out of quota. `MULTI`
+is only offered when more than one feed is connected — with one feed there is
+nothing to combine.
+
+### Canonical identity (duplicate prevention)
+
+Every match gets one internal identity built from the teams and the kickoff
+date, whichever feed it arrived from:
+
+```
+MANCHESTER_UNITED_ARSENAL_2026-09-12
+```
+
+A provider row is resolved to that identity in this order, and the rule that
+fired is recorded:
+
+1. the provider's own match id, when it is already known (`PROVIDER_ID`);
+2. normalized home team + normalized away team + kickoff date (`TEAMS_AND_KICKOFF`);
+3. fuzzy team names on the same date (`FUZZY_TEAM_NAMES` — "Man Utd" ↔
+   "Manchester United", threshold 0.7, deterministic);
+4. otherwise it is a new fixture (`NEW_FIXTURE`).
+
+A different date is a different fixture, however similar the names: the same
+two clubs meet again in the reverse fixture. Two tables back this:
+
+- `football_provider_matches` — one row per (provider, provider match id),
+  pointing at the internal match, with `matched_by` and `confidence`;
+- `football_competition_mapping` — the internal competition a provider's league
+  id stands for, with the deployment's own `tier`, `premium` and `active`
+  classification. **Premium is an application-level label, not a provider league
+  id.**
+
+The same match from three feeds is one match, one prediction and — in
+`MULTI` — one fixture request per contributing feed, never one per match.
+
+### Odds fallback
+
+When the selected provider has no price for a competition or market, another
+provider is tried, and the result names the source: `source: sportmonks`,
+`attempted: [api-football, sportmonks]`. If no provider quoted the market the
+odds are `DATA_UNAVAILABLE` — a price is never derived from a probability.
+
+### Provider health
+
+`GET /api/football/providers/health` reports per provider: status, response
+time, last successful request, last error, rate-limit state (`OK` /
+`EXHAUSTED` / `BACKOFF` / `UNKNOWN`), reliability, capabilities, whether odds
+and statistics are available, how many competitions are mapped, and — in
+`missingData` — what the provider cannot supply at all. Automatic fallback uses
+the same information: a provider that is offline or in backoff is skipped, not
+retried.
+
+### The prediction result
+
+Every prediction result carries what is needed to judge it:
+
+```jsonc
+{
+  "matchId": "api-football:1201",
+  "selection": "OVER", "selectionLabel": "Over 2.5",
+  "probability": 0.531, "odds": 1.95, "impliedProbability": 0.513, "edge": 0.018,
+  "riskLevel": "LOW",            // LOW | MEDIUM | HIGH, with riskFactors
+  "dataSources": [               // every provider behind the match
+    { "provider": "api-football", "providerMatchId": "1201", "matchedBy": "PROVIDER_ID" },
+    { "provider": "sportmonks",   "providerMatchId": "88012", "matchedBy": "FUZZY_TEAM_NAMES" }
+  ],
+  "modelVersion": 7,
+  "generatedAt": "2026-09-09T11:04:00+00:00",
+  "expiresAt": "2026-09-12T14:00:00+00:00",   // frozen at kickoff
+  "expiryBasis": "FROZEN_AT_KICKOFF"
+}
+```
+
+`riskLevel` is a reading of the inputs, not a mood: it weighs the data-quality
+band, how much of the score distribution the market could see, the selection's
+probability, the price, whether the model sees any edge, and whether the market
+rests on a stated assumption. `riskFactors` names whichever of those counted.
+
+### Regeneration
+
+A prediction is reused unless a stated reason justifies replacing it, and the
+reason is reported with the match:
+
+| Reason | Meaning |
+| --- | --- |
+| `MODEL_VERSION_CHANGED` | the stored prediction came from another model version |
+| `PREDICTION_EXPIRED` | older than `WINDELS_FOOTBALL_PREDICTION_TTL_SECONDS` (default 6h) |
+| `SIGNIFICANT_ODDS_MOVEMENT` | the price moved ≥ `WINDELS_FOOTBALL_ODDS_MOVEMENT_THRESHOLD` (default 0.05) in implied probability |
+| `CONFIRMED_LINEUP_CHANGE` | a confirmed lineup change was recorded |
+| `MAJOR_INJURY_OR_NEWS` | a major injury or team-news update was recorded |
+| `MATCH_STATUS_CHANGE` | the fixture is postponed, cancelled, suspended or live |
+| `NEW_STATISTICS_AVAILABLE` | the provider sent new data for the fixture after the prediction |
+
+Changing page, reloading, changing market or re-sweeping a date is **not** a
+reason: the default is reuse, and an unknown signal is never treated as
+permission. Once a match has kicked off the prediction is frozen
+(`FROZEN_AT_KICKOFF`) — no signal reopens it; it is settled instead.
+
 ## Output contract
 
 `GET /api/football/matches/:id/prediction` and the console share this shape:
@@ -371,6 +513,9 @@ GET /api/football/calibrations           ?modelVersionId= (defaults to the model
 GET /api/football/provider/status
 GET /api/football/status
 GET /api/football/dashboard            ?date=&refresh=
+GET /api/football/providers            the provider catalogue behind the Data Provider selector
+GET /api/football/providers/health     per-provider health: status, response time, rate limit, coverage, odds, what is missing
+GET /api/football/matches/fetch        ?provider=AUTO&competition=&date=&dateFrom=&dateTo=&limit=50  (the only endpoint that spends provider calls)
 ```
 
 Mutations require the native session plus the CSRF token (header or body field),
@@ -547,6 +692,8 @@ WINDELS_FOOTBALL_MAX_AGE_<BUCKET>=seconds    freshness window, one per bucket th
                                              freshness component; h2h (1095 d) is the age after
                                              which a head-to-head sample's weight is halved
 WINDELS_FOOTBALL_MIN_CALIBRATION_SAMPLES=50  settled rows required to fit a calibration (floor: 10)
+WINDELS_FOOTBALL_PREDICTION_TTL_SECONDS=21600     how long a prediction stays valid before fresh data may replace it (0 = never expires)
+WINDELS_FOOTBALL_ODDS_MOVEMENT_THRESHOLD=0.05     implied-probability move that justifies regenerating a prediction (0..1)
 DEMO_MODE=false                              platform demo switch; also readable as WINDELS_FOOTBALL_DEMO_MODE
 ```
 

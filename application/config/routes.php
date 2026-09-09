@@ -282,6 +282,11 @@ $route['api/football/fixtures/live'] = 'api_football/fixtures_live';
 $route['api/football/matches'] = 'api_football/matches';
 $route['api/football/matches/generate'] = 'api_football/generate_matches';
 $route['api/football/competitions'] = 'api_football/competitions';
+// Multi-provider: the provider catalogue, per-provider health, and a direct
+// (canonicalized) read of the selected provider.
+$route['api/football/providers'] = 'api_football/providers';
+$route['api/football/providers/health'] = 'api_football/providers_health';
+$route['api/football/matches/fetch'] = 'api_football/fetch_matches';
 $route['api/football/markets'] = 'api_football/markets';
 $route['api/football/matches/(:num)'] = 'api_football/show_match/$1';
 $route['api/football/matches/(:num)/analysis'] = 'api_football/analysis/$1';

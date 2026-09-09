@@ -423,16 +423,17 @@ test('football: every schema source declares the same tables and columns', funct
     $sqlite = fx_fb_ddl_tables(fx_fb_ddl('sqlite'));
     $prod = fx_fb_ddl_tables(fx_fb_ddl('prod'));
     $expected = [
-        'football_calibration_versions', 'football_competitions', 'football_fixture_statistics', 'football_fixtures',
-        'football_head_to_head', 'football_match_predictions', 'football_model_performance', 'football_model_versions',
-        'football_prediction_settlements', 'football_provider_sync_logs', 'football_providers',
+        'football_calibration_versions', 'football_competition_mapping', 'football_competitions',
+        'football_fixture_statistics', 'football_fixtures', 'football_head_to_head', 'football_match_predictions',
+        'football_model_performance', 'football_model_versions', 'football_prediction_settlements',
+        'football_provider_matches', 'football_provider_sync_logs', 'football_providers',
         'football_score_probabilities', 'football_teams', 'football_team_statistics',
     ];
     sort($expected);
     foreach (['mysql' => $mysql, 'sqlite' => $sqlite, 'production.sql' => $prod] as $label => $tables) {
         $names = array_keys($tables);
         sort($names);
-        assert_equals($expected, $names, $label . ' declares exactly the fourteen football entities');
+        assert_equals($expected, $names, $label . ' declares exactly the sixteen football entities');
         foreach ($tables as $table => $columns) {
             assert_true(count($columns) >= 3, $label . ':' . $table . ' is not a stub');
         }
