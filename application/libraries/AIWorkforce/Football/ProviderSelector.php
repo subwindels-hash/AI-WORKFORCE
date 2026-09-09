@@ -284,7 +284,11 @@ final class ProviderSelector
      */
     private function latency(array $health): float
     {
-        $ms = is_numeric($health['responseTimeMs'] ?? null) ? (float) $health['responseTimeMs'] : null;
+        // The adapters report `responseMs`; `responseTimeMs` is accepted from a
+        // feed that names it that way. Neither present means unknown, and an
+        // unknown is neutral, not fast.
+        $ms = is_numeric($health['responseTimeMs'] ?? null) ? (float) $health['responseTimeMs']
+            : (is_numeric($health['responseMs'] ?? null) ? (float) $health['responseMs'] : null);
         if ($ms === null) return 0.5;
         if ($ms <= 400) return 1.0;
         if ($ms >= 3000) return 0.0;

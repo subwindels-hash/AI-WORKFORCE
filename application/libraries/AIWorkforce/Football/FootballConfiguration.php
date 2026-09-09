@@ -148,6 +148,60 @@ final class FootballConfiguration
     }
 
     /**
+     * The premium (featured) competitions — the leagues the Premium League
+     * selector offers. Premium is an *application-level* classification: no
+     * provider numbers competitions the same way, so a league is premium
+     * because this deployment classified it, not because a feed says so.
+     *
+     * The list is configuration, and it is a list rather than a single value
+     * because "premium" in football means a group of leagues — the Premier
+     * League, the Champions League, La Liga, Serie A, the Bundesliga, Ligue 1
+     * — not one flagship. Matching is by name or by provider competition id.
+     *
+     * @return list<string> names and/or provider competition ids, as configured
+     */
+    public function premiumCompetitions(): array
+    {
+        $configured = $this->text('WINDELS_FOOTBALL_PREMIUM_COMPETITIONS', '');
+        $out = [];
+        foreach (explode(',', $configured) as $entry) {
+            $entry = trim($entry);
+            if ($entry !== '') $out[] = $entry;
+        }
+        return $out === [] ? [$this->premiumCompetition()['name']] : $out;
+    }
+
+    /**
+     * Is this competition premium, by name or by provider competition id?
+     * Both are compared loosely (case, punctuation and accents aside) because
+     * the same league is "Premier League" to one feed and "English Premier
+     * League" to another.
+     */
+    public function isPremiumCompetition(?string $name, ?string $externalId = null): bool
+    {
+        return $this->matchedPremium($name, $externalId) !== null;
+    }
+
+    /**
+     * The configured premium league this competition is, or null when it is
+     * not premium. Returning the matching entry — not just a boolean — is what
+     * lets two providers' different names for one league ("Premier League" and
+     * "English Premier League") collapse onto one internal competition.
+     */
+    public function matchedPremium(?string $name, ?string $externalId = null): ?string
+    {
+        foreach ($this->premiumCompetitions() as $premium) {
+            if ($externalId !== null && trim($externalId) !== '' && strtolower(trim($premium)) === strtolower(trim($externalId))) return $premium;
+            if ($name === null || trim($name) === '') continue;
+            if (strtolower(trim($premium)) === strtolower(trim($name))) return $premium;
+            $loose = static fn(string $value): string => trim((string) preg_replace('/[^a-z0-9]+/', ' ', strtolower($value)));
+            $a = $loose($premium); $b = $loose($name);
+            if ($a !== '' && $b !== '' && ($a === $b || str_contains($a, $b) || str_contains($b, $a))) return $premium;
+        }
+        return null;
+    }
+
+    /**
      * The default odds-prediction market, i.e. the market a request is answered
      * in when it does not name one. Every market in
      * `PredictionMarkets::catalog()` is accepted; an unknown name is reported

@@ -27,7 +27,8 @@ final class FootballMatch
      *  @param array<string,mixed> $odds @param array<string,mixed> $statistics
      *  @param array<int,mixed> $injuries @param array<int,mixed> $lineups
      *  @param array<string,mixed>|null $form @param array<string,mixed>|null $h2h
-     *  @param array<int,array<string,mixed>> $dataSources */
+     *  @param array<int,array<string,mixed>> $dataSources
+     *  @param ?string $country the competition's country, when the provider named it */
     public function __construct(
         public readonly string $id,
         public readonly array $providers,
@@ -46,6 +47,7 @@ final class FootballMatch
         public readonly ?array $form = null,
         public readonly ?array $h2h = null,
         public readonly array $dataSources = [],
+        public readonly ?string $country = null,
     ) {}
 
     /**
@@ -88,6 +90,7 @@ final class FootballMatch
             h2h: is_array($normalized['h2h'] ?? null) ? $normalized['h2h'] : null,
             dataSources: $provider === '' ? [] : [['provider' => $provider, 'classes' => ['fixtures'],
                 'providerMatchId' => $external !== '' ? $external : null]],
+            country: self::blankToNull($normalized['country'] ?? null),
         );
     }
 
@@ -144,6 +147,7 @@ final class FootballMatch
             form: $this->form ?? $other->form,
             h2h: $this->h2h ?? $other->h2h,
             dataSources: $sources,
+            country: $this->country ?? $other->country,
         );
     }
 
@@ -157,7 +161,7 @@ final class FootballMatch
             competitionName: $this->competitionName, season: $this->season, homeTeam: $this->homeTeam,
             awayTeam: $this->awayTeam, kickoffTime: $this->kickoffTime, status: $this->status, venue: $this->venue,
             odds: $this->odds, statistics: $this->statistics, injuries: $this->injuries, lineups: $this->lineups,
-            form: $this->form, h2h: $this->h2h, dataSources: $sources,
+            form: $this->form, h2h: $this->h2h, dataSources: $sources, country: $this->country,
         );
     }
 
@@ -182,6 +186,7 @@ final class FootballMatch
             'form' => $this->form,
             'h2h' => $this->h2h,
             'dataSources' => $this->dataSources,
+            'country' => $this->country,
         ];
     }
 

@@ -94,12 +94,21 @@ final class MatchFeed
         $competitions = $this->repo->listCompetitions($filter);
         $premium = $this->premiumCompetition($competitions);
         foreach ($competitions as &$competition) {
-            $competition['premium'] = $premium !== null && (string) $competition['externalId'] === (string) $premium['externalId'];
+            // Premium is this deployment's classification of a league, not a
+            // provider league id, so every competition on the date is judged
+            // against the configured premium list — not only the featured one.
+            // That is what makes the Premium League selector a list of leagues
+            // (Premier League, Champions League, La Liga…) rather than a single
+            // featured competition standing in for the whole idea.
+            $competition['premium'] = $this->config->isPremiumCompetition(
+                (string) ($competition['name'] ?? ''), (string) ($competition['externalId'] ?? ''));
         }
         unset($competition);
+        $premiumList = array_values(array_filter($competitions, static fn(array $c): bool => !empty($c['premium'])));
         return [
             'competitions' => $competitions,
             'premium' => $premium,
+            'premiumCompetitions' => $premiumList,
             'total' => count($competitions),
             'state' => $competitions === [] ? DataState::UNAVAILABLE : 'AVAILABLE',
             'message' => $competitions === []

@@ -391,10 +391,31 @@ two clubs meet again in the reverse fixture. Two tables back this:
 - `football_competition_mapping` — the internal competition a provider's league
   id stands for, with the deployment's own `tier`, `premium` and `active`
   classification. **Premium is an application-level label, not a provider league
-  id.**
+  id.** The mapping is written as fixtures are read: each provider row's league
+  id and name are recorded against the internal competition, so the competition
+  dropdown is populated from the provider that was selected. A row the provider
+  gave no competition id for is not mapped — a league guessed from a name alone
+  would merge two competitions.
 
 The same match from three feeds is one match, one prediction and — in
 `MULTI` — one fixture request per contributing feed, never one per match.
+
+### Premium leagues
+
+`WINDELS_FOOTBALL_PREMIUM_COMPETITIONS` is a comma-separated list of leagues
+this deployment classifies as premium — names or provider competition ids:
+
+```
+WINDELS_FOOTBALL_PREMIUM_COMPETITIONS=Premier League, UEFA Champions League, La Liga, Serie A, Bundesliga, Ligue 1
+```
+
+A league is premium because it was classified, and names match loosely, so one
+feed's "English Premier League" and another's "Premier League" are the same
+premium competition — and the same internal competition id. The Premium League
+selector offers every premium league that has a match on the date, with the
+featured one marked; a league that was not classified is never offered as
+premium, and a configured premium league with no match on the date is
+substituted by the featured competition with that stated, never silently.
 
 ### Odds fallback
 
@@ -680,6 +701,9 @@ WINDELS_FOOTBALL_ANALYSIS_LIMIT=120          fixtures one analysis pass may eval
 WINDELS_FOOTBALL_MATCH_PAGE_SIZE=50          matches per page and per generation request (1..50, hard-capped in code)
 WINDELS_FOOTBALL_PREMIUM_COMPETITION=English Premier League   the featured ("Premium") league the console offers first
 WINDELS_FOOTBALL_PREMIUM_COMPETITION_ID=39   optional: pin it to a provider competition id instead of matching the name
+WINDELS_FOOTBALL_PREMIUM_COMPETITIONS=English Premier League  comma-separated list of leagues classified premium (names or
+                                             provider competition ids); matches loosely, so "English Premier League"
+                                             and "Premier League" are one premium competition
 WINDELS_FOOTBALL_DEFAULT_MARKET=MATCH_WINNER the market a request is answered in when it names none
 WINDELS_FOOTBALL_FIRST_HALF_SHARE=0.45       goal expectancy attributed to the first half (0.20..0.80); named in the market basis
 WINDELS_FOOTBALL_MAX_GOALS=8                 scoreline grid width per team (4..12)

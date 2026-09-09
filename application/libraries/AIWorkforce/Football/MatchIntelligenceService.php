@@ -114,8 +114,10 @@ final class MatchIntelligenceService
                 'name' => $this->displayName($id),
                 'status' => (string) ($health['status'] ?? 'UNKNOWN'),
                 'detail' => (string) ($health['detail'] ?? ''),
-                'responseTimeMs' => $health['responseTimeMs'] ?? null,
-                'lastSuccessfulRequest' => $health['lastSuccessfulRequest'] ?? null,
+                // The adapters report `responseMs` / `lastSuccessAt`; a feed that
+                // reports it another way is shown as unknown rather than as fast.
+                'responseTimeMs' => $health['responseTimeMs'] ?? $health['responseMs'] ?? null,
+                'lastSuccessfulRequest' => $health['lastSuccessfulRequest'] ?? $health['lastSuccessAt'] ?? null,
                 'lastError' => $health['lastError'] ?? null,
                 'rateLimit' => [
                     'requestsToday' => $health['requestsToday'] ?? null,
@@ -341,11 +343,61 @@ final class MatchIntelligenceService
             'homeTeam' => $candidate['homeTeam'],
             'awayTeam' => $candidate['awayTeam'],
             'kickoff' => $candidate['kickoff'],
-            'competitionInternalId' => $match->competitionId,
+            'competitionInternalId' => $this->internalCompetitionId($match),
             'matchedBy' => $matchedBy,
             'confidence' => (float) ($existing['score'] ?? 1.0),
         ]);
+        $this->recordCompetition($providerCode, $match);
         return [$canonicalId, $match];
+    }
+
+    /**
+     * Record the competition a provider row belongs to.
+     *
+     * The competition dropdown has to be populated from the provider that was
+     * selected, and the same league is a different number in every feed — 39 in
+     * API-Football, 1 in SportMonks, 4328 in TheSportsDB. Each row is therefore
+     * mapped as it is read: the provider's own id, the name it uses, and this
+     * deployment's classification (tier, premium, active). Premium is decided
+     * here, by configuration, not by a provider league id.
+     *
+     * A row the provider gave no competition id for is not mapped: a mapping
+     * invented from a name alone would merge two different leagues.
+     */
+    private function recordCompetition(string $providerCode, FootballMatch $match): void
+    {
+        $external = (string) ($match->competitionId ?? '');
+        $name = (string) ($match->competitionName ?? '');
+        if ($external === '' || $name === '') return;
+        $premium = $this->config->isPremiumCompetition($name, $external);
+        $this->repo->saveCompetitionMapping([
+            'internalId' => $this->internalCompetitionId($match),
+            'providerCode' => $providerCode,
+            'providerCompetitionId' => $external,
+            'competitionName' => $name,
+            'country' => $match->country ?? null,
+            'tier' => $premium ? 'PREMIUM' : 'STANDARD',
+            'premium' => $premium,
+            'active' => true,
+        ]);
+    }
+
+    /**
+     * The internal id of a competition: the normalized name, so the league is
+     * the same entity whichever provider's id was read. "English Premier
+     * League" and "Premier League" collapse to the same internal competition
+     * because the mapping — not the provider's number — is what identifies it.
+     */
+    private function internalCompetitionId(FootballMatch $match): ?string
+    {
+        $name = (string) ($match->competitionName ?? '');
+        if ($name === '') return null;
+        // A premium league is identified by the name this deployment gave it,
+        // so one feed's "English Premier League" and another's "Premier
+        // League" are the same internal competition instead of two.
+        $premium = $this->config->matchedPremium($name, (string) ($match->competitionId ?? ''));
+        $slug = strtoupper(CanonicalMatch::slug($premium ?? $name));
+        return $slug !== '' ? $slug : null;
     }
 
     /** @param array<int,array<string,mixed>> $rows @return array<string,mixed> */

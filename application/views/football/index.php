@@ -26,6 +26,12 @@ $summary = $board['summary'] ?? ['fixtures' => 0, 'analyzed' => 0, 'qualified' =
 $filters = is_array($board['filters'] ?? null) ? $board['filters'] : [];
 $competitions = is_array($filters['competitions']['competitions'] ?? null) ? $filters['competitions']['competitions'] : [];
 $premium = is_array($filters['competitions']['premium'] ?? null) ? $filters['competitions']['premium'] : null;
+// Every competition on this date the deployment classifies as premium, not just
+// the featured one: the Premium League selector offers the leagues that were
+// classified, in the order the feed sent them.
+$premiumOptions = array_values(array_filter(
+    is_array($filters['competitions']['premiumCompetitions'] ?? null) ? $filters['competitions']['premiumCompetitions'] : [],
+    static fn($entry): bool => is_array($entry) && (string) ($entry['externalId'] ?? '') !== ''));
 $selectedCompetition = is_array($filters['competition'] ?? null) ? $filters['competition'] : null;
 $selectedExternal = (string) ($selectedCompetition['externalId'] ?? '');
 $marketBlock = is_array($board['market'] ?? null) ? $board['market'] : [];
@@ -216,12 +222,13 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
             <div>
               <label class="dim" style="font-size:11px;display:block">Premium League</label>
               <select name="premium" style="min-width:200px" onchange="if(this.value!==''){this.form.competition.value=this.value;this.form.submit();}">
-                <option value=""><?= $premium === null ? 'No premium competition stored' : '— featured —' ?></option>
-                <?php if ($premium !== null): ?>
-                  <option value="<?= e((string) ($premium['externalId'] ?? '')) ?>"<?= $selectedExternal === (string) ($premium['externalId'] ?? '') ? ' selected' : '' ?>>
-                    <?= e((string) ($premium['name'] ?? 'Premium League')) ?> (<?= (int) ($premium['matches'] ?? 0) ?> matches)
+                <option value=""><?= $premiumOptions === [] ? 'No premium competition stored' : '— featured —' ?></option>
+                <?php foreach ($premiumOptions as $entry): ?>
+                  <?php $externalId = (string) ($entry['externalId'] ?? ''); ?>
+                  <option value="<?= e($externalId) ?>"<?= $selectedExternal === $externalId ? ' selected' : '' ?>>
+                    <?= e((string) ($entry['name'] ?? 'Premium League')) ?> (<?= (int) ($entry['matches'] ?? 0) ?> matches)<?= $externalId === (string) ($premium['externalId'] ?? '') ? ' · featured' : '' ?>
                   </option>
-                <?php endif; ?>
+                <?php endforeach; ?>
               </select>
             </div>
             <div>

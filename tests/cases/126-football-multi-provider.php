@@ -728,3 +728,92 @@ test('multi-provider: a material price move replaces the prediction, and a tick 
         }
     }
 });
+
+// ─── 11. Competition mapping is populated from the provider that was read ────
+
+test('multi-provider: reading a provider records the competition it carries, per provider id', function () {
+    $repo = new FootballRepositoryStub();
+    $config = new FootballConfiguration(['WINDELS_FOOTBALL_PREMIUM_COMPETITIONS' => 'Premier League']);
+    $manager = new SportsProviderManager();
+    $manager->register(new FxFullFeed('api-football', [
+        fx_multi_row('1', 'Chelsea', 'Liverpool', '2026-09-12T14:00:00Z', 'Premier League', '39'),
+        fx_multi_row('2', 'Al Hilal', 'Al Nassr', '2026-09-12T16:00:00Z', 'Saudi Pro League', '307'),
+    ]));
+    $manager->register(new FxFullFeed('sportmonks', [
+        fx_multi_row('77', 'Chelsea', 'Liverpool', '2026-09-12T15:00:00+01:00', 'Premier League', '1'),
+    ]));
+    $gateway = new ProviderGateway($manager, $config);
+    $service = new MatchIntelligenceService($gateway, new ProviderSelector($gateway, $config), $repo, $config);
+
+    $notes = [];
+    $service->matches(['provider' => 'MULTI', 'date' => '2026-09-12'], $notes);
+
+    $epl = $repo->findCompetitionMapping('api-football', '39');
+    assert_not_null($epl, 'the competition the provider sent is mapped, not invented');
+    assert_equals('PREMIER_LEAGUE', $epl['internal_id'], 'the internal competition is the deployment id, not the provider number');
+    assert_true((bool) $epl['premium'], 'premium is this deployment\'s classification of the league');
+    assert_equals('PREMIUM', $epl['tier']);
+
+    $saudi = $repo->findCompetitionMapping('api-football', '307');
+    assert_not_null($saudi);
+    assert_equals('SAUDI_PRO_LEAGUE', $saudi['internal_id']);
+    assert_false((bool) $saudi['premium'], 'a league that was not classified premium is not premium');
+
+    // The same competition under another feed's id is the same competition.
+    $other = $repo->findCompetitionMapping('sportmonks', '1');
+    assert_not_null($other);
+    assert_equals($epl['internal_id'], $other['internal_id'], 'API-Football 39 and SportMonks 1 are one competition');
+    assert_true((bool) $other['premium']);
+});
+
+test('multi-provider: a row the provider gave no competition id for is not mapped', function () {
+    $repo = new FootballRepositoryStub();
+    $config = new FootballConfiguration();
+    $manager = new SportsProviderManager();
+    $manager->register(new FxFullFeed('api-football', [
+        fx_multi_row('1', 'Chelsea', 'Liverpool', '2026-09-12T14:00:00Z', 'Premier League', ''),
+    ]));
+    $gateway = new ProviderGateway($manager, $config);
+    $service = new MatchIntelligenceService($gateway, new ProviderSelector($gateway, $config), $repo, $config);
+    $notes = [];
+    $service->matches([], $notes);
+    assert_equals([], $repo->competitionMappings, 'no competition id, no mapping — a guessed league would merge two competitions');
+});
+
+test('multi-provider: premium is classification, so the same league under three ids is premium in all of them', function () {
+    $config = new FootballConfiguration(['WINDELS_FOOTBALL_PREMIUM_COMPETITIONS' => 'Premier League, UEFA Champions League, 39']);
+    assert_true($config->isPremiumCompetition('Premier League'), 'by name');
+    assert_true($config->isPremiumCompetition('English Premier League'), 'a provider\'s longer name for the same league');
+    assert_true($config->isPremiumCompetition('Saudi Pro League', '39'), 'by provider competition id');
+    assert_false($config->isPremiumCompetition('Saudi Pro League', '307'));
+    assert_false($config->isPremiumCompetition(null, null), 'nothing named means nothing is premium');
+});
+
+test('multi-provider: the Premium League selector offers every premium league on the date, not only the featured one', function () {
+    require_once TESTSPATH . 'football_support.php';
+    $config = ['WINDELS_FOOTBALL_PREMIUM_COMPETITIONS' => 'Premier League, La Liga, UEFA Champions League'];
+    [$repo, , $module, $day] = fx_multi_paged_day(2, $config);
+    // A second premium league with a match on the same date, stored the way a
+    // sync stores one: a competition row and a fixture pointing at it.
+    $laLiga = $repo->saveCompetition(1, ['externalId' => '140', 'name' => 'La Liga', 'country' => 'Spain']);
+    foreach ($repo->fixtures as &$storedFixture) {
+        if ((string) ($storedFixture['external_id'] ?? '') === 'fx-page-1') {
+            $storedFixture['competition'] = 'La Liga';
+            $storedFixture['competition_id'] = (int) ($laLiga['id'] ?? 140);
+        }
+    }
+    unset($storedFixture);
+
+    $listed = $module->feed()->competitions($day, null);
+    $premiumNames = array_column((array) ($listed['premiumCompetitions'] ?? []), 'name');
+    sort($premiumNames);
+    assert_in_array('Premier League', $premiumNames, 'the configured premium league is offered');
+    assert_in_array('La Liga', $premiumNames, 'so is the second one');
+    assert_false(in_array('Saudi Pro League', $premiumNames, true), 'a league that was not classified premium is not offered as premium');
+    // The featured competition is still named separately, and is one of them.
+    assert_in_array((string) ($listed['premium']['name'] ?? ''), $premiumNames);
+    foreach ((array) ($listed['competitions'] ?? []) as $competition) {
+        $isPremium = in_array((string) ($competition['name'] ?? ''), $premiumNames, true);
+        assert_equals($isPremium, !empty($competition['premium']), 'each competition is marked premium exactly when it was classified premium');
+    }
+});
