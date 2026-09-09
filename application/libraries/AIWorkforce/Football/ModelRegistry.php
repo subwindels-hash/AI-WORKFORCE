@@ -138,7 +138,8 @@ final class ModelRegistry
             'label' => 'MODEL_' . strtoupper((string) ($best['status'] ?? self::DRAFT)),
             'publishable' => true,
             'highConfidenceAllowed' => false,
-            'reason' => 'Predictions still run with the configured 70%+ confidence tiers. The HIGH_CONFIDENCE badge is reserved until an administrator activates the model.',
+            'reason' => 'The model version is in state ' . (string) ($best['status'] ?? self::DRAFT)
+                . ' — not ACTIVE. Predictions still run with the configured 70%+ confidence tiers, and the HIGH_CONFIDENCE badge is reserved until an administrator moves a version to ACTIVE.',
         ];
     }
 

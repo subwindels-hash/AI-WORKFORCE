@@ -69,6 +69,11 @@ def is_release_file(path: Path) -> bool:
         return path.name == ".gitkeep"
     if rel.startswith("assets/uploads/avatars/"):
         return path.name in {".gitkeep", "index.html", ".htaccess"}
+    # Schema/identity/provider stamp files are written into the application
+    # cache by a local runtime and their names embed environment-specific
+    # hashes, so they must never be part of a release archive.
+    if rel.startswith("application/cache/"):
+        return path.name in {".gitkeep", "index.html", ".htaccess"}
 
     return True
 
