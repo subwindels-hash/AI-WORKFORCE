@@ -293,6 +293,11 @@ $route['api/football/matches/(:num)/analysis'] = 'api_football/analysis/$1';
 $route['api/football/matches/(:num)/prediction'] = 'api_football/prediction/$1';
 $route['api/football/predictions/today'] = 'api_football/predictions_today';
 $route['api/football/predictions/history'] = 'api_football/predictions_history';
+// Generic prediction reads. They come AFTER the specific ones above: CI3 matches
+// routes in the order they are declared, so `/predictions/today` still resolves
+// to the board endpoint and only anything else falls through to these.
+$route['api/football/predictions/(:any)'] = 'api_football/show_prediction/$1';
+$route['api/football/predictions'] = 'api_football/predictions';
 $route['api/football/performance'] = 'api_football/performance';
 $route['api/football/models'] = 'api_football/models';
 $route['api/football/models/active'] = 'api_football/models_active';

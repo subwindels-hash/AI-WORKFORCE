@@ -356,6 +356,78 @@ class Api_football extends Api_controller
 
     // ------------------------------------------------------------- predictions
 
+    /**
+     * The stored predictions for a date — the canonical `GET
+     * /api/football/predictions` of the multi-provider spec, answered from the
+     * same board the console reads. `?page=1&limit=50` is the paged form.
+     */
+    public function predictions()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        $date = \AIWorkforce\Football\RequestParams::date($g, 'date', gmdate('Y-m-d'), $notes);
+        $page = \AIWorkforce\Football\RequestParams::int($g, 'page', 1, 1, \AIWorkforce\Football\MatchFeed::MAX_PAGE, $notes);
+        $limit = \AIWorkforce\Football\RequestParams::int($g, 'limit', \AIWorkforce\Football\MatchFeed::DEFAULT_PAGE_SIZE,
+            1, \AIWorkforce\Football\MatchFeed::MAX_PAGE_SIZE, $notes);
+        $options = $this->feedOptions($g, $notes);
+        $payload = $this->football()->feed()->page($date, $page, $limit, false, $options);
+        $payload['request']['notes'] = array_values(array_merge($notes, (array) ($payload['request']['notes'] ?? [])));
+        $payload['request']['limitMaximum'] = \AIWorkforce\Football\MatchFeed::MAX_PAGE_SIZE;
+        $this->json($payload);
+    }
+
+    /**
+     * One prediction by match id (`provider:externalId`) — the identity a
+     * prediction is stored and paged under, so a caller that knows the match
+     * does not have to know the internal fixture id.
+     */
+    public function show_prediction(string $matchId)
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $fixtureId = $this->fixtureIdForMatchId($matchId);
+        if ($fixtureId === null) {
+            $this->json(['status' => 'NOT_FOUND', 'matchId' => $matchId,
+                'dataState' => \AIWorkforce\Football\DataState::UNAVAILABLE,
+                'message' => 'No stored match has the id ' . $matchId . '. A match id is provider:externalId, '
+                    . 'for example api-football:1201; the paged feed returns it per match.'], 404);
+            return;
+        }
+        $generate = in_array((string) $this->input->get('generate'), ['1', 'true'], true);
+        if ($generate && !$this->requirePermission('sports.manage')) return;
+        $payload = $this->football()->predictionFor($fixtureId, $generate);
+        $payload['matchId'] = $matchId;
+        $this->json($payload, ($payload['status'] ?? '') === 'NOT_FOUND' ? 404 : 200);
+    }
+
+    /**
+     * A match id (`provider:externalId`) onto the stored fixture row. The
+     * provider's code is resolved from the registry rather than assumed, so a
+     * match id from a feed that is not connected is reported as not found
+     * instead of being matched against the wrong provider's fixtures.
+     */
+    private function fixtureIdForMatchId(string $matchId): ?int
+    {
+        $matchId = trim($matchId);
+        if ($matchId === '') return null;
+        $code = '';
+        $external = $matchId;
+        if (str_contains($matchId, ':')) {
+            [$code, $external] = explode(':', $matchId, 2);
+        }
+        $providerId = null;
+        foreach ($this->AIWorkforce_model->football->listProviders() as $provider) {
+            // Stored rows carry `provider_code`; `code` is accepted from a
+            // caller that already normalized the row.
+            $rowCode = (string) ($provider['provider_code'] ?? $provider['code'] ?? '');
+            if ($code !== '' && strtolower($rowCode) !== strtolower($code)) continue;
+            if ($providerId === null) $providerId = (int) ($provider['id'] ?? 0);
+        }
+        if ($providerId === null || $providerId <= 0) return null;
+        $fixture = $this->AIWorkforce_model->football->findFixture($providerId, $external);
+        return $fixture === null ? null : (int) ($fixture['id'] ?? 0);
+    }
+
     /** Today's board: tiers, counts and per-fixture cards (§10/§11). */
     public function predictions_today()
     {

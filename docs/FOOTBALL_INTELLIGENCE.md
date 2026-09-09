@@ -525,6 +525,8 @@ GET /api/football/markets               ?date=   the odds-prediction markets and
 GET /api/football/matches/:id            fixture + statistics + H2H as stored
 GET /api/football/matches/:id/analysis
 GET /api/football/matches/:id/prediction
+GET /api/football/predictions            ?date=&page=1&limit=50&competition=&market=&line=   the paged prediction feed
+GET /api/football/predictions/:matchId   one prediction by match id (`provider:externalId`)
 GET /api/football/predictions/today      ?date=&refresh=1
 GET /api/football/predictions/history  ?limit=&modelVersionId=
 GET /api/football/performance            ?days=30&modelVersionId=
