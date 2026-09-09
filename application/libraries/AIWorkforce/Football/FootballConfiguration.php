@@ -88,10 +88,141 @@ final class FootballConfiguration
         return max(0, (int) $this->num('WINDELS_FOOTBALL_DAILY_REQUEST_CEILING', 0));
     }
 
+    /**
+     * How long a stored prediction stays valid before new data may justify
+     * replacing it. Regeneration is the exception, not the rule — this is what
+     * puts a bound on the exception.
+     */
+    public function predictionTtlSeconds(): int
+    {
+        return max(0, (int) $this->num('WINDELS_FOOTBALL_PREDICTION_TTL_SECONDS', 6 * 3600));
+    }
+
+    /**
+     * How far a price has to move, in implied-probability points, before the
+     * move is material enough to warrant regenerating a prediction. A tick is
+     * not a reason; a five-point swing is.
+     */
+    public function oddsMovementThreshold(): float
+    {
+        return max(0.0, min(1.0, (float) $this->num('WINDELS_FOOTBALL_ODDS_MOVEMENT_THRESHOLD', 0.05)));
+    }
+
     /** How many fixtures one analysis pass may evaluate (bounded, never "all"). */
     public function analysisLimit(): int
     {
         return max(1, min(500, (int) $this->num('WINDELS_FOOTBALL_ANALYSIS_LIMIT', 120)));
+    }
+
+    /**
+     * Matches per page — and therefore matches per generation request.
+     *
+     * The page size is deliberately small and hard-capped: the module pages
+     * through *persisted* matches 50 at a time, and a generation request may
+     * never produce more than one page of new predictions. Raising it above
+     * `MatchFeed::MAX_PAGE_SIZE` cannot happen here — the ceiling is enforced
+     * again in the service, so an operator cannot talk the module into asking
+     * for a thousand predictions in one call.
+     */
+    public function matchPageSize(): int
+    {
+        return max(1, min(MatchFeed::MAX_PAGE_SIZE, (int) $this->num('WINDELS_FOOTBALL_MATCH_PAGE_SIZE', MatchFeed::DEFAULT_PAGE_SIZE)));
+    }
+
+    /**
+     * The premium (featured) competition — the league the console offers first
+     * and processes by default. It is configuration, not a constant, so an
+     * operator running a different flagship league does not have to fork the
+     * module; the default is the English Premier League.
+     *
+     * @return array{name:string,externalId:?string}
+     */
+    public function premiumCompetition(): array
+    {
+        $name = $this->text('WINDELS_FOOTBALL_PREMIUM_COMPETITION', '');
+        $external = $this->text('WINDELS_FOOTBALL_PREMIUM_COMPETITION_ID', '');
+        return [
+            'name' => $name !== '' ? $name : 'English Premier League',
+            'externalId' => $external !== '' ? $external : null,
+        ];
+    }
+
+    /**
+     * The premium (featured) competitions — the leagues the Premium League
+     * selector offers. Premium is an *application-level* classification: no
+     * provider numbers competitions the same way, so a league is premium
+     * because this deployment classified it, not because a feed says so.
+     *
+     * The list is configuration, and it is a list rather than a single value
+     * because "premium" in football means a group of leagues — the Premier
+     * League, the Champions League, La Liga, Serie A, the Bundesliga, Ligue 1
+     * — not one flagship. Matching is by name or by provider competition id.
+     *
+     * @return list<string> names and/or provider competition ids, as configured
+     */
+    public function premiumCompetitions(): array
+    {
+        $configured = $this->text('WINDELS_FOOTBALL_PREMIUM_COMPETITIONS', '');
+        $out = [];
+        foreach (explode(',', $configured) as $entry) {
+            $entry = trim($entry);
+            if ($entry !== '') $out[] = $entry;
+        }
+        return $out === [] ? [$this->premiumCompetition()['name']] : $out;
+    }
+
+    /**
+     * Is this competition premium, by name or by provider competition id?
+     * Both are compared loosely (case, punctuation and accents aside) because
+     * the same league is "Premier League" to one feed and "English Premier
+     * League" to another.
+     */
+    public function isPremiumCompetition(?string $name, ?string $externalId = null): bool
+    {
+        return $this->matchedPremium($name, $externalId) !== null;
+    }
+
+    /**
+     * The configured premium league this competition is, or null when it is
+     * not premium. Returning the matching entry — not just a boolean — is what
+     * lets two providers' different names for one league ("Premier League" and
+     * "English Premier League") collapse onto one internal competition.
+     */
+    public function matchedPremium(?string $name, ?string $externalId = null): ?string
+    {
+        foreach ($this->premiumCompetitions() as $premium) {
+            if ($externalId !== null && trim($externalId) !== '' && strtolower(trim($premium)) === strtolower(trim($externalId))) return $premium;
+            if ($name === null || trim($name) === '') continue;
+            if (strtolower(trim($premium)) === strtolower(trim($name))) return $premium;
+            $loose = static fn(string $value): string => trim((string) preg_replace('/[^a-z0-9]+/', ' ', strtolower($value)));
+            $a = $loose($premium); $b = $loose($name);
+            if ($a !== '' && $b !== '' && ($a === $b || str_contains($a, $b) || str_contains($b, $a))) return $premium;
+        }
+        return null;
+    }
+
+    /**
+     * The default odds-prediction market, i.e. the market a request is answered
+     * in when it does not name one. Every market in
+     * `PredictionMarkets::catalog()` is accepted; an unknown name is reported
+     * and falls back to this.
+     */
+    public function defaultMarket(): string
+    {
+        $value = strtoupper($this->text('WINDELS_FOOTBALL_DEFAULT_MARKET', ''));
+        return $value !== '' ? $value : PredictionMarkets::DEFAULT_MARKET;
+    }
+
+    /**
+     * Share of a match's goal expectancy the model attributes to the first
+     * half, used only by the two first-half markets. It is an assumption rather
+     * than a stored input, so it is configurable and named in the market's
+     * `basis` (`FIRST_HALF_SHARE_0.45`) wherever it is used.
+     */
+    public function firstHalfGoalShare(): float
+    {
+        $value = (float) $this->num('WINDELS_FOOTBALL_FIRST_HALF_SHARE', 0.45);
+        return max(0.2, min(0.8, $value));
     }
 
     /** Scoreline grid: goals per team. 8 covers >99.9% of real football scores. */
@@ -214,6 +345,8 @@ final class FootballConfiguration
             'maxDataAgeSeconds' => $this->maxDataAgeSummary(),
             'minRequestSpacingMs' => $this->minRequestSpacingMs(),
             'analysisLimit' => $this->analysisLimit(),
+            'matchPageSize' => $this->matchPageSize(),
+            'maxMatchPageSize' => MatchFeed::MAX_PAGE_SIZE,
             'model' => [
                 'maxGoals' => $this->maxGoals(),
                 'dixonColesRho' => $this->dixonColesRho(),
@@ -225,6 +358,14 @@ final class FootballConfiguration
                 'limitedDataQuality' => QualityBand::LIMITED_MIN,
             ],
         ];
+    }
+
+    /** A free-text setting: overrides win, then the environment, then the default. */
+    private function text(string $name, string $default): string
+    {
+        if (array_key_exists($name, $this->overrides)) return trim((string) $this->overrides[$name]);
+        $value = getenv($name);
+        return $value === false ? $default : trim((string) $value);
     }
 
     private function num(string $name, int|float $default): int|float

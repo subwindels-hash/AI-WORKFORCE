@@ -66,10 +66,11 @@ MARKET DATA  →  ANALYSIS ENGINES  →  SPECIALIZED AI AGENTS  →  TRADING INT
 | **Admin-sent notifications** (`/admin/notifications` → send panel): one member or every active account, per-recipient read state, audited as NOTIFICATION_SENT | **TESTED** |
 | **Direct member ⇄ admin messages** (`/messages` member page, `/admin/messages` console): one support thread per member, per-side read badges, start-by-username/email/User-ID, audited as MESSAGE_SENT | **TESTED** |
 | **Scheduled operations worker** (`php index.php tools cron`): portfolio scan, broker transitions, proposal expiry | **TESTED** |
+| **Football Intelligence — paginated match feed** (`/football`, `/api/football/matches`): 50 matches per page with Previous / Next pager, at most **50 new predictions per generation request**, two-stage flow (stored fixtures → check `match_id` against the database → new matches only → prediction engine → save with model version + timestamp), stored predictions reused instead of regenerated when paging, `UNIQUE(fixture_id, prediction_kind, model_version_id)` duplicate guard, hard server-side `limit <= 50`, date-wide counts over paged rendering | **TESTED** (16 cases in `tests/cases/124-football-match-pagination.php`, 15 in `tests/cases/125-football-competition-market-selection.php`) | — plus competition / premium-league / odds-market selection: competitions listed from the provider feed, configurable featured league (default English Premier League), 19 markets (1X2, Double Chance, Draw No Bet, Over/Under 0.5–3.5, BTTS, BTTS + Over 2.5, first half, correct score, Asian handicap, corners, cards) summed from the stored score distribution, quoted odds shown with implied probability and edge and reported DATA_UNAVAILABLE when the feed priced none, market changes and page changes never regenerate a match |
 | **Lottery Intelligence (EuroMillions)**: rule engine, validated idempotent ingestion (verified draws never silently overwritten), frequency/gap/hot-cold/distribution/pair statistics, per-line combination analyzer, 5-mode AI combination generator with lock/exclude + AI decision reports, diversification engine, system builder (C(N,5) combinatorics), user-scoped ticket builder + saved tickets, backtesting (Strategy Lab) with mandatory random baseline + same-period strategy comparison, model versioning, separated performance overview, RBAC (lottery.view/manage), idempotent lottery-cron | **TESTED** (dashboard UI at /lottery; admin controls, RBAC and idempotent ingestion wired; official feeds PLANNED) |
 | MT4 / crypto-exchange / stock-broker connectors + per-user broker connection dashboard | **IMPLEMENTED** (MT5 verified; user-scoped connections for MT4/MT5/OANDA/Alpaca/IBKR/Binance/Bybit/OKX/Coinbase/Kraken) |
 
-**529 automated tests** run through the real CodeIgniter stack
+**1055 automated tests** run through the real CodeIgniter stack
 (`php index.php tools tests` on any host; `node run-tests.mjs` in the offline
 sandbox — see below), plus 9 contract tests for the Python bridge
 (`python-services/mt5-bridge/.venv/bin/python -m pytest test_bridge.py`).
@@ -137,6 +138,16 @@ egress** — it cannot run native PHP or MariaDB. The demo therefore runs the
 cd runtime && npm install
 AI_WORKFORCE_ALLOW_SYNTHETIC_PAPER=1 node server.mjs   # CI3 app on :8080
 node run-tests.mjs                              # full test suite
+```
+
+The suite is **hermetic**: it sets `AI_WORKFORCE_DISABLE_REAL_PROVIDERS=1`, so
+no case can depend on the public internet. Without it a sandbox with no egress
+— or a real outage — registers the public feeds as DOWN, and an unrelated
+trading case then fails because the market-data kill switch is engaged. Cases
+that test a provider construct it directly. Run the host CLI the same way:
+
+```bash
+AI_WORKFORCE_DISABLE_REAL_PROVIDERS=1 php index.php tools tests
 ```
 
 This is a **dev bridge only** — `runtime/` is not part of the production

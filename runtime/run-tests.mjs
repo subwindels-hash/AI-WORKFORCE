@@ -29,6 +29,12 @@ chdir('${root}');
 putenv('AI_WORKFORCE_DB_DRIVER=pdo_sqlite');
 putenv('AI_WORKFORCE_SQLITE_PATH=${process.env.AI_WORKFORCE_SQLITE_PATH.replaceAll("'", "\\'")}');
 putenv('AI_WORKFORCE_TEST_FILTER=${(process.env.AI_WORKFORCE_TEST_FILTER || '').replaceAll("'", "\\'")}');
+// The suite must not depend on the public internet. Real market-data providers
+// (exchanges, Yahoo…) are not registered here, so a sandbox without network —
+// or an outage — cannot engage the market-data kill switch and fail cases that
+// have nothing to do with the feed. Providers that need the network are tested
+// by constructing them directly.
+putenv('AI_WORKFORCE_DISABLE_REAL_PROVIDERS=1');
 ini_set('display_errors', '1');
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE & ~E_WARNING);
 // php-wasm runs with PHP_SAPI='wasm' — defining STDIN makes CI3's is_cli() true.

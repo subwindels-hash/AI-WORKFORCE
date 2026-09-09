@@ -35,6 +35,58 @@ interface FootballRepository
     public function saveCompetition(int $providerId, array $row): array;
     /** @return array<string,mixed>|null */
     public function findCompetition(int $providerId, string $externalId, ?string $season = null): ?array;
+
+    /**
+     * Competition mapping: the internal competition id a provider's own league
+     * id stands for, with the deployment's own classification (tier, premium,
+     * active). A premium league is an application-level label — no provider
+     * numbers competitions the same way, so the mapping is what makes the
+     * premium league resolvable whichever feed answered.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,mixed> stored row
+     */
+    public function saveCompetitionMapping(array $row): array;
+    /** @return array<string,mixed>|null */
+    public function findCompetitionMapping(string $providerCode, string $providerCompetitionId): ?array;
+    /**
+     * @param array<string,mixed> $filter keys: premium, active, internalId, providerCode
+     * @return array<int,array<string,mixed>>
+     */
+    public function listCompetitionMappings(array $filter = [], int $limit = 500): array;
+
+    /**
+     * Record that a provider's own match id is this canonical match. One
+     * internal match may carry a row per provider; the same match from a second
+     * feed links to the identity it already has instead of becoming a second
+     * fixture.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,mixed> stored row
+     */
+    public function saveProviderMatch(array $row): array;
+    /** @return array<string,mixed>|null */
+    public function findProviderMatch(string $providerCode, string $providerMatchId): ?array;
+    /** @return array<int,array<string,mixed>> every provider row behind one internal match */
+    public function listProviderMatches(string $internalMatchId): array;
+    /**
+     * The provider rows behind a whole page of internal matches, in one read —
+     * source attribution is part of every prediction result, and it must not
+     * cost one query per match.
+     *
+     * @param list<string> $internalMatchIds
+     * @return array<string,list<array<string,mixed>>> keyed by internal match id
+     */
+    public function listProviderMatchesFor(array $internalMatchIds): array;
+    /**
+     * The canonical match a provider row belongs to, searched by identity and
+     * then by normalized teams + kickoff date. Returns null when nothing
+     * matches — the caller then creates a new identity.
+     *
+     * @param array<string,mixed> $candidate keys: providerCode, providerMatchId, homeTeam, awayTeam, kickoff
+     * @return array{row:array<string,mixed>, score:float, matchedBy:string}|null
+     */
+    public function resolveCanonicalMatch(array $candidate): ?array;
     /** @return array<string,mixed> */
     public function saveTeam(int $providerId, array $row): array;
     /** @return array<string,mixed>|null */
@@ -49,9 +101,23 @@ interface FootballRepository
     public function findFixtureById(int $id): ?array;
     /** @return array<string,mixed>|null */
     public function findFixture(int $providerId, string $externalId): ?array;
-    /** Filter keys: date, from, to, status, competition, team, providerId,
-     *  unsettledOnly. @return array<int,array<string,mixed>> */
-    public function listFixtures(array $filter = [], int $limit = 500): array;
+    /**
+     * Filter keys: date, from, to, status, competition, team, providerId,
+     * unsettledOnly. Rows are ordered by kickoff then id, so a page boundary is
+     * stable: match 51 of a date is the same row on every call.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public function listFixtures(array $filter = [], int $limit = 500, int $offset = 0): array;
+
+    /**
+     * How many fixtures a filter matches, without loading them. Pagination
+     * needs the total to answer "Page 1 of 20" — it must never be guessed from
+     * the size of one page.
+     *
+     * @param array<string,mixed> $filter
+     */
+    public function countFixtures(array $filter = []): int;
     public function markFixtureSettled(int $id, string $at): void;
     /** Point a stored fixture at its competition row without touching provider facts. */
     public function linkFixtureCompetition(int $fixtureId, int $competitionId): void;
@@ -61,6 +127,19 @@ interface FootballRepository
      * @return array<int,array<string,mixed>>
      */
     public function listFixturesAwaitingResult(int $limit = 200, ?int $providerId = null): array;
+
+    /**
+     * The competitions the feed can be narrowed to, each with how many matches
+     * it has. This is the dropdown's source: competitions the provider has
+     * actually sent, never a hard-coded league list. `date` narrows the count to
+     * one day; without it the count is everything stored.
+     *
+     * Filter keys: date, providerId.
+     *
+     * @param array<string,mixed> $filter
+     * @return list<array<string,mixed>> rows of externalId, name, country, season, matches
+     */
+    public function listCompetitions(array $filter = [], int $limit = 200): array;
 
     // ── statistics ──────────────────────────────────────────────────────────
     /** @return array<string,mixed> */
@@ -108,11 +187,56 @@ interface FootballRepository
     public function findPrediction(string $id): ?array;
     /** Filter keys: fixtureId, date, from, to, kind, eligibility, modelVersionId,
      *  settlementState. @return array<int,array<string,mixed>> */
-    public function listPredictions(array $filter = [], int $limit = 500): array;
+    public function listPredictions(array $filter = [], int $limit = 500, int $offset = 0): array;
+
+    /**
+     * How many stored predictions a filter matches. The board's date-wide
+     * counts (analyzed / qualified / limited) are read from here rather than
+     * counted in PHP over one page, so the summary describes the whole date
+     * while the page shows 50 rows.
+     *
+     * @param array<string,mixed> $filter
+     */
+    public function countPredictions(array $filter = []): int;
+
+    /**
+     * The stored predictions for a specific set of fixtures — one query for a
+     * whole page of matches instead of one per match.
+     *
+     * This is the "check match_id against the database" step: the caller hands
+     * it the page's fixture ids and gets back only the predictions that already
+     * exist, so the generation stage is handed the difference.
+     *
+     * @param list<int> $fixtureIds
+     * @return array<int,array<string,mixed>> keyed by fixture id
+     */
+    public function listPredictionsForFixtures(array $fixtureIds, string $kind, ?int $modelVersionId = null): array;
     /** Replaces the score grid of a NOT-yet-settled prediction. */
     public function saveScoreProbabilities(string $predictionId, array $rows): void;
     /** @return array<int,array<string,mixed>> */
     public function listScoreProbabilities(string $predictionId, int $limit = 20): array;
+
+    /**
+     * The score grids of many predictions at once. Evaluating an odds market
+     * for a page is 50 grids, and 50 queries per page is exactly the kind of
+     * cost this module exists to avoid: one batched read keeps market
+     * selection free of database amplification.
+     *
+     * @param list<string> $predictionIds
+     * @return array<string,list<array{home:int,away:int,probability:float}>> keyed by prediction id
+     */
+    public function listScoreProbabilitiesFor(array $predictionIds, int $limitPerPrediction = 200): array;
+
+    /**
+     * The prices the connected odds feed has quoted, keyed by `matchId`
+     * (`providerCode:externalId`) — the same identity a prediction is stored
+     * under. A match with no quoted row is absent from the result, which the
+     * caller reports as DATA_UNAVAILABLE rather than as a price of 0.
+     *
+     * @param list<string> $matchIds
+     * @return array<string,list<array{market:string,selection:string,decimalOdds:float,observedAt:?string}>>
+     */
+    public function listMarketOdds(array $matchIds): array;
 
     // ── settlements + performance ───────────────────────────────────────────
     /** Insert-once keyed by prediction_id; a second call returns the existing

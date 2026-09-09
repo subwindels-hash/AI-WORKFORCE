@@ -20,6 +20,33 @@ $models = $d['models'] ?? [];
 $caps = $caps ?? ['sync' => false, 'calibrate' => false, 'approve' => false, 'settle' => false];
 $summary = $board['summary'] ?? ['fixtures' => 0, 'analyzed' => 0, 'qualified' => 0, 'limited' => 0, 'rejected' => 0];
 
+// The selection the operator made — competition, premium league and market. It
+// is computed once, at the top, because every pager link and the generate form
+// carry it: paging and generating stay inside the league and market chosen.
+$filters = is_array($board['filters'] ?? null) ? $board['filters'] : [];
+$competitions = is_array($filters['competitions']['competitions'] ?? null) ? $filters['competitions']['competitions'] : [];
+$premium = is_array($filters['competitions']['premium'] ?? null) ? $filters['competitions']['premium'] : null;
+// Every competition on this date the deployment classifies as premium, not just
+// the featured one: the Premium League selector offers the leagues that were
+// classified, in the order the feed sent them.
+$premiumOptions = array_values(array_filter(
+    is_array($filters['competitions']['premiumCompetitions'] ?? null) ? $filters['competitions']['premiumCompetitions'] : [],
+    static fn($entry): bool => is_array($entry) && (string) ($entry['externalId'] ?? '') !== ''));
+$selectedCompetition = is_array($filters['competition'] ?? null) ? $filters['competition'] : null;
+$selectedExternal = (string) ($selectedCompetition['externalId'] ?? '');
+$marketBlock = is_array($board['market'] ?? null) ? $board['market'] : [];
+$marketList = is_array($marketBlock['available'] ?? null) ? $marketBlock['available'] : [];
+$selectedMarket = (string) ($marketBlock['key'] ?? 'MATCH_WINNER');
+// The data provider, offered only when the catalogue has something to offer:
+// with no feed connected the dropdown is replaced by the reason, because a
+// selector full of modes nobody can honour is a lie dressed as a choice.
+$providerOptions = is_array($providers['options'] ?? null) ? $providers['options'] : [];
+$selectedProvider = strtoupper(trim((string) ($provider ?? '')));
+$carry = [];
+if ($selectedExternal !== '') $carry['competition'] = (string) ($selectedCompetition['requested'] ?? $selectedExternal);
+if ($selectedMarket !== '') $carry['market'] = $selectedMarket;
+if ($selectedProvider !== '') $carry['provider'] = $selectedProvider;
+
 $dash = static fn(mixed $v, int $dp = 1): string => is_numeric($v) ? number_format((float) $v, $dp) : '—';
 $percent = static fn(mixed $v, int $dp = 1): string => is_numeric($v) ? number_format((float) $v * 100, $dp) . '%' : '—';
 $bandClass = static fn(string $band): string => match (strtoupper($band)) {
@@ -39,6 +66,37 @@ $kickoffLabel = static fn(?string $iso): string => $iso === null || $iso === '' 
 $kickoffStamp = static function (mixed $iso): string {
     $ts = is_string($iso) && trim($iso) !== '' ? strtotime($iso) : false;
     return $ts === false ? 'DATA_UNAVAILABLE' : gmdate('D j M Y · H:i', $ts) . ' UTC';
+};
+// The pager moves through the matches that are already stored. It is rendered
+// above and below the list from one function so the two cannot drift, and every
+// link carries the date — a page number without a date is a different request.
+$pager = static function (array $pagination, string $date, array $carry = []): string {
+    $total = (int) ($pagination['totalMatches'] ?? 0);
+    if ($total === 0) return '';
+    $page = (int) ($pagination['page'] ?? 1);
+    $pages = (int) ($pagination['totalPages'] ?? 1);
+    $size = (int) ($pagination['pageSize'] ?? 50);
+    // Every link carries the competition and market the page is narrowed to: a
+    // page number alone would silently drop the selection the operator made.
+    $href = static function (int $target) use ($date, $carry): string {
+        $query = array_merge(['date' => $date, 'page' => $target], $carry);
+        return '/football?' . http_build_query($query);
+    };
+    $previous = !empty($pagination['hasPrevious'])
+        ? '<a class="btn small" href="' . e($href((int) $pagination['previousPage'])) . '">&larr; Previous</a>'
+        : '<span class="btn small" aria-disabled="true" style="opacity:.45;cursor:default">&larr; Previous</span>';
+    $next = !empty($pagination['hasNext'])
+        ? '<a class="btn small" href="' . e($href((int) $pagination['nextPage'])) . '">Next &rarr;</a>'
+        : '<span class="btn small" aria-disabled="true" style="opacity:.45;cursor:default">Next &rarr;</span>';
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
+        . '<div>' . $previous . '</div>'
+        . '<div style="text-align:center">'
+        . '<div style="font-weight:700">Page ' . $page . ' of ' . $pages . '</div>'
+        . '<div class="dim" style="font-size:11px">' . $size . ' matches per page &middot; showing '
+        . (int) ($pagination['from'] ?? 0) . '&ndash;' . (int) ($pagination['to'] ?? 0) . ' of ' . $total . '</div>'
+        . '</div>'
+        . '<div>' . $next . '</div>'
+        . '</div>';
 };
 ?>
 <div class="page-head">
@@ -61,16 +119,19 @@ $kickoffStamp = static function (mixed $iso): string {
           <button class="btn small" disabled title="Requires the sports.manage permission">Sync this date</button>
         <?php endif; ?>
       </form>
-      <form method="post" action="/football/predict" style="display:inline">
+      <form method="post" action="/football/predict" style="display:inline" onsubmit="return confirm('Generate predictions for the matches on this page that do not have one yet? At most 50 new predictions are created, and matches that already have one are reused, not regenerated.')">
         <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
         <input type="hidden" name="date" value="<?= e((string) ($date ?? gmdate('Y-m-d'))) ?>">
+        <input type="hidden" name="page" value="<?= (int) ($page ?? 1) ?>">
+        <input type="hidden" name="competition" value="<?= e((string) ($carry['competition'] ?? '')) ?>">
+        <input type="hidden" name="market" value="<?= e((string) ($carry['market'] ?? '')) ?>">
+        <input type="hidden" name="provider" value="<?= e((string) ($carry['provider'] ?? '')) ?>">
         <?php if (!empty($caps['sync'])): ?>
-          <button class="btn small">Rebuild board from stored data</button>
+          <button class="btn small">Generate this page (max 50)</button>
         <?php else: ?>
-          <button class="btn small" disabled title="Requires the sports.manage permission">Rebuild board from stored data</button>
+          <button class="btn small" disabled title="Requires the sports.manage permission">Generate this page (max 50)</button>
         <?php endif; ?>
       </form>
-      <a class="btn small" href="/football?date=<?= e((string) ($date ?? gmdate('Y-m-d'))) ?>&refresh=1">Re-analyze stored data</a>
       <a class="btn small" href="/football/live">Live view</a>
       <a class="btn small" href="/football/models">Models &amp; calibration</a>
       <a class="btn small" href="/sports" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700">🎯 Odds Prediction Ticket →</a>
@@ -108,8 +169,217 @@ $kickoffStamp = static function (mixed $iso): string {
         <?php if (!empty($board['model']['note'])): ?>
           <div class="notice warnbox" style="margin-top:10px"><b><?= e((string) ($board['model']['state'] ?? 'MODEL')) ?></b> — <?= e((string) $board['model']['note']) ?></div>
         <?php endif; ?>
-        <?php if (($board['state'] ?? '') === 'NO_FIXTURES_STORED' || ($board['state'] ?? '') === 'NO_PREDICTIONS_STORED'): ?>
+        <?php if (in_array((string) ($board['state'] ?? ''), ['NO_FIXTURES_STORED', 'NO_PREDICTIONS_STORED', 'PAGE_BEYOND_LAST'], true)): ?>
           <p class="dim" style="margin-top:12px"><?= e((string) ($board['message'] ?? '')) ?></p>
+        <?php endif; ?>
+
+        <?php
+        $pagination = is_array($board['pagination'] ?? null) ? $board['pagination'] : [];
+        $dateParam = (string) ($date ?? gmdate('Y-m-d'));
+        ?>
+        <?php if ($pagination !== []): ?>
+          <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+            <?= $pager($pagination, $dateParam, $carry) ?>
+            <p class="dim" style="font-size:11px;margin:8px 0 0">
+              <?= (int) ($summary['analyzed'] ?? 0) ?> of <?= (int) ($summary['fixtures'] ?? 0) ?> matches on this date have a stored prediction ·
+              <?= (int) ($pagination['awaiting'] ?? 0) ?> of the <?= (int) ($pagination['returned'] ?? 0) ?> on this page are still unanalyzed.
+              Paging reads stored rows: it never regenerates a prediction, and generating a page creates at most <?= (int) ($pagination['maxLimit'] ?? 50) ?> new ones.
+            </p>
+          </div>
+        <?php endif; ?>
+
+        <!-- ── the selection (competition → premium league → market) ───────── -->
+        <div style="margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:10px;background:rgba(127,127,127,.04)">
+          <form method="get" action="/football" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+            <input type="hidden" name="page" value="1">
+            <div>
+              <label class="dim" style="font-size:11px;display:block">Data Provider</label>
+              <?php if ($providerOptions === []): ?>
+                <select disabled style="min-width:200px"><option>No feed connected</option></select>
+              <?php else: ?>
+                <select name="provider" style="min-width:200px" title="Which feed answers this request. Auto / Smart picks from health, coverage, odds availability and rate limits; Multi-Provider takes each piece of data from the feed that has it.">
+                  <?php foreach ($providerOptions as $option): ?>
+                    <?php $value = strtoupper((string) ($option['value'] ?? '')); ?>
+                    <option value="<?= e((string) ($option['value'] ?? '')) ?>"<?= $selectedProvider === $value ? ' selected' : '' ?>>
+                      <?= e((string) ($option['label'] ?? $value)) ?>
+                    </option>
+                  <?php endforeach; ?>
+                </select>
+              <?php endif; ?>
+            </div>
+            <div>
+              <label class="dim" style="font-size:11px;display:block">Select Competition</label>
+              <select name="competition" style="min-width:210px">
+                <option value=""<?= $selectedExternal === '' ? ' selected' : '' ?>>All competitions (<?= (int) ($summary['fixtures'] ?? 0) ?> matches)</option>
+                <?php foreach ($competitions as $competition): ?>
+                  <?php $external = (string) ($competition['externalId'] ?? ''); ?>
+                  <option value="<?= e($external) ?>"<?= $selectedExternal === $external ? ' selected' : '' ?>>
+                    <?= e((string) ($competition['name'] ?? 'Unnamed competition')) ?><?= !empty($competition['country']) ? ' · ' . e((string) $competition['country']) : '' ?> (<?= (int) ($competition['matches'] ?? 0) ?>)
+                  </option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+            <div>
+              <label class="dim" style="font-size:11px;display:block">Premium League</label>
+              <select name="premium" style="min-width:200px" onchange="if(this.value!==''){this.form.competition.value=this.value;this.form.submit();}">
+                <option value=""><?= $premiumOptions === [] ? 'No premium competition stored' : '— featured —' ?></option>
+                <?php foreach ($premiumOptions as $entry): ?>
+                  <?php $externalId = (string) ($entry['externalId'] ?? ''); ?>
+                  <option value="<?= e($externalId) ?>"<?= $selectedExternal === $externalId ? ' selected' : '' ?>>
+                    <?= e((string) ($entry['name'] ?? 'Premium League')) ?> (<?= (int) ($entry['matches'] ?? 0) ?> matches)<?= $externalId === (string) ($premium['externalId'] ?? '') ? ' · featured' : '' ?>
+                  </option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+            <div>
+              <label class="dim" style="font-size:11px;display:block">Select Odds Prediction</label>
+              <select name="market" style="min-width:230px">
+                <?php foreach ($marketList as $entry): ?>
+                  <?php $key = (string) ($entry['key'] ?? ''); ?>
+                  <option value="<?= e($key) ?>"<?= $selectedMarket === $key ? ' selected' : '' ?>>
+                    <?= e((string) ($entry['label'] ?? $key)) ?><?= empty($entry['oddsAvailable']) && (string) ($entry['derivation'] ?? '') === 'NOT_MODELLED' ? ' — no stored data' : '' ?>
+                  </option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+            <div>
+              <label class="dim" style="font-size:11px;display:block">Date</label>
+              <input type="date" name="date" value="<?= e($dateParam) ?>">
+            </div>
+            <button class="btn small primary">Apply</button>
+          </form>
+          <p class="dim" style="font-size:11px;margin:8px 0 0">
+            Competitions are listed from the provider feed — no league is offered that has no stored match.
+            The market is a view over the predictions already stored: changing it never regenerates a match.
+            The provider chosen here is the one a sync or a fetch reads; paging and market changes read stored rows and cost no provider call.
+          </p>
+        </div>
+
+        <!-- ── the page as a market table ─────────────────────────────────── -->
+        <?php $rows = is_array($board['rows'] ?? null) ? $board['rows'] : []; ?>
+        <?php if ($rows !== []): ?>
+          <div style="margin-top:16px;overflow-x:auto">
+            <h4 style="margin:0 0 8px"><?= e((string) ($marketBlock['label'] ?? 'Market')) ?>
+              <span class="dim" style="font-weight:400;font-size:11px">(<?= count($rows) ?> match<?= count($rows) === 1 ? '' : 'es' ?> on this page)</span>
+            </h4>
+            <table style="width:100%;border-collapse:collapse;font-size:12px">
+              <thead>
+                <tr style="text-align:left;border-bottom:1px solid var(--line)">
+                  <th style="padding:6px">Match</th>
+                  <th style="padding:6px">Competition</th>
+                  <th style="padding:6px">Kickoff</th>
+                  <th style="padding:6px">Prediction</th>
+                  <th style="padding:6px">Odds</th>
+                  <th style="padding:6px">Confidence</th>
+                </tr>
+              </thead>
+              <tbody>
+                <?php foreach ($rows as $row): ?>
+                  <?php
+                  $m = is_array($row['market'] ?? null) ? $row['market'] : [];
+                  $odds = $m['odds'] ?? null;
+                  $implied = $m['impliedProbability'] ?? null;
+                  $edge = $m['edge'] ?? null;
+                  ?>
+                  <tr style="border-bottom:1px solid var(--line)">
+                    <td style="padding:6px">
+                      <a href="/football/match/<?= (int) ($row['fixtureId'] ?? 0) ?>" style="font-weight:600"><?= e((string) ($row['homeTeam'] ?? '—')) ?> vs <?= e((string) ($row['awayTeam'] ?? '—')) ?></a>
+                      <div class="dim" style="font-size:10px"><?= e((string) ($row['matchId'] ?? '')) ?></div>
+                    </td>
+                    <td style="padding:6px"><?= e((string) ($row['competition'] ?? '—')) ?></td>
+                    <td style="padding:6px" class="mono"><?= e((string) ($row['kickoffLabel'] ?? '—')) ?></td>
+                    <td style="padding:6px">
+                      <?php if (($row['analysisState'] ?? '') !== 'ANALYZED'): ?>
+                        <span class="dim">Not analyzed</span>
+                      <?php else: ?>
+                        <b><?= e((string) ($m['selectionLabel'] ?? '—')) ?></b>
+                        <div class="dim" style="font-size:10px"><?= e((string) ($row['resultLabel'] ?? '—')) ?><?= !empty($row['prediction']['predictedScore']['label']) ? ' · ' . e((string) $row['prediction']['predictedScore']['label']) : '' ?></div>
+                      <?php endif; ?>
+                    </td>
+                    <td style="padding:6px" class="mono">
+                      <?php if ($odds === null): ?>
+                        <span class="dim" title="The connected odds provider has quoted no price for this selection.">DATA_UNAVAILABLE</span>
+                      <?php else: ?>
+                        <?= number_format((float) $odds, 2) ?>
+                        <div class="dim" style="font-size:10px">implied <?= $implied === null ? '—' : number_format((float) $implied * 100, 1) . '%' ?></div>
+                      <?php endif; ?>
+                    </td>
+                    <td style="padding:6px" class="mono">
+                      <?= is_numeric($row['confidence'] ?? null) ? number_format((float) $row['confidence'], 1) . '%' : '—' ?>
+                      <div class="dim" style="font-size:10px">DQ <?= (int) ($row['dataQuality'] ?? 0) ?>/100 · risk <?= e(strtolower((string) ($row['risk']['level'] ?? 'unknown'))) ?></div>
+                    </td>
+                  </tr>
+                  <?php if (($row['analysisState'] ?? '') === 'ANALYZED'): ?>
+                    <tr style="border-bottom:1px solid var(--line)">
+                      <td colspan="6" style="padding:0 6px 8px">
+                        <details>
+                          <summary class="dim" style="font-size:11px;cursor:pointer">Model detail, price and risk</summary>
+                          <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:6px;font-size:11px">
+                            <div>
+                              <div class="dim">Market outcomes</div>
+                              <?php foreach ((array) ($m['outcomes'] ?? []) as $outcome): ?>
+                                <div><?= e((string) ($outcome['label'] ?? '')) ?> —
+                                  <span class="mono"><?= is_numeric($outcome['probability'] ?? null) ? number_format((float) $outcome['probability'] * 100, 1) . '%' : '—' ?></span>
+                                  <?php if (($outcome['oddsState'] ?? '') === 'AVAILABLE'): ?>
+                                    · <span class="mono"><?= number_format((float) $outcome['odds'], 2) ?></span>
+                                    <span class="dim">(edge <?= is_numeric($outcome['edge'] ?? null) ? number_format((float) $outcome['edge'] * 100, 1) : '—' ?>pp)</span>
+                                  <?php else: ?>
+                                    <span class="dim">· no price quoted</span>
+                                  <?php endif; ?>
+                                </div>
+                              <?php endforeach; ?>
+                            </div>
+                            <div>
+                              <div class="dim">Risk</div>
+                              <div><?= e((string) ($row['risk']['level'] ?? 'UNKNOWN')) ?></div>
+                              <div class="dim"><?= e((string) ($row['risk']['basis'] ?? '')) ?></div>
+                            </div>
+                            <div>
+                              <div class="dim">Prediction</div>
+                              <div><?= e((string) ($row['prediction']['predictionDate'] ?? '—')) ?> · <?= e((string) ($board['model']['version'] ?? '—')) ?></div>
+                              <div class="dim"><?= e((string) ($row['prediction']['generatedAt'] ?? '')) ?></div>
+                            </div>
+                            <div>
+                              <div class="dim">Source</div>
+                              <div><?= e((string) ($m['source'] ?? '—')) ?></div>
+                              <div class="dim"><?= e((string) ($m['basis'] ?? '')) ?></div>
+                            </div>
+                            <div>
+                              <div class="dim">Data providers</div>
+                              <?php $sources = (array) ($m['dataSources'] ?? []); ?>
+                              <?php if ($sources === []): ?>
+                                <div class="dim">No provider recorded</div>
+                              <?php else: ?>
+                                <?php foreach ($sources as $source): ?>
+                                  <div>
+                                    <?= e((string) ($source['provider'] ?? '—')) ?>
+                                    <?php if (!empty($source['providerMatchId'])): ?>
+                                      <span class="dim mono">#<?= e((string) $source['providerMatchId']) ?></span>
+                                    <?php endif; ?>
+                                    <?php if (!empty($source['matchedBy'])): ?>
+                                      <span class="dim" title="How this feed's match was recognized as the same match"><?= e(strtolower(str_replace('_', ' ', (string) $source['matchedBy']))) ?></span>
+                                    <?php endif; ?>
+                                  </div>
+                                <?php endforeach; ?>
+                                <div class="dim" style="margin-top:2px">
+                                  <?= count($sources) > 1 ? 'the same match, recognized across ' . count($sources) . ' feeds — one prediction' : 'odds fall back to another provider when this one has no price' ?>
+                                </div>
+                              <?php endif; ?>
+                            </div>
+                            <div>
+                              <div class="dim">Valid until</div>
+                              <div><?= e($kickoffStamp($m['expiresAt'] ?? null)) ?></div>
+                              <div class="dim">frozen at kickoff · model v<?= e((string) ($m['modelVersion'] ?? '—')) ?></div>
+                            </div>
+                          </div>
+                        </details>
+                      </td>
+                    </tr>
+                  <?php endif; ?>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
         <?php endif; ?>
 
         <?php foreach ($board['categories'] ?? [] as $category): ?>
@@ -242,6 +512,12 @@ $kickoffStamp = static function (mixed $iso): string {
           <div class="notice warnbox" style="margin-top:14px">
             <b>No fixtures currently satisfy the required prediction and data-quality thresholds.</b>
             <?= $board['message'] !== null && (string) ($board['state'] ?? '') === 'NONE_QUALIFIED' ? '' : 'Fixtures below the threshold stay listed as limited data or rejected instead of being promoted into a prediction tier.' ?>
+          </div>
+        <?php endif; ?>
+
+        <?php if ($pagination !== []): ?>
+          <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--line)">
+            <?= $pager($pagination, $dateParam, $carry) ?>
           </div>
         <?php endif; ?>
       </div>

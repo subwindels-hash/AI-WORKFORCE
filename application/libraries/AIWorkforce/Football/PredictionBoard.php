@@ -21,67 +21,166 @@ final class PredictionBoard
         private PredictionService $predictions,
         private ModelRegistry $models,
         private FootballConfiguration $config,
-    ) {}
+        private ?MatchFeed $feed = null,
+    ) {
+        $this->feed ??= new MatchFeed($repo, $predictions, $models, $config);
+    }
 
     /**
+     * The board for one page of a date: 50 matches at a time, read from the
+     * rows that are already stored.
+     *
+     * Pagination is the difference between "the board" and "the feed": the
+     * summary counts describe the *whole* date (they are `COUNT`s, not the
+     * length of a page), while the cards are the page's matches only. `refresh`
+     * generates at most one page's worth of missing predictions — it never
+     * rebuilds matches that already have one.
+     *
+     * `options` narrow the board the same way the feed narrows a page:
+     * `competition` (an external id, a name, or `premium`) and `market` (a key
+     * from `PredictionMarkets::catalog()`). Both are selections over stored
+     * rows — neither one generates anything.
+     *
+     * @param array<string,mixed> $options
      * @return array{heading:string, date:string, dateLabel:string, status:string, state:string,
      *               summary:array<string,int>, categories:list<array>, emptyReason:?string,
-     *               message:?string, model:array, performance:array, generatedAt:string}
+     *               message:?string, model:array, performance:array, generatedAt:string,
+     *               pagination:array<string,mixed>}
      */
-    public function forDate(string $date, bool $refresh = false): array
+    public function forDate(string $date, bool $refresh = false, int $page = 1, int $limit = MatchFeed::MAX_PAGE_SIZE, array $options = []): array
     {
         $date = $this->validDate($date);
-        if ($refresh) {
-            $this->predictions->predictDay($date);
+        $notes = [];
+        [$page, $limit] = $this->feed->resolve($page, $limit, $notes);
+        $competition = $this->feed->resolveCompetition($options['competition'] ?? null, $date, null, $notes);
+        $market = $this->feed->markets()->resolve($options['market'] ?? $this->config->defaultMarket(), $notes);
+        $line = isset($options['line']) && is_numeric($options['line'])
+            ? max(-10.0, min(10.0, (float) $options['line'])) : null;
+
+        $filter = ['date' => $date];
+        if ($competition['externalId'] !== null) $filter['competitionExternalId'] = $competition['externalId'];
+        $totalFixtures = $this->repo->countFixtures($filter);
+        $totalPages = max(1, (int) ceil($totalFixtures / $limit));
+        $fixtures = $this->repo->listFixtures($filter, $limit, ($page - 1) * $limit);
+        if ($page > $totalPages && $totalFixtures > 0) {
+            $notes[] = 'page=' . $page . ' is past the last page (' . $totalPages . '); no matches were returned.';
         }
-        $rows = $this->repo->listPredictions(['date' => $date, 'kind' => PredictionService::KIND_PRE_MATCH], max(1, $this->config->analysisLimit()));
-        $fixtures = $this->repo->listFixtures(['date' => $date], max(1, $this->config->analysisLimit()));
+
         $model = $this->models->usable();
-        $cards = [];
-        $counts = ['fixtures' => count($fixtures), 'analyzed' => count($rows), 'qualified' => 0, 'limited' => 0, 'rejected' => 0];
-        foreach ($rows as $row) {
-            $fixture = $this->repo->findFixtureById((int) $row['fixture_id']) ?? [];
-            $band = (string) ($row['data_quality_band'] ?? QualityBand::REJECTED);
-            if ($band === QualityBand::QUALIFIED) $counts['qualified']++;
-            elseif ($band === QualityBand::LIMITED) $counts['limited']++;
-            else $counts['rejected']++;
-            $cards[] = $this->card($row, $fixture, $model);
+        $modelVersionId = (int) ($model['model']['id'] ?? 0);
+        // One query answers "which of these 50 matches already exist?" — the
+        // lookups below are then answered from memory.
+        $this->predictions->prime(
+            array_map(static fn(array $row): int => (int) ($row['id'] ?? 0), $fixtures),
+            $modelVersionId,
+            PredictionService::KIND_PRE_MATCH,
+        );
+        if ($refresh) {
+            // Bounded to the page on screen: at most `limit` NEW predictions,
+            // and only for matches that have none.
+            $this->predictions->predictMissing($fixtures, $limit, PredictionService::KIND_PRE_MATCH);
         }
+
+        // Counts over the selection — the day, or the day narrowed to the chosen
+        // competition — so the panel describes what the page is showing rather
+        // than every league the provider sent that day. `eligibility` stores the
+        // band the prediction was written with.
+        $dateWide = ['date' => $date, 'kind' => PredictionService::KIND_PRE_MATCH];
+        if ($competition['externalId'] !== null) $dateWide['competitionExternalId'] = $competition['externalId'];
+        $analyzed = $this->repo->countPredictions($dateWide);
+        $qualified = $this->repo->countPredictions($dateWide + ['eligibility' => QualityBand::QUALIFIED]);
+        $limited = $this->repo->countPredictions($dateWide + ['eligibility' => QualityBand::LIMITED]);
+        $counts = ['fixtures' => $totalFixtures, 'analyzed' => $analyzed, 'qualified' => $qualified, 'limited' => $limited,
+            'rejected' => max(0, $analyzed - $qualified - $limited)];
+
+        $cards = [];
+        $onPagePredicted = 0;
+        $entries = [];
+        foreach ($fixtures as $fixture) {
+            $row = $this->predictions->existing($fixture, $modelVersionId, PredictionService::KIND_PRE_MATCH);
+            if ($row === null) continue;
+            $onPagePredicted++;
+            $cards[] = $this->card($row, $fixture, $model);
+            $entries[] = ['prediction' => $row, 'matchId' => MatchFeed::matchId($fixture)];
+        }
+        // The selected market is a view over the same stored rows: one batched
+        // read for the grids, one for the quoted prices, and each card is
+        // annotated. Choosing another market cannot regenerate a match.
+        $markets = $this->feed->attachMarkets($entries, $market['market'], $line);
+        $marketsByPrediction = [];
+        $rows = [];
+        foreach ($markets as $index => $block) {
+            $prediction = $entries[$index]['prediction'] ?? null;
+            $predictionId = is_array($prediction) ? (string) ($prediction['id'] ?? '') : '';
+            if ($predictionId !== '') $marketsByPrediction[$predictionId] = $block;
+            // One table row per match on the page, analyzed or not: a match
+            // without a prediction is a row that says so, not a row that is
+            // missing.
+            $rows[] = $this->row($fixtures[$index] ?? [], $prediction, $block);
+        }
+        foreach ($cards as &$card) {
+            $card['market'] = $marketsByPrediction[(string) ($card['predictionId'] ?? '')] ?? null;
+        }
+        unset($card);
         usort($cards, static fn(array $a, array $b) => [$b['confidence'], $b['dataQuality']['score']] <=> [$a['confidence'], $a['dataQuality']['score']]);
         $tiers = $this->config->confidenceTiers();
+        $lowest = 70.0;
+        foreach ($tiers as $tier) $lowest = min($lowest, (float) ($tier['min'] ?? 70));
+        // Every card lands in exactly one category — including a card whose data
+        // quality cleared the threshold while its confidence sits below the
+        // lowest tier. Such a card is reported, not dropped: paging through a
+        // long day must never make an analyzed match disappear from the board.
         $categories = [];
+        $placed = [];
         foreach ($tiers as $tier) {
             $min = (float) ($tier['min'] ?? 0);
             $max = (float) ($tier['max'] ?? 100);
+            $items = [];
+            foreach ($cards as $index => $card) {
+                if ($card['band'] === QualityBand::QUALIFIED && $card['confidence'] !== null
+                    && $card['confidence'] >= $min && $card['confidence'] <= $max) {
+                    $items[] = $card;
+                    $placed[$index] = true;
+                }
+            }
             $categories[] = [
                 'key' => (string) $tier['key'],
                 'label' => (string) $tier['label'],
                 'range' => $min . '–' . ($max >= 100 ? '100' : number_format($max, 0)),
                 'min' => $min,
-                'items' => array_values(array_filter($cards, static fn(array $card) => $card['band'] === QualityBand::QUALIFIED
-                    && $card['confidence'] !== null && $card['confidence'] >= $min && $card['confidence'] <= $max)),
+                'items' => $items,
             ];
+        }
+        $belowTiers = [];
+        foreach ($cards as $index => $card) {
+            if (!isset($placed[$index])) $belowTiers[] = $card;
         }
         $categories[] = [
             'key' => 'limitedData',
             'label' => 'Limited Data',
-            'range' => 'below threshold',
+            'range' => 'below ' . number_format($lowest, 0),
             'min' => 0.0,
-            'items' => array_values(array_filter($cards, static fn(array $card) => $card['band'] !== QualityBand::QUALIFIED)),
+            'items' => $belowTiers,
         ];
         $qualified = count($categories[0]['items']) + count($categories[1]['items']) + count($categories[2]['items']);
         $emptyReason = null;
         $message = null;
-        if ($fixtures === []) {
+        if ($totalFixtures === 0) {
             $emptyReason = 'NO_FIXTURES_STORED';
             $message = 'No fixture has been stored for ' . $date . '. This is a data-availability state, not a prediction result: the module will not name matches it has not received.';
+        } elseif ($fixtures === []) {
+            $emptyReason = 'PAGE_BEYOND_LAST';
+            $message = 'Page ' . $page . ' is past the last page of ' . $totalPages . ' for ' . $date . '. Nothing is generated for a page that holds no match.';
         } elseif ($cards === []) {
             $emptyReason = 'NO_PREDICTIONS_STORED';
-            $message = 'Fixtures are stored for ' . $date . ' but no prediction row exists yet. Run the analysis (or wait for the scheduled job).';
+            $message = $analyzed === 0
+                ? 'Fixtures are stored for ' . $date . ' but no prediction row exists yet. Generating this page creates at most ' . MatchFeed::MAX_PAGE_SIZE . ' new predictions.'
+                : 'No match on page ' . $page . ' has a stored prediction yet. The other pages of this date do — generating this page analyzes only these ' . count($fixtures) . ' matches.';
         } elseif ($qualified === 0) {
             $emptyReason = 'NONE_QUALIFIED';
             $message = self::EMPTY_QUALIFIERS;
         }
+        $first = $totalFixtures === 0 ? 0 : (($page - 1) * $limit) + 1;
         return [
             'heading' => "TODAY'S FOOTBALL PREDICTIONS",
             'date' => $date,
@@ -91,6 +190,10 @@ final class PredictionBoard
             'summary' => $counts,
             'categories' => $categories,
             'cards' => $cards,
+            // The page as a table: one row per match, in kickoff order, with the
+            // selected market's answer. The cards below group the same matches
+            // by confidence; both read the identical stored prediction.
+            'rows' => $rows,
             'emptyReason' => $emptyReason,
             'message' => $message,
             'model' => [
@@ -102,8 +205,117 @@ final class PredictionBoard
             ],
             'thresholds' => ['dataQualityQualified' => QualityBand::QUALIFIED_MIN, 'dataQualityLimited' => QualityBand::LIMITED_MIN,
                 'tiers' => $tiers, 'calibrationMinimum' => $this->config->minCalibrationSamples()],
+            // Pagination over the persisted matches. The pager moves between
+            // pages of stored rows; it never re-generates what a previous page
+            // already produced.
+            'pagination' => [
+                'page' => $page,
+                'limit' => $limit,
+                'pageSize' => $limit,
+                'maxLimit' => MatchFeed::MAX_PAGE_SIZE,
+                'totalMatches' => $totalFixtures,
+                'totalPages' => $totalPages,
+                'returned' => count($fixtures),
+                'predicted' => $onPagePredicted,
+                'awaiting' => count($fixtures) - $onPagePredicted,
+                'from' => count($fixtures) === 0 ? 0 : $first,
+                'to' => count($fixtures) === 0 ? 0 : $first + count($fixtures) - 1,
+                'hasPrevious' => $page > 1 && $totalFixtures > 0,
+                'hasNext' => $page < $totalPages,
+                'previousPage' => $page > 1 ? $page - 1 : null,
+                'nextPage' => $page < $totalPages ? $page + 1 : null,
+                'firstPage' => 1,
+                'lastPage' => $totalPages,
+            ],
+            // What the page was narrowed to. The board lists the competitions
+            // the provider actually sent, so a league that is not in the feed is
+            // never offered as an option.
+            'filters' => [
+                'date' => $date,
+                'competition' => $competition,
+                'competitions' => $this->feed->competitions($date),
+            ],
+            'market' => [
+                'key' => (string) $market['key'],
+                'label' => (string) $market['market']['label'],
+                'group' => (string) $market['market']['group'],
+                'line' => $line ?? ($market['market']['line'] ?? null),
+                'available' => $this->feed->markets()->available($this->quotedMarketCodes($cards)),
+            ],
+            'request' => ['date' => $date, 'page' => $page, 'limit' => $limit, 'refresh' => $refresh,
+                'competition' => $competition['requested'], 'market' => $market['key'], 'line' => $line,
+                'notes' => array_values($notes)],
             'generatedAt' => gmdate('c'),
         ];
+    }
+
+    /**
+     * The market codes the odds feed has actually priced on this page, so the
+     * market dropdown can mark the markets that have a real price behind them.
+     *
+     * @param list<array<string,mixed>> $cards
+     * @return list<string>
+     */
+    private function quotedMarketCodes(array $cards): array
+    {
+        $codes = [];
+        foreach ($cards as $card) {
+            foreach ((array) ($card['market']['outcomes'] ?? []) as $outcome) {
+                if (($outcome['oddsState'] ?? '') === PredictionMarkets::STATE_AVAILABLE) $codes[] = (string) ($card['market']['key'] ?? '');
+            }
+        }
+        return array_values(array_unique(array_filter($codes)));
+    }
+
+    /**
+     * One row of the market table: match, competition, kickoff, the selected
+     * market's prediction, the price the odds feed quoted (DATA_UNAVAILABLE
+     * when it quoted none) and the model's confidence.
+     *
+     * @param array<string,mixed> $fixture
+     * @param array<string,mixed>|null $prediction
+     * @param array<string,mixed> $market
+     * @return array<string,mixed>
+     */
+    private function row(array $fixture, ?array $prediction, array $market): array
+    {
+        $kickoff = (string) ($fixture['kickoff_at'] ?? '');
+        $confidence = $prediction !== null && is_numeric($prediction['confidence'] ?? null)
+            ? round((float) $prediction['confidence'], 1) : null;
+        $band = (string) ($prediction['data_quality_band'] ?? QualityBand::REJECTED);
+        return [
+            'matchId' => MatchFeed::matchId($fixture),
+            'fixtureId' => (int) ($fixture['id'] ?? 0),
+            'homeTeam' => (string) ($fixture['home_team'] ?? DataState::UNAVAILABLE),
+            'awayTeam' => (string) ($fixture['away_team'] ?? DataState::UNAVAILABLE),
+            'competition' => (string) ($fixture['competition'] ?? DataState::UNAVAILABLE),
+            'country' => $fixture['country'] ?? null,
+            'kickoff' => $kickoff !== '' ? $kickoff : null,
+            'kickoffLabel' => $kickoff !== '' ? gmdate('H:i', (int) strtotime($kickoff)) . ' UTC' : DataState::UNAVAILABLE,
+            'status' => (string) ($fixture['status'] ?? 'UNKNOWN'),
+            'analysisState' => $prediction === null ? 'NOT_ANALYZED' : 'ANALYZED',
+            'prediction' => $prediction === null ? null : MatchFeed::predictionSummary($prediction),
+            'resultLabel' => $prediction === null ? null : self::resultLabel($prediction, $fixture),
+            'confidence' => $confidence,
+            'band' => $band,
+            'dataQuality' => (int) ($prediction['data_quality_score'] ?? 0),
+            // Risk is derived, not invented: it names the two stored facts it
+            // was derived from so the label can never be read as a judgment the
+            // data does not support.
+            'risk' => $this->risk($band, $confidence),
+            'market' => $market,
+        ];
+    }
+
+    /** @return array{level:string,basis:string} */
+    private function risk(string $band, ?float $confidence): array
+    {
+        if ($confidence === null) return ['level' => 'UNKNOWN', 'basis' => 'no prediction is stored for this match'];
+        if ($band !== QualityBand::QUALIFIED || $confidence < 55.0) {
+            return ['level' => 'HIGH', 'basis' => 'data quality ' . $band . ' and model confidence ' . number_format($confidence, 1) . '%'];
+        }
+        if ($confidence < 70.0) return ['level' => 'MEDIUM', 'basis' => 'model confidence ' . number_format($confidence, 1) . '%'];
+        return ['level' => 'LOW', 'basis' => 'qualified data and model confidence ' . number_format($confidence, 1) . '%'];
     }
 
     /**

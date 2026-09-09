@@ -38,6 +38,9 @@ test('football: every documented endpoint is routed to a real controller method'
         'api/football/fixtures' => 'api_football/fixtures',
         'api/football/fixtures/today' => 'api_football/fixtures_today',
         'api/football/fixtures/live' => 'api_football/fixtures_live',
+        // The paginated feed: 50 matches per page, 50 per generation request.
+        'api/football/matches' => 'api_football/matches',
+        'api/football/matches/generate' => 'api_football/generate_matches',
         'api/football/matches/(:num)' => 'api_football/show_match/$1',
         'api/football/matches/(:num)/analysis' => 'api_football/analysis/$1',
         'api/football/matches/(:num)/prediction' => 'api_football/prediction/$1',
@@ -420,16 +423,17 @@ test('football: every schema source declares the same tables and columns', funct
     $sqlite = fx_fb_ddl_tables(fx_fb_ddl('sqlite'));
     $prod = fx_fb_ddl_tables(fx_fb_ddl('prod'));
     $expected = [
-        'football_calibration_versions', 'football_competitions', 'football_fixture_statistics', 'football_fixtures',
-        'football_head_to_head', 'football_match_predictions', 'football_model_performance', 'football_model_versions',
-        'football_prediction_settlements', 'football_provider_sync_logs', 'football_providers',
+        'football_calibration_versions', 'football_competition_mapping', 'football_competitions',
+        'football_fixture_statistics', 'football_fixtures', 'football_head_to_head', 'football_match_predictions',
+        'football_model_performance', 'football_model_versions', 'football_prediction_settlements',
+        'football_provider_matches', 'football_provider_sync_logs', 'football_providers',
         'football_score_probabilities', 'football_teams', 'football_team_statistics',
     ];
     sort($expected);
     foreach (['mysql' => $mysql, 'sqlite' => $sqlite, 'production.sql' => $prod] as $label => $tables) {
         $names = array_keys($tables);
         sort($names);
-        assert_equals($expected, $names, $label . ' declares exactly the fourteen football entities');
+        assert_equals($expected, $names, $label . ' declares exactly the sixteen football entities');
         foreach ($tables as $table => $columns) {
             assert_true(count($columns) >= 3, $label . ':' . $table . ' is not a stub');
         }

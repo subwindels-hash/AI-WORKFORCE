@@ -31,6 +31,9 @@ final class FootballIntelligence
     private ?SettlementService $settlements = null;
     private ?PerformanceService $performance = null;
     private ?PredictionBoard $board = null;
+    private ?MatchFeed $feed = null;
+    private ?MatchIntelligenceService $intelligence = null;
+    private ?PredictionMarkets $markets = null;
     private ?RefreshPolicy $refresh = null;
     private ?FootballDiagnostics $diagnostics = null;
     private ?FootballCronService $cron = null;
@@ -135,7 +138,49 @@ final class FootballIntelligence
 
     public function board(): PredictionBoard
     {
-        return $this->board ??= new PredictionBoard($this->repo, $this->predictions(), $this->models(), $this->config);
+        return $this->board ??= new PredictionBoard($this->repo, $this->predictions(), $this->models(), $this->config, $this->feed());
+    }
+
+    /**
+     * The paginated match feed: 50 matches per page, and at most 50 new
+     * predictions per generation request.
+     */
+    public function feed(): MatchFeed
+    {
+        return $this->feed ??= new MatchFeed($this->repo, $this->predictions(), $this->models(), $this->config, $this->markets());
+    }
+
+    /**
+     * The Match Intelligence Engine: provider selection, normalization and
+     * canonical identity across API-Football, TheSportsDB and SportMonks.
+     *
+     * This is the only door to a provider for the football module — the
+     * prediction engine reads matches, never feeds.
+     */
+    public function intelligence(): MatchIntelligenceService
+    {
+        return $this->intelligence ??= new MatchIntelligenceService(
+            $this->gateway(), new ProviderSelector($this->gateway(), $this->config), $this->repo, $this->config);
+    }
+
+    /**
+     * The odds-prediction markets: the catalogue, and the evaluation of one
+     * market over a stored prediction. Choosing a market is a view, never a
+     * regeneration.
+     */
+    public function markets(): PredictionMarkets
+    {
+        return $this->markets ??= new PredictionMarkets($this->config);
+    }
+
+    /**
+     * The competitions a date can be narrowed to, with the premium (featured)
+     * competition marked. Listed from the provider's own rows — the module never
+     * offers a league it has no data for.
+     */
+    public function competitions(string $date, ?int $providerId = null): array
+    {
+        return $this->feed()->competitions($date, $providerId);
     }
 
     public function refresh(): RefreshPolicy
@@ -166,13 +211,17 @@ final class FootballIntelligence
      *
      * @return array<string,mixed>
      */
-    public function dashboard(?string $date = null, bool $refresh = false): array
+    public function dashboard(?string $date = null, bool $refresh = false, int $page = 1, int $limit = MatchFeed::MAX_PAGE_SIZE, array $options = []): array
     {
         $date = $date ?? gmdate('Y-m-d');
         $diagnostics = $this->diagnostics()->snapshot();
         return [
             'date' => $date,
-            'board' => $this->board()->forDate($date, $refresh),
+            // One page of the board. The pager moves through stored matches; the
+            // summary counts above the cards still describe the whole date.
+            // `options` narrow it (`competition`, `market`) without generating
+            // anything — both are selections over rows that are already stored.
+            'board' => $this->board()->forDate($date, $refresh, $page, $limit, $options),
             'diagnostics' => $diagnostics,
             'performance' => $this->performance()->report(30),
             'live' => $this->live()->board(false),

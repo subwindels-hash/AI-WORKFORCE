@@ -153,10 +153,15 @@ test('activation never touches a service that is already live, and refuses non-k
 test('refreshMarketDataProviders rebuilds the chain in-process and keeps synthetic last', function () {
     $snapshot = fx_md_snapshot();
     $db = platform()->model->db;
+    // The suite runs with real providers disabled so that no case depends on
+    // the public internet (see runtime/run-tests.mjs). This case is about
+    // REGISTRATION, not connectivity — registering a provider makes no network
+    // call — so it builds its own platform with the live feeds left enabled.
+    $live_platform = new \AIWorkforce\Platform(platform()->model, false);
     try {
         $db->where_in('service', \AIWorkforce\ApiProviders::MARKET_DATA_SERVICES)->delete('api_providers');
 
-        $report = platform()->refreshMarketDataProviders();
+        $report = $live_platform->refreshMarketDataProviders();
         assert_true($report['refreshed']);
         assert_in_array('binance', $report['registered'], 'crypto live feed registered when unconfigured');
         assert_in_array('frankfurter-ecb', $report['registered'], 'forex live feed registered when unconfigured');
@@ -169,16 +174,16 @@ test('refreshMarketDataProviders rebuilds the chain in-process and keeps synthet
             'service' => 'crypto_market', 'driver' => 'binance_public', 'label' => 'Binance public',
             'role' => 'unused', 'enabled' => 0, 'base_url' => 'https://api.binance.com',
         ], null, 1, true);
-        $dark = platform()->refreshMarketDataProviders();
+        $dark = $live_platform->refreshMarketDataProviders();
         assert_false(in_array('binance', $dark['registered'], true), 'disabled row unregisters the live crypto feed');
 
         // ...and activating it brings the chain straight back, same process.
         \AIWorkforce\ApiProviders::activateKeylessFeed($db, 'crypto_market');
-        $live = platform()->refreshMarketDataProviders();
+        $live = $live_platform->refreshMarketDataProviders();
         assert_in_array('binance', $live['registered'], 'live feed returns after activation');
         assert_false($live['syntheticOnly']);
 
-        $names = array_map(fn($p) => $p->name(), platform()->providers->listProviders());
+        $names = array_map(fn($p) => $p->name(), $live_platform->providers->listProviders());
         assert_equals($names, array_values(array_unique($names)), 'refresh does not duplicate providers');
     } finally {
         fx_md_restore($snapshot);

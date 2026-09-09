@@ -90,6 +90,135 @@ class Api_football extends Api_controller
         ]);
     }
 
+    /**
+     * The paginated match feed (50 matches per page).
+     *
+     * `GET /api/football/matches?page=1&limit=50` reads the stored fixtures for
+     * a date and returns one page with the predictions that already exist — it
+     * never runs the engine and never touches the provider, so moving between
+     * pages costs nothing. `?generate=1` (or the POST form below) asks for the
+     * page's *missing* predictions to be created, up to a hard maximum of 50
+     * new predictions per request; matches that already have one are returned,
+     * not regenerated.
+     *
+     * `limit` is clamped server-side to `MatchFeed::MAX_PAGE_SIZE` (50) and the
+     * clamp is reported in `request.notes`; no caller can ask for a thousand.
+     */
+    public function matches()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        $date = \AIWorkforce\Football\RequestParams::date($g, 'date', gmdate('Y-m-d'), $notes);
+        $page = \AIWorkforce\Football\RequestParams::int($g, 'page', 1, 1, \AIWorkforce\Football\MatchFeed::MAX_PAGE, $notes);
+        $limit = \AIWorkforce\Football\RequestParams::int($g, 'limit', \AIWorkforce\Football\MatchFeed::DEFAULT_PAGE_SIZE,
+            1, \AIWorkforce\Football\MatchFeed::MAX_PAGE_SIZE, $notes);
+        $generate = in_array(strtolower((string) ($g['generate'] ?? '')), ['1', 'true', 'yes'], true);
+        // Generation writes prediction rows, so it is a managed action even
+        // though it rides on a read endpoint — the same rule
+        // `/matches/:id/prediction?generate=1` already follows.
+        if ($generate && !$this->requirePermission('sports.manage', false)) return;
+        $options = $this->feedOptions($g, $notes);
+        $payload = $this->football()->feed()->page($date, $page, $limit, $generate, $options);
+        $payload['request']['notes'] = array_values(array_merge($notes, (array) ($payload['request']['notes'] ?? [])));
+        $payload['request']['limitMaximum'] = \AIWorkforce\Football\MatchFeed::MAX_PAGE_SIZE;
+        $this->json($payload);
+    }
+
+    /**
+     * The competitions a date can be narrowed to, listed from the rows the
+     * provider sent, with the premium (featured) competition marked. Available
+     * to any identity that may read the board: a league list is not a
+     * privileged fact.
+     */
+    public function competitions()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        $date = \AIWorkforce\Football\RequestParams::date($g, 'date', gmdate('Y-m-d'), $notes);
+        $providerId = \AIWorkforce\Football\RequestParams::int($g, 'providerId', 0, 0, 1000000, $notes) ?: null;
+        $payload = $this->football()->competitions($date, $providerId);
+        $payload['request'] = ['date' => $date, 'providerId' => $providerId, 'notes' => array_values($notes)];
+        $payload['generatedAt'] = gmdate('c');
+        $this->json($payload);
+    }
+
+    /**
+     * The odds-prediction markets, with whether each one can currently be
+     * answered. A market that has no stored input and no quoted price is
+     * reported as DATA_UNAVAILABLE rather than left off the list.
+     */
+    public function markets()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        $date = \AIWorkforce\Football\RequestParams::date($g, 'date', gmdate('Y-m-d'), $notes);
+        $available = $this->football()->markets()->available([]);
+        $selected = $this->football()->markets()->resolve($g['market'] ?? null, $notes);
+        $this->json([
+            'status' => 'OK',
+            'date' => $date,
+            'defaultMarket' => $this->football()->config()->defaultMarket(),
+            'selected' => $selected['key'],
+            'markets' => $available,
+            'total' => count($available),
+            'note' => 'Selecting a market is a view over the stored prediction: it never regenerates a match and never costs a provider call.',
+            'request' => ['date' => $date, 'market' => $g['market'] ?? null, 'notes' => array_values($notes)],
+            'generatedAt' => gmdate('c'),
+        ]);
+    }
+
+    /**
+     * `competition` and `market` from a request. Both are selections over rows
+     * that are already stored; an unusable value is reported through `$notes`
+     * rather than silently becoming a different selection.
+     *
+     * @param array<string,mixed> $input
+     * @param list<string> $notes
+     * @return array<string,mixed>
+     */
+    private function feedOptions(array $input, array &$notes): array
+    {
+        $options = [];
+        $competition = trim((string) ($input['competition'] ?? ''));
+        if ($competition !== '') $options['competition'] = $competition;
+        $market = trim((string) ($input['market'] ?? ''));
+        if ($market !== '') $options['market'] = $market;
+        if (isset($input['line']) && trim((string) $input['line']) !== '') {
+            if (is_numeric($input['line'])) {
+                $options['line'] = max(-10.0, min(10.0, (float) $input['line']));
+            } else {
+                $notes[] = 'line=' . \AIWorkforce\Football\RequestParams::preview($input['line'])
+                    . ' is not a number; the market\'s own default line was used.';
+            }
+        }
+        $providerId = \AIWorkforce\Football\RequestParams::int($input, 'providerId', 0, 0, 1000000, $notes);
+        if ($providerId > 0) $options['providerId'] = $providerId;
+        return $options;
+    }
+
+    /**
+     * Generate the missing predictions for one page (sports.manage + CSRF) and
+     * return that page. At most 50 new predictions are written per call, and a
+     * match that already has one is never regenerated.
+     */
+    public function generate_matches()
+    {
+        if (!$this->requirePermission('sports.manage')) return;
+        $body = array_merge($this->input->post() ?: [], $this->jsonBody());
+        $notes = [];
+        $date = \AIWorkforce\Football\RequestParams::date($body, 'date', gmdate('Y-m-d'), $notes);
+        $page = \AIWorkforce\Football\RequestParams::int($body, 'page', 1, 1, \AIWorkforce\Football\MatchFeed::MAX_PAGE, $notes);
+        $limit = \AIWorkforce\Football\RequestParams::int($body, 'limit', \AIWorkforce\Football\MatchFeed::DEFAULT_PAGE_SIZE,
+            1, \AIWorkforce\Football\MatchFeed::MAX_PAGE_SIZE, $notes);
+        $options = $this->feedOptions($body, $notes);
+        $payload = $this->football()->feed()->generate($date, $page, $limit, $options);
+        $payload['request']['notes'] = array_values(array_merge($notes, (array) ($payload['request']['notes'] ?? [])));
+        $this->json($payload);
+    }
+
     public function fixtures_today()
     {
         if (!$this->requirePermission('sports.view', false)) return;
@@ -100,6 +229,85 @@ class Api_football extends Api_controller
     {
         if (!$this->requirePermission('sports.view', false)) return;
         $this->listForDate(gmdate('Y-m-d', strtotime('+1 day')), 'tomorrow');
+    }
+
+    /**
+     * The providers behind the "Data Provider" selector.
+     *
+     * `GET /api/football/providers` lists Auto / Smart, every configured feed
+     * and — when more than one feed is connected — Multi-Provider, each with
+     * the capabilities and health the choice was derived from. A mode nobody
+     * can honour (Multi with one provider) is not offered.
+     */
+    public function providers()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $payload = $this->football()->intelligence()->providers();
+        $payload['generatedAt'] = gmdate('c');
+        $payload['note'] = 'Auto / Smart picks the provider per request from health, competition coverage, fixture availability, odds availability and rate limits. Multi-Provider takes each piece of data from the feed that has it and combines them into one match.';
+        $this->json($payload);
+    }
+
+    /**
+     * Per-provider health.
+     *
+     * `GET /api/football/providers/health` reports, for each feed: status,
+     * response time, the last successful request, rate-limit state, available
+     * competitions, whether odds and statistics are available, and what the
+     * provider cannot supply. It is the record behind automatic fallback — a
+     * feed that is offline or in backoff is skipped, not retried.
+     */
+    public function providers_health()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $this->json($this->football()->intelligence()->health());
+    }
+
+    /**
+     * Matches read straight from the selected provider.
+     *
+     * `GET /api/football/matches/fetch?provider=AUTO&competition=39&dateFrom=…&dateTo=…&limit=50`
+     * runs the documented pipeline — validate → load provider config →
+     * retrieve fixtures → normalize → deduplicate → resolve the canonical match
+     * — and returns the canonical matches with the provider (or providers) each
+     * one came from. The same match seen by two feeds is returned once.
+     *
+     * This is the only football endpoint that spends provider calls; the paged
+     * feed at `/api/football/matches` reads stored rows and costs none.
+     */
+    public function fetch_matches()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        $query = [
+            'provider' => trim((string) ($g['provider'] ?? '')),
+            'competition' => trim((string) ($g['competition'] ?? '')),
+            'date' => trim((string) ($g['date'] ?? '')),
+            'dateFrom' => trim((string) ($g['dateFrom'] ?? '')),
+            'dateTo' => trim((string) ($g['dateTo'] ?? '')),
+            'limit' => \AIWorkforce\Football\RequestParams::int($g, 'limit',
+                \AIWorkforce\Football\MatchIntelligenceService::MAX_GENERATION_BATCH, 1,
+                \AIWorkforce\Football\MatchIntelligenceService::MAX_GENERATION_BATCH, $notes),
+            // `with=lineups` collects the confirmed lineups too. It costs one
+            // provider call per match, so it is opt-in and bounded by the
+            // request budget: a match the budget did not reach says so.
+            'with' => isset($g['with']) ? array_map('strval', explode(',', (string) $g['with'])) : [],
+            'refresh' => in_array(strtolower((string) ($g['refresh'] ?? '')), ['1', 'true', 'yes'], true),
+        ];
+        $result = $this->football()->intelligence()->matches($query, $notes);
+        $this->json([
+            'state' => $result['state'],
+            'message' => $result['message'],
+            'matches' => array_map(static fn($match): array => $match->toArray(), $result['matches']),
+            'count' => $result['counts']['returned'],
+            'counts' => $result['counts'],
+            'selection' => $result['selection'],
+            'calls' => $result['calls'],
+            'request' => array_merge($query, ['notes' => array_values($notes)]),
+            'limitMaximum' => \AIWorkforce\Football\MatchIntelligenceService::MAX_GENERATION_BATCH,
+            'generatedAt' => gmdate('c'),
+        ]);
     }
 
     /** Fixtures currently in play, with live score/minute/red cards as stored. */
@@ -152,6 +360,78 @@ class Api_football extends Api_controller
     }
 
     // ------------------------------------------------------------- predictions
+
+    /**
+     * The stored predictions for a date — the canonical `GET
+     * /api/football/predictions` of the multi-provider spec, answered from the
+     * same board the console reads. `?page=1&limit=50` is the paged form.
+     */
+    public function predictions()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        $date = \AIWorkforce\Football\RequestParams::date($g, 'date', gmdate('Y-m-d'), $notes);
+        $page = \AIWorkforce\Football\RequestParams::int($g, 'page', 1, 1, \AIWorkforce\Football\MatchFeed::MAX_PAGE, $notes);
+        $limit = \AIWorkforce\Football\RequestParams::int($g, 'limit', \AIWorkforce\Football\MatchFeed::DEFAULT_PAGE_SIZE,
+            1, \AIWorkforce\Football\MatchFeed::MAX_PAGE_SIZE, $notes);
+        $options = $this->feedOptions($g, $notes);
+        $payload = $this->football()->feed()->page($date, $page, $limit, false, $options);
+        $payload['request']['notes'] = array_values(array_merge($notes, (array) ($payload['request']['notes'] ?? [])));
+        $payload['request']['limitMaximum'] = \AIWorkforce\Football\MatchFeed::MAX_PAGE_SIZE;
+        $this->json($payload);
+    }
+
+    /**
+     * One prediction by match id (`provider:externalId`) — the identity a
+     * prediction is stored and paged under, so a caller that knows the match
+     * does not have to know the internal fixture id.
+     */
+    public function show_prediction(string $matchId)
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $fixtureId = $this->fixtureIdForMatchId($matchId);
+        if ($fixtureId === null) {
+            $this->json(['status' => 'NOT_FOUND', 'matchId' => $matchId,
+                'dataState' => \AIWorkforce\Football\DataState::UNAVAILABLE,
+                'message' => 'No stored match has the id ' . $matchId . '. A match id is provider:externalId, '
+                    . 'for example api-football:1201; the paged feed returns it per match.'], 404);
+            return;
+        }
+        $generate = in_array((string) $this->input->get('generate'), ['1', 'true'], true);
+        if ($generate && !$this->requirePermission('sports.manage')) return;
+        $payload = $this->football()->predictionFor($fixtureId, $generate);
+        $payload['matchId'] = $matchId;
+        $this->json($payload, ($payload['status'] ?? '') === 'NOT_FOUND' ? 404 : 200);
+    }
+
+    /**
+     * A match id (`provider:externalId`) onto the stored fixture row. The
+     * provider's code is resolved from the registry rather than assumed, so a
+     * match id from a feed that is not connected is reported as not found
+     * instead of being matched against the wrong provider's fixtures.
+     */
+    private function fixtureIdForMatchId(string $matchId): ?int
+    {
+        $matchId = trim($matchId);
+        if ($matchId === '') return null;
+        $code = '';
+        $external = $matchId;
+        if (str_contains($matchId, ':')) {
+            [$code, $external] = explode(':', $matchId, 2);
+        }
+        $providerId = null;
+        foreach ($this->AIWorkforce_model->football->listProviders() as $provider) {
+            // Stored rows carry `provider_code`; `code` is accepted from a
+            // caller that already normalized the row.
+            $rowCode = (string) ($provider['provider_code'] ?? $provider['code'] ?? '');
+            if ($code !== '' && strtolower($rowCode) !== strtolower($code)) continue;
+            if ($providerId === null) $providerId = (int) ($provider['id'] ?? 0);
+        }
+        if ($providerId === null || $providerId <= 0) return null;
+        $fixture = $this->AIWorkforce_model->football->findFixture($providerId, $external);
+        return $fixture === null ? null : (int) ($fixture['id'] ?? 0);
+    }
 
     /** Today's board: tiers, counts and per-fixture cards (§10/§11). */
     public function predictions_today()

@@ -37,6 +37,11 @@ each panel exists exactly once in the product.
 | `RequestParams.php` | query-parameter reading for the read models and the console: absent ⇒ documented default, unusable ⇒ default **plus a note in the response**, out of range ⇒ clamped **and stated**; a mutation with an unreadable `date` refuses instead of refreshing another day |
 | `DataState.php` | `DataState` (`DATA_UNAVAILABLE` / `LIMITED_DATA` / `AVAILABLE`) and `QualityBand` (`QUALIFIED` ≥ 70, `LIMITED` 50–69, `REJECTED` < 50) |
 | `ProviderGateway.php` | provider selection, per-sweep request budget, daily quota, request spacing, persisted backoff |
+| `ProviderSelector.php` | Auto / Smart scoring, named-provider plans, Multi-Provider class assignment (with the load-spread penalty) |
+| `MatchIntelligenceService.php` | the Match Intelligence Engine: retrieve → normalize → deduplicate → canonical identity; also the provider catalogue and per-provider health |
+| `CanonicalMatch.php` | canonical identity (`HOME_AWAY_YYYY-MM-DD`), team normalization and deterministic cross-provider matching |
+| `FootballMatch.php` | the one normalized match model every layer downstream of a provider reads |
+| `RegenerationPolicy.php` | when a stored prediction may be replaced, and the reason |
 | `FixtureSyncService.php` | fixture/live/result sweeps, normalization, idempotent upserts, per-run sync log |
 | `StatisticsCollector.php` | team statistics, league tables, head-to-head snapshots, in-match statistics |
 | `FeatureBuilder.php` | normalized feature vector per fixture + `dataQualityScore` with weighted components and provenance |
@@ -45,8 +50,10 @@ each panel exists exactly once in the product.
 | `OutcomePredictor.php` | probabilities, most likely scoreline, alternatives, confidence ceiling, evidence rows, reasons |
 | `CalibrationService.php` | temperature scaling fitted from settled predictions only; `CALIBRATION_PENDING` otherwise |
 | `ModelRegistry.php` | lifecycle states, transition guards, registration from the deployed fingerprint |
-| `PredictionService.php` | prediction storage, the §output contract, the post-kickoff freeze |
-| `PredictionBoard.php` | the daily board: summary counts, confidence categories, match cards |
+| `PredictionService.php` | prediction storage, the §output contract, the post-kickoff freeze; `predictMissing()` generates only matches that have no prediction, `predictDay()` sweeps a date in 50-match batches and reuses what exists |
+| `MatchFeed.php` | the paginated feed: 50 matches per page, at most 50 NEW predictions per generation request, `match_id` de-duplication, competition and premium-league selection |
+| `PredictionMarkets.php` | the odds-prediction markets: the catalogue, the evaluation of one market from the stored score distribution, and the odds a feed actually quoted |
+| `PredictionBoard.php` | the daily board for one page: date-wide summary counts, confidence categories, match cards, pager |
 | `LiveMatchService.php` | in-play board and `LIVE` estimate rows, never rewriting the pre-match row |
 | `SettlementService.php` | grading on `FINISHED`, voiding on postponement, idempotent sweeps |
 | `PerformanceService.php` | 30-day metrics from stored settlements, snapshots, per-model evaluation |
@@ -71,7 +78,9 @@ columns arrive through its idempotent ALTER list.
 ## Data flow
 
 ```
-provider (api-football / thesportsdb / sportmonks via SportsProviderManager)
+three providers (api-football / thesportsdb / sportmonks via SportsProviderManager)
+  → ProviderSelector        Auto / Smart, a named feed, or Multi-Provider
+  → MatchIntelligenceService  retrieve → normalize → deduplicate → canonical identity
   → FixtureSyncService      fixtures for today, the upcoming window, live, results
   → StatisticsCollector      team stats, league table, head-to-head, match stats
   → FeatureBuilder           features + dataQualityScore (0–100) + provenance
@@ -126,7 +135,10 @@ settled rows and says so, and `PerformanceService::report()` returns
 * Displayed confidence is the calibrated value when a calibration exists, and the
   raw share capped by `50 + 45 × (dq/100)` when it does not. It is never 100%.
 * Board categories: `Highest Confidence` (≥ 80), `Strong Predictions` (75–79.99),
-  `Standard Predictions` (70–74.99), `Limited Data` (below threshold).
+  `Standard Predictions` (70–74.99), `Limited Data` (below 70 — both data that did
+  not clear the qualified threshold and qualified cards whose confidence sits
+  under the lowest cut line). Every card sits in exactly one category: paging
+  never makes an analyzed match disappear from the board.
 
 ## Model lifecycle
 
@@ -174,6 +186,319 @@ Stored per version: `model_id`, `model_name`, `model_version`, `algorithm`,
   Brier, ECE, log loss, average data quality, average goal error, plus the
   per-model breakdown over the same window.
 
+## Paging: 50 matches at a time
+
+The module never asks for thousands of matches, and it never regenerates a match
+because someone changed page.
+
+```text
+← Previous       Page 1 of 20       Next →
+                 50 Matches
+```
+
+**Reading** pages through the *persisted* matches. `GET /api/football/matches`
+slices the stored fixtures for a date (`ORDER BY kickoff_at, id`, so match 51 is
+the same row on every call) and attaches the predictions that already exist. A
+page read runs no model, makes no provider request and writes nothing.
+
+**Generating** is a separate, bounded stage. The two stages, in order:
+
+```text
+1. fixtures stored for a date
+       ↓  check every match_id against the database (one query per page)
+       ↓  new matches only
+       ↓  at most 50 sent for prediction generation
+2. prediction engine
+       ↓  features → quality gate → score model → calibration
+       ↓  save prediction + model version + timestamp
+       ↓  display the page from those stored rows
+```
+
+The rules, and where each one is enforced:
+
+| Rule | Enforced by |
+| --- | --- |
+| 50 matches per page; `limit > 50` is clamped | `MatchFeed::MAX_PAGE_SIZE`, `MatchFeed::resolve()`, `RequestParams::int()` in the endpoints |
+| at most 50 **new** predictions per generation request | `PredictionService::predictMissing()` — a `$limit` of 9,999 still yields 50, and the rest are reported `DEFERRED` |
+| a match that already has a prediction is never regenerated | `PredictionService::existing()` → the stored row is returned; `predictDay()` counts it as `skipped` |
+| moving between pages costs nothing | the read path touches only `listFixtures`/`listPredictionsForFixtures`/`countFixtures` |
+| one prediction per match | `UNIQUE(fixture_id, prediction_kind, model_version_id)` in every schema, plus `UNIQUE(provider_id, external_id)` on fixtures |
+
+**`match_id`.** A match is identified by `providerCode:externalId`
+(`MatchFeed::matchId()`), which the provider guarantees unique and
+`football_fixtures` enforces. A prediction is distinguished from a later refresh
+of the same match by three things together — the match, the prediction kind
+(pre-match or live), and `model_version_id` — plus `generated_at` as
+`predictionDate`. Every match row in the feed carries `matchId`,
+`predictionSource` (`STORED` / `GENERATED` / `DEFERRED` / `REFUSED` / `FAILED`)
+and, when there is no prediction, a `predictionRefusal` naming the reason.
+
+**Worked example** (120 matches on a date, 3 pages):
+
+```text
+Page 1 → matches 1–50    generate these 50 → save      (50 stored, 70 outstanding)
+Page 2 → matches 51–100  generate these 50 → save      (100 stored, 20 outstanding)
+Page 3 → matches 101–120 generate these 20 → save      (120 stored, 0 outstanding)
+Back to page 1 → the 50 rows are read back. Nothing is regenerated.
+```
+
+The scheduled `predict` job fills a partly-predicted date the same way: it
+sweeps in 50-match batches (up to its `analysisLimit` budget) and skips every
+match that already has a row, so re-running it costs nothing for work already
+done.
+
+## Selecting a competition, a premium league and a market
+
+The console and the API are driven by one flow:
+
+```text
+Football Intelligence
+        ↓
+Select Competition            (the leagues the provider actually sent)
+        ↓
+Select Premium League         (the featured competition — default: English Premier League)
+        ↓
+Select Odds Prediction        (the market Football Intelligence answers in)
+        ↓
+Select date
+        ↓
+Generate predictions          (at most 50 NEW matches, inside the selected competition)
+        ↓
+Page 1 → Next → Page 2        (stored rows; nothing is regenerated)
+```
+
+**Competitions are data, not a constant.** `GET /api/football/competitions` lists
+the competitions stored for a date — `football_competitions` rows the sync wrote
+from the provider payload — each with how many matches it has on that date. A
+league with no stored match is never offered, and a provider that cannot list
+leagues is never filled in with a guessed catalogue.
+
+**The premium league is the featured competition**, configured with
+`WINDELS_FOOTBALL_PREMIUM_COMPETITION` (name, or
+`WINDELS_FOOTBALL_PREMIUM_COMPETITION_ID` for an exact provider id). It defaults
+to the **English Premier League**. Selecting it narrows generation to that
+league; the day's other competitions are left untouched. If the configured
+premium league has no match on the date, the competition with the most matches is
+featured instead and the payload says so (`source: MOST_MATCHES_ON_DATE`) rather
+than silently featuring nothing.
+
+A competition that is named but not stored is **reported, not widened**: the page
+is narrowed to it (and is therefore empty) and the note names the competitions
+that are available. Widening it to "every league" would answer a different
+question than the one that was asked.
+
+**A market is a view, not a prediction.** `PredictionMarkets` evaluates the
+selected market from what is already stored:
+
+| Market | Answered from |
+| --- | --- |
+| Match Winner (1X2), Double Chance, Draw No Bet | the 1X2 row stored with the prediction |
+| Over/Under 0.5–3.5, BTTS, BTTS + Over 2.5, Correct Score, Asian Handicap | sums over the score distribution |
+| First Half Winner, First Half Over/Under | the same score model on `WINDELS_FOOTBALL_FIRST_HALF_SHARE` of the goal expectancy |
+| Half Time / Full Time, Corners, Cards | nothing — `DATA_UNAVAILABLE` unless the odds provider priced them |
+
+The displayed grid is deliberately truncated (scorelines below 1% are not
+persisted), and a truncated grid is unfit for summing: draws, handicaps and
+both-teams-to-score are spread across many small cells, so the tail would be
+under-reported. A market that needs sums is therefore evaluated over the
+**complete** distribution recomputed from the expected goals stored with the
+prediction — the same model on the same inputs, with the cut removed — and the
+`basis` of every market block says which one was used
+(`SCORE_GRID`, `SCORE_MODEL_FROM_STORED_EXPECTED_GOALS`, `FIRST_HALF_SHARE_0.45`).
+
+**Odds are quoted, never derived.** A price appears only when the connected odds
+feed has a row for that match, market, selection and line — matched on the one
+identity both modules share, the provider's own match id. When it has one, the
+block carries `odds`, `impliedProbability` (`1/odds`) and `edge` (model minus
+implied). When it does not, the field is `DATA_UNAVAILABLE` with a reason; the
+model's own probability is still shown, because that one is computed from stored
+data. An "Over 3.5" price is never used as the price of "Over 2.5".
+
+**Changing the market cannot regenerate a match.** Every market reads the same
+stored prediction and the same score grid, so switching from *Match Winner* to
+*Over 2.5 Goals* and back writes nothing and costs no provider call. The
+50-match ceiling is likewise unaffected by a selection: `limit=500` with a
+competition chosen is still 50 new predictions, inside that competition.
+
+The market list is exposed by `GET /api/football/markets`, and the page payload
+carries the same `market.available` array, with `state` and `oddsAvailable` per
+market so the console can mark the ones that have a real price behind them.
+
+## Multi-provider: three feeds, one canonical match
+
+Three providers can be connected at once, and any of them — or all of them — can
+answer a request. The rule the module is built on:
+
+> Three providers, one normalized football intelligence system, one canonical
+> match record, one prediction record, maximum 50 new predictions per
+> generation, and zero unnecessary regeneration.
+
+### The layers
+
+```
+provider adapters (ApiFootball · TheSportsDB · SportMonks)
+   → ProviderSelector          which feed answers which part of the request
+   → SportsDataNormalizer      every row into the one FootballMatch model
+   → MatchIntelligenceService  deduplicate + resolve canonical identity
+   → prediction engine         (never knows which provider answered)
+   → database / cache
+   → 50 matches per page
+```
+
+The prediction engine never sees a provider-specific shape. Every adapter's
+output is normalized into `FootballMatch` — id, provider(s), competition,
+season, home/away team (id, name, logo), kickoff, status, venue, odds,
+statistics, injuries, lineups, form, H2H — before anything downstream reads it.
+
+### Selecting a provider
+
+`provider` accepts `AUTO` (default), `api-football`, `thesportsdb`,
+`sportmonks`, or `MULTI`:
+
+| Mode | Behaviour |
+| --- | --- |
+| `AUTO` | One provider serves everything, chosen by a score over what is observable: health, circuit-breaker and backoff state, quota head-room, reliability, response time, competition coverage, odds availability and statistics availability. The score and its components are returned in `selection.scores`, so the choice can be argued with. |
+| named | That provider serves everything it can; a data class it has no data for falls back to another feed rather than coming back empty. An unknown name is reported and Auto is used — never silently substituted. |
+| `MULTI` | One provider per data class: fixtures from the feed that covers the competition, statistics and odds from the feeds that have them, metadata from whichever supplies it. A feed already holding a class is penalised, so the work spreads across feeds instead of spending one provider's whole quota. |
+
+No mode calls a provider that is offline, in backoff or out of quota. `MULTI`
+is only offered when more than one feed is connected — with one feed there is
+nothing to combine.
+
+### Canonical identity (duplicate prevention)
+
+Every match gets one internal identity built from the teams and the kickoff
+date, whichever feed it arrived from:
+
+```
+MANCHESTER_UNITED_ARSENAL_2026-09-12
+```
+
+A provider row is resolved to that identity in this order, and the rule that
+fired is recorded:
+
+1. the provider's own match id, when it is already known (`PROVIDER_ID`);
+2. normalized home team + normalized away team + kickoff date (`TEAMS_AND_KICKOFF`);
+3. fuzzy team names on the same date (`FUZZY_TEAM_NAMES` — "Man Utd" ↔
+   "Manchester United", threshold 0.7, deterministic);
+4. otherwise it is a new fixture (`NEW_FIXTURE`).
+
+A different date is a different fixture, however similar the names: the same
+two clubs meet again in the reverse fixture. Two tables back this:
+
+- `football_provider_matches` — one row per (provider, provider match id),
+  pointing at the internal match, with `matched_by` and `confidence`;
+- `football_competition_mapping` — the internal competition a provider's league
+  id stands for, with the deployment's own `tier`, `premium` and `active`
+  classification. **Premium is an application-level label, not a provider league
+  id.** The mapping is written as fixtures are read: each provider row's league
+  id and name are recorded against the internal competition, so the competition
+  dropdown is populated from the provider that was selected. A row the provider
+  gave no competition id for is not mapped — a league guessed from a name alone
+  would merge two competitions.
+
+The same match from three feeds is one match, one prediction and — in
+`MULTI` — one fixture request per contributing feed, never one per match.
+
+### Premium leagues
+
+`WINDELS_FOOTBALL_PREMIUM_COMPETITIONS` is a comma-separated list of leagues
+this deployment classifies as premium — names or provider competition ids:
+
+```
+WINDELS_FOOTBALL_PREMIUM_COMPETITIONS=Premier League, UEFA Champions League, La Liga, Serie A, Bundesliga, Ligue 1
+```
+
+A league is premium because it was classified, and names match loosely, so one
+feed's "English Premier League" and another's "Premier League" are the same
+premium competition — and the same internal competition id. The Premium League
+selector offers every premium league that has a match on the date, with the
+featured one marked; a league that was not classified is never offered as
+premium, and a configured premium league with no match on the date is
+substituted by the featured competition with that stated, never silently.
+
+### API calls: database first
+
+The order is cache → database → dedupe → engine, in that order:
+
+1. A window that is already **stored and still fresh** — the newest fixture row
+   is inside `WINDELS_FOOTBALL_MAX_AGE_FIXTURES` (default 24h) — is served from
+   those rows. No provider is called, the canonical identities are the same, and
+   the response says `calls.source: STORED_FIXTURES`.
+2. Stored rows older than that window are stale, not a cache: the feed is read.
+   `refresh=1` reads the feed whatever the stored rows say.
+3. What is read is cached in `football_fixtures` as it arrived, so the next
+   request for the same window is answered from the database.
+
+Per-match data is opt-in, because it costs one call per match rather than one
+per page: `?with=lineups` collects confirmed lineups from whichever feed has
+them (with the same fallback as odds), bounded by the request budget, and each
+match records whether it got one — a match with no confirmed lineup says so
+rather than showing eleven names nobody announced.
+
+### Odds fallback
+
+When the selected provider has no price for a competition or market, another
+provider is tried, and the result names the source: `source: sportmonks`,
+`attempted: [api-football, sportmonks]`. If no provider quoted the market the
+odds are `DATA_UNAVAILABLE` — a price is never derived from a probability.
+
+### Provider health
+
+`GET /api/football/providers/health` reports per provider: status, response
+time, last successful request, last error, rate-limit state (`OK` /
+`EXHAUSTED` / `BACKOFF` / `UNKNOWN`), reliability, capabilities, whether odds
+and statistics are available, how many competitions are mapped, and — in
+`missingData` — what the provider cannot supply at all. Automatic fallback uses
+the same information: a provider that is offline or in backoff is skipped, not
+retried.
+
+### The prediction result
+
+Every prediction result carries what is needed to judge it:
+
+```jsonc
+{
+  "matchId": "api-football:1201",
+  "selection": "OVER", "selectionLabel": "Over 2.5",
+  "probability": 0.531, "odds": 1.95, "impliedProbability": 0.513, "edge": 0.018,
+  "riskLevel": "LOW",            // LOW | MEDIUM | HIGH, with riskFactors
+  "dataSources": [               // every provider behind the match
+    { "provider": "api-football", "providerMatchId": "1201", "matchedBy": "PROVIDER_ID" },
+    { "provider": "sportmonks",   "providerMatchId": "88012", "matchedBy": "FUZZY_TEAM_NAMES" }
+  ],
+  "modelVersion": 7,
+  "generatedAt": "2026-09-09T11:04:00+00:00",
+  "expiresAt": "2026-09-12T14:00:00+00:00",   // frozen at kickoff
+  "expiryBasis": "FROZEN_AT_KICKOFF"
+}
+```
+
+`riskLevel` is a reading of the inputs, not a mood: it weighs the data-quality
+band, how much of the score distribution the market could see, the selection's
+probability, the price, whether the model sees any edge, and whether the market
+rests on a stated assumption. `riskFactors` names whichever of those counted.
+
+### Regeneration
+
+A prediction is reused unless a stated reason justifies replacing it, and the
+reason is reported with the match:
+
+| Reason | Meaning |
+| --- | --- |
+| `MODEL_VERSION_CHANGED` | the stored prediction came from another model version |
+| `PREDICTION_EXPIRED` | older than `WINDELS_FOOTBALL_PREDICTION_TTL_SECONDS` (default 6h) |
+| `SIGNIFICANT_ODDS_MOVEMENT` | the price moved ≥ `WINDELS_FOOTBALL_ODDS_MOVEMENT_THRESHOLD` (default 0.05) in implied probability |
+| `CONFIRMED_LINEUP_CHANGE` | a confirmed lineup change was recorded |
+| `MAJOR_INJURY_OR_NEWS` | a major injury or team-news update was recorded |
+| `MATCH_STATUS_CHANGE` | the fixture is postponed, cancelled, suspended or live |
+| `NEW_STATISTICS_AVAILABLE` | the provider sent new data for the fixture after the prediction |
+
+Changing page, reloading, changing market or re-sweeping a date is **not** a
+reason: the default is reuse, and an unknown signal is never treated as
+permission. Once a match has kicked off the prediction is frozen
+(`FROZEN_AT_KICKOFF`) — no signal reopens it; it is settled instead.
+
 ## Output contract
 
 `GET /api/football/matches/:id/prediction` and the console share this shape:
@@ -213,9 +538,14 @@ GET /api/football/fixtures            ?date= | ?from=&to=&limit=&status=&competi
 GET /api/football/fixtures/today
 GET /api/football/fixtures/tomorrow
 GET /api/football/fixtures/live
+GET /api/football/matches                 ?date=&page=1&limit=50&competition=&market=&line=   the paginated feed (50 per page)
+GET /api/football/competitions          ?date=&providerId=   competitions stored for the date, premium marked
+GET /api/football/markets               ?date=   the odds-prediction markets and which can be answered
 GET /api/football/matches/:id            fixture + statistics + H2H as stored
 GET /api/football/matches/:id/analysis
 GET /api/football/matches/:id/prediction
+GET /api/football/predictions            ?date=&page=1&limit=50&competition=&market=&line=   the paged prediction feed
+GET /api/football/predictions/:matchId   one prediction by match id (`provider:externalId`)
 GET /api/football/predictions/today      ?date=&refresh=1
 GET /api/football/predictions/history  ?limit=&modelVersionId=
 GET /api/football/performance            ?days=30&modelVersionId=
@@ -225,12 +555,16 @@ GET /api/football/calibrations           ?modelVersionId= (defaults to the model
 GET /api/football/provider/status
 GET /api/football/status
 GET /api/football/dashboard            ?date=&refresh=
+GET /api/football/providers            the provider catalogue behind the Data Provider selector
+GET /api/football/providers/health     per-provider health: status, response time, rate limit, coverage, odds, what is missing
+GET /api/football/matches/fetch        ?provider=AUTO&competition=&date=&dateFrom=&dateTo=&limit=50&with=lineups&refresh=1
 ```
 
 Mutations require the native session plus the CSRF token (header or body field),
 then the capability named. They take a JSON body:
 
 ```
+POST /api/football/matches/generate  sports.manage   {"date":"2026-09-05","page":2,"competition":"39","market":"OVER_2_5"}  (max 50 NEW predictions)
 POST /api/football/sync            sports.manage   {"date":"2026-09-05","provider":"apifootball"}
 POST /api/football/sync/live       sports.manage   {}
 POST /api/football/settle          sports.settle   {"fixtureId":1234}  (omit to sweep)
@@ -253,6 +587,55 @@ seeded **Sports administrator** role (`sports_admin`, `tools/rbac.php`) already 
 all four, so a fresh install needs no new grants — and no screen or message may name a
 role or permission the seed does not define, which `tests/cases/105` checks by reading
 that catalogue.
+
+### The paged feed, page by page
+
+```jsonc
+// GET /api/football/matches?date=2026-09-05&page=2&limit=50
+{
+  "state": "AVAILABLE",
+  "date": "2026-09-05",
+  "matches": [
+    {
+      "matchId": "apifootball:1204831",   // the unique match identity
+      "fixtureId": 318,                   // database id
+      "homeTeam": "Manchester City", "awayTeam": "Everton",
+      "kickoff": "2026-09-05T14:00:00+00:00", "status": "SCHEDULED",
+      "analysisState": "ANALYZED",
+      "predictionSource": "STORED",       // STORED | GENERATED | DEFERRED | REFUSED | FAILED
+      "prediction": {
+        "predictionId": "fpx-9f3c2a71…", "result": "HOME",
+        "predictedScore": { "home": 2, "away": 0, "label": "2–0" },
+        "probabilities": { "home": 0.71, "draw": 0.19, "away": 0.10 },
+        "confidence": 71.4, "band": "QUALIFIED",
+        "modelVersionId": 7, "predictionDate": "2026-09-05",
+        "generatedAt": "2026-09-05T09:14:02+00:00"
+      },
+      "predictionRefusal": null            // { "code": "NOT_GENERATED", "reason": "…" } when there is none
+    }
+    // … 49 more
+  ],
+  "pagination": {
+    "page": 2, "limit": 50, "maxLimit": 50,
+    "totalMatches": 137, "totalPages": 3, "returned": 50,
+    "from": 51, "to": 100,
+    "hasPrevious": true, "hasNext": true, "previousPage": 1, "nextPage": 3
+  },
+  "generation": {
+    "requested": false, "batchLimit": 50,
+    "generated": 0,            // new predictions written by THIS request
+    "reused": 50,              // served from storage
+    "remainingOnDate": 87,     // matches on the date with no prediction yet
+    "predictionModelVersion": "v1+9f3c2a71", "predictionDate": "2026-09-05"
+  }
+}
+```
+
+`?generate=1` on the read endpoint (or `POST /api/football/matches/generate`)
+fills in the page's missing predictions first; `generation.requested` and
+`generation.generated` then report what the request actually produced. A clamp
+(`limit=1000` → 50) or a fallback (`page=abc` → 1) is always listed in
+`request.notes`, so a caller can see that the response is not the request.
 
 ## Refresh model
 
@@ -336,6 +719,14 @@ WINDELS_FOOTBALL_BUDGET_<JOB>=n              requests one sweep may spend; 0 = d
 WINDELS_FOOTBALL_MIN_REQUEST_SPACING_MS=250  spacing between provider requests
 WINDELS_FOOTBALL_DAILY_REQUEST_CEILING=0     fallback daily ceiling when a feed reports none
 WINDELS_FOOTBALL_ANALYSIS_LIMIT=120          fixtures one analysis pass may evaluate (1..500)
+WINDELS_FOOTBALL_MATCH_PAGE_SIZE=50          matches per page and per generation request (1..50, hard-capped in code)
+WINDELS_FOOTBALL_PREMIUM_COMPETITION=English Premier League   the featured ("Premium") league the console offers first
+WINDELS_FOOTBALL_PREMIUM_COMPETITION_ID=39   optional: pin it to a provider competition id instead of matching the name
+WINDELS_FOOTBALL_PREMIUM_COMPETITIONS=English Premier League  comma-separated list of leagues classified premium (names or
+                                             provider competition ids); matches loosely, so "English Premier League"
+                                             and "Premier League" are one premium competition
+WINDELS_FOOTBALL_DEFAULT_MARKET=MATCH_WINNER the market a request is answered in when it names none
+WINDELS_FOOTBALL_FIRST_HALF_SHARE=0.45       goal expectancy attributed to the first half (0.20..0.80); named in the market basis
 WINDELS_FOOTBALL_MAX_GOALS=8                 scoreline grid width per team (4..12)
 WINDELS_FOOTBALL_DC_RHO=-0.06                Dixon–Coles low-score adjustment (±0.25, 0 = plain Poisson)
 WINDELS_FOOTBALL_MARKET_BLEND=0.35           weight for market-implied probabilities (0 disables)
@@ -346,6 +737,8 @@ WINDELS_FOOTBALL_MAX_AGE_<BUCKET>=seconds    freshness window, one per bucket th
                                              freshness component; h2h (1095 d) is the age after
                                              which a head-to-head sample's weight is halved
 WINDELS_FOOTBALL_MIN_CALIBRATION_SAMPLES=50  settled rows required to fit a calibration (floor: 10)
+WINDELS_FOOTBALL_PREDICTION_TTL_SECONDS=21600     how long a prediction stays valid before fresh data may replace it (0 = never expires)
+WINDELS_FOOTBALL_ODDS_MOVEMENT_THRESHOLD=0.05     implied-probability move that justifies regenerating a prediction (0..1)
 DEMO_MODE=false                              platform demo switch; also readable as WINDELS_FOOTBALL_DEMO_MODE
 ```
 
@@ -359,7 +752,7 @@ simulated rows.
 ## Testing
 
 ```
-php index.php tools tests            # includes tests/cases/101…107-football-*.php
+php index.php tools tests            # includes tests/cases/101…107, 124- and 125-football-*.php
 ```
 
 The football cases run on `tests/football_support.php`: an in-memory repository, a

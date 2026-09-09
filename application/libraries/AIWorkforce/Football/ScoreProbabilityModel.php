@@ -18,6 +18,58 @@ final class ScoreProbabilityModel
     public function __construct(private FootballConfiguration $config) {}
 
     /**
+     * Every scoreline in the grid, including the ones `distribution()` leaves
+     * out for display.
+     *
+     * Market maths needs the whole distribution. The displayed grid is
+     * deliberately truncated at the configured minimum probability, and a
+     * truncated grid is unfit for summing: draws, handicaps and
+     * both-teams-to-score are spread over many small cells, so dropping the
+     * tail under-reports all three at once. This is the same model on the same
+     * inputs — only the presentation cut is removed.
+     *
+     * @return array{rows:list<array{homeGoals:int,awayGoals:int,probability:float}>, coverage:float, maxGoals:int}
+     */
+    public function fullGrid(?float $lambdaHome, ?float $lambdaAway): array
+    {
+        $max = $this->config->maxGoals();
+        if ($lambdaHome === null || $lambdaAway === null || $lambdaHome < 0 || $lambdaAway < 0) {
+            return ['rows' => [], 'coverage' => 0.0, 'maxGoals' => $max];
+        }
+        $raw = $this->rawGrid($lambdaHome, $lambdaAway, $this->config->dixonColesRho(), $max);
+        $sum = array_sum(array_column($raw['rows'], 'raw'));
+        if (!is_finite($sum) || $sum <= 0.0) return ['rows' => [], 'coverage' => 0.0, 'maxGoals' => $max];
+        $rows = [];
+        foreach ($raw['rows'] as $row) {
+            $rows[] = ['homeGoals' => (int) $row['homeGoals'], 'awayGoals' => (int) $row['awayGoals'],
+                'probability' => round((float) $row['raw'] / $sum, 6)];
+        }
+        return ['rows' => $rows, 'maxGoals' => $max,
+            'coverage' => round(min(1.0, array_sum($raw['homeMarginal']) * array_sum($raw['awayMarginal'])), 6)];
+    }
+
+    /**
+     * The un-normalized grid: every (home, away) cell with its joint mass, plus
+     * the marginals the coverage figure is read from.
+     *
+     * @return array{rows:list<array{homeGoals:int,awayGoals:int,raw:float}>, homeMarginal:list<float>, awayMarginal:list<float>}
+     */
+    private function rawGrid(float $lambdaHome, float $lambdaAway, float $rho, int $max): array
+    {
+        $rows = [];
+        $homeMarginal = [];
+        $awayMarginal = [];
+        for ($h = 0; $h <= $max; $h++) $homeMarginal[$h] = self::poisson($lambdaHome, $h);
+        for ($a = 0; $a <= $max; $a++) $awayMarginal[$a] = self::poisson($lambdaAway, $a);
+        foreach ($homeMarginal as $h => $ph) {
+            foreach ($awayMarginal as $a => $pa) {
+                $rows[] = ['homeGoals' => $h, 'awayGoals' => $a, 'raw' => $ph * $pa * self::tau($h, $a, $lambdaHome, $lambdaAway, $rho)];
+            }
+        }
+        return ['rows' => $rows, 'homeMarginal' => $homeMarginal, 'awayMarginal' => $awayMarginal];
+    }
+
+    /**
      * @return array{home:?float, away:?float, rows:list<array{homeGoals:int,awayGoals:int,probability:float,rank:int}>,
      *               outcomes:array{home:float,draw:float,away:float}, expectedTotalGoals:float,
      *               homeCleanSheet:float, awayCleanSheet:float, homeFailedToScore:float, awayFailedToScore:float,
@@ -30,16 +82,10 @@ final class ScoreProbabilityModel
             return $this->empty($max, $goalSource);
         }
         $rho = $this->config->dixonColesRho();
-        $rows = [];
-        $homeMarginal = [];
-        $awayMarginal = [];
-        for ($h = 0; $h <= $max; $h++) $homeMarginal[$h] = self::poisson($lambdaHome, $h);
-        for ($a = 0; $a <= $max; $a++) $awayMarginal[$a] = self::poisson($lambdaAway, $a);
-        foreach ($homeMarginal as $h => $ph) {
-            foreach ($awayMarginal as $a => $pa) {
-                $rows[] = ['homeGoals' => $h, 'awayGoals' => $a, 'raw' => $ph * $pa * self::tau($h, $a, $lambdaHome, $lambdaAway, $rho)];
-            }
-        }
+        $raw = $this->rawGrid($lambdaHome, $lambdaAway, $rho, $max);
+        $rows = $raw['rows'];
+        $homeMarginal = $raw['homeMarginal'];
+        $awayMarginal = $raw['awayMarginal'];
         // Share of the independent-Poisson mass that falls inside the 0…max grid.
         // Reported, not hidden: the grid is renormalized, so a reader can see how
         // much of the distribution was outside it.

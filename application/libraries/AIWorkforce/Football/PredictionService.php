@@ -21,6 +21,28 @@ final class PredictionService
     public const KIND_PRE_MATCH = 'PRE_MATCH';
     public const KIND_LIVE = 'LIVE';
 
+    /** How a match was treated by a (bounded) generation request. */
+    public const MISSING_GENERATED = 'GENERATED';   // a new prediction was written
+    public const MISSING_STORED = 'STORED';         // one already existed → reused
+    public const MISSING_REFUSED = 'REFUSED';       // the engine answered without storing: data too thin
+    public const MISSING_DEFERRED = 'DEFERRED';     // the batch was full; try again
+    public const MISSING_FROZEN = 'FROZEN';         // kickoff passed, or the fixture is void
+    public const MISSING_FAILED = 'FAILED';         // the engine threw
+
+    /**
+     * Predictions already read during this request, keyed
+     * `fixtureId|kind|modelVersionId`.
+     *
+     * Paging through a date asks "does this match have a prediction?" fifty
+     * times per page. The answer cannot change inside a request, so it is read
+     * once and remembered — including the misses, which is what stops a page
+     * from re-asking for a match it already learned is missing.
+     *
+     * @var array<string,array<string,mixed>|null>
+     */
+    private array $resolved = [];
+    private ?RegenerationPolicy $regeneration = null;
+
     public function __construct(
         private FootballRepository $repo,
         private FeatureBuilder $features,
@@ -195,21 +217,344 @@ final class PredictionService
     }
 
     /**
-     * Predict every stored fixture for a date. Returns per-fixture outcomes plus
-     * the board counts, and never inflates a fixture into a higher band.
+     * The stored prediction for one match, if there is one.
      *
-     * @return array{status:string, date:string, fixtures:int, analyzed:int, qualified:int, limited:int, rejected:int, predictions:list<array>, errors:list<string>, provider:string|null, model:array}
+     * This is the "check match_id against the database" step: a match carries
+     * at most one pre-match prediction per model version — enforced by
+     * `UNIQUE(fixture_id, prediction_kind, model_version_id)` — so a hit here
+     * means the prediction is returned as it is and the engine is never asked
+     * to produce it a second time.
+     *
+     * A model version of 0 is a real state (a prediction written before a model
+     * row existed) and is matched as such, not treated as "any version".
+     *
+     * @param array<string,mixed> $fixture
+     * @param bool $refresh re-read after a write instead of trusting the cache
+     * @return array<string,mixed>|null
      */
-    public function predictDay(string $date, ?string $providerId = null): array
+    public function existing(array $fixture, int $modelVersionId, string $kind = self::KIND_PRE_MATCH, bool $refresh = false): ?array
+    {
+        $fixtureId = (int) ($fixture['id'] ?? 0);
+        if ($fixtureId <= 0) return null;
+        $key = $fixtureId . '|' . $kind . '|' . $modelVersionId;
+        if (!$refresh && array_key_exists($key, $this->resolved)) return $this->resolved[$key];
+        $rows = $this->repo->listPredictionsForFixtures([$fixtureId], $kind, $modelVersionId);
+        return $this->resolved[$key] = $rows[$fixtureId] ?? null;
+    }
+
+    /**
+     * Pre-load the stored predictions for a whole page, in one query, so the
+     * per-match lookups that follow are answered from memory.
+     *
+     * @param list<int> $fixtureIds
+     */
+    public function prime(array $fixtureIds, int $modelVersionId, string $kind = self::KIND_PRE_MATCH): void
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $fixtureIds), static fn(int $id): bool => $id > 0)));
+        if ($ids === []) return;
+        $rows = $this->repo->listPredictionsForFixtures($ids, $kind, $modelVersionId);
+        foreach ($ids as $id) {
+            $key = $id . '|' . $kind . '|' . $modelVersionId;
+            // A miss is cached too: it is a fact about this request, and it is
+            // what keeps paging from re-asking about the same empty match.
+            $this->resolved[$key] = $rows[$id] ?? null;
+        }
+    }
+
+    /**
+     * Why this match cannot receive a new prediction at all — kickoff has
+     * passed, or the fixture was postponed or cancelled. `null` means the slot
+     * is open and generation may be attempted.
+     *
+     * @param array<string,mixed> $fixture
+     * @return array{code:string, reason:string}|null
+     */
+    public function refusal(array $fixture, string $kind = self::KIND_PRE_MATCH): ?array
+    {
+        $code = $this->frozenReason($fixture, $kind);
+        if ($code === null) return null;
+        return ['code' => $code, 'reason' => match ($code) {
+            'KICKOFF_PASSED' => 'Kickoff has passed, so no pre-match prediction can be created for this match any more. Nothing is back-filled.',
+            'FIXTURE_POSTPONED', 'FIXTURE_CANCELLED' => 'The fixture is ' . strtolower(substr($code, 8)) . '; there is no match to predict.',
+            default => 'The fixture status is not one a pre-match prediction may be written for.',
+        }];
+    }
+
+    /** The rule that decides whether a stored prediction may be replaced. */
+    public function regeneration(): RegenerationPolicy
+    {
+        return $this->regeneration ??= new RegenerationPolicy($this->config);
+    }
+
+    /**
+     * The regeneration signals for the matches that already have a prediction.
+     *
+     * Only one signal is derived here — how far the quoted price has moved
+     * since the prediction was written — because it is the one that is already
+     * stored and can therefore be measured rather than assumed. It is read in
+     * a single batched query for the page, and it is only computed when a
+     * prediction exists to compare against. Lineup, injury and news signals
+     * come from the caller (`$signals`) when it has them; when it does not,
+     * they stay unknown, and an unknown is never a reason to regenerate.
+     *
+     * @param array<int,array<string,mixed>> $fixtures
+     * @param array<string,array<string,mixed>> $signals keyed by match id
+     * @return array<string,array<string,mixed>> keyed by match id
+     */
+    private function oddsHistory(array $fixtures, int $modelVersionId, string $kind, array $signals): array
+    {
+        $matchIds = [];
+        foreach ($fixtures as $fixture) {
+            $matchId = MatchFeed::matchId($fixture);
+            if ($matchId === '') continue;
+            if ($this->existing($fixture, $modelVersionId, $kind) === null) continue;
+            $matchIds[$matchId] = (string) ($this->existing($fixture, $modelVersionId, $kind)['generated_at'] ?? '');
+        }
+        if ($matchIds === []) return [];
+        $rows = $this->repo->listMarketOdds(array_keys($matchIds));
+        $out = [];
+        foreach ($matchIds as $matchId => $generatedAt) {
+            $movement = $this->priceMovement($rows[$matchId] ?? [], $generatedAt);
+            $signal = (array) ($signals[$matchId] ?? []);
+            if ($movement !== null && !array_key_exists('oddsMovement', $signal)) $signal['oddsMovement'] = $movement;
+            if (array_key_exists('oddsMovement', $signal)) $signal['oddsMovementMeasured'] = true;
+            $out[$matchId] = $signal;
+        }
+        return $out;
+    }
+
+    /**
+     * The largest move in implied probability between the price that stood when
+     * the prediction was written and the latest price the feed has quoted.
+     *
+     * @param list<array{market:string,selection:string,decimalOdds:float,observedAt:?string}> $rows
+     */
+    private function priceMovement(array $rows, string $generatedAt): ?float
+    {
+        if ($rows === []) return null;
+        $generated = $generatedAt !== '' ? strtotime($generatedAt) : null;
+        if ($generated === null || $generated === false) return null;
+        $latest = [];
+        $latestAt = [];
+        $baseline = [];
+        $baselineAt = [];
+        foreach ($rows as $row) {
+            $price = (float) ($row['decimalOdds'] ?? 0);
+            if ($price <= 0) continue;
+            $key = (string) ($row['market'] ?? '') . '|' . (string) ($row['selection'] ?? '');
+            $observed = strtotime((string) ($row['observedAt'] ?? ''));
+            if ($observed === false) continue;
+            // Chosen by the timestamp on the row, not by the order it arrived
+            // in: which quote is the newest and which one stood when the
+            // prediction was written must not depend on the query's ordering.
+            if (!isset($latestAt[$key]) || $observed > $latestAt[$key]) { $latestAt[$key] = $observed; $latest[$key] = $price; }
+            if ($observed <= $generated && (!isset($baselineAt[$key]) || $observed > $baselineAt[$key])) {
+                $baselineAt[$key] = $observed; $baseline[$key] = $price;
+            }
+        }
+        if ($latest === [] || $baseline === []) return null;
+        $worst = 0.0;
+        foreach ($latest as $key => $price) {
+            if (!isset($baseline[$key])) continue;
+            $move = abs((1 / $price) - (1 / $baseline[$key]));
+            if ($move > $worst) $worst = $move;
+        }
+        return round($worst, 6);
+    }
+
+    /**
+     * Generate predictions for the matches that do not have one yet — never
+     * more than `$limit` of them, and never more than one page
+     * (`MatchFeed::MAX_PAGE_SIZE`) in a single call.
+     *
+     * The rule this enforces is the one the paginated module is built on: a
+     * match that already has a stored prediction is *returned*, not
+     * recomputed. Changing pages, reloading a page or sweeping the same date
+     * twice therefore costs the engine nothing for those matches.
+     *
+     * @param array<int,array<string,mixed>> $fixtures candidate rows, already paged
+     * @return array{requested:int, limit:int, generated:int, skipped:int, deferred:int, frozen:int, failed:int, matches:array<int,array<string,mixed>>, errors:list<string>, modelVersionId:int|null, modelVersion:string|null}
+     */
+    public function predictMissing(array $fixtures, int $limit = MatchFeed::MAX_PAGE_SIZE, string $kind = self::KIND_PRE_MATCH, array $signals = []): array
+    {
+        $limit = max(0, min(MatchFeed::MAX_PAGE_SIZE, $limit));
+        $model = $this->models->usable();
+        $modelVersionId = (int) ($model['model']['id'] ?? 0);
+        $policy = $this->regeneration();
+        $out = [
+            'requested' => count($fixtures),
+            // The ceiling is repeated back to the caller: what was asked for and
+            // what was allowed are both visible, and they are not the same thing
+            // when someone asks for 500.
+            'limit' => $limit,
+            'generated' => 0, 'skipped' => 0, 'refreshed' => 0, 'refused' => 0, 'deferred' => 0, 'frozen' => 0, 'failed' => 0,
+            'matches' => [], 'errors' => [],
+            'modelVersionId' => $modelVersionId ?: null,
+            'modelVersion' => $model['model']['model_version'] ?? null,
+        ];
+        $budget = $limit;
+        // One batched read of the quoted prices for the matches that already
+        // have a prediction: it is what lets a real price move — rather than a
+        // reload, a page change or a second sweep — be the reason a prediction
+        // is replaced.
+        $history = $this->oddsHistory($fixtures, $modelVersionId, $kind, $signals);
+        foreach ($fixtures as $index => $fixture) {
+            $identity = ['fixtureId' => (int) ($fixture['id'] ?? 0), 'externalId' => $fixture['external_id'] ?? null,
+                'matchId' => MatchFeed::matchId($fixture)];
+            $stored = $this->existing($fixture, $modelVersionId, $kind);
+            if ($stored !== null) {
+                $decision = $policy->decide($stored, $fixture, $history[$identity['matchId']] ?? [], $modelVersionId);
+                if ($decision['action'] === RegenerationPolicy::REFRESH && $budget > 0) {
+                    // A reason that justifies it, and budget left for it: the
+                    // stored row is replaced by a fresh one, and both counts
+                    // say so — this is a regeneration, not a second prediction.
+                    $budget--;
+                    $payload = $this->predict($fixture, true, $kind);
+                    $replaced = $this->existing($fixture, $modelVersionId, $kind, true);
+                    if ($replaced !== null) {
+                        $out['refreshed']++;
+                        $out['matches'][$index] = $identity + ['state' => self::MISSING_GENERATED,
+                            'source' => MatchFeed::SOURCE_GENERATED, 'regenerated' => true,
+                            'regeneration' => ['codes' => $decision['codes'], 'reasons' => $decision['reasons']],
+                            'predictionId' => (string) ($replaced['id'] ?? ''),
+                            'reason' => 'The stored prediction was replaced because: ' . implode(' ', $decision['reasons'])];
+                        continue;
+                    }
+                    $out['failed']++;
+                    $out['errors'][] = 'fixture ' . ($fixture['external_id'] ?? $fixture['id'])
+                        . ': regeneration was justified but the engine stored no new row.';
+                    $out['matches'][$index] = $identity + ['state' => self::MISSING_FAILED, 'source' => MatchFeed::SOURCE_FAILED,
+                        'code' => 'REGENERATION_NOT_STORED',
+                        'reason' => 'Regeneration was justified (' . implode(', ', $decision['codes'])
+                            . ') but no replacement prediction was stored; the existing one is shown.'];
+                    continue;
+                }
+                $out['skipped']++;
+                $out['matches'][$index] = $identity + ['state' => self::MISSING_STORED, 'source' => MatchFeed::SOURCE_STORED,
+                    'regeneration' => ['action' => $decision['action'], 'codes' => $decision['codes'],
+                        'reasons' => $decision['reasons']],
+                    'reason' => 'A prediction for this match is already stored; it was reused instead of being generated again.'];
+                continue;
+            }
+            $refusal = $this->refusal($fixture, $kind);
+            if ($refusal !== null) {
+                $out['frozen']++;
+                $out['matches'][$index] = $identity + ['state' => self::MISSING_FROZEN, 'source' => MatchFeed::SOURCE_REFUSED,
+                    'code' => $refusal['code'], 'reason' => $refusal['reason']];
+                continue;
+            }
+            if ($budget <= 0) {
+                $out['deferred']++;
+                $out['matches'][$index] = $identity + ['state' => self::MISSING_DEFERRED, 'source' => MatchFeed::SOURCE_DEFERRED,
+                    'code' => 'BATCH_LIMIT_REACHED',
+                    'reason' => 'This request already generated ' . $limit . ' new predictions; the match is picked up by the next one.'];
+                continue;
+            }
+            $budget--;
+            try {
+                $payload = $this->predict($fixture, true, $kind);
+            } catch (\Throwable $e) {
+                $out['failed']++;
+                $out['errors'][] = 'fixture ' . ($fixture['external_id'] ?? $fixture['id']) . ': ' . mb_substr($e->getMessage(), 0, 200);
+                $out['matches'][$index] = $identity + ['state' => self::MISSING_FAILED, 'source' => MatchFeed::SOURCE_FAILED,
+                    'code' => 'ENGINE_ERROR', 'reason' => mb_substr($e->getMessage(), 0, 200)];
+                continue;
+            }
+            if (!empty($payload['predictionFrozen'])) {
+                $out['frozen']++;
+                $out['matches'][$index] = $identity + ['state' => self::MISSING_FROZEN, 'source' => MatchFeed::SOURCE_REFUSED,
+                    'code' => (string) ($payload['code'] ?? 'KICKOFF_PASSED'),
+                    'reason' => (string) ($payload['reason'] ?? 'The pre-match slot for this match is closed.')];
+                continue;
+            }
+            $stored = $this->existing($fixture, $modelVersionId, $kind, true);
+            $band = (string) ($payload['dataQuality']['status'] ?? ($stored['data_quality_band'] ?? QualityBand::REJECTED));
+            if ($stored === null) {
+                // The engine answered without writing a row — the quality gate
+                // refused it, or the data was too thin. That is a result, not an
+                // error: the match stays "not analyzed" and is retried later.
+                $out['refused']++;
+                $out['matches'][$index] = $identity + ['state' => self::MISSING_REFUSED, 'source' => MatchFeed::SOURCE_REFUSED,
+                    'code' => (string) ($payload['code'] ?? 'DATA_QUALITY_' . $band), 'band' => $band,
+                    'reason' => 'The stored data for this match is ' . $band . '; no prediction row was written.'];
+                continue;
+            }
+            $out['generated']++;
+            $out['matches'][$index] = $identity + ['state' => self::MISSING_GENERATED, 'source' => MatchFeed::SOURCE_GENERATED,
+                'predictionId' => (string) ($stored['id'] ?? ''), 'band' => $band,
+                'score' => (int) ($stored['data_quality_score'] ?? 0),
+                'result' => $payload['result'] ?? null, 'confidence' => $payload['confidence'] ?? null];
+        }
+        return $out;
+    }
+
+    /**
+     * The same classification without generating anything — what a read-only
+     * page request uses to explain, per match, why a prediction is or is not
+     * attached to it.
+     *
+     * @param array<int,array<string,mixed>> $fixtures
+     * @return array{requested:int, limit:int, generated:int, skipped:int, deferred:int, frozen:int, failed:int, matches:array<int,array<string,mixed>>, errors:list<string>, modelVersionId:int|null, modelVersion:string|null}
+     */
+    public function reportOnly(array $fixtures, int $limit = MatchFeed::MAX_PAGE_SIZE, string $kind = self::KIND_PRE_MATCH): array
+    {
+        $limit = max(0, min(MatchFeed::MAX_PAGE_SIZE, $limit));
+        $model = $this->models->usable();
+        $modelVersionId = (int) ($model['model']['id'] ?? 0);
+        $out = ['requested' => count($fixtures), 'limit' => $limit, 'generated' => 0, 'skipped' => 0,
+            'refused' => 0, 'deferred' => 0, 'frozen' => 0, 'failed' => 0, 'matches' => [], 'errors' => [],
+            'modelVersionId' => $modelVersionId ?: null, 'modelVersion' => $model['model']['model_version'] ?? null];
+        foreach ($fixtures as $index => $fixture) {
+            $identity = ['fixtureId' => (int) ($fixture['id'] ?? 0), 'externalId' => $fixture['external_id'] ?? null,
+                'matchId' => MatchFeed::matchId($fixture)];
+            if ($this->existing($fixture, $modelVersionId, $kind) !== null) {
+                $out['skipped']++;
+                $out['matches'][$index] = $identity + ['state' => self::MISSING_STORED, 'source' => MatchFeed::SOURCE_STORED];
+                continue;
+            }
+            $refusal = $this->refusal($fixture, $kind);
+            if ($refusal !== null) {
+                $out['frozen']++;
+                $out['matches'][$index] = $identity + ['state' => self::MISSING_FROZEN, 'source' => MatchFeed::SOURCE_REFUSED,
+                    'code' => $refusal['code'], 'reason' => $refusal['reason']];
+                continue;
+            }
+            $out['refused']++;
+            $out['matches'][$index] = $identity + [
+                'state' => self::MISSING_REFUSED, 'source' => MatchFeed::SOURCE_REFUSED,
+                'code' => 'NOT_GENERATED',
+                'reason' => 'No prediction is stored for this match yet. Generating this page creates at most '
+                    . MatchFeed::MAX_PAGE_SIZE . ' new predictions.',
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Predict every stored fixture for a date that does not have a prediction
+     * yet, in batches of at most one page.
+     *
+     * Matches that already carry a prediction for the model version in use are
+     * skipped rather than rewritten: re-running this job is how a partly-filled
+     * date gets finished, so it must cost nothing for the matches it already
+     * handled. `$maxNew` caps how many *new* predictions one call may write
+     * (default: the analysis limit); each batch inside the call is capped at
+     * `MatchFeed::MAX_PAGE_SIZE` regardless.
+     *
+     * @return array{status:string, date:string, fixtures:int, analyzed:int, qualified:int, limited:int, rejected:int, predictions:list<array>, errors:list<string>, provider:string|null, model:array, skipped:int, frozen:int, failed:int, batches:int, maxNew:int}
+     */
+    public function predictDay(string $date, ?string $providerId = null, ?int $maxNew = null): array
     {
         $filter = ['date' => $date];
         if ($providerId !== null) $filter['providerId'] = (int) $providerId;
-        $fixtures = $this->repo->listFixtures($filter, max(1, $this->config->analysisLimit()));
+        $analysisLimit = max(1, $this->config->analysisLimit());
+        $fixtures = $this->repo->listFixtures($filter, $analysisLimit);
         $out = ['status' => 'COMPLETED', 'date' => $date, 'fixtures' => count($fixtures), 'analyzed' => 0, 'qualified' => 0, 'limited' => 0, 'rejected' => 0,
             // Fixtures whose pre-match slot had already closed are tallied apart,
             // so "we did not predict it in time" is never mistaken for "the data
             // was too thin to predict".
-            'frozen' => 0, 'predictions' => [], 'errors' => []];
+            'frozen' => 0, 'predictions' => [], 'errors' => [], 'skipped' => 0, 'refused' => 0, 'failed' => 0, 'batches' => 0,
+            'maxNew' => $maxNew ?? $analysisLimit, 'batchSize' => MatchFeed::MAX_PAGE_SIZE];
         $model = $this->models->usable();
         $out['model'] = ['state' => $model['state'], 'label' => $model['label'], 'version' => $model['model']['model_version'] ?? null, 'reason' => $model['reason']];
         if ($fixtures === []) {
@@ -217,28 +562,43 @@ final class PredictionService
             $out['reason'] = 'No fixture for ' . $date . ' is stored. The provider has not been reached for this date, so no prediction is produced.';
             return $out;
         }
-        foreach ($fixtures as $fixture) {
-            $kind = self::KIND_PRE_MATCH;
-            try {
-                $payload = $this->predict($fixture, true, $kind);
-                if (!empty($payload['predictionFrozen'])) {
-                    $out['frozen']++;
-                    $out['predictions'][] = ['fixtureId' => $fixture['id'], 'externalId' => $fixture['external_id'] ?? null,
-                        'status' => 'NO_PREDICTION', 'code' => (string) ($payload['code'] ?? 'KICKOFF_PASSED'), 'band' => null];
-                    continue;
-                }
+        $budget = max(0, min($analysisLimit, $maxNew ?? $analysisLimit));
+        $attempted = [];
+        while ($budget > 0) {
+            $batch = [];
+            foreach ($fixtures as $index => $fixture) {
+                if (isset($attempted[$index])) continue;
+                $batch[$index] = $fixture;
+                if (count($batch) >= MatchFeed::MAX_PAGE_SIZE) break;
+            }
+            if ($batch === []) break;
+            $result = $this->predictMissing($batch, min(MatchFeed::MAX_PAGE_SIZE, $budget), self::KIND_PRE_MATCH);
+            $out['batches']++;
+            $budget -= max(0, $result['generated']);
+            $out['skipped'] += (int) $result['skipped'];
+            $out['frozen'] += (int) $result['frozen'];
+            $out['refused'] += (int) $result['refused'];
+            $out['failed'] += (int) $result['failed'];
+            $out['errors'] = array_merge($out['errors'], $result['errors']);
+            foreach ($result['matches'] as $index => $outcome) {
+                // A deferred match was never attempted, so it stays eligible for
+                // the next batch; everything else is settled for this call.
+                if ((string) ($outcome['state'] ?? '') !== self::MISSING_DEFERRED) $attempted[$index] = true;
+                if ((string) ($outcome['state'] ?? '') === self::MISSING_STORED) continue;
+                $out['predictions'][] = ['fixtureId' => $outcome['fixtureId'] ?? null, 'externalId' => $outcome['externalId'] ?? null,
+                    'matchId' => $outcome['matchId'] ?? null, 'status' => (string) ($outcome['state'] ?? 'UNKNOWN'),
+                    'code' => $outcome['code'] ?? null, 'band' => $outcome['band'] ?? null, 'score' => $outcome['score'] ?? null,
+                    'predictionId' => $outcome['predictionId'] ?? null, 'result' => $outcome['result'] ?? null,
+                    'confidence' => $outcome['confidence'] ?? null];
+                // A match the engine answered on is analyzed — whether it stored a
+                // prediction (GENERATED) or refused it on data quality (REFUSED).
+                // Only the closed-slot cases are FROZEN, and they are tallied apart.
+                if (!in_array((string) ($outcome['state'] ?? ''), [self::MISSING_GENERATED, self::MISSING_REFUSED], true)) continue;
                 $out['analyzed']++;
-                $band = (string) ($payload['dataQuality']['status'] ?? QualityBand::REJECTED);
+                $band = (string) ($outcome['band'] ?? QualityBand::REJECTED);
                 if ($band === QualityBand::QUALIFIED) $out['qualified']++;
                 elseif ($band === QualityBand::LIMITED) $out['limited']++;
                 else $out['rejected']++;
-                $out['predictions'][] = ['fixtureId' => $fixture['id'], 'externalId' => $fixture['external_id'] ?? null,
-                    'status' => (string) ($payload['status'] ?? 'UNKNOWN'), 'code' => $payload['code'] ?? null,
-                    'band' => $band, 'score' => (int) ($payload['dataQuality']['score'] ?? 0),
-                    'predictionId' => $payload['stored']['predictionId'] ?? ($payload['stored']['existingPredictionId'] ?? null),
-                    'result' => $payload['result'] ?? null, 'confidence' => $payload['confidence'] ?? null];
-            } catch (\Throwable $e) {
-                $out['errors'][] = 'fixture ' . ($fixture['external_id'] ?? $fixture['id']) . ': ' . mb_substr($e->getMessage(), 0, 200);
             }
         }
         return $out;
