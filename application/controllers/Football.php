@@ -97,6 +97,11 @@ class Football extends App_Controller
         $providers['mode'] = $providerMode;
         $providers['locked'] = $providerLocked;
         $data['providers'] = $providers;
+        // The selection panel (Data Provider → Select Competition → Premium
+        // League → Select Odds Prediction → Date) is an administrator concern.
+        // Operators see the board only; the AUTO · managed by admin selectors
+        // stay visible to administrators, who are the ones the backend honours.
+        $data['isAdmin'] = $this->isAdmin($this->refreshIdentityPermissions($this->identity));
         $data['competition'] = $competition;
         $data['market'] = $market;
         $data['line'] = $line;

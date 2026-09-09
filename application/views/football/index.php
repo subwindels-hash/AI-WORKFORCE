@@ -18,6 +18,7 @@ $perf = $d['performance'] ?? [];
 $live = $d['live'] ?? [];
 $models = $d['models'] ?? [];
 $caps = $caps ?? ['sync' => false, 'calibrate' => false, 'approve' => false, 'settle' => false];
+$isAdmin = $isAdmin ?? false;
 $summary = $board['summary'] ?? ['fixtures' => 0, 'analyzed' => 0, 'qualified' => 0, 'limited' => 0, 'rejected' => 0];
 
 // The selection the operator made — competition, premium league and market. It
@@ -198,6 +199,7 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
         <?php endif; ?>
 
         <!-- ── the selection (competition → premium league → market) ───────── -->
+        <?php if (!empty($isAdmin)): ?>
         <div style="margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:10px;background:rgba(127,127,127,.04)">
           <form method="get" action="/football" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
             <input type="hidden" name="page" value="1">
@@ -273,6 +275,7 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
             The provider chosen here is the one a sync or a fetch reads; paging and market changes read stored rows and cost no provider call.
           </p>
         </div>
+        <?php endif; ?>
 
         <!-- ── the page as a market table ─────────────────────────────────── -->
         <?php $rows = is_array($board['rows'] ?? null) ? $board['rows'] : []; ?>
