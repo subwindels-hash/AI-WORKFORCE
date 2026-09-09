@@ -226,12 +226,20 @@ The rules, and where each one is enforced:
 
 **`match_id`.** A match is identified by `providerCode:externalId`
 (`MatchFeed::matchId()`), which the provider guarantees unique and
-`football_fixtures` enforces. A prediction is distinguished from a later refresh
-of the same match by three things together — the match, the prediction kind
-(pre-match or live), and `model_version_id` — plus `generated_at` as
-`predictionDate`. Every match row in the feed carries `matchId`,
-`predictionSource` (`STORED` / `GENERATED` / `DEFERRED` / `REFUSED` / `FAILED`)
-and, when there is no prediction, a `predictionRefusal` naming the reason.
+`football_fixtures` enforces. Every match additionally owns its stored fixture
+id — the same number its page is served under (`/football/match/<fixtureId>`) —
+so each match is individually addressable once its fixture is stored, generated
+or not. A stored row whose feed supplied no external id (a legacy row, or a
+feed that omitted one) falls back to that stored id as `fixture:<id>`; a match
+that exists is never keyed by a blank. The console prints that stored id as the
+row's `Match ID`, so the number shown on a row is the number the row links to —
+no match row on the board is left without an id or pointed at a page it does
+not own. A prediction is distinguished from a later refresh of the same match
+by three things together — the match, the prediction kind (pre-match or live),
+and `model_version_id` — plus `generated_at` as `predictionDate`. Every match
+row in the feed carries `matchId`, `fixtureId`, `predictionSource` (`STORED` /
+`GENERATED` / `DEFERRED` / `REFUSED` / `FAILED`) and, when there is no
+prediction, a `predictionRefusal` naming the reason.
 
 **Worked example** (120 matches on a date, 3 pages):
 

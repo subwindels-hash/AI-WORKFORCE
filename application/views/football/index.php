@@ -369,9 +369,15 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                   ?>
                   <tr style="border-bottom:1px solid var(--line)">
                     <td style="padding:6px">
-                      <a href="/football/match/<?= (int) ($row['fixtureId'] ?? 0) ?>" style="font-weight:600"><?= e((string) ($row['homeTeam'] ?? '—')) ?> vs <?= e((string) ($row['awayTeam'] ?? '—')) ?></a>
+                      <?php $rowPageId = (int) ($row['fixtureId'] ?? 0); ?>
+                      <?php if ($rowPageId > 0): ?>
+                        <a href="/football/match/<?= $rowPageId ?>" style="font-weight:600"><?= e((string) ($row['homeTeam'] ?? '—')) ?> vs <?= e((string) ($row['awayTeam'] ?? '—')) ?></a>
+                      <?php else: ?>
+                        <span style="font-weight:600" title="This row has no stored fixture, so it has no match page."><?= e((string) ($row['homeTeam'] ?? '—')) ?> vs <?= e((string) ($row['awayTeam'] ?? '—')) ?></span>
+                      <?php endif; ?>
                       <div class="dim mono" style="font-size:10px"><?= e($windelsModelId) ?></div>
-                      <div class="dim mono" style="font-size:10px">Match ID: <?= e((string) ($row['matchId'] ?? '—')) ?></div>
+                      <?php /* Match ID is the match's own stored id — the same number its page is served under (/football/match/<fixtureId>) — so every generated match row carries one, never a blank. */ ?>
+                      <div class="dim mono" style="font-size:10px">Match ID: <?= $rowPageId > 0 ? $rowPageId : '—' ?><?php $rowFeedKey = (string) ($row['matchId'] ?? ''); if ($rowFeedKey !== '' && !str_starts_with($rowFeedKey, 'fixture:')): ?> · feed <?= e($rowFeedKey) ?><?php endif; ?></div>
                       <div class="dim mono" style="font-size:10px"><?= e((string) ($row['providerLabel'] ?? 'Model unavailable')) ?> · Provider ID: <?= e((string) ($row['providerId'] ?? '—')) ?> · Provider Match ID: <?= e((string) ($row['providerMatchId'] ?? '—')) ?></div>
                     </td>
                     <td style="padding:6px"><?= e((string) ($row['competition'] ?? '—')) ?></td>
@@ -472,7 +478,12 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                     <div class="body" style="padding:12px">
                       <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline">
                         <div>
-                          <a href="/football/match/<?= (int) ($card['fixtureId'] ?? 0) ?>" style="font-weight:700;font-size:15px"><?= e((string) ($card['predictedResultLabel'] ?? 'No prediction')) ?></a>
+                          <?php $cardPageId = (int) ($card['fixtureId'] ?? 0); ?>
+                          <?php if ($cardPageId > 0): ?>
+                            <a href="/football/match/<?= $cardPageId ?>" style="font-weight:700;font-size:15px"><?= e((string) ($card['predictedResultLabel'] ?? 'No prediction')) ?></a>
+                          <?php else: ?>
+                            <span style="font-weight:700;font-size:15px" title="This card has no stored fixture, so it has no match page."><?= e((string) ($card['predictedResultLabel'] ?? 'No prediction')) ?></span>
+                          <?php endif; ?>
                           <div class="dim" style="font-size:11px">
                             <?= e((string) ($card['competition'] ?? '—')) ?><?= !empty($card['country']) ? ' · ' . e((string) $card['country']) : '' ?> ·
                             <?= e((string) ($card['kickoff'] ? gmdate('M j, H:i', (int) strtotime((string) $card['kickoff'])) : '—')) ?> UTC ·

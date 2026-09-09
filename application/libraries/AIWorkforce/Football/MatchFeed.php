@@ -31,10 +31,14 @@ use AIWorkforce\Persistence\FootballRepository;
  *
  * A match is identified by its `matchId` (`providerCode:externalId`), which the
  * provider guarantees unique and the fixture table enforces with
- * `UNIQUE(provider_id, external_id)`. A prediction is identified by that match
- * plus the kind and the model version — `UNIQUE(fixture_id, prediction_kind,
- * model_version_id)` in every schema — so the same match cannot be stored
- * twice, and an existing prediction is *returned* rather than recomputed.
+ * `UNIQUE(provider_id, external_id)`. Every match additionally carries its own
+ * stored id — the fixture row's database id, served as `/football/match/<id>` —
+ * and a row whose feed supplied no external id falls back to that id
+ * (`fixture:<id>`), so a match that exists is never keyed by a blank. A
+ * prediction is identified by the match plus the kind and the model version —
+ * `UNIQUE(fixture_id, prediction_kind, model_version_id)` in every schema — so
+ * the same match cannot be stored twice, and an existing prediction is
+ * *returned* rather than recomputed.
  *
  * Nothing here invents a match to fill a short page: the last page holds
  * whatever is left, and an empty page says so.
@@ -613,12 +617,23 @@ final class MatchFeed
     /**
      * The identity a stored prediction is keyed by: the provider's own
      * `match_id`, scoped so two providers cannot collide.
+     *
+     * Every stored match also owns a second, deployment-local identity — the
+     * fixture row's own database id, the number its page is served under
+     * (`/football/match/<fixtureId>`). A row whose feed supplied no external id
+     * (legacy rows, or a feed that omitted one) falls back to that id, so a
+     * match that exists is never returned with a blank identity: the key is
+     * `fixture:<id>` only in that case, and stays `providerCode:externalId`
+     * whenever the provider's own id is present.
      */
     public static function matchId(array $fixture): string
     {
         $provider = (string) ($fixture['provider_code'] ?? '');
         $external = (string) ($fixture['external_id'] ?? '');
-        if ($external === '') return '';
+        if ($external === '') {
+            $id = (int) ($fixture['id'] ?? 0);
+            return $id > 0 ? 'fixture:' . $id : '';
+        }
         return $provider !== '' ? $provider . ':' . $external : $external;
     }
 
