@@ -43,7 +43,7 @@ final class ProviderSelector
     public const MULTI_LOAD_PENALTY = 0.15;
 
     /** The pieces of information a request may need, in the order they are asked for. */
-    public const DATA_CLASSES = ['fixtures', 'statistics', 'odds', 'headToHead', 'live', 'metadata'];
+    public const DATA_CLASSES = ['fixtures', 'statistics', 'odds', 'lineups', 'headToHead', 'live', 'metadata'];
 
     /** Data class → the provider capability (and its method) that serves it. */
     private const CAPABILITY_FOR = [
@@ -52,6 +52,11 @@ final class ProviderSelector
         'headToHead' => 'headToHead',
         'live' => 'live',
         'odds' => 'odds',
+        // Lineups are only ever fetched for a match that asks for them: they
+        // are per-match data, so a page that wanted them for all 50 rows would
+        // spend 50 calls. The capability is what tells the planner which feed
+        // can answer when one is asked for.
+        'lineups' => 'lineups',
         'metadata' => 'standings',
     ];
 

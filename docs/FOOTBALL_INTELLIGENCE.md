@@ -417,6 +417,25 @@ featured one marked; a league that was not classified is never offered as
 premium, and a configured premium league with no match on the date is
 substituted by the featured competition with that stated, never silently.
 
+### API calls: database first
+
+The order is cache → database → dedupe → engine, in that order:
+
+1. A window that is already **stored and still fresh** — the newest fixture row
+   is inside `WINDELS_FOOTBALL_MAX_AGE_FIXTURES` (default 24h) — is served from
+   those rows. No provider is called, the canonical identities are the same, and
+   the response says `calls.source: STORED_FIXTURES`.
+2. Stored rows older than that window are stale, not a cache: the feed is read.
+   `refresh=1` reads the feed whatever the stored rows say.
+3. What is read is cached in `football_fixtures` as it arrived, so the next
+   request for the same window is answered from the database.
+
+Per-match data is opt-in, because it costs one call per match rather than one
+per page: `?with=lineups` collects confirmed lineups from whichever feed has
+them (with the same fallback as odds), bounded by the request budget, and each
+match records whether it got one — a match with no confirmed lineup says so
+rather than showing eleven names nobody announced.
+
 ### Odds fallback
 
 When the selected provider has no price for a competition or market, another
@@ -538,7 +557,7 @@ GET /api/football/status
 GET /api/football/dashboard            ?date=&refresh=
 GET /api/football/providers            the provider catalogue behind the Data Provider selector
 GET /api/football/providers/health     per-provider health: status, response time, rate limit, coverage, odds, what is missing
-GET /api/football/matches/fetch        ?provider=AUTO&competition=&date=&dateFrom=&dateTo=&limit=50  (the only endpoint that spends provider calls)
+GET /api/football/matches/fetch        ?provider=AUTO&competition=&date=&dateFrom=&dateTo=&limit=50&with=lineups&refresh=1
 ```
 
 Mutations require the native session plus the CSRF token (header or body field),

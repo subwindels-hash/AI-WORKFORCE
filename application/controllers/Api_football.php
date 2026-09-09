@@ -289,6 +289,11 @@ class Api_football extends Api_controller
             'limit' => \AIWorkforce\Football\RequestParams::int($g, 'limit',
                 \AIWorkforce\Football\MatchIntelligenceService::MAX_GENERATION_BATCH, 1,
                 \AIWorkforce\Football\MatchIntelligenceService::MAX_GENERATION_BATCH, $notes),
+            // `with=lineups` collects the confirmed lineups too. It costs one
+            // provider call per match, so it is opt-in and bounded by the
+            // request budget: a match the budget did not reach says so.
+            'with' => isset($g['with']) ? array_map('strval', explode(',', (string) $g['with'])) : [],
+            'refresh' => in_array(strtolower((string) ($g['refresh'] ?? '')), ['1', 'true', 'yes'], true),
         ];
         $result = $this->football()->intelligence()->matches($query, $notes);
         $this->json([

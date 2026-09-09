@@ -32,8 +32,11 @@ final class FxFullFeed implements SportsDataProvider
 {
     public int $fixtureCalls = 0;
     public int $oddsCalls = 0;
+    public int $lineupCalls = 0;
     /** @var array<string,array> */
     public array $oddsRows = [];
+    /** @var array<string,array> */
+    public array $lineupRows = [];
 
     public function __construct(
         private string $id,
@@ -46,6 +49,7 @@ final class FxFullFeed implements SportsDataProvider
     public function fixtures(array $q): array { $this->fixtureCalls++; return $this->fixtureRows; }
     public function odds(string $externalId): array { $this->oddsCalls++; return $this->oddsRows[$externalId] ?? []; }
     public function results(string $externalId): array { return []; }
+    public function lineups(string $externalId): array { $this->lineupCalls++; return $this->lineupRows[$externalId] ?? []; }
     public function teamStatistics(array $q): array { return []; }
     public function standings(array $q): array { return []; }
     public function headToHead(array $q): array { return []; }
@@ -72,7 +76,7 @@ final class FxFixtureFeed implements SportsDataProvider
 }
 
 /** @param array<string,array> $rows provider id => its fixture rows, raw (unnormalized) shape */
-function fx_multi_gateway(array $rows, array $health = [], array $odds = []): array
+function fx_multi_gateway(array $rows, array $health = [], array $odds = [], array $lineups = []): array
 {
     $manager = new SportsProviderManager();
     $feeds = [];
@@ -82,6 +86,7 @@ function fx_multi_gateway(array $rows, array $health = [], array $odds = []): ar
             ? new FxFixtureFeed($id, $fixtureRows, $feedHealth)
             : new FxFullFeed($id, $fixtureRows, $feedHealth);
         if (isset($odds[$id]) && $feed instanceof FxFullFeed) $feed->oddsRows = $odds[$id];
+        if (isset($lineups[$id]) && $feed instanceof FxFullFeed) $feed->lineupRows = $lineups[$id];
         $manager->register($feed);
         $feeds[$id] = $feed;
     }
@@ -816,4 +821,120 @@ test('multi-provider: the Premium League selector offers every premium league on
         $isPremium = in_array((string) ($competition['name'] ?? ''), $premiumNames, true);
         assert_equals($isPremium, !empty($competition['premium']), 'each competition is marked premium exactly when it was classified premium');
     }
+});
+
+// ─── 12. Lineups: per-match data, opt-in, and never invented ─────────────────
+
+test('multi-provider: lineups are attached only when asked for, from the feed that has them', function () {
+    [, , $service, $feeds] = fx_multi_gateway([
+        'api-football' => [fx_multi_row('1201', 'Manchester United', 'Arsenal', '2026-09-12T14:00:00Z')],
+        'sportmonks' => [fx_multi_row('88012', 'Man Utd', 'Arsenal', '2026-09-12T16:00:00+02:00')],
+    ], [], [], ['sportmonks' => ['88012' => [['player' => 'A. Onana', 'position' => 'Goalkeeper', 'starter' => true]]]]);
+
+    $notes = [];
+    $plain = $service->matches(['provider' => 'MULTI', 'date' => '2026-09-12'], $notes);
+    assert_equals([], $plain['matches'][0]->lineups, 'lineups are not collected unless the request asks for them');
+    assert_equals(0, $feeds['sportmonks']->lineupCalls, 'so no lineup call was made');
+
+    $notes = [];
+    $with = $service->matches(['provider' => 'MULTI', 'date' => '2026-09-12', 'with' => ['lineups']], $notes);
+    $match = $with['matches'][0];
+    assert_equals(1, count($match->lineups), 'asked for, they come back');
+    assert_equals('A. Onana', (string) $match->lineups[0]['player']);
+    assert_equals(1, $feeds['sportmonks']->lineupCalls, 'one call for the match, not one per player');
+    $providers = array_column($match->dataSources, 'provider');
+    assert_in_array('sportmonks', $providers, 'and the feed that supplied them is recorded');
+});
+
+test('multi-provider: a match with no confirmed lineup says so instead of showing eleven names', function () {
+    [, , $service, $feeds] = fx_multi_gateway([
+        'api-football' => [fx_multi_row('1201', 'Manchester United', 'Arsenal', '2026-09-12T14:00:00Z')],
+    ]);
+    $notes = [];
+    $result = $service->matches(['date' => '2026-09-12', 'with' => ['lineups']], $notes);
+    assert_equals([], $result['matches'][0]->lineups, 'no lineup was announced, so none is shown');
+    $reasons = implode(' ', $notes);
+    assert_true(str_contains($reasons, 'did not'), 'the page says how many had no lineup');
+    // The reason is attached per match, not left to be inferred from an empty array.
+    $sources = $result['matches'][0]->dataSources;
+    $lineupSource = null;
+    foreach ($sources as $source) {
+        if (in_array('lineups', (array) ($source['classes'] ?? []), true)) $lineupSource = $source;
+    }
+    assert_not_null($lineupSource, 'the attempt is recorded');
+    assert_true(str_contains((string) ($lineupSource['detail'] ?? ''), 'lineup'), 'with the reason it is absent');
+});
+
+// ─── 13. API calls: database first, provider only when it has to be ──────────
+
+test('multi-provider: a date that is already stored and still fresh costs no provider call', function () {
+    $repo = new FootballRepositoryStub();
+    $config = new FootballConfiguration();
+    $manager = new SportsProviderManager();
+    $feed = new FxFullFeed('api-football', [fx_multi_row('1201', 'Manchester United', 'Arsenal', '2026-09-12T14:00:00Z')]);
+    $manager->register($feed);
+    $gateway = new ProviderGateway($manager, $config);
+    $service = new MatchIntelligenceService($gateway, new ProviderSelector($gateway, $config), $repo, $config);
+
+    // A sync registers the provider, which is what gives it an internal id;
+    // the intelligence engine caches what it reads against that id.
+    $repo->ensureProvider('api-football', ['displayName' => 'API-Football']);
+    // Read the date once: the rows are now stored and fresh.
+    $notes = [];
+    $first = $service->matches(['date' => '2026-09-12'], $notes);
+    assert_equals(1, $feed->fixtureCalls, 'the first read went to the provider');
+    foreach ($repo->fixtures as &$stored) $stored['updated_at'] = gmdate('c');
+    unset($stored);
+
+    $notes = [];
+    $second = $service->matches(['date' => '2026-09-12'], $notes);
+    assert_equals(1, $feed->fixtureCalls, 'the second read did not call the provider again');
+    assert_equals(0, $second['calls']['made']);
+    assert_equals('STORED_FIXTURES', (string) ($second['calls']['source'] ?? ''));
+    assert_equals(1, $second['counts']['returned'], 'and it returned the same match');
+    assert_equals('MANCHESTER_UNITED_ARSENAL_2026-09-12', $second['matches'][0]->id);
+    assert_true(count($notes) > 0, 'the page says it was served from stored rows');
+});
+
+test('multi-provider: stored rows past their freshness window are not used as a cache', function () {
+    $repo = new FootballRepositoryStub();
+    $config = new FootballConfiguration();
+    $manager = new SportsProviderManager();
+    $feed = new FxFullFeed('api-football', [fx_multi_row('1201', 'Manchester United', 'Arsenal', '2026-09-12T14:00:00Z')]);
+    $manager->register($feed);
+    $gateway = new ProviderGateway($manager, $config);
+    $service = new MatchIntelligenceService($gateway, new ProviderSelector($gateway, $config), $repo, $config);
+
+    $notes = [];
+    $service->matches(['date' => '2026-09-12'], $notes);
+    // Backdate the stored rows beyond the fixture freshness window.
+    foreach ($repo->fixtures as &$stored) {
+        $stored['updated_at'] = gmdate('c', time() - ($config->maxDataAgeSeconds('fixtures') + 3600));
+    }
+    unset($stored);
+
+    $notes = [];
+    $result = $service->matches(['date' => '2026-09-12'], $notes);
+    assert_equals(2, $feed->fixtureCalls, 'stale rows are re-read from the feed, not served as a cache');
+    assert_equals(1, $result['calls']['made']);
+});
+
+test('multi-provider: refresh=1 reads the feed even when the date is stored', function () {
+    $repo = new FootballRepositoryStub();
+    $config = new FootballConfiguration();
+    $manager = new SportsProviderManager();
+    $feed = new FxFullFeed('api-football', [fx_multi_row('1201', 'Manchester United', 'Arsenal', '2026-09-12T14:00:00Z')]);
+    $manager->register($feed);
+    $gateway = new ProviderGateway($manager, $config);
+    $service = new MatchIntelligenceService($gateway, new ProviderSelector($gateway, $config), $repo, $config);
+
+    $notes = [];
+    $service->matches(['date' => '2026-09-12'], $notes);
+    foreach ($repo->fixtures as &$stored) $stored['updated_at'] = gmdate('c');
+    unset($stored);
+
+    $notes = [];
+    $result = $service->matches(['date' => '2026-09-12', 'refresh' => true], $notes);
+    assert_equals(2, $feed->fixtureCalls, 'an operator asking to refresh gets the feed read');
+    assert_equals(1, $result['calls']['made']);
 });

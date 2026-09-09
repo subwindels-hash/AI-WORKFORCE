@@ -31,6 +31,9 @@ final class MatchIntelligenceService
     /** New predictions one generation request may create. Hard, not configurable. */
     public const MAX_GENERATION_BATCH = 50;
 
+    /** @var array<string,int|null> provider code => its internal id, resolved once */
+    private array $providerIds = [];
+
     public function __construct(
         private ProviderGateway $gateway,
         private ProviderSelector $selector,
@@ -216,6 +219,26 @@ final class MatchIntelligenceService
                 'calls' => $calls, 'state' => $selection['state'],
                 'message' => $selection['reason']];
         }
+        // Cache → database → provider. A date that is already stored and still
+        // inside the fixture freshness window is served from those rows: the
+        // same page, the same canonical identities and no provider call at all.
+        // `refresh=1` is how an operator asks for the feed to be read anyway.
+        if (empty($query['refresh'])) {
+            $stored = $this->storedMatches($query, $notes);
+            if ($stored !== null) {
+                return [
+                    'matches' => array_slice($stored, 0, max(1, $limit)),
+                    'selection' => $selection,
+                    'counts' => $this->counts(count($stored), 0, 0),
+                    'calls' => ['made' => 0, 'providers' => [], 'failures' => [],
+                        'source' => 'STORED_FIXTURES',
+                        'note' => 'Served from the fixtures already stored for this window — they are inside the '
+                            . $this->config->maxDataAgeSeconds('fixtures') . 's freshness window, so no provider was called.'],
+                    'state' => $stored === [] ? DataState::UNAVAILABLE : DataState::AVAILABLE,
+                    'message' => $stored === [] ? 'No match is stored for this window.' : null,
+                ];
+            }
+        }
         $this->gateway->beginSweep($this->config->requestBudget('upcoming'));
         $matches = [];
         $duplicates = 0; $unusable = 0;
@@ -251,6 +274,7 @@ final class MatchIntelligenceService
             if ($selection['mode'] !== ProviderSelector::MULTI && count($matches) >= $limit) break;
         }
         $matches = $this->order($matches, $limit);
+        $matches = $this->attachExtras($matches, $query, $selection, $notes);
         return [
             'matches' => $matches,
             'selection' => $selection,
@@ -307,6 +331,157 @@ final class MatchIntelligenceService
     }
 
     /**
+     * Lineups for one match, with fallback.
+     *
+     * Lineups are per-match data, so this is called for a match that asked for
+     * them, never for a whole page. The selected provider is tried first; when
+     * it has no lineup for the match another feed is tried and named. A match
+     * with no confirmed lineup anywhere comes back DATA_UNAVAILABLE — eleven
+     * names are not invented from a squad list, and "no lineup announced yet"
+     * is a real state.
+     *
+     * @param array<string,mixed> $match
+     * @param list<string> $notes
+     * @return array{state:string, lineups:list<array<string,mixed>>, source:?string, attempted:list<string>, reason:?string}
+     */
+    public function lineups(array $match, ?array $selection = null, array &$notes = []): array
+    {
+        $selection ??= $this->selector->resolve(null, $notes);
+        $plan = (array) ($selection['plan'] ?? []);
+        $order = array_values(array_filter([$plan['lineups'] ?? null, ...array_keys((array) ($selection['scores'] ?? []))]));
+        $attempted = [];
+        $this->gateway->beginSweep($this->config->requestBudget('upcoming'));
+        foreach ($order as $providerId) {
+            $providerId = (string) $providerId;
+            if (in_array($providerId, $attempted, true)) continue;
+            if (!$this->gateway->supports('lineups')) break;
+            $attempted[] = $providerId;
+            $external = (string) ($match['providers'][$providerId] ?? '');
+            if ($external === '') continue;
+            $outcome = $this->gateway->call('lineups', fn($provider) => $provider->lineups($external), $providerId);
+            if (!$outcome['ok']) continue;
+            $rows = is_array($outcome['result']) ? array_values(array_filter($outcome['result'], 'is_array')) : [];
+            if ($rows === []) continue;
+            return ['state' => DataState::AVAILABLE, 'lineups' => $rows, 'source' => $providerId,
+                'attempted' => $attempted, 'reason' => null];
+        }
+        return ['state' => DataState::UNAVAILABLE, 'lineups' => [], 'source' => null, 'attempted' => $attempted,
+            'reason' => $attempted === []
+                ? 'No connected provider offers lineups.'
+                : 'None of the providers tried (' . implode(', ', $attempted) . ') has a confirmed lineup for this match.'];
+    }
+
+    /**
+     * Attach the per-match extras a caller asked for (`?with=lineups`).
+     *
+     * These cost one call per match, so they are opt-in, they are bounded by
+     * the provider budget, and each match records whether it got one — a match
+     * the budget or the feed could not cover says so instead of looking like a
+     * match with no lineup announced.
+     *
+     * @param list<FootballMatch> $matches @param array<string,mixed> $query
+     * @param list<string> $notes
+     * @return list<FootballMatch>
+     */
+    private function attachExtras(array $matches, array $query, array $selection, array &$notes): array
+    {
+        $wanted = [];
+        foreach ((array) ($query['with'] ?? []) as $extra) {
+            if (is_string($extra) && trim($extra) !== '') $wanted[strtolower(trim($extra))] = true;
+        }
+        if (!isset($wanted['lineups']) || $matches === []) return $matches;
+        $this->gateway->beginSweep($this->config->requestBudget('upcoming'));
+        $out = [];
+        $filled = 0;
+        foreach ($matches as $match) {
+            if ($this->gateway->requestsRemaining() <= 0) {
+                $out[] = $match->withSource('none', ['lineups'], 'lineups', 'NOT_REQUESTED: the provider budget for this request was spent before this match was reached.');
+                continue;
+            }
+            $row = $match->toArray();
+            $result = $this->lineups($row, $selection, $notes);
+            if ($result['state'] === DataState::AVAILABLE) {
+                $filled++;
+                $out[] = $match->withLineups($result['lineups'], (string) $result['source']);
+                continue;
+            }
+            $out[] = $match->withSource('none', ['lineups'], 'lineups', $result['reason']);
+        }
+        $notes[] = 'lineups were requested for ' . count($matches) . ' match(es); '
+            . $filled . ' had a confirmed lineup and ' . (count($matches) - $filled)
+            . ' did not (no provider quoted one, or the request budget was spent).';
+        return $out;
+    }
+
+    /**
+     * The canonical matches a window already has stored, or null when the
+     * stored rows cannot answer the window and the provider must be read.
+     *
+     * Three conditions, all of them checkable: the window resolves to dates,
+     * at least one fixture is stored for it, and the newest stored row is still
+     * inside the fixture freshness window. A stored row that is older than that
+     * is not used as a cache — it is stale, and reading the feed is the honest
+     * answer.
+     *
+     * @param array<string,mixed> $query @param list<string> $notes
+     * @return list<FootballMatch>|null
+     */
+    private function storedMatches(array $query, array &$notes): ?array
+    {
+        $filter = [];
+        if (!empty($query['date'])) $filter['date'] = (string) $query['date'];
+        if (!empty($query['dateFrom'])) $filter['from'] = (string) $query['dateFrom'];
+        if (!empty($query['dateTo'])) $filter['to'] = (string) $query['dateTo'];
+        if (!empty($query['competition'])) $filter['competitionExternalId'] = (string) $query['competition'];
+        if ($filter === []) return null;
+        $rows = $this->repo->listFixtures($filter, self::MAX_GENERATION_BATCH * 4);
+        if ($rows === []) return null;
+        $newest = 0;
+        foreach ($rows as $row) {
+            $updated = strtotime((string) ($row['updated_at'] ?? ''));
+            if ($updated !== false && $updated > $newest) $newest = $updated;
+        }
+        if ($newest <= 0) return null;
+        $age = time() - $newest;
+        if ($age > $this->config->maxDataAgeSeconds('fixtures')) return null;
+
+        $out = [];
+        $seen = [];
+        foreach ($rows as $row) {
+            $canonical = CanonicalMatch::identity((string) ($row['home_team'] ?? ''), (string) ($row['away_team'] ?? ''),
+                (string) ($row['kickoff_at'] ?? ''));
+            if ($canonical === '' || isset($seen[$canonical])) continue;
+            $seen[$canonical] = true;
+            $match = FootballMatch::fromNormalized([
+                'provider' => (string) ($row['provider_code'] ?? ''),
+                'externalId' => (string) ($row['external_id'] ?? ''),
+                'homeTeam' => (string) ($row['home_team'] ?? ''),
+                'awayTeam' => (string) ($row['away_team'] ?? ''),
+                'competition' => (string) ($row['competition'] ?? ''),
+                'leagueId' => (string) ($row['competition_id'] ?? ''),
+                'kickoff' => (string) ($row['kickoff_at'] ?? ''),
+                'status' => (string) ($row['status'] ?? 'SCHEDULED'),
+                'venue' => $row['venue'] ?? null,
+                'country' => $row['country'] ?? null,
+                'season' => $row['season'] ?? null,
+            ], $canonical);
+            if ($match === null) continue;
+            $out[] = $match;
+        }
+        if ($out === []) return null;
+        $notes[] = 'Served from the ' . count($out) . ' fixture(s) already stored for this window (newest row is '
+            . $this->age($age) . ' old); no provider was called. Use refresh=1 to read the feed anyway.';
+        return $this->order($out, self::MAX_GENERATION_BATCH * 4);
+    }
+
+    private function age(int $seconds): string
+    {
+        if ($seconds < 3600) return max(0, (int) round($seconds / 60)) . ' minutes';
+        if ($seconds < 172800) return round($seconds / 3600, 1) . ' hours';
+        return round($seconds / 86400, 1) . ' days';
+    }
+
+    /**
      * Normalize one provider row and resolve it to a canonical match.
      *
      * @param array<string,mixed> $raw
@@ -315,7 +490,12 @@ final class MatchIntelligenceService
      */
     private function ingest(array $raw, string $providerCode, array &$notes = []): ?array
     {
-        $match = FootballMatch::fromProviderRow($providerCode, $raw);
+        try {
+            $normalized = SportsDataNormalizer::fixture($raw, $providerCode);
+        } catch (\InvalidArgumentException $e) {
+            return null;
+        }
+        $match = FootballMatch::fromNormalized($normalized);
         if ($match === null) return null;
         $candidate = [
             'providerCode' => $providerCode,
@@ -348,7 +528,46 @@ final class MatchIntelligenceService
             'confidence' => (float) ($existing['score'] ?? 1.0),
         ]);
         $this->recordCompetition($providerCode, $match);
+        // What was read is cached in the fixtures table, so the next request
+        // for the same window is answered from the database instead of the
+        // feed. It is the provider's own row, stored as it arrived.
+        $this->storeFixture($providerCode, $normalized);
         return [$canonicalId, $match];
+    }
+
+    /**
+     * Cache one normalized fixture row in the fixtures table.
+     *
+     * Only a provider that a sync has already registered is written for: the
+     * registry is what gives a provider its internal id, and the intelligence
+     * engine does not invent provider rows on a read path.
+     */
+    private function storeFixture(string $providerCode, array $normalized): void
+    {
+        $providerId = $this->providerIdFor($providerCode);
+        if ($providerId === null) return;
+        $normalized['dataState'] = DataState::AVAILABLE;
+        try {
+            $this->repo->saveFixture($providerId, $normalized);
+        } catch (\Throwable $e) {
+            // A row the repository refuses is not worth failing a page for: the
+            // match is still returned, it just is not cached.
+        }
+    }
+
+    /**
+     * The internal id of a registered provider, or null when a sync has not
+     * registered one yet.
+     */
+    private function providerIdFor(string $providerCode): ?int
+    {
+        if (array_key_exists($providerCode, $this->providerIds)) return $this->providerIds[$providerCode];
+        $id = null;
+        foreach ($this->repo->listProviders() as $provider) {
+            $code = (string) ($provider['provider_code'] ?? $provider['code'] ?? '');
+            if ($code !== '' && strtolower($code) === strtolower($providerCode)) { $id = (int) ($provider['id'] ?? 0) ?: null; break; }
+        }
+        return $this->providerIds[$providerCode] = $id;
     }
 
     /**

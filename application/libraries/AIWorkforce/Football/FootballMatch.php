@@ -151,6 +151,28 @@ final class FootballMatch
         );
     }
 
+    /**
+     * Attach the lineups one provider confirmed for this match.
+     *
+     * Lineups are per-match data, so they are only ever attached to a match
+     * that asked for them — a page that collected them for all fifty rows would
+     * spend fifty provider calls. Absent stays absent: a match with no
+     * confirmed lineup is reported as DATA_UNAVAILABLE, not as eleven names.
+     */
+    public function withLineups(array $lineups, string $provider): self
+    {
+        return new self(
+            id: $this->id, providers: $this->providers, competitionId: $this->competitionId,
+            competitionName: $this->competitionName, season: $this->season, homeTeam: $this->homeTeam,
+            awayTeam: $this->awayTeam, kickoffTime: $this->kickoffTime, status: $this->status, venue: $this->venue,
+            odds: $this->odds, statistics: $this->statistics, injuries: $this->injuries, lineups: $lineups,
+            form: $this->form, h2h: $this->h2h,
+            dataSources: array_merge($this->dataSources, [['provider' => $provider, 'classes' => ['lineups'],
+                'providerMatchId' => $this->providers[$provider] ?? null]]),
+            country: $this->country,
+        );
+    }
+
     /** Add one provenance entry (which provider supplied which data class). */
     public function withSource(string $provider, array $classes, ?string $operation = null, ?string $detail = null): self
     {
