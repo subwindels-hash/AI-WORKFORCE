@@ -226,12 +226,20 @@ The rules, and where each one is enforced:
 
 **`match_id`.** A match is identified by `providerCode:externalId`
 (`MatchFeed::matchId()`), which the provider guarantees unique and
-`football_fixtures` enforces. A prediction is distinguished from a later refresh
-of the same match by three things together — the match, the prediction kind
-(pre-match or live), and `model_version_id` — plus `generated_at` as
-`predictionDate`. Every match row in the feed carries `matchId`,
-`predictionSource` (`STORED` / `GENERATED` / `DEFERRED` / `REFUSED` / `FAILED`)
-and, when there is no prediction, a `predictionRefusal` naming the reason.
+`football_fixtures` enforces. Every match additionally owns its stored fixture
+id — the same number its page is served under (`/football/match/<fixtureId>`) —
+so each match is individually addressable once its fixture is stored, generated
+or not. A stored row whose feed supplied no external id (a legacy row, or a
+feed that omitted one) falls back to that stored id as `fixture:<id>`; a match
+that exists is never keyed by a blank. The console prints that stored id as the
+row's `Match ID`, so the number shown on a row is the number the row links to —
+no match row on the board is left without an id or pointed at a page it does
+not own. A prediction is distinguished from a later refresh of the same match
+by three things together — the match, the prediction kind (pre-match or live),
+and `model_version_id` — plus `generated_at` as `predictionDate`. Every match
+row in the feed carries `matchId`, `fixtureId`, `predictionSource` (`STORED` /
+`GENERATED` / `DEFERRED` / `REFUSED` / `FAILED`) and, when there is no
+prediction, a `predictionRefusal` naming the reason.
 
 **Worked example** (120 matches on a date, 3 pages):
 
@@ -254,18 +262,38 @@ The console and the API are driven by one flow:
 ```text
 Football Intelligence
         ↓
-Select Competition            (the leagues the provider actually sent)
+Select Data Provider          (All providers = every feed's stored rows, mixed on one page)
         ↓
-Select Premium League         (the featured competition — default: English Premier League)
+Select Competition            (the leagues the provider actually sent; All = the whole date)
         ↓
-Select Odds Prediction        (the market Football Intelligence answers in)
+Select Premium League         (one premium league, or All premium leagues combined)
+        ↓
+Select Odds Prediction        (one market, or All markets = the default odds view)
         ↓
 Select date
         ↓
-Generate predictions          (at most 50 NEW matches, inside the selected competition)
+Generate predictions          (at most 50 NEW matches, inside the selected competition(s))
         ↓
 Page 1 → Next → Page 2        (stored rows; nothing is regenerated)
 ```
+
+Every selector also offers its **all-value**, so the page can list every fixture
+at once instead of one league or market at a time:
+
+- **All providers** — no feed is pinned: the board reads the stored rows of
+  every connected provider and each row names the feed behind it.
+- **All competitions** — the whole date, no league narrowing.
+- **All premium leagues** — the date's premium leagues as one group (still
+  excluding non-premium leagues). The selection resolves to the group's
+  external ids and pages/generates inside the group, so the 50-match budget is
+  spent across the premium leagues only. When no premium league is stored for
+  the date, the page is empty and says why — it is never widened to every
+  league.
+- **All markets** — no market is pinned; the page shows every fixture in the
+  default odds view (`MATCH_WINNER`).
+
+The API spells the premium group as `competition=premium_leagues` (aliases:
+`all_premium`, `premium leagues`, `all premium leagues`).
 
 **Competitions are data, not a constant.** `GET /api/football/competitions` lists
 the competitions stored for a date — `football_competitions` rows the sync wrote

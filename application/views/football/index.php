@@ -35,9 +35,23 @@ $premiumOptions = array_values(array_filter(
     static fn($entry): bool => is_array($entry) && (string) ($entry['externalId'] ?? '') !== ''));
 $selectedCompetition = is_array($filters['competition'] ?? null) ? $filters['competition'] : null;
 $selectedExternal = (string) ($selectedCompetition['externalId'] ?? '');
+// The "All premium leagues" scope: the board is narrowed to the date's premium
+// leagues as a group (resolved to their external ids) instead of to one league.
+// The Premium League selector offers it, and the Competition selector reports
+// it, because a page that is narrowed to a group must never display itself as
+// narrowed to nothing.
+$resolvedCompetitionState = (string) (is_array($selectedCompetition) ? ($selectedCompetition['state'] ?? '') : '');
+$premiumAllKeyword = \AIWorkforce\Football\MatchFeed::PREMIUM_LEAGUES;
+$premiumAllScope = $resolvedCompetitionState === $premiumAllKeyword;
+$premiumAllMatches = $premiumAllScope && is_array($selectedCompetition) ? (int) ($selectedCompetition['matches'] ?? 0) : 0;
 $marketBlock = is_array($board['market'] ?? null) ? $board['market'] : [];
 $marketList = is_array($marketBlock['available'] ?? null) ? $marketBlock['available'] : [];
 $selectedMarket = (string) ($marketBlock['key'] ?? 'MATCH_WINNER');
+// The raw query values, kept apart from the resolved ones: the "All" options
+// are marked selected only when the operator actually asked for no narrowing,
+// while the resolved values keep the locked (admin-managed) controls honest.
+$marketRequested = trim((string) ($market ?? ''));
+$providerRequestedRaw = trim((string) ($providerRequested ?? ''));
 // The data provider, offered only when the catalogue has something to offer:
 // with no feed connected the dropdown is replaced by the reason, because a
 // selector full of modes nobody can honour is a lie dressed as a choice.
@@ -59,10 +73,31 @@ $adminManagedTitle = $selectorsLockedByAdmin
     ? 'AUTO: this selector is managed by the administrator.'
     : 'MANUAL: administrator enabled this selector.';
 $windelsModelId = 'Windels Model id: 1520863';
+// The selection the pager and the generate form carry. It is the *raw*
+// requested value — an empty one means "not narrowed" and must stay empty, so
+// choosing "All" in a selector cannot silently flip the next page to the
+// resolved default (that would show a different dropdown selection on reload).
 $carry = [];
-if ($selectedExternal !== '') $carry['competition'] = (string) ($selectedCompetition['requested'] ?? $selectedExternal);
-if ($selectedMarket !== '') $carry['market'] = $selectedMarket;
-if ($selectedProvider !== '') $carry['provider'] = $selectedProvider;
+$competitionRequested = trim((string) (is_array($selectedCompetition) ? ($selectedCompetition['requested'] ?? '') : ''));
+if ($competitionRequested !== '') $carry['competition'] = $competitionRequested;
+if ($marketRequested !== '') $carry['market'] = $marketRequested;
+if ($providerRequestedRaw !== '') $carry['provider'] = $providerRequestedRaw;
+// "All providers" is selected when nothing is pinned: either the operator asked
+// for ALL_PROVIDERS, or the request fell back to Auto/Smart (no administrator
+// manual default) — Auto reads every feed, so the page is already the mixed,
+// best-data-per-fixture board that "All providers" describes.
+$providerAllSelected = !$selectorsLockedByAdmin
+    && ($selectedProvider === \AIWorkforce\Football\ProviderSelector::ALL_PROVIDERS
+        || ($selectedProvider === 'AUTO' && $providerRequestedRaw === ''));
+$premiumHiddenValue = $premiumAllScope ? $premiumAllKeyword : $selectedExternal;
+// The text of the Premium League selector's neutral first option. It must
+// never claim the page is showing every competition while the Competition
+// selector has narrowed it to a non-premium league.
+$premiumNoneLabel = $premiumOptions === []
+    ? 'No premium league stored for this date — every competition shown'
+    : ($selectedExternal !== ''
+        ? 'No premium filter — the competition in Select Competition applies'
+        : 'All competitions — no premium-only filter');
 
 $dash = static fn(mixed $v, int $dp = 1): string => is_numeric($v) ? number_format((float) $v, $dp) : '—';
 $percent = static fn(mixed $v, int $dp = 1): string => is_numeric($v) ? number_format((float) $v * 100, $dp) . '%' : '—';
@@ -221,7 +256,10 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                 </select>
                 <input type="hidden" name="provider" value="AUTO">
               <?php else: ?>
-                <select name="provider" style="min-width:200px" title="Which feed answers this request. Auto / Smart picks from health, coverage, odds availability and rate limits; Multi-Provider takes each piece of data from the feed that has it.">
+                <select name="provider" style="min-width:240px" title="Which feed answers this request. All providers lists every stored fixture and takes each match's data from the feed that has it; Auto / Smart picks from health, coverage, odds availability and rate limits; Multi-Provider takes each piece of data from the feed that has it.">
+                  <option value="<?= e(\AIWorkforce\Football\ProviderSelector::ALL_PROVIDERS) ?>"<?= $providerAllSelected ? ' selected' : '' ?>>
+                    All providers — every stored fixture
+                  </option>
                   <?php $providerNumber = 0; ?>
                   <?php foreach ($providerOptions as $option): ?>
                     <?php
@@ -229,8 +267,12 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                     $isAuto = in_array($value, ['AUTO', 'SMART'], true);
                     if (!$isAuto) $providerNumber++;
                     $providerLabel = $isAuto ? 'Windels Smart Model' : 'Model ' . $providerNumber;
+                    // The AUTO entry is only marked when the operator pinned it
+                    // explicitly; an unpinned request already reads as the
+                    // "All providers" option above it.
+                    $isSelected = $selectedProvider === $value && !($providerAllSelected && $isAuto);
                     ?>
-                    <option value="<?= e((string) ($option['value'] ?? '')) ?>"<?= $selectedProvider === $value ? ' selected' : '' ?>>
+                    <option value="<?= e((string) ($option['value'] ?? '')) ?>"<?= $isSelected ? ' selected' : '' ?>>
                       <?= e($providerLabel) ?>
                     </option>
                   <?php endforeach; ?>
@@ -240,8 +282,11 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
             <div>
               <label class="dim" style="font-size:11px;display:block">Select Competition <?= $adminManagedBadge ?></label>
               <?php if ($selectorsLockedByAdmin): ?><input type="hidden" name="competition" value="<?= e((string) ($carry['competition'] ?? '')) ?>"><?php endif; ?>
-              <select name="competition"<?= $selectorDisabled ?> style="min-width:210px" title="<?= e($adminManagedTitle) ?>">
-                <option value=""<?= $selectedExternal === '' ? ' selected' : '' ?>>All competitions (<?= (int) ($summary['fixtures'] ?? 0) ?> matches)</option>
+              <select name="competition"<?= $selectorDisabled ?> style="min-width:230px" title="<?= e($adminManagedTitle) ?>">
+                <?php if ($premiumOptions !== [] || $premiumAllScope): ?>
+                  <option value="<?= e($premiumAllKeyword) ?>"<?= $premiumAllScope ? ' selected' : '' ?>>All premium leagues (combined<?= $premiumAllMatches > 0 ? ', ' . $premiumAllMatches . ' matches' : '' ?>)</option>
+                <?php endif; ?>
+                <option value=""<?= !$premiumAllScope && $selectedExternal === '' ? ' selected' : '' ?>>All competitions (<?= (int) ($summary['fixtures'] ?? 0) ?> matches)</option>
                 <?php foreach ($competitions as $competition): ?>
                   <?php $external = (string) ($competition['externalId'] ?? ''); ?>
                   <option value="<?= e($external) ?>"<?= $selectedExternal === $external ? ' selected' : '' ?>>
@@ -252,12 +297,15 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
             </div>
             <div>
               <label class="dim" style="font-size:11px;display:block">Premium League <?= $adminManagedBadge ?></label>
-              <?php if ($selectorsLockedByAdmin): ?><input type="hidden" name="premium" value="<?= e($selectedExternal) ?>"><?php endif; ?>
-              <select name="premium"<?= $selectorDisabled ?> style="min-width:200px" title="<?= e($adminManagedTitle) ?>" onchange="if(this.value!==''){this.form.competition.value=this.value;this.form.submit();}">
-                <option value=""><?= $premiumOptions === [] ? 'No premium competition stored' : '— featured —' ?></option>
+              <?php if ($selectorsLockedByAdmin): ?><input type="hidden" name="premium" value="<?= e($premiumHiddenValue) ?>"><?php endif; ?>
+              <select name="premium"<?= $selectorDisabled ?> style="min-width:240px" title="<?= e($adminManagedTitle) ?>" onchange="this.form.competition.value=this.value;this.form.submit();">
+                <option value=""<?= !$premiumAllScope && $selectedExternal === '' ? ' selected' : '' ?>><?= e($premiumNoneLabel) ?></option>
+                <?php if ($premiumOptions !== [] || $premiumAllScope): ?>
+                <option value="<?= e($premiumAllKeyword) ?>"<?= $premiumAllScope ? ' selected' : '' ?>>All premium leagues (combined<?= $premiumAllMatches > 0 ? ', ' . $premiumAllMatches . ' matches' : '' ?>)</option>
+                <?php endif; ?>
                 <?php foreach ($premiumOptions as $entry): ?>
                   <?php $externalId = (string) ($entry['externalId'] ?? ''); ?>
-                  <option value="<?= e($externalId) ?>"<?= $selectedExternal === $externalId ? ' selected' : '' ?>>
+                  <option value="<?= e($externalId) ?>"<?= !$premiumAllScope && $selectedExternal === $externalId ? ' selected' : '' ?>>
                     <?= e((string) ($entry['name'] ?? 'Premium League')) ?> (<?= (int) ($entry['matches'] ?? 0) ?> matches)<?= $externalId === (string) ($premium['externalId'] ?? '') ? ' · featured' : '' ?>
                   </option>
                 <?php endforeach; ?>
@@ -266,10 +314,11 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
             <div>
               <label class="dim" style="font-size:11px;display:block">Select Odds Prediction <?= $adminManagedBadge ?></label>
               <?php if ($selectorsLockedByAdmin): ?><input type="hidden" name="market" value="<?= e($selectedMarket) ?>"><?php endif; ?>
-              <select name="market"<?= $selectorDisabled ?> style="min-width:230px" title="<?= e($adminManagedTitle) ?>">
+              <select name="market"<?= $selectorDisabled ?> style="min-width:250px" title="<?= e($adminManagedTitle) ?>">
+                <option value=""<?= $marketRequested === '' ? ' selected' : '' ?>>All markets — every fixture, default odds view</option>
                 <?php foreach ($marketList as $entry): ?>
                   <?php $key = (string) ($entry['key'] ?? ''); ?>
-                  <option value="<?= e($key) ?>"<?= $selectedMarket === $key ? ' selected' : '' ?>>
+                  <option value="<?= e($key) ?>"<?= $marketRequested !== '' && $selectedMarket === $key ? ' selected' : '' ?>>
                     <?= e((string) ($entry['label'] ?? $key)) ?><?= empty($entry['oddsAvailable']) && (string) ($entry['derivation'] ?? '') === 'NOT_MODELLED' ? ' — no stored data' : '' ?>
                   </option>
                 <?php endforeach; ?>
@@ -284,6 +333,7 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
           </form>
           <p class="dim" style="font-size:11px;margin:8px 0 0">
             <?= $selectorsLockedByAdmin ? 'These selections are set to AUTO and managed by the administrator; the visible controls are locked for operators.' : 'MANUAL mode is enabled by the administrator; operators may choose the provider, competition, premium league, market, and date.' ?>
+            Every selector also offers its all-value, so the page can list <b>every fixture at once</b> instead of one league or market at a time: <i>All providers</i> reads every connected feed's stored rows (each row names the feed behind it), <i>All competitions</i> and the Premium League selector's first option clear the league narrowing, <i>All premium leagues (combined)</i> narrows to every premium league on the date together, and <i>All markets</i> shows every fixture in the default odds view.
             Competitions are listed from the provider feed — no league is offered that has no stored match.
             The market is a view over the predictions already stored: changing it never regenerates a match.
             The provider chosen here is the one a sync or a fetch reads; paging and market changes read stored rows and cost no provider call.
@@ -319,9 +369,15 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                   ?>
                   <tr style="border-bottom:1px solid var(--line)">
                     <td style="padding:6px">
-                      <a href="/football/match/<?= (int) ($row['fixtureId'] ?? 0) ?>" style="font-weight:600"><?= e((string) ($row['homeTeam'] ?? '—')) ?> vs <?= e((string) ($row['awayTeam'] ?? '—')) ?></a>
+                      <?php $rowPageId = (int) ($row['fixtureId'] ?? 0); ?>
+                      <?php if ($rowPageId > 0): ?>
+                        <a href="/football/match/<?= $rowPageId ?>" style="font-weight:600"><?= e((string) ($row['homeTeam'] ?? '—')) ?> vs <?= e((string) ($row['awayTeam'] ?? '—')) ?></a>
+                      <?php else: ?>
+                        <span style="font-weight:600" title="This row has no stored fixture, so it has no match page."><?= e((string) ($row['homeTeam'] ?? '—')) ?> vs <?= e((string) ($row['awayTeam'] ?? '—')) ?></span>
+                      <?php endif; ?>
                       <div class="dim mono" style="font-size:10px"><?= e($windelsModelId) ?></div>
-                      <div class="dim mono" style="font-size:10px">Match ID: <?= e((string) ($row['matchId'] ?? '—')) ?></div>
+                      <?php /* Match ID is the match's own stored id — the same number its page is served under (/football/match/<fixtureId>) — so every generated match row carries one, never a blank. */ ?>
+                      <div class="dim mono" style="font-size:10px">Match ID: <?= $rowPageId > 0 ? $rowPageId : '—' ?><?php $rowFeedKey = (string) ($row['matchId'] ?? ''); if ($rowFeedKey !== '' && !str_starts_with($rowFeedKey, 'fixture:')): ?> · feed <?= e($rowFeedKey) ?><?php endif; ?></div>
                       <div class="dim mono" style="font-size:10px"><?= e((string) ($row['providerLabel'] ?? 'Model unavailable')) ?> · Provider ID: <?= e((string) ($row['providerId'] ?? '—')) ?> · Provider Match ID: <?= e((string) ($row['providerMatchId'] ?? '—')) ?></div>
                     </td>
                     <td style="padding:6px"><?= e((string) ($row['competition'] ?? '—')) ?></td>
@@ -422,7 +478,12 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                     <div class="body" style="padding:12px">
                       <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline">
                         <div>
-                          <a href="/football/match/<?= (int) ($card['fixtureId'] ?? 0) ?>" style="font-weight:700;font-size:15px"><?= e((string) ($card['predictedResultLabel'] ?? 'No prediction')) ?></a>
+                          <?php $cardPageId = (int) ($card['fixtureId'] ?? 0); ?>
+                          <?php if ($cardPageId > 0): ?>
+                            <a href="/football/match/<?= $cardPageId ?>" style="font-weight:700;font-size:15px"><?= e((string) ($card['predictedResultLabel'] ?? 'No prediction')) ?></a>
+                          <?php else: ?>
+                            <span style="font-weight:700;font-size:15px" title="This card has no stored fixture, so it has no match page."><?= e((string) ($card['predictedResultLabel'] ?? 'No prediction')) ?></span>
+                          <?php endif; ?>
                           <div class="dim" style="font-size:11px">
                             <?= e((string) ($card['competition'] ?? '—')) ?><?= !empty($card['country']) ? ' · ' . e((string) $card['country']) : '' ?> ·
                             <?= e((string) ($card['kickoff'] ? gmdate('M j, H:i', (int) strtotime((string) $card['kickoff'])) : '—')) ?> UTC ·

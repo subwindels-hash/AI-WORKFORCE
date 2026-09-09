@@ -35,6 +35,15 @@ final class ProviderSelector
     public const MULTI = 'MULTI';
 
     /**
+     * The console-level selection that pins *no* feed. A board read then lists
+     * the fixtures every connected provider has stored — each row keeps the
+     * feed behind it — instead of the rows of one named provider. It is a read
+     * scope, not a routing mode: a live request still routes through
+     * `resolve()` (Auto / Smart picks the provider per request).
+     */
+    public const ALL_PROVIDERS = 'ALL_PROVIDERS';
+
+    /**
      * In multi-provider mode, how much a provider's score is reduced for each
      * data class it already holds. Enough to hand the next class to another
      * feed, never enough to prefer a worse provider for a class only it can

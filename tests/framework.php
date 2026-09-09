@@ -929,14 +929,20 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
             if (!empty($filter['team']) && stripos((string) ($row['home_team'] ?? '') . ' ' . (string) ($row['away_team'] ?? ''), (string) $filter['team']) === false) return false;
             if (!empty($filter['settledOnly']) && empty($row['settled_at'])) return false;
             if (!empty($filter['unsettledFinished']) && ((string) ($row['status'] ?? '') !== 'FINISHED' || !empty($row['settled_at']))) return false;
-            // Narrowing to one competition filters on the competition row's
-            // external id, the same way the SQL repository does — a name prefix
-            // would put two leagues whose names overlap on the same page.
-            if (!empty($filter['competitionExternalId'])) {
+            // Narrowing to one competition (or to a group — the "all premium
+            // leagues" selection) filters on the competition row's external id,
+            // the same way the SQL repository does — a name prefix would put
+            // two leagues whose names overlap on the same page.
+            if (!empty($filter['competitionExternalId']) || array_key_exists('competitionExternalIds', $filter)) {
+                $wanted = array_key_exists('competitionExternalIds', $filter)
+                    ? array_values(array_unique(array_filter(array_map('strval', (array) $filter['competitionExternalIds']),
+                        static fn(string $v): bool => $v !== '')))
+                    : [(string) $filter['competitionExternalId']];
+                if ($wanted === []) return false; // an empty premium group matches nothing
                 $competitionId = (int) ($row['competition_id'] ?? 0);
                 $competition = $competitionId > 0
                     ? $this->find($this->competitions, fn(array $c) => (int) $c['id'] === $competitionId) : null;
-                if ($competition === null || (string) ($competition['external_id'] ?? '') !== (string) $filter['competitionExternalId']) return false;
+                if ($competition === null || !in_array((string) ($competition['external_id'] ?? ''), $wanted, true)) return false;
             }
             return true;
         }));
@@ -1237,14 +1243,20 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
             if (!empty($filter['date']) && !str_starts_with((string) ($row['kickoff_at'] ?? ''), (string) $filter['date'])) return false;
             if (!empty($filter['from']) && (string) ($row['generated_at'] ?? '') < (string) $filter['from']) return false;
             if (!empty($filter['to']) && (string) ($row['generated_at'] ?? '') > (string) $filter['to']) return false;
-            // A competition is resolved through the fixture the prediction
-            // belongs to, so a narrowed page reports the league it shows.
-            if (!empty($filter['competitionExternalId'])) {
+            // A competition (or a group — the "all premium leagues" selection)
+            // is resolved through the fixture the prediction belongs to, so a
+            // narrowed page reports the leagues it shows.
+            if (!empty($filter['competitionExternalId']) || array_key_exists('competitionExternalIds', $filter)) {
+                $wanted = array_key_exists('competitionExternalIds', $filter)
+                    ? array_values(array_unique(array_filter(array_map('strval', (array) $filter['competitionExternalIds']),
+                        static fn(string $v): bool => $v !== '')))
+                    : [(string) $filter['competitionExternalId']];
+                if ($wanted === []) return false; // an empty premium group matches nothing
                 $fixture = $this->find($this->fixtures, fn(array $f) => (int) ($f['id'] ?? 0) === (int) ($row['fixture_id'] ?? 0));
                 $competitionId = (int) ($fixture['competition_id'] ?? 0);
                 $competition = $competitionId > 0
                     ? $this->find($this->competitions, fn(array $c) => (int) $c['id'] === $competitionId) : null;
-                if ($competition === null || (string) ($competition['external_id'] ?? '') !== (string) $filter['competitionExternalId']) return false;
+                if ($competition === null || !in_array((string) ($competition['external_id'] ?? ''), $wanted, true)) return false;
             }
             return true;
         }));

@@ -31,10 +31,14 @@ use AIWorkforce\Persistence\FootballRepository;
  *
  * A match is identified by its `matchId` (`providerCode:externalId`), which the
  * provider guarantees unique and the fixture table enforces with
- * `UNIQUE(provider_id, external_id)`. A prediction is identified by that match
- * plus the kind and the model version — `UNIQUE(fixture_id, prediction_kind,
- * model_version_id)` in every schema — so the same match cannot be stored
- * twice, and an existing prediction is *returned* rather than recomputed.
+ * `UNIQUE(provider_id, external_id)`. Every match additionally carries its own
+ * stored id — the fixture row's database id, served as `/football/match/<id>` —
+ * and a row whose feed supplied no external id falls back to that id
+ * (`fixture:<id>`), so a match that exists is never keyed by a blank. A
+ * prediction is identified by the match plus the kind and the model version —
+ * `UNIQUE(fixture_id, prediction_kind, model_version_id)` in every schema — so
+ * the same match cannot be stored twice, and an existing prediction is
+ * *returned* rather than recomputed.
  *
  * Nothing here invents a match to fill a short page: the last page holds
  * whatever is left, and an empty page says so.
@@ -54,6 +58,14 @@ final class MatchFeed
 
     /** A page number is at least 1; the upper bound only stops absurd input. */
     public const MAX_PAGE = 100000;
+
+    /**
+     * The `competition` keyword that narrows a page to *every* premium league
+     * on the date together — the selection behind the Premium League selector's
+     * "All premium leagues" option. `all_premium` (and any spelling with
+     * separators instead of underscores) is accepted as an alias.
+     */
+    public const PREMIUM_LEAGUES = 'PREMIUM_LEAGUES';
 
     /** Why a match on a page has no prediction attached to it. */
     public const SOURCE_STORED = 'STORED';
@@ -191,9 +203,10 @@ final class MatchFeed
      * Options:
      *
      *  - `providerId`  narrow the page to one provider
-     *  - `competition` a competition external id, its name, or `premium` for the
-     *    configured featured league. Narrowing the page narrows generation with
-     *    it: only the selected competition is ever processed.
+     *  - `competition` a competition external id, its name, `premium` for the
+     *    configured featured league, or `premium_leagues` / `all_premium` for
+     *    every premium league on the date together. Narrowing the page narrows
+     *    generation with it: only the selected competition(s) are processed.
      *  - `market`      a market key from `PredictionMarkets::catalog()`
      *  - `line`        an explicit goal/handicap line where the market has one
      *
@@ -218,7 +231,8 @@ final class MatchFeed
 
         $filter = ['date' => $date];
         if ($providerId !== null) $filter['providerId'] = $providerId;
-        if ($competition['externalId'] !== null) $filter['competitionExternalId'] = $competition['externalId'];
+        if ($competition['externalIds'] !== null) $filter['competitionExternalIds'] = $competition['externalIds'];
+        elseif ($competition['externalId'] !== null) $filter['competitionExternalId'] = $competition['externalId'];
 
         $model = $this->models->usable();
         $modelVersionId = (int) ($model['model']['id'] ?? 0);
@@ -271,10 +285,11 @@ final class MatchFeed
         }
 
         // Counted with the same filter as the page: with a competition selected,
-        // "how many are analyzed" means analyzed in that competition, not on the
-        // date as a whole.
+        // "how many are analyzed" means analyzed in that competition (or group
+        // of premium leagues), not on the date as a whole.
         $countFilter = ['date' => $date, 'kind' => PredictionService::KIND_PRE_MATCH];
-        if ($competition['externalId'] !== null) $countFilter['competitionExternalId'] = $competition['externalId'];
+        if ($competition['externalIds'] !== null) $countFilter['competitionExternalIds'] = $competition['externalIds'];
+        elseif ($competition['externalId'] !== null) $countFilter['competitionExternalId'] = $competition['externalId'];
         $analyzed = $this->repo->countPredictions($countFilter);
         $missing = max(0, $totalMatches - $analyzed);
 
@@ -517,26 +532,52 @@ final class MatchFeed
     }
 
     /**
-     * A requested competition onto a stored one. `premium` names the configured
-     * featured league; anything else is matched against the provider's own
-     * competition ids and names. A name that matches nothing is reported with
-     * the competitions that are available — the page is narrowed to it (and is
-     * therefore empty) rather than silently widened to every league.
+     * A requested competition onto a stored one.
+     *
+     * `premium` names the configured featured league; `premium_leagues` (also
+     * spelled `all_premium`) names *every* premium league on the date at once —
+     * the selection behind the Premium League selector's "All premium leagues"
+     * option — and resolves to the group of their external ids. Anything else
+     * is matched against the provider's own competition ids and names. A name
+     * that matches nothing is reported with the competitions that are
+     * available — the page is narrowed to it (and is therefore empty) rather
+     * than silently widened to every league.
      *
      * @param list<string> $notes
-     * @return array{requested:?string,externalId:?string,name:?string,matches:?int,premium:bool,state:string,note:?string}
+     * @return array{requested:?string,externalId:?string,externalIds:?list<string>,name:?string,matches:?int,premium:bool,state:string,note:?string}
      */
     public function resolveCompetition(?string $requested, string $date, ?int $providerId, array &$notes): array
     {
-        $empty = ['requested' => $requested, 'externalId' => null, 'name' => null, 'matches' => null,
-            'premium' => false, 'state' => 'ALL_COMPETITIONS', 'note' => null];
+        $empty = ['requested' => $requested, 'externalId' => null, 'externalIds' => null, 'name' => null,
+            'matches' => null, 'premium' => false, 'state' => 'ALL_COMPETITIONS', 'note' => null];
         if ($requested === null || trim($requested) === '') return $empty;
         $wanted = trim($requested);
         $available = $this->competitions($date, $providerId);
+        // Premium scope keywords are compared with separators ignored, so
+        // premium_leagues, premium-leagues, all_premium and "all premium" all
+        // land on the same selection.
+        $scopeKey = (string) preg_replace('/[^a-z0-9]/', '', strtolower($wanted));
+        if (in_array($scopeKey, ['premiumleagues', 'allpremium', 'allpremiumleagues', 'premiumall', 'premiumleaguesall'], true)) {
+            $externalIds = [];
+            $matches = 0;
+            foreach ($available['premiumCompetitions'] as $premiumLeague) {
+                $external = (string) ($premiumLeague['externalId'] ?? '');
+                if ($external !== '') $externalIds[] = $external;
+                $matches += (int) ($premiumLeague['matches'] ?? 0);
+            }
+            $externalIds = array_values(array_unique($externalIds));
+            if ($externalIds === []) {
+                $notes[] = 'competition=' . RequestParams::preview($wanted) . ' asks for every premium league, but no premium league'
+                    . ' is stored for ' . $date . '; the page holds no match.';
+            }
+            return ['requested' => $wanted, 'externalId' => null, 'externalIds' => $externalIds,
+                'name' => 'All premium leagues', 'matches' => $matches, 'premium' => true,
+                'state' => 'PREMIUM_LEAGUES', 'note' => null];
+        }
         $isPremiumKeyword = in_array(strtolower($wanted), ['premium', 'premium_league', 'premium-league'], true);
         if ($isPremiumKeyword && $available['premium'] !== null) {
             $premium = $available['premium'];
-            return ['requested' => $wanted, 'externalId' => (string) $premium['externalId'], 'name' => (string) $premium['name'],
+            return ['requested' => $wanted, 'externalId' => (string) $premium['externalId'], 'externalIds' => null, 'name' => (string) $premium['name'],
                 'matches' => (int) $premium['matches'], 'premium' => true, 'state' => 'NARROWED',
                 'note' => $premium['source'] === 'MOST_MATCHES_ON_DATE'
                     ? 'The configured premium competition has no match on this date; the competition with the most matches was featured instead.'
@@ -544,7 +585,7 @@ final class MatchFeed
         }
         foreach ($available['competitions'] as $competition) {
             if ((string) $competition['externalId'] === $wanted || strtolower((string) $competition['name']) === strtolower($wanted)) {
-                return ['requested' => $wanted, 'externalId' => (string) $competition['externalId'], 'name' => (string) $competition['name'],
+                return ['requested' => $wanted, 'externalId' => (string) $competition['externalId'], 'externalIds' => null, 'name' => (string) $competition['name'],
                     'matches' => (int) $competition['matches'], 'premium' => !empty($competition['premium']), 'state' => 'NARROWED', 'note' => null];
             }
         }
@@ -552,7 +593,7 @@ final class MatchFeed
         $notes[] = 'competition=' . RequestParams::preview($wanted) . ' is not one of the competitions stored for ' . $date
             . ($names !== '' ? ' (available: ' . $names . ')' : ' (no competition is stored for this date)')
             . '; the page was narrowed to it and holds no match.';
-        return ['requested' => $wanted, 'externalId' => '__none__', 'name' => $wanted, 'matches' => 0,
+        return ['requested' => $wanted, 'externalId' => '__none__', 'externalIds' => null, 'name' => $wanted, 'matches' => 0,
             'premium' => false, 'state' => 'NOT_FOUND', 'note' => 'No stored competition matches this selection.'];
     }
 
@@ -576,12 +617,23 @@ final class MatchFeed
     /**
      * The identity a stored prediction is keyed by: the provider's own
      * `match_id`, scoped so two providers cannot collide.
+     *
+     * Every stored match also owns a second, deployment-local identity — the
+     * fixture row's own database id, the number its page is served under
+     * (`/football/match/<fixtureId>`). A row whose feed supplied no external id
+     * (legacy rows, or a feed that omitted one) falls back to that id, so a
+     * match that exists is never returned with a blank identity: the key is
+     * `fixture:<id>` only in that case, and stays `providerCode:externalId`
+     * whenever the provider's own id is present.
      */
     public static function matchId(array $fixture): string
     {
         $provider = (string) ($fixture['provider_code'] ?? '');
         $external = (string) ($fixture['external_id'] ?? '');
-        if ($external === '') return '';
+        if ($external === '') {
+            $id = (int) ($fixture['id'] ?? 0);
+            return $id > 0 ? 'fixture:' . $id : '';
+        }
         return $provider !== '' ? $provider . ':' . $external : $external;
     }
 

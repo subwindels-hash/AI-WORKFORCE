@@ -423,3 +423,70 @@ test('football: the hard 50-match generation ceiling survives a competition and 
     $notes = implode(' ', (array) ($page['request']['notes'] ?? []));
     assert_true(str_contains($notes, 'exceeds the hard maximum of 50'), 'and the clamp is reported');
 });
+
+test('football: the Premium League all-value narrows to every premium league on the date', function () {
+    [$repo, $module, $day] = fx_fb_two_leagues(60, 30);
+    $feed = $module->feed();
+
+    $page = $feed->page($day, 1, 50, false, ['competition' => MatchFeed::PREMIUM_LEAGUES]);
+    assert_equals(60, (int) $page['pagination']['totalMatches'], 'premium-all pages the date\'s premium leagues together (Premier League, 60)');
+    assert_equals('PREMIUM_LEAGUES', (string) $page['filters']['competition']['state'], 'the scope states itself');
+    assert_equals('All premium leagues', (string) $page['filters']['competition']['name'], 'and names the group');
+    assert_equals(60, (int) $page['filters']['competition']['matches'], 'with the combined match count');
+    assert_true((bool) $page['filters']['competition']['premium'], 'marked as premium scope');
+    assert_null($page['filters']['competition']['externalId'], 'no single league id');
+    assert_equals(['39'], (array) $page['filters']['competition']['externalIds'], 'resolved to the group of premium external ids');
+    foreach ($page['matches'] as $match) {
+        assert_equals('Premier League', (string) $match['competition'], 'only premium-league matches are on the page');
+    }
+    // The selectable spelling and the documented alias land on the same scope.
+    $aliased = $feed->page($day, 1, 50, false, ['competition' => 'all_premium']);
+    assert_equals(60, (int) $aliased['pagination']['totalMatches'], 'all_premium is an alias for the same scope');
+    $spaced = $feed->page($day, 1, 50, false, ['competition' => 'premium leagues']);
+    assert_equals(60, (int) $spaced['pagination']['totalMatches'], 'spelling with spaces is accepted too');
+});
+
+test('football: premium-all combines every configured premium league on one page', function () {
+    [, $module, $day] = fx_fb_two_leagues(60, 30, ['WINDELS_FOOTBALL_PREMIUM_COMPETITIONS' => 'Premier League, La Liga']);
+    $feed = $module->feed();
+
+    $page = $feed->page($day, 1, 50, false, ['competition' => 'premium_leagues']);
+    assert_equals(90, (int) $page['pagination']['totalMatches'], 'both premium leagues are combined: 60 + 30');
+    $ids = (array) $page['filters']['competition']['externalIds'];
+    assert_true(in_array('39', $ids, true) && in_array('140', $ids, true), 'the group carries both leagues\' external ids');
+    // Page 1 holds the earliest 50 kickoffs (all Premier League rows), so the
+    // two leagues are read across the first two pages of the combined scope.
+    $page2 = $feed->page($day, 2, 50, false, ['competition' => 'premium_leagues']);
+    $names = array_unique(array_column(array_merge($page['matches'], $page2['matches']), 'competition'));
+    assert_true(in_array('Premier League', $names, true) && in_array('La Liga', $names, true), 'the scope mixes both premium leagues');
+    assert_equals(90, (int) $page['filters']['competition']['matches'], 'the group reports the combined match count');
+
+    $board = $module->board()->forDate($day, false, 1, 50, ['competition' => MatchFeed::PREMIUM_LEAGUES]);
+    assert_equals(90, (int) $board['pagination']['totalMatches'], 'the console board pages the same premium scope');
+    assert_equals('PREMIUM_LEAGUES', (string) $board['filters']['competition']['state'], 'and reports it in its filters block');
+});
+
+test('football: generating under premium-all spends the budget inside the premium leagues only', function () {
+    [$repo, $module, $day] = fx_fb_two_leagues(60, 30);
+    $feed = $module->feed();
+
+    $page = $feed->generate($day, 1, 50, ['competition' => 'PREMIUM_LEAGUES']);
+    assert_equals(50, (int) $page['generation']['generated'], 'the first premium-all page writes 50 new predictions');
+    assert_equals(10, (int) $page['generation']['remainingOnDate'], 'leaving 10 premium matches for page 2');
+    assert_equals(50, count($repo->predictions), 'and only those rows exist — La Liga was not processed');
+    foreach ($page['matches'] as $match) {
+        assert_equals('Premier League', (string) $match['competition'], 'every generated match is from a premium league');
+    }
+    assert_equals('PREMIUM_LEAGUES', (string) $page['request']['competition'], 'the request still names the premium scope, so paging stays in it');
+});
+
+test('football: premium-all with no premium league stored narrows to nothing and says so', function () {
+    [, $module, $day] = fx_fb_two_leagues(60, 30, ['WINDELS_FOOTBALL_PREMIUM_COMPETITIONS' => 'Ligue 1']);
+    $page = $module->feed()->page($day, 1, 50, false, ['competition' => 'premium leagues']);
+
+    assert_equals(0, (int) $page['pagination']['totalMatches'], 'no premium league on the date means an empty premium scope, not the whole date');
+    assert_equals([], (array) $page['filters']['competition']['externalIds'], 'the group is empty');
+    assert_equals('PREMIUM_LEAGUES', (string) $page['filters']['competition']['state'], 'the empty scope is still reported, not widened');
+    $notes = implode(' ', (array) ($page['request']['notes'] ?? []));
+    assert_true(str_contains($notes, 'no premium league'), 'and the note says why the page holds nothing');
+});
