@@ -68,6 +68,7 @@ class Football extends App_Controller
         $providerMode = $this->platform->football->config()->providerMode();
         $providerLocked = $providerMode !== 'MANUAL';
         $provider = isset($get['provider']) ? trim((string) $get['provider']) : null;
+        $providerRequested = (string) $provider;
         if ($providerLocked) {
             if ($provider !== null && $provider !== '' && strtoupper($provider) !== 'AUTO' && strtoupper($provider) !== 'SMART') {
                 $lockNote = 'provider=' . \AIWorkforce\Football\RequestParams::preview($provider)
@@ -78,11 +79,22 @@ class Football extends App_Controller
                 $data['notice'] = trim((string) ($data['notice'] ?? '') . ' ' . $lockNote);
             }
             $provider = \AIWorkforce\Football\ProviderSelector::AUTO;
+        } elseif (strtoupper($providerRequested) === \AIWorkforce\Football\ProviderSelector::ALL_PROVIDERS) {
+            // All providers: no feed is pinned, so the board reads the stored
+            // rows of every connected feed and each row names the feed behind
+            // it. Distinct from AUTO, which is the routing mode a live sync or
+            // fetch would use — on this read page both show the full board.
+            $provider = \AIWorkforce\Football\ProviderSelector::ALL_PROVIDERS;
         } elseif ($provider === null || $provider === '') {
             $manualDefault = $this->platform->football->config()->manualProvider();
             $provider = $manualDefault !== '' ? $manualDefault : \AIWorkforce\Football\ProviderSelector::AUTO;
         }
         $data['provider'] = $provider;
+        // The raw query value, kept apart from the resolved one: the view marks
+        // the "All providers" option selected only when the operator actually
+        // asked for no pinning — an absent parameter may still resolve to the
+        // administrator's manual default provider.
+        $data['providerRequested'] = $providerRequested;
         $data['providerMode'] = $providerMode;
         $data['providerLocked'] = $providerLocked;
         $providers = $this->platform->football->intelligence()->providers();

@@ -260,7 +260,23 @@ class FootballRepositoryDatabase implements FootballRepository
         // builder when a query runs, so a lookup squeezed between two `where`
         // calls would silently drop the conditions that came before it.
         $competitionIds = null;
-        if (!empty($filter['competitionExternalId'])) {
+        if (array_key_exists('competitionExternalIds', $filter) && is_array($filter['competitionExternalIds'])) {
+            // A group of leagues (the "all premium leagues" selection) filters
+            // on every competition row whose provider external id is in the
+            // group. An empty group is a real answer — none of the leagues
+            // asked for is stored — and must narrow the page to nothing, never
+            // widen it to every league.
+            $externalIds = array_values(array_unique(array_filter(
+                array_map('strval', $filter['competitionExternalIds']),
+                static fn(string $v): bool => $v !== '')));
+            if ($externalIds !== []) {
+                $rows = $this->db->select('id')->where_in('external_id', $externalIds)
+                    ->get('football_competitions')->result_array();
+                $competitionIds = array_map(static fn(array $row): int => (int) $row['id'], $rows);
+            } else {
+                $competitionIds = [];
+            }
+        } elseif (!empty($filter['competitionExternalId'])) {
             // Narrowing the page to one league is a filter on the competition
             // row, not a free-text match on a name a provider may spell
             // differently: two competitions whose names share a prefix must not
@@ -845,7 +861,27 @@ class FootballRepositoryDatabase implements FootballRepository
         // run in the middle of building this one would reset the builder and
         // drop every condition added before it.
         $fixtureIds = null;
-        if (!empty($filter['competitionExternalId'])) {
+        if (array_key_exists('competitionExternalIds', $filter) && is_array($filter['competitionExternalIds'])) {
+            // A group of leagues (the "all premium leagues" selection) resolves
+            // through every competition row whose external id is in the group.
+            // An empty group must match nothing, never the whole date.
+            $externalIds = array_values(array_unique(array_filter(
+                array_map('strval', $filter['competitionExternalIds']),
+                static fn(string $v): bool => $v !== '')));
+            $competitionIds = [];
+            if ($externalIds !== []) {
+                $competitions = $this->db->select('id')->where_in('external_id', $externalIds)
+                    ->get('football_competitions')->result_array();
+                $competitionIds = array_map(static fn(array $row): int => (int) $row['id'], $competitions);
+            }
+            if ($competitionIds !== []) {
+                $fixtures = $this->db->select('id')->where_in('competition_id', $competitionIds)
+                    ->get('football_fixtures')->result_array();
+                $fixtureIds = array_map(static fn(array $row): int => (int) $row['id'], $fixtures);
+            } else {
+                $fixtureIds = [];
+            }
+        } elseif (!empty($filter['competitionExternalId'])) {
             // A prediction stores its kickoff but not its league, so the
             // competition is resolved through the fixture it belongs to. A
             // date-wide count taken without this would report the whole date

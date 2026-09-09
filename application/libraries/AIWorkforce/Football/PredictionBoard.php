@@ -37,9 +37,11 @@ final class PredictionBoard
      * rebuilds matches that already have one.
      *
      * `options` narrow the board the same way the feed narrows a page:
-     * `competition` (an external id, a name, or `premium`) and `market` (a key
-     * from `PredictionMarkets::catalog()`). Both are selections over stored
-     * rows — neither one generates anything.
+     * `competition` (an external id, a name, `premium` for the featured
+     * league, or `premium_leagues` / `all_premium` for every premium league on
+     * the date together) and `market` (a key from
+     * `PredictionMarkets::catalog()`, or none for the default view). Both are
+     * selections over stored rows — neither one generates anything.
      *
      * @param array<string,mixed> $options
      * @return array{heading:string, date:string, dateLabel:string, status:string, state:string,
@@ -58,7 +60,8 @@ final class PredictionBoard
             ? max(-10.0, min(10.0, (float) $options['line'])) : null;
 
         $filter = ['date' => $date];
-        if ($competition['externalId'] !== null) $filter['competitionExternalId'] = $competition['externalId'];
+        if ($competition['externalIds'] !== null) $filter['competitionExternalIds'] = $competition['externalIds'];
+        elseif ($competition['externalId'] !== null) $filter['competitionExternalId'] = $competition['externalId'];
         $totalFixtures = $this->repo->countFixtures($filter);
         $totalPages = max(1, (int) ceil($totalFixtures / $limit));
         $fixtures = $this->repo->listFixtures($filter, $limit, ($page - 1) * $limit);
@@ -86,7 +89,8 @@ final class PredictionBoard
         // than every league the provider sent that day. `eligibility` stores the
         // band the prediction was written with.
         $dateWide = ['date' => $date, 'kind' => PredictionService::KIND_PRE_MATCH];
-        if ($competition['externalId'] !== null) $dateWide['competitionExternalId'] = $competition['externalId'];
+        if ($competition['externalIds'] !== null) $dateWide['competitionExternalIds'] = $competition['externalIds'];
+        elseif ($competition['externalId'] !== null) $dateWide['competitionExternalId'] = $competition['externalId'];
         $analyzed = $this->repo->countPredictions($dateWide);
         $qualified = $this->repo->countPredictions($dateWide + ['eligibility' => QualityBand::QUALIFIED]);
         $limited = $this->repo->countPredictions($dateWide + ['eligibility' => QualityBand::LIMITED]);

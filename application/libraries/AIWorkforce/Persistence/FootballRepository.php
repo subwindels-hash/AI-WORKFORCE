@@ -103,8 +103,10 @@ interface FootballRepository
     public function findFixture(int $providerId, string $externalId): ?array;
     /**
      * Filter keys: date, from, to, status, competition, team, providerId,
-     * unsettledOnly. Rows are ordered by kickoff then id, so a page boundary is
-     * stable: match 51 of a date is the same row on every call.
+     * unsettledOnly, competitionExternalId (one league), competitionExternalIds
+     * (a group of leagues — the "all premium leagues" selection; an empty list
+     * matches nothing). Rows are ordered by kickoff then id, so a page
+     * boundary is stable: match 51 of a date is the same row on every call.
      *
      * @return array<int,array<string,mixed>>
      */

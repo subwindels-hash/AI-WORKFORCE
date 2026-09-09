@@ -254,18 +254,38 @@ The console and the API are driven by one flow:
 ```text
 Football Intelligence
         ↓
-Select Competition            (the leagues the provider actually sent)
+Select Data Provider          (All providers = every feed's stored rows, mixed on one page)
         ↓
-Select Premium League         (the featured competition — default: English Premier League)
+Select Competition            (the leagues the provider actually sent; All = the whole date)
         ↓
-Select Odds Prediction        (the market Football Intelligence answers in)
+Select Premium League         (one premium league, or All premium leagues combined)
+        ↓
+Select Odds Prediction        (one market, or All markets = the default odds view)
         ↓
 Select date
         ↓
-Generate predictions          (at most 50 NEW matches, inside the selected competition)
+Generate predictions          (at most 50 NEW matches, inside the selected competition(s))
         ↓
 Page 1 → Next → Page 2        (stored rows; nothing is regenerated)
 ```
+
+Every selector also offers its **all-value**, so the page can list every fixture
+at once instead of one league or market at a time:
+
+- **All providers** — no feed is pinned: the board reads the stored rows of
+  every connected provider and each row names the feed behind it.
+- **All competitions** — the whole date, no league narrowing.
+- **All premium leagues** — the date's premium leagues as one group (still
+  excluding non-premium leagues). The selection resolves to the group's
+  external ids and pages/generates inside the group, so the 50-match budget is
+  spent across the premium leagues only. When no premium league is stored for
+  the date, the page is empty and says why — it is never widened to every
+  league.
+- **All markets** — no market is pinned; the page shows every fixture in the
+  default odds view (`MATCH_WINNER`).
+
+The API spells the premium group as `competition=premium_leagues` (aliases:
+`all_premium`, `premium leagues`, `all premium leagues`).
 
 **Competitions are data, not a constant.** `GET /api/football/competitions` lists
 the competitions stored for a date — `football_competitions` rows the sync wrote
