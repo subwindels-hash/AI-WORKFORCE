@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { ExportRequestSchema, ResolveDuplicateSchema } from "../../../../packages/shared/src/leadDiscovery.js";
 import { requireLeadAccess, type LeadPrincipal } from "../auth.js";
-import { mapLeadRow } from "../leadRepository.js";
+import { mapLeadRow, type PersistedLead } from "../leadRepository.js";
 
 const leadColumns = "l.id, l.organization_id, l.source, l.source_id, l.name, l.category, l.address, l.city, l.region, l.country, l.phone, l.website, l.latitude, l.longitude, l.status, l.owner_id, l.metadata, l.created_at, l.updated_at";
 const id = (request: FastifyRequest, key: string) => {
@@ -72,9 +72,15 @@ export async function intelligenceRoutes(app: FastifyInstance): Promise<void> {
     return { filters, leads: rows.rows.map(mapLeadRow) };
   };
 
+  const exportRow = (lead: PersistedLead) => ({
+    ...lead,
+    email: typeof lead.metadata.email === "string" ? lead.metadata.email : null,
+    emailVerification: lead.metadata.email_verified === true ? "verified" : null,
+  });
+
   app.post("/export/preview", async request => {
     const user = await requireLeadAccess(request); const result = await exportLeads(user, request.body);
-    return { rows: result.leads.slice(0, 25).map(lead => Object.fromEntries(Object.entries(lead).map(([key, value]) => [key, csvSafeValue(value)]))), count: result.leads.length, csvSafe: true };
+    return { rows: result.leads.slice(0, 25).map(lead => Object.fromEntries(Object.entries(exportRow(lead)).map(([key, value]) => [key, csvSafeValue(value)]))), count: result.leads.length, csvSafe: true };
   });
 
   app.post("/export", async request => {
@@ -86,8 +92,11 @@ export async function intelligenceRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/export/csv", async (request, reply) => {
     const user = await writable(request); const result = await exportLeads(user, request.body);
-    const keys = ["name", "category", "address", "city", "region", "country", "phone", "website", "status"] as const;
-    const body = [keys.join(","), ...result.leads.map(lead => keys.map(key => csvCell(lead[key])).join(","))].join("\r\n");
+    const keys = ["name", "category", "address", "city", "region", "country", "phone", "email", "emailVerification", "website", "status"] as const;
+    const body = [keys.join(","), ...result.leads.map(lead => {
+      const row = exportRow(lead);
+      return keys.map(key => csvCell(row[key])).join(",");
+    })].join("\r\n");
     await app.db.query("INSERT INTO export_history (organization_id,user_id,format,filters,lead_count) VALUES ($1,$2,'csv',$3::jsonb,$4)", [user.organizationId, user.sub, JSON.stringify(result.filters), result.leads.length]);
     await Promise.all(result.leads.map(lead => audit(app, user, lead.id, "LEAD_EXPORTED", { format: "csv" })));
     return reply.header("content-type", "text/csv; charset=utf-8").header("content-disposition", "attachment; filename=leads.csv").send(body);

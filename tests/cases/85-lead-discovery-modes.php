@@ -91,4 +91,22 @@ $tests[] = function(): array {
     return ['msg' => 'provider dropdown is white-labelled, driver ids unchanged'];
 };
 
+$tests[] = function(): array {
+    $controller = file_get_contents(APPPATH . 'controllers/Api_lead_discovery.php');
+    $apollo = file_get_contents(APPPATH . 'libraries/LeadDiscovery/ApolloProvider.php');
+    assert_true(str_contains($controller, "['business','person','buyer']"), 'buyer_mode_is_server_supported');
+    assert_true(str_contains($controller, "'crude oil buyer'"), 'buyer_defaults_include_crude_oil');
+    assert_true(str_contains($controller, "'Australia'"), 'buyer_defaults_to_australia');
+    assert_true(str_contains($controller, 'verifiedEmailOnly'), 'strict_email_flag_is_server_parsed');
+    assert_true(str_contains($controller, 'No guessed, generated, masked, or placeholder emails'), 'buyer_no_fake_email_notice');
+    assert_true(str_contains($controller, "'email_verification'"), 'csv_includes_email_verification');
+    assert_true(str_contains($controller, "'linkedin_url'"), 'csv_includes_linkedin');
+    assert_true(str_contains($apollo, 'isVerifiedEmailStatus'), 'provider_verification_helper_present');
+    assert_true(\LeadDiscovery\ApolloProvider::isVerifiedEmailStatus('verified'), 'explicit_verified_status_accepted');
+    assert_true(\LeadDiscovery\ApolloProvider::isVerifiedEmailStatus(['verified' => true]), 'nested_verified_status_accepted');
+    assert_false(\LeadDiscovery\ApolloProvider::isVerifiedEmailStatus('deliverable'), 'deliverable_is_not_provider_verified');
+    assert_false(\LeadDiscovery\ApolloProvider::isUsableEmail('email_not_unlocked@apollo.io'), 'locked_email_rejected');
+    return ['msg' => 'buyer mode is strict: provider-verified work emails only'];
+};
+
 run('85-lead-discovery-modes', $tests);

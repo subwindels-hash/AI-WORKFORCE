@@ -27,20 +27,28 @@ class Api_lead_discovery extends Api_controller
     public function modes(){ if(!$this->guard())return; $this->json(['modes'=>[
         ['id'=>'business','label'=>'Business Mode','description'=>'Search B2B/business contacts by keyword + country/city. Works with both Windels G and Windels A (B2B contacts with emails/phones).'],
         ['id'=>'person','label'=>'Person Mode','description'=>'Search for individuals by first-name list + country/city; results are filtered to people whose email is on a free webmail provider (gmail.com, yahoo.com, outlook.com, icloud.com, hotmail.com, aol.com, proton.me, live.com). Windels A required, with contact reveal enabled on the provider: Windels A people search returns no email addresses until a record is enriched (spends credits).'],
+        ['id'=>'buyer','label'=>'Verified Buyer Email Mode','description'=>'Search Australian crude-oil buyers and procurement decision-makers. Windels A only: a lead is returned only when Apollo supplies a syntactically valid, explicitly provider-verified email. No guessed, generated, masked, or placeholder emails are stored.'],
     ]]); }
     private function id(): string { return bin2hex(random_bytes(16)); }
     private function now(): string { return gmdate('c'); }
     private function recordActivity(?string $lead, string $type, array $detail=[]): void { $this->db->insert('lead_activities',['id'=>$this->id(),'lead_id'=>$lead,'organization_id'=>$this->org,'actor_id'=>$this->user['id'],'type'=>$type,'detail'=>json_encode($detail),'created_at'=>$this->now()]); }
     private function lead(string $id): ?array { return $this->db->get_where('leads',['id'=>$id,'organization_id'=>$this->org],1)->row_array() ?: null; }
     private function safeCsv(string $v): string { return preg_match('/^[=+\-@]/', $v) ? "'".$v : $v; }
+    private function freeEmailDomains(): array { return ['gmail.com','yahoo.com','outlook.com','icloud.com','hotmail.com','aol.com','proton.me','live.com','me.com','mail.com','gmx.com','yandex.com']; }
+    private function verifiedEmailStatus(mixed $status): bool { return \LeadDiscovery\ApolloProvider::isVerifiedEmailStatus($status); }
+    private function usableEmail(mixed $email): ?string { $value=strtolower(trim((string)$email)); return $value!=='' && \LeadDiscovery\ApolloProvider::isUsableEmail($value) ? $value : null; }
+    private function workEmail(string $email): bool { $at=strrpos($email,'@'); return $at!==false && !in_array(strtolower(substr($email,$at+1)),$this->freeEmailDomains(),true); }
 
     public function search() {
         if(!$this->guard())return; $b=$this->jsonBody();
         $mode=(string)($b['mode']??'business');
-        if(!in_array($mode,['business','person'],true)) return $this->jsonError('invalid mode');
+        if(!in_array($mode,['business','person','buyer'],true)) return $this->jsonError('invalid mode');
+        $isBuyer=$mode==='buyer';
         $q=trim((string)($b['query']??''));
-        $providerName=(string)($b['provider']??($mode==='person'?'apollo_io':'google_places'));
+        $providerName=(string)($b['provider']??(($mode==='person'||$isBuyer)?'apollo_io':'google_places'));
+        if($isBuyer&&$providerName!=='apollo_io') return $this->jsonError('Verified buyer email mode requires the Windels A provider; business listings do not supply provider-verified emails.',422);
         $country=trim((string)($b['country']??''));
+        if($isBuyer&&$country==='') $country='Australia';
         $city=trim((string)($b['city']??''));
         $keywords=is_array($b['keywords']??null)?array_values(array_filter(array_map('trim',$b['keywords']),fn($s)=>$s!=='')):[];
         $names=is_array($b['names']??null)?array_values(array_filter(array_map('trim',$b['names']),fn($s)=>$s!=='')):[];
@@ -48,17 +56,23 @@ class Api_lead_discovery extends Api_controller
         $titles=is_array($b['titles']??null)?array_values(array_filter(array_map('trim',$b['titles']))):[];
         $parts=[];
         if($q!=='') $parts[]=$q;
+        if($isBuyer&&$keywords===[]&&$q==='') $keywords=['crude oil buyer','crude oil importer','petroleum procurement','crude trading'];
         if($mode==='business'){
             if($keywords===[]) $parts=array_values($parts);
             else foreach($keywords as $k) $parts[]=$k;
-        } else {
+        } elseif($mode==='person') {
             if($names===[]&&$parts===[]) return $this->jsonError('Enter one or more first names to search');
             foreach($names as $n) $parts[]=$n;
+        } else {
+            foreach($keywords as $k) $parts[]=$k;
         }
         if($city!=='') $parts[]=$city;
         if($country!=='') $parts[]=$country;
         $finalQuery=trim(implode(' ',$parts));
         if(strlen($finalQuery)<3||strlen($finalQuery)>300) return $this->jsonError('query must be 3–300 characters');
+        $emailPolicy=strtolower(trim((string)($b['emailPolicy']??'')));
+        $verifiedOnly=$isBuyer||!empty($b['verifiedEmailOnly'])||in_array($emailPolicy,['verified','provider_verified','verified_email'],true);
+        $workEmailOnly=$isBuyer?($b['workEmailOnly']??true)!==false:!empty($b['workEmailOnly']);
         $location=trim(implode(', ',array_filter([$city,$country])));
         $started=microtime(true); $error=null; $raw=[]; $providerStatus='DISABLED'; $providerInfo=null;
         $providerInput=['query'=>$finalQuery,'limit'=>(int)($b['limit']??20)];
@@ -68,6 +82,10 @@ class Api_lead_discovery extends Api_controller
             if($seniorities) $providerInput['seniorities']=$seniorities;
             if($titles) $providerInput['person_titles']=$titles;
             if($names) $providerInput['first_names']=$names;
+            // This is a narrowing hint, not a claim that search itself returns
+            // contact data. Apollo's enrichment step still has to return the
+            // actual address and an explicit verified status.
+            if($verifiedOnly) $providerInput['contact_email_status']=['verified'];
         }
         try { $registry=new \LeadDiscovery\ProviderRegistry([new \LeadDiscovery\GooglePlacesProvider(), new \LeadDiscovery\ApolloProvider()]); $provider=$registry->get($providerName); $providerStatus=$provider->healthCheck()['status']; $raw=$provider->searchBusinesses($providerInput); if(method_exists($provider,'lastSearchInfo')) $providerInfo=$provider->lastSearchInfo(); }
         catch(\LeadDiscovery\ProviderException $e) { log_message('error','lead_discovery '.$providerName.': '.$e->getMessage()); $error=\AIWorkforce\ApiProviders::providerMessage($e->getMessage()); $providerStatus=$e->httpStatus===422?'PLANNED':'DISABLED'; }
@@ -76,16 +94,17 @@ class Api_lead_discovery extends Api_controller
         // returns emails/phones (https://docs.apollo.io/reference/people-api-search),
         // so the notice explains why Person Mode can come back empty. Internal
         // detail stays in the error log — members never see connection internals.
+        $providerRows=count($raw);
         if(is_array($providerInfo)){
             if(!empty($providerInfo['notes'])) log_message('error','lead_discovery '.$providerName.' notes: '.implode(' | ',$providerInfo['notes']));
-            $providerInfo=['results'=>(int)($providerInfo['results']??0),'revealEnabled'=>!empty($providerInfo['reveal_enabled']),'revealRequested'=>(int)($providerInfo['reveal_requested']??0),'revealed'=>(int)($providerInfo['revealed']??0),'notice'=>($providerInfo['notice']??null)];
+            $providerInfo=['results'=>(int)($providerInfo['results']??$providerRows),'revealEnabled'=>!empty($providerInfo['reveal_enabled']),'revealRequested'=>(int)($providerInfo['reveal_requested']??0),'revealed'=>(int)($providerInfo['revealed']??0),'notice'=>($providerInfo['notice']??null)];
         }
-        $freeDomains=['gmail.com','yahoo.com','outlook.com','icloud.com','hotmail.com','aol.com','proton.me','live.com','me.com','mail.com','gmx.com','yandex.com'];
+        $freeDomains=$this->freeEmailDomains();
         if($mode==='person'){
             $raw=array_values(array_filter($raw,function($p)use($names,$freeDomains){
                 $meta=is_array($p['metadata']??null)?$p['metadata']:[];
-                $email=strtolower((string)($meta['email']??($p['email']??'')));
-                if($email==='') return false;
+                $email=$this->usableEmail($meta['email']??($p['email']??''));
+                if($email===null) return false;
                 $domain=strtolower((string)substr($email, (int)strrpos($email,'@')+1));
                 if(!in_array($domain,$freeDomains,true)) return false;
                 if($names===[]) return true;
@@ -93,21 +112,39 @@ class Api_lead_discovery extends Api_controller
                 foreach($names as $n){ if($n!==''&&strpos($pname, strtolower($n))===0) return true; }
                 return false;
             }));
+        } elseif($verifiedOnly) {
+            // Never manufacture a likely address from a person's name or
+            // company domain. A buyer result must carry both a usable address
+            // and Apollo's explicit verified signal; work-email mode also
+            // excludes free-mail inboxes.
+            $raw=array_values(array_filter($raw,function($p)use($workEmailOnly){
+                $meta=is_array($p['metadata']??null)?$p['metadata']:[];
+                $email=$this->usableEmail($meta['email']??($p['email']??''));
+                if($email===null||!$this->verifiedEmailStatus($meta['email_status']??($p['email_status']??null))) return false;
+                return !$workEmailOnly||$this->workEmail($email);
+            }));
+        }
+        $verifiedEmailCount=$verifiedOnly?count($raw):0;
+        if($isBuyer&&$raw===[]&&$providerRows>0&&$error===null){
+            $notice=($providerInfo['notice']??null);
+            if(!is_string($notice)||$notice==='') $notice='No provider-verified Australian buyer work emails were returned. Contact reveal must be enabled for Windels A; no guessed or placeholder emails are accepted.';
+            if(is_array($providerInfo)) $providerInfo['notice']=$notice;
+            else $providerInfo=['results'=>$providerRows,'revealEnabled'=>false,'revealRequested'=>0,'revealed'=>0,'notice'=>$notice];
         }
         $new=0;$dupes=0;$candidateCount=0;$results=[];
         foreach($raw as $p){
             $sid=(string)$p['sourceId'];
             $meta=is_array($p['metadata']??null)?$p['metadata']:[];
-            $email=(string)($meta['email']??($p['email']??''));
-            $leadKind=$mode==='person'?'person':'business';
+            $email=$this->usableEmail($meta['email']??($p['email']??''));
+            $emailVerified=$providerName==='apollo_io'&&$this->verifiedEmailStatus($meta['email_status']??($p['email_status']??null));
+            // Defensive second gate before persistence. This keeps the storage
+            // boundary honest even if a future provider bypasses the filter.
+            if($verifiedOnly&&($email===null||!$emailVerified||($workEmailOnly&&!$this->workEmail($email)))) continue;
+            $leadKind=$isBuyer?'person':($mode==='person'?'person':'business');
             $verificationStatus='provider_enriched';
             if($providerName==='apollo_io'){
-                $es=$meta['email_status']??null;
-                $verified=false;
-                if(is_array($es)){ foreach($es as $c){ if(is_array($c)&&($c['verified']??false)){$verified=true;break;} } }
-                elseif(is_string($es)&&stripos($es,'verified')!==false) $verified=true;
-                if($verified) $verificationStatus='verified';
-                if(!empty($p['phone'])&&!$verified) $verificationStatus='partial_verified';
+                if($email!==null&&$emailVerified) $verificationStatus='verified';
+                if(!empty($p['phone'])&&($email===null||!$emailVerified)) $verificationStatus='partial_verified';
             } elseif($providerName==='google_places'){
                 $verificationStatus='business_listing';
             }
@@ -116,10 +153,16 @@ class Api_lead_discovery extends Api_controller
             $meta['country']=$country?:null;
             $meta['city']=$city?:null;
             $meta['keyword']=$keywords?:($q?:null);
+            if($email!==null) $meta['email']=$email;
+            if($verifiedOnly){
+                $meta['email_policy']=$workEmailOnly?'verified_work_email':'verified_email';
+                $meta['email_verified']=$emailVerified;
+                $meta['email_source']=$providerName;
+            }
             $existing=$this->db->get_where('leads',['organization_id'=>$this->org,'source'=>$providerName,'source_id'=>$sid],1)->row_array();
             $record=['organization_id'=>$this->org,'source'=>$providerName,'source_id'=>$sid,'name'=>$p['name'],'category'=>$p['category'],'address'=>$p['address'],
                 'phone'=>$p['phone'],'website'=>$p['website'],'latitude'=>$p['latitude'],'longitude'=>$p['longitude'],
-                'email'=>$email?:null,'job_title'=>($meta['title']??null),'company_name'=>($meta['company']??null),
+                'email'=>$email,'job_title'=>($meta['title']??null),'company_name'=>($meta['company']??null),
                 'linkedin_url'=>($meta['linkedin_url']??null),'lead_kind'=>$leadKind,
                 'metadata'=>json_encode($meta),'updated_at'=>$this->now()];
             if($existing){$this->db->where('id',$existing['id'])->where('organization_id',$this->org)->update('leads',$record);$record['id']=$existing['id'];$dupes++;$this->recordActivity($existing['id'],'DUPLICATE_DETECTED',['rule'=>'provider_source_id']);}
@@ -127,11 +170,13 @@ class Api_lead_discovery extends Api_controller
             $candidateCount+=(new \LeadDiscovery\Deduplicator($this->db))->detect($record,$this->org);
             $record['metadata']=$meta;
             $record['verification_status']=$verificationStatus;
+            $record['email']=$email;
             $results[]=$record;
         }
-        $this->db->insert('search_history',['id'=>$this->id(),'organization_id'=>$this->org,'user_id'=>(int)$this->user['id'],'query'=>$finalQuery,'provider'=>$providerName,'filters'=>json_encode(['mode'=>$mode,'limit'=>$b['limit']??20,'country'=>$country,'city'=>$city,'keywords'=>$keywords,'names'=>$names,'seniorities'=>$seniorities,'titles'=>$titles]),'results_returned'=>count($raw),'new_leads_created'=>$new,'duplicates_detected'=>$dupes+$candidateCount,'errors'=>$error,'duration_ms'=>(int)((microtime(true)-$started)*1000),'created_at'=>$this->now()]);
-        if($error)return $this->jsonError($error,503,['providerStatus'=>$providerStatus]);
-        $this->json(['mode'=>$mode,'provider'=>$providerName,'providerStatus'=>$providerStatus,'results'=>$results,'newLeadsCreated'=>$new,'duplicatesDetected'=>$dupes+$candidateCount,'duplicateCandidatesCreated'=>$candidateCount,'freeEmailCount'=>($mode==='person'?count($results):null),'providerInfo'=>$providerInfo,'notice'=>(is_array($providerInfo)?($providerInfo['notice']??null):null)]);
+        $filters=['mode'=>$mode,'limit'=>$b['limit']??20,'country'=>$country,'city'=>$city,'keywords'=>$keywords,'names'=>$names,'seniorities'=>$seniorities,'titles'=>$titles,'emailPolicy'=>$verifiedOnly?($workEmailOnly?'verified_work_email':'verified_email'):null,'providerRows'=>$providerRows];
+        $this->db->insert('search_history',['id'=>$this->id(),'organization_id'=>$this->org,'user_id'=>(int)$this->user['id'],'query'=>$finalQuery,'provider'=>$providerName,'filters'=>json_encode($filters),'results_returned'=>count($raw),'new_leads_created'=>$new,'duplicates_detected'=>$dupes+$candidateCount,'errors'=>$error,'duration_ms'=>(int)((microtime(true)-$started)*1000),'created_at'=>$this->now()]);
+        if($error)return $this->jsonError($error,503,['providerStatus'=>$providerStatus,'providerInfo'=>$providerInfo]);
+        $this->json(['mode'=>$mode,'provider'=>$providerName,'providerStatus'=>$providerStatus,'results'=>$results,'newLeadsCreated'=>$new,'duplicatesDetected'=>$dupes+$candidateCount,'duplicateCandidatesCreated'=>$candidateCount,'freeEmailCount'=>($mode==='person'?count($results):null),'verifiedEmailCount'=>$verifiedEmailCount,'emailPolicy'=>$verifiedOnly?($workEmailOnly?'verified_work_email':'verified_email'):null,'providerInfo'=>$providerInfo,'notice'=>(is_array($providerInfo)?($providerInfo['notice']??null):null)]);
     }
     public function leads($id=null){if(!$this->guard())return;if($id){$x=$this->lead($id);return $x?$this->json($x):$this->jsonError('lead not found',404);} $this->db->where('organization_id',$this->org);if($s=$this->input->get('status'))$this->db->where('status',$s);$this->json(['leads'=>$this->db->order_by('updated_at','DESC')->limit(250)->get('leads')->result_array()]);}
     public function collections($id=null){
@@ -244,5 +289,5 @@ class Api_lead_discovery extends Api_controller
     public function history(){if(!$this->guard())return;$this->json(['history'=>$this->db->where('organization_id',$this->org)->order_by('created_at','DESC')->limit(100)->get('search_history')->result_array()]);}
     public function summary(){if(!$this->guard())return;$rows=$this->db->select('status, COUNT(*) total')->where('organization_id',$this->org)->group_by('status')->get('leads')->result_array();$this->json(['pipeline'=>$rows]);}
     public function pipeline(){if(!$this->guard())return;$statuses=['new','contacted','qualified','disqualified','converted'];$columns=array_fill_keys($statuses,[]);foreach($this->db->where('organization_id',$this->org)->order_by('updated_at','DESC')->get('leads')->result_array() as $lead)$columns[$lead['status']][]=$lead;$this->json(['statuses'=>$statuses,'columns'=>$columns]);}
-    public function export($mode='json'){if(!$this->guard())return;$b=$this->jsonBody();$this->db->where('l.organization_id',$this->org)->from('leads l');if(!empty($b['collectionId']))$this->db->join('collection_leads cl','cl.lead_id=l.id')->where('cl.collection_id',$b['collectionId']);foreach(['status','owner_id','country','category'] as $f)if(isset($b[$f])&&$b[$f]!=='')$this->db->where('l.'.$f,$b[$f]);if(!empty($b['from']))$this->db->where('l.created_at >=',$b['from']);if(!empty($b['to']))$this->db->where('l.created_at <=',$b['to']);$leads=$this->db->get()->result_array();if($mode==='preview'){foreach($leads as &$row)foreach($row as $k=>$v)$row[$k]=is_string($v)?$this->safeCsv($v):$v;return $this->json(['rows'=>array_slice($leads,0,25),'count'=>count($leads),'csvSafe'=>true]);}$format=$mode==='csv'?'csv':($b['format']??'json');$this->db->insert('export_history',['id'=>$this->id(),'organization_id'=>$this->org,'user_id'=>$this->user['id'],'format'=>$format,'filters'=>json_encode($b),'lead_count'=>count($leads),'created_at'=>$this->now()]);foreach($leads as $x)$this->recordActivity($x['id'],'LEAD_EXPORTED',['format'=>$format]);if($format==='csv'){$keys=['name','category','address','city','country','phone','website','status'];$lines=[implode(',',$keys)];foreach($leads as $l){$lines[]=implode(',',array_map(fn($k)=>'"'.str_replace('"','""',$this->safeCsv((string)($l[$k]??''))).'"',$keys));}$this->output->set_content_type('text/csv')->set_header('Content-Disposition: attachment; filename="leads.csv"')->set_output(implode("\r\n",$lines));return;}$this->json(['leads'=>$leads,'count'=>count($leads)]);}
+    public function export($mode='json'){if(!$this->guard())return;$b=$this->jsonBody();$this->db->where('l.organization_id',$this->org)->from('leads l');if(!empty($b['collectionId']))$this->db->join('collection_leads cl','cl.lead_id=l.id')->where('cl.collection_id',$b['collectionId']);foreach(['status','owner_id','country','category'] as $f)if(isset($b[$f])&&$b[$f]!=='')$this->db->where('l.'.$f,$b[$f]);if(!empty($b['from']))$this->db->where('l.created_at >=',$b['from']);if(!empty($b['to']))$this->db->where('l.created_at <=',$b['to']);$leads=$this->db->get()->result_array();if($mode==='preview'){foreach($leads as &$row)foreach($row as $k=>$v)$row[$k]=is_string($v)?$this->safeCsv($v):$v;return $this->json(['rows'=>array_slice($leads,0,25),'count'=>count($leads),'csvSafe'=>true]);}$format=$mode==='csv'?'csv':($b['format']??'json');$this->db->insert('export_history',['id'=>$this->id(),'organization_id'=>$this->org,'user_id'=>$this->user['id'],'format'=>$format,'filters'=>json_encode($b),'lead_count'=>count($leads),'created_at'=>$this->now()]);foreach($leads as $x)$this->recordActivity($x['id'],'LEAD_EXPORTED',['format'=>$format]);if($format==='csv'){$keys=['name','lead_kind','job_title','company_name','email','email_verification','category','address','city','country','phone','website','linkedin_url','status'];$lines=[implode(',',$keys)];foreach($leads as $l){$meta=json_decode((string)($l['metadata']??'{}'),true)?:[];$values=[];foreach($keys as $k){$value=$k==='email_verification'?($meta['verification_status']??null):($l[$k]??'');$values[]='"'.str_replace('"','""',$this->safeCsv((string)$value)).'"';}$lines[]=implode(',',$values);}$this->output->set_content_type('text/csv')->set_header('Content-Disposition: attachment; filename=\"leads.csv\"')->set_output(implode(\"\r\n\",$lines));return;}$this->json(['leads'=>$leads,'count'=>count($leads)]);}
 }

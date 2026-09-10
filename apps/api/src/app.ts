@@ -11,6 +11,7 @@ import { LeadPipelineService } from "./leadPipeline/leadPipeline.service.js";
 import { LeadCoverageService } from "./quality/leadCoverage.service.js";
 import { SearchHistoryService } from "./searchHistory/searchHistory.service.js";
 import { GooglePlacesProvider } from "./providers/googlePlaces.js";
+import { ApolloProvider } from "./providers/apollo.js";
 import { leadRoutes } from "./routes/leads.js";
 import { discoveryRoutes } from "./routes/discovery.js";
 import { pipelineRoutes } from "./routes/pipeline.js";
@@ -32,7 +33,7 @@ export async function buildApp(options: {
   await app.register(cors, { origin: (origin, callback) => callback(null, !origin || origins.includes(origin.replace(/\/$/, ""))), credentials: true, methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] });
   const operational = new LeadOperationalStore(options.redis);
   const providerRegistry = new LeadDiscoveryProviderRegistry();
-  for (const provider of options.providers ?? [new GooglePlacesProvider()]) providerRegistry.register(provider);
+  for (const provider of options.providers ?? [new GooglePlacesProvider(), new ApolloProvider()]) providerRegistry.register(provider);
   app.decorate("db", options.db);
   app.decorate("operational", operational);
   app.decorate("providers", providerRegistry);

@@ -9,7 +9,7 @@ contract package at `packages/shared/src/leadDiscovery.ts`.
 ## Vertical slice
 
 ```text
-Google Places → validate/normalize → PostgreSQL leads
+Google Places / Apollo People Search → validate/normalize → PostgreSQL leads
        → source-key deduplication → secondary duplicate review
        → collections → pipeline/status/owner/notes/activity
        → coverage/history → formula-safe JSON/CSV export
@@ -29,7 +29,8 @@ Google Places → validate/normalize → PostgreSQL leads
 npm install
 cp .env.example .env
 # Set DATABASE_URL, REDIS_URL, LEAD_JWT_SECRET and CORS_ORIGINS.
-# Set GOOGLE_PLACES_API_KEY for live discovery, then export the values:
+# Set GOOGLE_PLACES_API_KEY for business listings and/or APOLLO_IO_API_KEY
+# for buyer/contact searches, then export the values:
 set -a; source .env; set +a
 docker compose -f docker-compose.lead-discovery.yml up -d
 cd apps/api && npm run migrate
@@ -62,10 +63,13 @@ production set `LEAD_API_INTERNAL_URL` to the private API URL and configure
 - `searchBusinesses(input)` returning normalized businesses with stable
   `sourceId` values
 
-`GooglePlacesProvider` is the first implementation. Provider-specific payloads
-are normalized before persistence; missing values remain `null`, never
-invented. Search results are cached and identical in-flight searches are
-coalesced with a Redis lock.
+`GooglePlacesProvider` supplies business listings and `ApolloProvider` supplies
+B2B people/contact records when `APOLLO_IO_API_KEY` is configured. Provider-
+specific payloads are normalized before persistence; missing values remain
+`null`, never invented. Apollo contact reveal is opt-in via
+`APOLLO_IO_REVEAL_CONTACTS=1`, capped by `APOLLO_IO_REVEAL_LIMIT`, and buyer
+mode persists only explicit `email_status=verified` work emails. Search results
+are cached and identical in-flight searches are coalesced with a Redis lock.
 
 ## API
 
@@ -115,7 +119,7 @@ duplicate decision is recorded in `lead_activities` or `export_history`.
 
 ## Discovery Modes (PHP/cPanel build)
 
-The `/leads` view (`application/views/leads/index.php`) ships with two modes:
+The `/leads` view (`application/views/leads/index.php`) ships with three modes:
 
 1. **Business Mode** — keyword + country + city targeting. Example inputs:
    - Keywords: `Banking, Commercial Real Estate, Architecture`
@@ -130,13 +134,24 @@ The `/leads` view (`application/views/leads/index.php`) ships with two modes:
    only Windels A returns people with personal emails. Name matching is a
    startswith prefix on the normalized contact name.
 
+3. **Verified Buyer Email Mode** — a strict B2B contact search for crude-oil
+   buyers and procurement decision-makers, with Australia as the default
+   country. It requires Windels A and contact reveal. A row is persisted only
+   when the provider returns a syntactically valid email **and** an explicit
+   `email_status=verified` signal; buyer mode defaults to work/company domains.
+   The platform never derives an address from a name, guesses a domain, or
+   stores Apollo's masked/locked placeholders. If contact reveal is disabled,
+   the search returns no buyer email rows and explains what the administrator
+   must enable.
+
 New API endpoints:
 - `GET /modes` — returns the list of supported modes with descriptions.
-- `POST /search` accepts `mode` (`business`|`person`), `keywords[]`, `country`,
-  `city`, `names[]`, `seniorities[]`, `provider`. Persisted leads carry
-  `lead_kind` (`business`|`person`), per-lead `email`, `job_title`,
-  `company_name`, `linkedin_url`, and a truthful `verification_status` in
-  metadata:
+- `POST /search` accepts `mode` (`business`|`person`|`buyer`), `keywords[]`,
+  `country`, `city`, `names[]`, `titles[]`, `seniorities[]`, `provider`, and
+  the strict-email options `verifiedEmailOnly`, `workEmailOnly` and
+  `emailPolicy`. Persisted leads carry `lead_kind` (`business`|`person`),
+  per-lead `email`, `job_title`, `company_name`, `linkedin_url`, and a
+  truthful `verification_status` in metadata:
   - `verified` — Windels.ai-reported verified email/direct phone.
   - `partial_verified` — phone present but email not fully verified.
   - `provider_enriched` — data present but no provider-level verification signal.

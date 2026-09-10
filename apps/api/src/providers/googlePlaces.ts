@@ -19,7 +19,7 @@ export class GooglePlacesProvider implements LeadDiscoveryProvider {
 
   /** Backwards-compatible shorthand for existing consumers. */
   async search(query: string, limit: number): Promise<DiscoveredBusiness[]> {
-    return this.searchBusinesses({ query, provider: this.name, limit });
+    return this.searchBusinesses({ query, mode: "business", provider: this.name, limit, verifiedEmailOnly: false, workEmailOnly: false });
   }
 
   async searchBusinesses(input: ParsedBusinessSearchInput): Promise<DiscoveredBusiness[]> {

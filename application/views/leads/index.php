@@ -3,12 +3,15 @@ defined('BASEPATH') or exit('No direct script access allowed');
 /**
  * Lead Discovery workspace (Scout).
  *
- * Supports two discovery modes:
+ * Supports three discovery modes:
  *  - Business Mode: keywords (banking, commercial real estate, architecture...)
  *    combined with country + city targeting.
  *  - Person Mode: first-name list (Mark, David, John, Emma...) combined with
  *    country + city. Results are filtered to free webmail domains (gmail,
  *    yahoo, outlook, icloud, hotmail, aol, proton, live, me, mail, gmx, yandex).
+ *  - Verified Buyer Email Mode: a ready-to-run Australian crude-oil buyer
+ *    search. It returns only provider-verified work emails from Windels A;
+ *    names/domains are never used to guess an address.
  * Every lead carries an honest verification_status (verified / partial_verified
  * / provider_enriched / business_listing) — we never claim 100% verification.
  *
@@ -164,6 +167,7 @@ $pageTitle = $isPipeline ? 'Lead Pipeline' : 'Lead Discovery';
       <div class="mode-tabs">
         <button type="button" class="mode-btn active" data-mode="business" id="modeBusiness">🏢 Business Mode</button>
         <button type="button" class="mode-btn" data-mode="person" id="modePerson">👤 Person Mode</button>
+        <button type="button" class="mode-btn" data-mode="buyer" id="modeBuyer">🛢️ Verified buyer emails</button>
       </div>
 
       <div class="search" id="businessFields" style="margin-top:10px">
@@ -204,6 +208,14 @@ $pageTitle = $isPipeline ? 'Lead Pipeline' : 'Lead Discovery';
           </div>
         </div>
         <button type="button" id="searchPersonBtn" style="margin-top:6px">Search people</button>
+      </div>
+      <div class="search hidden" id="buyerFields" style="margin-top:10px">
+        <input id="buyerKeywords" value="crude oil buyer, crude oil importer, petroleum procurement, crude trading" aria-label="Buyer keywords" style="min-width:320px;flex:2">
+        <input id="buyerCountry" value="Australia" aria-label="Buyer country">
+        <input id="buyerCity" placeholder="City (optional: Perth, Melbourne, Sydney…)" aria-label="Buyer city">
+        <textarea id="buyerTitles" placeholder="Decision-maker titles (optional): Crude Oil Buyer, Procurement Manager, Head of Crude Trading, Oil Trader" aria-label="Buyer titles" style="min-width:300px;flex-basis:100%"></textarea>
+        <button type="button" id="searchBuyerBtn" style="margin-top:6px">Find verified buyer emails</button>
+        <p class="muted" style="flex-basis:100%;margin:0">Strict mode: Windels A must return a usable email with an explicit provider-verified status. No guessed, generated, masked, or placeholder emails are accepted. Contact reveal is administrator-controlled and may spend provider credits.</p>
       </div>
       <p id="message" class="muted" style="margin:10px 2px 0">Enter keywords or names and a location to start. Windels.ai is required for Person Mode (it provides emails/phones).</p>
     </div>
@@ -351,7 +363,8 @@ $pageTitle = $isPipeline ? 'Lead Pipeline' : 'Lead Discovery';
     document.querySelectorAll('.mode-btn').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
     $('businessFields').classList.toggle('hidden', mode !== 'business');
     $('personFields').classList.toggle('hidden', mode !== 'person');
-    if (mode === 'person') {
+    $('buyerFields').classList.toggle('hidden', mode !== 'buyer');
+    if (mode === 'person' || mode === 'buyer') {
       // Auto-select Apollo in business selector too (stays in sync).
       $('provider').value = 'apollo_io';
     }
@@ -403,6 +416,26 @@ $pageTitle = $isPipeline ? 'Lead Pipeline' : 'Lead Discovery';
   }
   if ($('searchBtn')) $('searchBtn').addEventListener('click', () => runSearch(false));
   if ($('searchPersonBtn')) $('searchPersonBtn').addEventListener('click', () => runSearch(true));
+  function runBuyerSearch() {
+    setMode('buyer');
+    const keywords = splitList($('buyerKeywords').value);
+    const country = $('buyerCountry').value.trim() || 'Australia';
+    const city = $('buyerCity').value.trim();
+    const titles = splitList($('buyerTitles').value);
+    if (!keywords.length) { messageEl.textContent = 'Enter at least one buyer keyword.'; return; }
+    if (!country) { messageEl.textContent = 'Add a country for the buyer search.'; return; }
+    messageEl.textContent = 'Searching Windels A for provider-verified Australian buyer emails…';
+    $('searchBuyerBtn').disabled = true;
+    request('/search', { method: 'POST', body: JSON.stringify({ mode: 'buyer', provider: 'apollo_io', keywords, country, city, titles, emailPolicy: 'verified_work_email', verifiedEmailOnly: true, workEmailOnly: true }) })
+      .then((d) => {
+        const count = Number(d.verifiedEmailCount ?? d.results.length);
+        const note = d.notice || (d.providerInfo && d.providerInfo.notice) || '';
+        messageEl.textContent = `${count} provider-verified work-email buyer leads · ${d.newLeadsCreated} new · ${d.duplicatesDetected} existing refreshed` + (note ? ` — ${note}` : '');
+        return load();
+      }).catch((e) => { messageEl.textContent = e.message; })
+      .finally(() => { $('searchBuyerBtn').disabled = false; });
+  }
+  if ($('searchBuyerBtn')) $('searchBuyerBtn').addEventListener('click', runBuyerSearch);
 
   async function load() {
     try {
@@ -437,7 +470,7 @@ $pageTitle = $isPipeline ? 'Lead Pipeline' : 'Lead Discovery';
 
   function verificationPill(meta) {
     const s = meta.verification_status || 'enriched';
-    if (s === 'verified') return '<span class="pill verified">✓ Verified</span>';
+    if (s === 'verified') return '<span class="pill verified">✓ Provider verified</span>';
     if (s === 'partial_verified') return '<span class="pill partial">Partial</span>';
     if (s === 'business_listing') return '<span class="pill listing">Listing</span>';
     return '<span class="pill enriched">Enriched</span>';

@@ -715,6 +715,28 @@ class ApolloProvider implements LeadDiscoveryProvider
         return filter_var($e, FILTER_VALIDATE_EMAIL) !== false;
     }
 
+    /**
+     * Return true only for an explicit provider verification signal. Syntax and
+     * a domain are not proof that a mailbox exists, so buyer-email searches must
+     * not treat values such as "valid", "deliverable" or a guessed address as
+     * verified. Apollo has returned both a scalar status and nested status
+     * objects over time; support those documented shapes conservatively.
+     */
+    public static function isVerifiedEmailStatus(mixed $status): bool
+    {
+        if (is_string($status)) return strtolower(trim($status)) === 'verified';
+        if (!is_array($status)) return false;
+        if (array_key_exists('verified', $status) && $status['verified'] === true) return true;
+        foreach (['status', 'email_status', 'value'] as $key) {
+            if (isset($status[$key]) && is_string($status[$key]) && strtolower(trim($status[$key])) === 'verified') return true;
+        }
+        foreach ($status as $child) {
+            if (is_array($child) && self::isVerifiedEmailStatus($child)) return true;
+            if (is_string($child) && strtolower(trim($child)) === 'verified') return true;
+        }
+        return false;
+    }
+
     /** First real phone number in an Apollo person/contact payload. */
     private static function firstPhone(array $p): ?string
     {

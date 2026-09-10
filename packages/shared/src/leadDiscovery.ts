@@ -42,12 +42,23 @@ export const LeadSchema = z.object({
 });
 export type Lead = z.infer<typeof LeadSchema>;
 
+export const LeadDiscoveryModeSchema = z.enum(["business", "person", "buyer"]);
+export type LeadDiscoveryMode = z.infer<typeof LeadDiscoveryModeSchema>;
 export const BusinessSearchInputSchema = z.object({
   query: z.string().trim().min(3).max(300),
+  mode: LeadDiscoveryModeSchema.default("business"),
   provider: z.string().trim().min(1).max(50).default("google_places"),
   limit: z.coerce.number().int().min(1).max(20).default(20),
   country: z.string().trim().max(120).optional(),
+  city: z.string().trim().max(120).optional(),
   category: z.string().trim().max(120).optional(),
+  keywords: z.array(z.string().trim().min(1).max(120)).max(20).optional(),
+  names: z.array(z.string().trim().min(1).max(80)).max(50).optional(),
+  titles: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
+  seniorities: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
+  verifiedEmailOnly: z.boolean().default(false),
+  workEmailOnly: z.boolean().optional(),
+  emailPolicy: z.enum(["verified", "verified_email", "verified_work_email"]).optional(),
 });
 export type BusinessSearchInput = z.input<typeof BusinessSearchInputSchema>;
 export type ParsedBusinessSearchInput = z.output<typeof BusinessSearchInputSchema>;
@@ -58,6 +69,9 @@ export const BusinessSearchResultSchema = z.object({
   newLeadsCreated: z.number().int().nonnegative(),
   duplicatesDetected: z.number().int().nonnegative(),
   duplicateCandidatesCreated: z.number().int().nonnegative(),
+  verifiedEmailCount: z.number().int().nonnegative().optional(),
+  emailPolicy: z.string().optional(),
+  notice: z.string().nullable().optional(),
 });
 export type BusinessSearchResult = z.infer<typeof BusinessSearchResultSchema>;
 
