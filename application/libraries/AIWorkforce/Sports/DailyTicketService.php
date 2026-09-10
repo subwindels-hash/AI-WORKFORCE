@@ -1093,7 +1093,9 @@ class DailyTicketService
             $decimal = $row['decimalOdds'] ?? $row['decimal_odds'] ?? null;
             $observed = $row['observedAt'] ?? $row['observed_at'] ?? null;
             if ($market === '' || $selection === '') continue;
-            if (!is_numeric($decimal) || (float) $decimal <= 1.0 || !is_finite((float) $decimal)) continue;
+            $decFloat = (float) $decimal;
+            // Validate odds: >1.0, ≤100, finite — reject unrealistic high odds
+            if (!is_numeric($decimal) || $decFloat <= 1.0 || $decFloat > 100.0 || !is_finite($decFloat)) continue;
             if (!$observed) continue;
             $key = $market . ':' . $selection;
             if (!isset($latest[$key]) || strcmp((string) $observed, (string) $latest[$key]['observedAt']) > 0) {

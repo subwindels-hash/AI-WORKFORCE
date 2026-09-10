@@ -128,6 +128,9 @@ final class PredictionBoard
         // read for the grids, one for the quoted prices, and each card is
         // annotated. Choosing another market cannot regenerate a match.
         $markets = $this->feed->attachMarkets($entries, $market['market'], $line);
+        // Multiple market candidates per fixture where verified provider odds exist
+        // (1X2, Over 1.5, BTTS, Double Chance) — each candidate must have real provider odds.
+        $multiMarkets = $this->feed->attachMultipleMarkets($entries, \AIWorkforce\Football\MatchFeed::MULTI_MARKET_CANDIDATES);
         $marketsByPrediction = [];
         $rows = [];
         foreach ($markets as $index => $block) {
@@ -137,7 +140,10 @@ final class PredictionBoard
             // One table row per match on the page, analyzed or not: a match
             // without a prediction is a row that says so, not a row that is
             // missing.
-            $rows[] = $this->row($fixtures[$index] ?? [], $prediction, $block);
+            $row = $this->row($fixtures[$index] ?? [], $prediction, $block);
+            // Attach multiple verified market candidates (only those with real provider odds)
+            $row['marketCandidates'] = $multiMarkets[$index] ?? [];
+            $rows[] = $row;
         }
         foreach ($cards as &$card) {
             $card['market'] = $marketsByPrediction[(string) ($card['predictionId'] ?? '')] ?? null;
@@ -358,27 +364,45 @@ final class PredictionBoard
         $confidence = $prediction !== null && is_numeric($prediction['confidence'] ?? null)
             ? round((float) $prediction['confidence'], 1) : null;
         $band = (string) ($prediction['data_quality_band'] ?? QualityBand::REJECTED);
+        $fixtureId = (int) ($fixture['id'] ?? 0);
+        // Contract: every stored fixture must have internal DB fixture ID >0 before appears in prediction table
+        if ($fixtureId <= 0) {
+            // Do not produce /football/match/0 — treat as unavailable, caller will filter or show DATA_UNAVAILABLE
+            $fixtureId = 0;
+        }
         return [
             'matchId' => MatchFeed::matchId($fixture),
-            'fixtureId' => (int) ($fixture['id'] ?? 0),
+            'fixtureId' => $fixtureId,
+            'fixtureDatabaseId' => $fixtureId,
+            'externalId' => (string) ($fixture['external_id'] ?? ''),
+            'providerId' => isset($fixture['provider_id']) ? (int) $fixture['provider_id'] : null,
+            'providerCode' => (string) ($fixture['provider_code'] ?? DataState::UNAVAILABLE),
+            'providerMatchId' => ((string) ($fixture['external_id'] ?? '')) ?: null,
             'homeTeam' => (string) ($fixture['home_team'] ?? DataState::UNAVAILABLE),
             'awayTeam' => (string) ($fixture['away_team'] ?? DataState::UNAVAILABLE),
             'competition' => (string) ($fixture['competition'] ?? DataState::UNAVAILABLE),
+            'league' => (string) ($fixture['competition'] ?? DataState::UNAVAILABLE),
             'country' => $fixture['country'] ?? null,
             'kickoff' => $kickoff !== '' ? $kickoff : null,
+            'kickoffAt' => $kickoff !== '' ? $kickoff : null,
             'kickoffLabel' => $kickoff !== '' ? gmdate('H:i', (int) strtotime($kickoff)) . ' UTC' : DataState::UNAVAILABLE,
             'status' => (string) ($fixture['status'] ?? 'UNKNOWN'),
+            'matchState' => (string) ($fixture['match_state'] ?? 'PRE_MATCH'),
             'analysisState' => $prediction === null ? 'NOT_ANALYZED' : 'ANALYZED',
+            'predictionStatus' => $prediction === null ? 'NOT_ANALYZED' : 'ANALYZED',
             'prediction' => $prediction === null ? null : MatchFeed::predictionSummary($prediction),
             'resultLabel' => $prediction === null ? null : self::resultLabel($prediction, $fixture),
             'confidence' => $confidence,
             'band' => $band,
             'dataQuality' => (int) ($prediction['data_quality_score'] ?? 0),
+            'dataQualityScore' => (int) ($prediction['data_quality_score'] ?? 0),
             // Risk is derived, not invented: it names the two stored facts it
             // was derived from so the label can never be read as a judgment the
             // data does not support.
             'risk' => $this->risk($band, $confidence),
+            'riskStatus' => $this->risk($band, $confidence)['level'] ?? 'UNKNOWN',
             'market' => $market,
+            'marketCandidates' => [],
         ];
     }
 

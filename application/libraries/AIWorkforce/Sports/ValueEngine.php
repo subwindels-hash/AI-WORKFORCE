@@ -21,7 +21,8 @@ class ValueEngine
     {
         if (($prediction['decision'] ?? '') !== 'PREDICTION_READY') return ['qualified' => false, 'reason' => $prediction['reason'] ?? 'NO_PREDICTION', 'missingFields' => $prediction['missingFields'] ?? []];
         $decimal = (float) ($odds['decimalOdds'] ?? $odds['decimal_odds'] ?? 0);
-        if ($decimal <= 1) return ['qualified' => false, 'reason' => 'ODDS_UNAVAILABLE'];
+        // Validate odds: must be >1.0, ≤100, finite — reject unrealistic high odds
+        if ($decimal <= 1.0 || $decimal > 100.0 || !is_finite($decimal)) return ['qualified' => false, 'reason' => 'ODDS_UNAVAILABLE'];
         $implied = 1 / $decimal;
         $calibrated = (float) $prediction['calibratedProbability'];
         $fair = $calibrated > 0 ? 1 / $calibrated : null;

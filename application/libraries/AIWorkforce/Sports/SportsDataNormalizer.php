@@ -167,11 +167,17 @@ class SportsDataNormalizer
         }
         return $out === null ? null : (count($out) ? $out : null);
     }
+    /** Maximum realistic decimal odds — anything above is a data error, never a real price. */
+    public const MAX_DECIMAL_ODDS = 100.0;
+
     public static function odds(array $raw, string $provider): array
     {
         foreach (['market', 'selection', 'decimalOdds', 'observedAt'] as $field) if (!isset($raw[$field]) || $raw[$field] === '') throw new \InvalidArgumentException("odds missing {$field}");
-        if (!is_numeric($raw['decimalOdds']) || (float) $raw['decimalOdds'] <= 1.0 || !is_finite((float) $raw['decimalOdds'])) throw new \InvalidArgumentException('decimal odds are invalid');
-        return ['provider' => $provider, 'market' => trim((string) $raw['market']), 'selection' => trim((string) $raw['selection']), 'decimalOdds' => (float) $raw['decimalOdds'], 'observedAt' => self::timestamp($raw['observedAt'])];
+        $odds = (float) $raw['decimalOdds'];
+        if (!is_numeric($raw['decimalOdds']) || $odds <= 1.0 || $odds > self::MAX_DECIMAL_ODDS || !is_finite($odds)) {
+            throw new \InvalidArgumentException('decimal odds are invalid (must be >1.0 and ≤' . self::MAX_DECIMAL_ODDS . ', got ' . $raw['decimalOdds'] . ')');
+        }
+        return ['provider' => $provider, 'market' => trim((string) $raw['market']), 'selection' => trim((string) $raw['selection']), 'decimalOdds' => $odds, 'observedAt' => self::timestamp($raw['observedAt'])];
     }
 
     private static function timestamp($value): string

@@ -28,12 +28,31 @@ class FootballRepositoryDatabase implements FootballRepository
 
     public function __construct(private object $db) {}
 
+    /**
+     * Convert any timestamp (RFC3339 with T+offset, or DATETIME) to MySQL DATETIME literal
+     * 'Y-m-d H:i:s' UTC — the only literal that survives strict mode on all drivers.
+     */
+    private static function toSqlDateTime(?string $value): ?string
+    {
+        if ($value === null || trim($value) === '') return null;
+        try {
+            return (new \DateTimeImmutable($value))->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private static function nowSql(): string
+    {
+        return gmdate('Y-m-d H:i:s');
+    }
+
     // ── providers ───────────────────────────────────────────────────────────
 
     public function ensureProvider(string $code, array $attributes = []): array
     {
         $row = $this->db->get_where('football_providers', ['provider_code' => $code], 1)->row_array();
-        $now = gmdate('c');
+        $now = self::nowSql();
         if (!$row) {
             $insert = [
                 'provider_code' => $code,
@@ -79,7 +98,7 @@ class FootballRepositoryDatabase implements FootballRepository
             };
         }
         if ($data) {
-            $data['updated_at'] = gmdate('c');
+            $data['updated_at'] = self::nowSql();
             $this->db->where('id', $id)->update('football_providers', $data);
         }
     }
@@ -116,8 +135,8 @@ class FootballRepositoryDatabase implements FootballRepository
             'reliability' => self::nullableFloat($row['reliability'] ?? null),
             'data_state' => (string) ($row['dataState'] ?? 'DATA_UNAVAILABLE'),
             'payload' => json_encode($row['payload'] ?? []),
-            'fetched_at' => (string) ($row['fetchedAt'] ?? gmdate('c')),
-            'updated_at' => gmdate('c'),
+            'fetched_at' => (string) ($row['fetchedAt'] ?? self::nowSql()),
+            'updated_at' => self::nowSql(),
         ];
         $existing = $this->db->where(['provider_id' => $providerId, 'external_id' => $externalId, 'season' => $season])
             ->get('football_competitions', 1)->row_array();
@@ -125,7 +144,7 @@ class FootballRepositoryDatabase implements FootballRepository
             $this->db->where('id', (int) $existing['id'])->update('football_competitions', $data);
             return $this->decode(array_merge($existing, $data));
         }
-        $this->db->insert('football_competitions', array_merge(['provider_id' => $providerId, 'external_id' => $externalId, 'created_at' => gmdate('c')], $data));
+        $this->db->insert('football_competitions', array_merge(['provider_id' => $providerId, 'external_id' => $externalId, 'created_at' => self::nowSql()], $data));
         return $this->decode(array_merge($data, ['id' => (int) $this->db->insert_id(), 'provider_id' => $providerId, 'external_id' => $externalId]));
     }
 
@@ -149,15 +168,15 @@ class FootballRepositoryDatabase implements FootballRepository
             'country' => self::nullableString($row['country'] ?? null),
             'data_state' => (string) ($row['dataState'] ?? 'DATA_UNAVAILABLE'),
             'payload' => json_encode($row['payload'] ?? []),
-            'fetched_at' => (string) ($row['fetchedAt'] ?? gmdate('c')),
-            'updated_at' => gmdate('c'),
+            'fetched_at' => (string) ($row['fetchedAt'] ?? self::nowSql()),
+            'updated_at' => self::nowSql(),
         ];
         $existing = $this->db->get_where('football_teams', ['provider_id' => $providerId, 'external_id' => $externalId], 1)->row_array();
         if ($existing) {
             $this->db->where('id', (int) $existing['id'])->update('football_teams', $data);
             return $this->decode(array_merge($existing, $data));
         }
-        $this->db->insert('football_teams', array_merge(['provider_id' => $providerId, 'external_id' => $externalId, 'created_at' => gmdate('c')], $data));
+        $this->db->insert('football_teams', array_merge(['provider_id' => $providerId, 'external_id' => $externalId, 'created_at' => self::nowSql()], $data));
         return $this->decode(array_merge($data, ['id' => (int) $this->db->insert_id(), 'provider_id' => $providerId, 'external_id' => $externalId]));
     }
 
@@ -176,7 +195,7 @@ class FootballRepositoryDatabase implements FootballRepository
         foreach (['homeTeam', 'awayTeam'] as $required) {
             if (trim((string) ($fixture[$required] ?? '')) === '') throw new \InvalidArgumentException("fixture requires {$required}");
         }
-        $now = gmdate('c');
+        $now = self::nowSql();
         $data = [
             'competition_id' => self::nullableInt($fixture['competitionId'] ?? null),
             'competition' => (string) (($fixture['competition'] ?? '') !== '' ? $fixture['competition'] : 'DATA_UNAVAILABLE'),
@@ -299,8 +318,15 @@ class FootballRepositoryDatabase implements FootballRepository
         if (!empty($filter['matchState'])) $this->db->where('match_state', strtoupper((string) $filter['matchState']));
         if (!empty($filter['date'])) {
             $date = (string) $filter['date'];
+            // Accept both ISO8601 and DATETIME stored values
+            $this->db->group_start();
+            $this->db->where('kickoff_at >=', self::isoForFilter($date, true));
+            $this->db->where('kickoff_at <=', self::isoForFilter($date, false));
+            $this->db->or_group_start();
             $this->db->where('kickoff_at >=', $date . 'T00:00:00+00:00');
             $this->db->where('kickoff_at <=', $date . 'T23:59:59+00:00');
+            $this->db->group_end();
+            $this->db->group_end();
         }
         if (!empty($filter['from'])) $this->db->where('kickoff_at >=', (string) $filter['from']);
         if (!empty($filter['to'])) $this->db->where('kickoff_at <=', (string) $filter['to']);
@@ -319,7 +345,7 @@ class FootballRepositoryDatabase implements FootballRepository
 
     public function markFixtureSettled(int $id, string $at): void
     {
-        $this->db->where('id', $id)->update('football_fixtures', ['settled_at' => $at, 'updated_at' => gmdate('c')]);
+        $this->db->where('id', $id)->update('football_fixtures', ['settled_at' => $at, 'updated_at' => self::nowSql()]);
     }
 
     /**
@@ -343,7 +369,7 @@ class FootballRepositoryDatabase implements FootballRepository
         $providerCode = trim((string) ($row['providerCode'] ?? ''));
         $external = trim((string) ($row['providerCompetitionId'] ?? ''));
         if ($providerCode === '' || $external === '') throw new \InvalidArgumentException('competition mapping requires providerCode and providerCompetitionId');
-        $now = gmdate('c');
+        $now = self::nowSql();
         $data = [
             'internal_id' => trim((string) ($row['internalId'] ?? '')),
             'provider_id' => self::nullableInt($row['providerId'] ?? null),
@@ -396,7 +422,7 @@ class FootballRepositoryDatabase implements FootballRepository
         if ($providerCode === '' || $external === '' || $internal === '') {
             throw new \InvalidArgumentException('provider match requires providerCode, providerMatchId and internalMatchId');
         }
-        $now = gmdate('c');
+        $now = self::nowSql();
         $data = [
             'internal_match_id' => $internal,
             'provider_id' => self::nullableInt($row['providerId'] ?? null),
@@ -498,8 +524,15 @@ class FootballRepositoryDatabase implements FootballRepository
         $this->db->select('competition_id, COUNT(*) AS matches')->where('competition_id IS NOT NULL');
         if (!empty($filter['date'])) {
             $date = (string) $filter['date'];
+            // Accept both ISO8601 and DATETIME stored values
+            $this->db->group_start();
+            $this->db->where('kickoff_at >=', self::isoForFilter($date, true));
+            $this->db->where('kickoff_at <=', self::isoForFilter($date, false));
+            $this->db->or_group_start();
             $this->db->where('kickoff_at >=', $date . 'T00:00:00+00:00');
             $this->db->where('kickoff_at <=', $date . 'T23:59:59+00:00');
+            $this->db->group_end();
+            $this->db->group_end();
         }
         $counts = [];
         foreach ($this->db->group_by('competition_id')->get('football_fixtures')->result_array() as $row) {
@@ -524,14 +557,14 @@ class FootballRepositoryDatabase implements FootballRepository
 
     public function linkFixtureCompetition(int $fixtureId, int $competitionId): void
     {
-        $this->db->where('id', $fixtureId)->update('football_fixtures', ['competition_id' => $competitionId, 'updated_at' => gmdate('c')]);
+        $this->db->where('id', $fixtureId)->update('football_fixtures', ['competition_id' => $competitionId, 'updated_at' => self::nowSql()]);
     }
 
     public function listFixturesAwaitingResult(int $limit = 200, ?int $providerId = null): array
     {
         $this->db->group_start();
         $this->db->where('status', 'LIVE')
-            ->or_group_start()->where('status', 'SCHEDULED')->where('kickoff_at <=', gmdate('c'))->group_end()
+            ->or_group_start()->where('status', 'SCHEDULED')->where('kickoff_at <=', self::nowSql())->group_end()
             ->or_group_start()->where('status', 'FINISHED')->where('home_score', null)->group_end()
             ->or_group_start()->where('status', 'FINISHED')->where('settled_at', null)->group_end();
         $this->db->group_end();
@@ -565,8 +598,8 @@ class FootballRepositoryDatabase implements FootballRepository
         $data['data_state'] = (string) ($row['dataState'] ?? 'DATA_UNAVAILABLE');
         $data['coverage'] = json_encode($row['coverage'] ?? []);
         $data['payload'] = json_encode($row['payload'] ?? $row);
-        $data['fetched_at'] = (string) ($row['fetchedAt'] ?? gmdate('c'));
-        $data['updated_at'] = gmdate('c');
+        $data['fetched_at'] = (string) ($row['fetchedAt'] ?? self::nowSql());
+        $data['updated_at'] = self::nowSql();
         $existing = $this->db->where(['provider_id' => $providerId, 'team_external_id' => $teamId])
             ->where('competition_external_id', $competitionId)->where('season', $season)
             ->get('football_team_statistics', 1)->row_array();
@@ -576,7 +609,7 @@ class FootballRepositoryDatabase implements FootballRepository
         }
         $this->db->insert('football_team_statistics', array_merge([
             'provider_id' => $providerId, 'team_external_id' => $teamId,
-            'competition_external_id' => $competitionId, 'season' => $season, 'created_at' => gmdate('c'),
+            'competition_external_id' => $competitionId, 'season' => $season, 'created_at' => self::nowSql(),
         ], $data));
         return $this->decode(array_merge($data, [
             'id' => (int) $this->db->insert_id(), 'provider_id' => $providerId,
@@ -614,7 +647,7 @@ class FootballRepositoryDatabase implements FootballRepository
             'payload' => json_encode($payload),
             'data_state' => $coverage === [] ? 'DATA_UNAVAILABLE' : (isset($coverage['state']) ? (string) $coverage['state'] : 'LIMITED_DATA'),
             'coverage' => json_encode($coverage),
-            'fetched_at' => gmdate('c'),
+            'fetched_at' => self::nowSql(),
         ];
         $existing = $this->db->get_where('football_fixture_statistics', ['fixture_id' => $fixtureId, 'provider_id' => $providerId, 'kind' => $kind], 1)->row_array();
         if ($existing) {
@@ -622,7 +655,7 @@ class FootballRepositoryDatabase implements FootballRepository
             return $this->decode(array_merge($existing, $data));
         }
         $this->db->insert('football_fixture_statistics', array_merge([
-            'fixture_id' => $fixtureId, 'provider_id' => $providerId, 'kind' => $kind, 'created_at' => gmdate('c'),
+            'fixture_id' => $fixtureId, 'provider_id' => $providerId, 'kind' => $kind, 'created_at' => self::nowSql(),
         ], $data));
         return $this->decode(array_merge($data, ['id' => (int) $this->db->insert_id(), 'fixture_id' => $fixtureId, 'kind' => $kind]));
     }
@@ -657,8 +690,8 @@ class FootballRepositoryDatabase implements FootballRepository
             'weight' => round((float) ($row['weight'] ?? 0), 4),
             'data_state' => (string) ($row['dataState'] ?? 'DATA_UNAVAILABLE'),
             'matches' => json_encode($row['matches'] ?? []),
-            'fetched_at' => (string) ($row['fetchedAt'] ?? gmdate('c')),
-            'updated_at' => gmdate('c'),
+            'fetched_at' => (string) ($row['fetchedAt'] ?? self::nowSql()),
+            'updated_at' => self::nowSql(),
         ];
         $existing = $this->db->where(['provider_id' => $providerId, 'home_team_external_id' => $homeId, 'away_team_external_id' => $awayId])
             ->where('competition_external_id', $competitionId)->get('football_head_to_head', 1)->row_array();
@@ -668,7 +701,7 @@ class FootballRepositoryDatabase implements FootballRepository
         }
         $this->db->insert('football_head_to_head', array_merge([
             'provider_id' => $providerId, 'home_team_external_id' => $homeId, 'away_team_external_id' => $awayId,
-            'competition_external_id' => $competitionId, 'created_at' => gmdate('c'),
+            'competition_external_id' => $competitionId, 'created_at' => self::nowSql(),
         ], $data));
         return $this->decode(array_merge($data, ['id' => (int) $this->db->insert_id()]));
     }
@@ -699,13 +732,13 @@ class FootballRepositoryDatabase implements FootballRepository
         $data['model_id'] = (string) ($data['model_id'] ?? ('football-' . substr(hash('sha256', $name . '@' . $version), 0, 10)));
         // Fail closed: a model version never enters the registry already approved.
         $data['status'] = (string) ($data['status'] ?? 'DRAFT');
-        $data['updated_at'] = gmdate('c');
+        $data['updated_at'] = self::nowSql();
         $existing = $this->findModelVersionByName($name, $version);
         if ($existing !== null) {
             $this->db->where('id', (int) $existing['id'])->update('football_model_versions', $data);
             return $this->decode(array_merge($existing, $data));
         }
-        $this->db->insert('football_model_versions', array_merge($data, ['created_at' => gmdate('c')]));
+        $this->db->insert('football_model_versions', array_merge($data, ['created_at' => self::nowSql()]));
         $id = (int) $this->db->insert_id();
         if ($id === 0) $existing = $this->findModelVersionByName($name, $version);
         return $this->decode(array_merge($data, ['id' => $id !== 0 ? $id : ($existing['id'] ?? 0)]));
@@ -739,7 +772,7 @@ class FootballRepositoryDatabase implements FootballRepository
             'accuracy', 'log_loss', 'brier_score', 'ece', 'parameters', 'lifecycle_history', 'rejection_reason',
         ]);
         if (!$data) return;
-        $data['updated_at'] = gmdate('c');
+        $data['updated_at'] = self::nowSql();
         $this->db->where('id', $id)->update('football_model_versions', $data);
     }
 
@@ -752,7 +785,7 @@ class FootballRepositoryDatabase implements FootballRepository
         ]);
         if (empty($data['model_version_id'])) throw new \InvalidArgumentException('calibration requires model_version_id');
         $data['status'] = (string) ($data['status'] ?? 'PENDING');
-        $now = gmdate('c');
+        $now = self::nowSql();
         $data['updated_at'] = $now;
         $existing = $this->db->get_where('football_calibration_versions', [
             'model_version_id' => (int) $data['model_version_id'],
@@ -781,7 +814,7 @@ class FootballRepositoryDatabase implements FootballRepository
     {
         $data = self::only($patch, ['status', 'approved_by', 'approved_at', 'rejected_by', 'rejected_at', 'reason', 'parameters', 'sample_size', 'accuracy', 'log_loss', 'brier', 'ece', 'mce', 'reliability_bins']);
         if (!$data) return;
-        $data['updated_at'] = gmdate('c');
+        $data['updated_at'] = self::nowSql();
         $this->db->where('id', $id)->update('football_calibration_versions', $data);
     }
 
@@ -800,7 +833,7 @@ class FootballRepositoryDatabase implements FootballRepository
             'probabilities_matrix', 'alternative_scores', 'reason', 'evidence', 'outcome', 'eligibility',
             'rejection_reasons', 'settlement_state',
         ]);
-        $now = gmdate('c');
+        $now = self::nowSql();
         $data['updated_at'] = $now;
         $existing = $this->db->get_where('football_match_predictions', ['id' => $id], 1)->row_array();
         if ($existing) {
@@ -909,8 +942,15 @@ class FootballRepositoryDatabase implements FootballRepository
         if (!empty($filter['settlementState'])) $this->db->where('settlement_state', (string) $filter['settlementState']);
         if (!empty($filter['date'])) {
             $date = (string) $filter['date'];
+            // Accept both ISO8601 and DATETIME stored values
+            $this->db->group_start();
+            $this->db->where('kickoff_at >=', self::isoForFilter($date, true));
+            $this->db->where('kickoff_at <=', self::isoForFilter($date, false));
+            $this->db->or_group_start();
             $this->db->where('kickoff_at >=', $date . 'T00:00:00+00:00');
             $this->db->where('kickoff_at <=', $date . 'T23:59:59+00:00');
+            $this->db->group_end();
+            $this->db->group_end();
         }
         if (!empty($filter['from'])) $this->db->where('generated_at >=', (string) $filter['from']);
         if (!empty($filter['to'])) $this->db->where('generated_at <=', (string) $filter['to']);
@@ -920,7 +960,7 @@ class FootballRepositoryDatabase implements FootballRepository
     public function saveScoreProbabilities(string $predictionId, array $rows): void
     {
         $this->db->where('prediction_id', $predictionId)->delete('football_score_probabilities');
-        $now = gmdate('c');
+        $now = self::nowSql();
         foreach ($rows as $row) {
             $home = self::nullableInt($row['home'] ?? $row['home_goals'] ?? null);
             $away = self::nullableInt($row['away'] ?? $row['away_goals'] ?? null);
@@ -1021,9 +1061,13 @@ class FootballRepositoryDatabase implements FootballRepository
                 $external = $externalById[(int) $row['match_id']] ?? null;
                 if ($external === null) continue;
                 $price = is_numeric($row['decimal_odds'] ?? null) ? (float) $row['decimal_odds'] : null;
-                if ($price === null || $price <= 0) continue;
+                // Validate odds: must be >1.0, ≤100, finite — reject unrealistic high odds
+                if ($price === null || $price <= 1.0 || $price > 100.0 || !is_finite($price)) continue;
+                $market = trim((string) ($row['market'] ?? ''));
+                $selection = trim((string) ($row['selection'] ?? ''));
+                if ($market === '' || $selection === '') continue;
                 $key = $code === '' ? $external : $code . ':' . $external;
-                $out[$key][] = ['market' => (string) $row['market'], 'selection' => (string) $row['selection'],
+                $out[$key][] = ['market' => $market, 'selection' => $selection,
                     'decimalOdds' => $price, 'observedAt' => $row['observed_at'] ?? null];
             }
         }
@@ -1044,7 +1088,7 @@ class FootballRepositoryDatabase implements FootballRepository
             'confidence', 'data_quality_score', 'model_version_id', 'calibration_version_id', 'correct_result',
             'correct_exact_score', 'brier', 'log_loss', 'absolute_goal_error', 'result_source', 'settled_at',
         ]);
-        $data['created_at'] = gmdate('c');
+        $data['created_at'] = self::nowSql();
         $this->db->insert('football_prediction_settlements', $data);
         return ['row' => $this->decode(array_merge($data, ['id' => (int) $this->db->insert_id()])), 'created' => true];
     }
@@ -1134,7 +1178,7 @@ class FootballRepositoryDatabase implements FootballRepository
             'evaluated_predictions', 'correct_results', 'correct_scores', 'result_accuracy', 'exact_score_accuracy',
             'average_confidence', 'average_data_quality', 'brier', 'ece', 'log_loss', 'payload', 'computed_at',
         ]);
-        $data['computed_at'] = (string) ($data['computed_at'] ?? gmdate('c'));
+        $data['computed_at'] = (string) ($data['computed_at'] ?? self::nowSql());
         $data['payload'] = json_encode($data['payload'] ?? []);
         $existing = $this->db->get_where('football_model_performance', [
             'model_version_id' => $data['model_version_id'] ?? null,
@@ -1174,7 +1218,7 @@ class FootballRepositoryDatabase implements FootballRepository
             'window_start' => self::nullableString($run['windowStart'] ?? null),
             'window_end' => self::nullableString($run['windowEnd'] ?? null),
             'attempts' => (int) ($run['attempts'] ?? 1),
-            'started_at' => (string) ($run['startedAt'] ?? gmdate('c')),
+            'started_at' => (string) ($run['startedAt'] ?? self::nowSql()),
         ];
         $this->db->insert('football_provider_sync_logs', $row);
         return array_merge($row, ['id' => (int) $this->db->insert_id()]);
@@ -1184,7 +1228,7 @@ class FootballRepositoryDatabase implements FootballRepository
     {
         $data = [
             'status' => (string) ($result['status'] ?? 'COMPLETED'),
-            'ended_at' => gmdate('c'),
+            'ended_at' => self::nowSql(),
             'records_processed' => (int) ($result['processed'] ?? 0),
             'records_created' => (int) ($result['created'] ?? 0),
             'records_updated' => (int) ($result['updated'] ?? 0),
@@ -1206,7 +1250,7 @@ class FootballRepositoryDatabase implements FootballRepository
 
     public function pruneSyncLogs(int $olderThanDays = 120): int
     {
-        $cutoff = gmdate('c', time() - max(1, $olderThanDays) * 86400);
+        $cutoff = gmdate('Y-m-d H:i:s', time() - max(1, $olderThanDays) * 86400);
         $this->db->where('started_at <', $cutoff);
         $this->db->delete('football_provider_sync_logs');
         return is_object($this->db) && method_exists($this->db, 'affected_rows') ? (int) $this->db->affected_rows() : 0;
@@ -1275,7 +1319,7 @@ class FootballRepositoryDatabase implements FootballRepository
         if (isset($data['trigger_codes']) && !is_string($data['trigger_codes'])) {
             $data['trigger_codes'] = json_encode(array_values((array) $data['trigger_codes']));
         }
-        $data['created_at'] = gmdate('c');
+        $data['created_at'] = self::nowSql();
         $this->db->insert('football_prediction_revisions', $data);
         $stored = $this->db->get_where('football_prediction_revisions', ['prediction_id' => $predictionId], 1)->row_array();
         return ['row' => $stored ? $this->decode($stored) : $data, 'created' => true];
@@ -1306,7 +1350,7 @@ class FootballRepositoryDatabase implements FootballRepository
     public function prunePredictionRevisions(int $olderThanDays = 90): int
     {
         if (!$this->db->table_exists('football_prediction_revisions')) return 0;
-        $cutoff = gmdate('c', time() - max(1, $olderThanDays) * 86400);
+        $cutoff = gmdate('Y-m-d H:i:s', time() - max(1, $olderThanDays) * 86400);
         $this->db->where('recorded_at <', $cutoff);
         $this->db->delete('football_prediction_revisions');
         return is_object($this->db) && method_exists($this->db, 'affected_rows') ? (int) $this->db->affected_rows() : 0;
@@ -1419,15 +1463,21 @@ class FootballRepositoryDatabase implements FootballRepository
         return preg_replace_callback('/_([a-z])/', static fn(array $m) => strtoupper($m[1]), $snake) ?? $snake;
     }
 
-    /** Provider timestamps → UTC ISO-8601 so string range filters stay correct. */
+    /** Provider timestamps → UTC DATETIME literal for MySQL strict mode. */
     private static function iso(string $value): ?string
     {
         if ($value === '') return null;
         try {
-            return (new \DateTimeImmutable($value))->setTimezone(new \DateTimeZone('UTC'))->format('c');
+            return (new \DateTimeImmutable($value))->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
         } catch (\Throwable $e) {
             return null;
         }
+    }
+
+    /** For date range filters — accepts both c and Y-m-d H:i:s stored values. */
+    private static function isoForFilter(string $date, bool $start): string
+    {
+        return $start ? $date . ' 00:00:00' : $date . ' 23:59:59';
     }
 
     private function decode(array $row): array

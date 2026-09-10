@@ -175,7 +175,8 @@ final class PredictionMarkets
             $quotedLine = self::lineOf((string) ($row['selection'] ?? ''));
             if ($lineChecked && ($quotedLine === null || abs($quotedLine - (float) $line) > 1e-9)) { $ignored++; continue; }
             $price = is_numeric($row['decimalOdds'] ?? null) ? (float) $row['decimalOdds'] : null;
-            if ($price === null || $price <= 1.0) { $ignored++; continue; }
+            // Validate odds: >1.0, ≤100, finite — reject unrealistic high odds
+            if ($price === null || $price <= 1.0 || $price > 100.0 || !is_finite($price)) { $ignored++; continue; }
             $observed = (string) ($row['observedAt'] ?? '');
             $seen = (array) ($quotes[$selection] ?? null);
             $newest = $seen === null || $observed >= (string) ($seen['observedAt'] ?? '');
@@ -660,7 +661,8 @@ final class PredictionMarkets
                 if ($quotedLine === null || abs($quotedLine - (float) $line) > 1e-9) continue;
             }
             $price = is_numeric($row['decimalOdds'] ?? null) ? (float) $row['decimalOdds'] : null;
-            if ($price === null || $price <= 0) continue;
+            // Validate odds: >1.0, ≤100, finite — reject unrealistic high odds
+            if ($price === null || $price <= 1.0 || $price > 100.0 || !is_finite($price)) continue;
             $observed = (string) ($row['observedAt'] ?? '');
             if ($newest === null || $observed >= (string) $newest['observedAt']) $newest = ['decimalOdds' => $price, 'observedAt' => $observed];
         }
