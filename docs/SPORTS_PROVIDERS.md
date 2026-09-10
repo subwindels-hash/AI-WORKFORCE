@@ -439,9 +439,12 @@ Provider fixture responses never carry form, so the `FormResolver` fetches it:
 
 * **Any provider that publishes a league table** serves form — one
   `standings()` request per *(league, season)* covers every team in that
-  league, cached for the whole run. api-football additionally uses its
-  per-team `/teams/statistics` endpoint and falls back to the table when a
-  team has no statistics yet (season opener, cup entry).
+  league, cached for the whole run. The table is the **primary** source:
+  api-football's per-team `/teams/statistics` costs two lookups per fixture
+  and starved the 30-lookup budget after ~15 fixtures (the "14 with-form"
+  dead end of the 2026-09-10 run). Per-team statistics are now the
+  **fallback** for teams the table does not cover (cup sides, mid-season
+  moves, no games yet).
 * **The lookup budget is spent where a ticket can still be won.** The daily
   ticket engine screens fixture eligibility *before* enrichment, so
   `WINDELS_SPORTS_FORM_LOOKUPS` (default 30) is never burned on matches that
@@ -458,6 +461,36 @@ Provider fixture responses never carry form, so the `FormResolver` fetches it:
   / `budget` / `lookupFailures` / `budgetSkips` / `providerCapable`). When no
   fixture resolved form, the no-ticket message names the cause — missing
   endpoint, failed lookups, or a starved budget with the numbers to fix it.
+
+## Calibration — the cold start
+
+The ticket engine predicts nothing without an **APPROVED** calibration
+(`MODEL_NOT_CALIBRATED`), and a fitted Platt calibration can only be fitted
+from 20+ SETTLED stored predictions — which only the ticket engine writes.
+A fresh installation would be locked out of itself, so the daily run breaks
+the deadlock with the documented **identity calibration**
+(`POST /api/sports/calibrations/bootstrap-identity` creates the same row
+manually):
+
+* **Auto-bootstrap + auto-approval (audited system act)**: when a run starts
+  and no APPROVED calibration exists for the deployed model version, the
+  engine bootstraps the identity mapping (intercept 0 / slope 1 — the raw
+  model probability, the same mapping the backtester uses) and approves it
+  as actor `system:daily-ticket`, emitting a `SPORTS_CALIBRATION_AUTO_APPROVED`
+  audit event. The funnel carries `calibrationBootstrap`
+  (`IDENTITY_AUTO_APPROVED` / `REJECTED_BY_ADMIN` / …).
+* **Only the identity bootstrap is auto-approved.** Fitted Platt
+  calibrations remain a human decision, and once one is approved it is the
+  newest APPROVED row, so the identity bootstrap retires itself.
+* **Explicit vetoes are honoured**: if an administrator REJECTS the identity
+  bootstrap, the engine does not resurrect it — the run stays blocked with
+  `MODEL_NOT_CALIBRATED` and a message that names the veto. `require_calibration`
+  (config) can also be set to 0, which runs the model through the identity
+  mapping without any calibration row and flags it `identity` on the
+  decision record.
+* Tickets remain gated by confidence / quality / value / risk — and, in the
+  default `USER_APPROVAL_REQUIRED` engine mode, by user approval — before
+  anything happens.
 
 ## Odds Prediction Ticket compliance rules
 

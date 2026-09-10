@@ -128,23 +128,24 @@ test('daily ticket E2E: approval flow with audit attribution', function () {
     assert_throws(RuntimeException::class, fn() => $governance->decide($run['ticketId'], false, 'admin-9'));
 });
 
-test('daily ticket E2E: without approved calibration nothing is predicted', function () {
+test('daily ticket E2E: a fresh install breaks the calibration cold start itself', function () {
+    // No calibration seeded: the engine bootstraps the identity calibration
+    // (0,1) and auto-approves it as an audited system act, so a fresh
+    // installation predicts on day one instead of locking itself out.
+    // (An admin REJECTED identity bootstrap still blocks — see case 133.)
     [$repo, $audit, $service] = fx_daily_stack();
     $date = gmdate('Y-m-d', strtotime('+1 day'));
     $run = $service->runDaily($date);
-    assert_equals('NO_QUALIFIED_TICKET', $run['status']);
-    assert_equals(0, count($repo->tickets));
-    $daily = $repo->findDailyTicket($date);
-    assert_equals('NO_QUALIFIED_TICKET', $daily['status']);
-    // Calibration is a shared upstream condition: each fixture is rejected
-    // ONCE with MODEL_NOT_CALIBRATED — the engine does not generate five
-    // per-market predictions just to reject every one of them.
-    assert_true(isset($daily['rejection_summary']['MODEL_NOT_CALIBRATED']), 'rejection reasons are stored');
-    assert_equals(5, (int) $daily['rejection_summary']['MODEL_NOT_CALIBRATED'], 'one rejection per fixture, not per market');
-    assert_equals(0, (int) $run['predictionsRecorded'], 'no predictions generated without a model stack');
-    assert_equals(5, (int) $run['diagnostics']['fixturesWithoutCalibration'], 'the funnel attributes the failure');
-    assert_equals(5, (int) $run['diagnostics']['fixturesWithFreshOdds'], 'odds stage passed first');
-    assert_true(isset($run['diagnostics']['topRejectionReasons']['MODEL_NOT_CALIBRATED']), 'top rejection reasons exposed');
+    assert_equals('IDENTITY_AUTO_APPROVED', $run['diagnostics']['calibrationBootstrap'], 'the funnel records the cold-start break');
+    assert_equals(0, (int) ($run['rejectionSummary']['MODEL_NOT_CALIBRATED'] ?? 0), 'no calibration rejections on a fresh install');
+    assert_equals(5, (int) $run['diagnostics']['predictionsGenerated'], 'all five fixtures predict');
+    $approved = $repo->listCalibrations(null, 'APPROVED');
+    assert_equals(1, count($approved), 'exactly one approved calibration (the bootstrap)');
+    assert_equals('identity-bootstrap', (string) $approved[0]['method']);
+    assert_equals('system:daily-ticket', (string) $approved[0]['approved_by'], 'the system actor is recorded');
+    $types = array_map(fn($e) => $e['type'], $audit->events);
+    assert_true(in_array('SPORTS_CALIBRATION_BOOTSTRAPPED', $types, true));
+    assert_true(in_array('SPORTS_CALIBRATION_AUTO_APPROVED', $types, true));
 });
 
 test('daily ticket E2E: no provider configured → DISABLED_NO_PROVIDER, nothing fabricated', function () {

@@ -143,6 +143,18 @@ class DailyTicketService
                     $funnel['providersConfigured'] = count($this->providers->all());
                     $runtimeNow = time();
 
+                    // ── Calibration cold start ────────────────────────────
+                    // The engine predicts nothing without an APPROVED
+                    // calibration, and a fitted Platt calibration can only be
+                    // fitted from 20+ SETTLED predictions — which only THIS
+                    // engine writes. Break the deadlock with the documented
+                    // identity calibration (intercept 0 / slope 1: the raw
+                    // model probability, the same mapping the backtester
+                    // uses). Tickets remain gated by confidence / quality /
+                    // value / risk and — in the default engine mode — by
+                    // user approval before anything happens.
+                    if (!empty($config['require_calibration'])) $this->ensureIdentityCalibration($funnel);
+
                     // ── Form enrichment, spent where it can still win a ticket.
                     //
                     // The lookup budget (WINDELS_SPORTS_FORM_LOOKUPS, 30 by
@@ -407,7 +419,9 @@ class DailyTicketService
                             $message .= ' — recent form could not be resolved for ANY fixture (' . $why . '); without verified recentForm the model computes no probabilities';
                         }
                         if (($funnel['fixturesWithoutCalibration'] ?? 0) > 0) {
-                            $message .= ' — no APPROVED calibration for the deployed model version (create one via POST /api/sports/calibrations/bootstrap-identity, then approve it)';
+                            $message .= ($funnel['calibrationBootstrap'] ?? null) === 'REJECTED_BY_ADMIN'
+                                ? ' — the identity bootstrap calibration was REJECTED by an administrator, so no APPROVED calibration exists for the deployed model version (re-approve it, or fit and approve a real calibration, to unblock prediction)'
+                                : ' — no APPROVED calibration for the deployed model version (create one via POST /api/sports/calibrations/bootstrap-identity, then approve it)';
                         }
                     }
                     if ($ticketId === null) $message .= ' ' . $this->funnelSummary($funnel, $evaluated, $recorded, $rejections);
@@ -524,6 +538,7 @@ class DailyTicketService
             'fixturesRejectedNoOdds' => 0,
             'fixturesMissingMandatoryData' => 0,
             'fixturesWithoutCalibration' => 0,
+            'calibrationBootstrap' => null,
             'fixturesBelowQualityFloor' => 0,
             'sufficientDataFixtures' => 0,
             'generationCap' => 0,
@@ -1044,6 +1059,69 @@ class DailyTicketService
             'providerReliability' => $reliability,
             'minDataQuality' => $minQuality,
         ];
+    }
+
+    /**
+     * Break the calibration cold start (see the call site in runDaily).
+     *
+     * Bootstrap the identity calibration and auto-approve it as an audited
+     * SYSTEM act — never a human act, and never a fitted calibration:
+     *   • an existing APPROVED calibration (fitted or bootstrap) → no-op;
+     *   • an existing PENDING identity bootstrap → reused, never duplicated;
+     *   • a REJECTED identity bootstrap → an explicit operator veto: the
+     *     engine does not resurrect it and stays blocked, honestly reported.
+     * Once an operator fits and approves a real Platt calibration it is the
+     * newest APPROVED row and the identity bootstrap retires itself.
+     */
+    private function ensureIdentityCalibration(array &$funnel): void
+    {
+        $actor = 'system:daily-ticket';
+        $method = CalibrationBootstrap::method();
+        $modelId = $this->repo->ensureModelVersion([
+            'modelName' => PredictionEngine::MODEL_NAME,
+            'modelVersion' => PredictionEngine::MODEL_VERSION,
+            'featureVersion' => FeatureEngineeringEngine::VERSION,
+        ]);
+        if ($this->repo->activeCalibration($modelId) !== null) return;
+
+        $identityRows = function (string $status) use ($modelId, $method): array {
+            return array_values(array_filter(
+                $this->repo->listCalibrations($modelId, $status, 50),
+                fn(array $c): bool => (string) ($c['method'] ?? '') === $method
+            ));
+        };
+
+        $pending = $identityRows('PENDING');
+        if ($pending === []) {
+            if ($identityRows('REJECTED') !== []) {
+                $funnel['calibrationBootstrap'] = 'REJECTED_BY_ADMIN'; // explicit operator veto — honoured
+                return;
+            }
+            $result = (new CalibrationBootstrap($this->repo, $this->audit))->bootstrapIdentity($actor);
+            if (empty($result['ok'])) {
+                $funnel['calibrationBootstrap'] = (string) ($result['reason'] ?? 'UNAVAILABLE');
+                return;
+            }
+            $pending = $identityRows('PENDING');
+            if ($pending === []) {
+                $funnel['calibrationBootstrap'] = 'BOOTSTRAP_UNREADABLE';
+                return;
+            }
+        }
+
+        $id = (int) ($pending[0]['id'] ?? 0);
+        if ($id === 0) {
+            $funnel['calibrationBootstrap'] = 'BOOTSTRAP_UNREADABLE';
+            return;
+        }
+        $this->repo->updateCalibrationStatus($id, 'APPROVED', $actor);
+        $this->audit->emit(
+            'SPORTS_CALIBRATION_AUTO_APPROVED',
+            'Identity bootstrap calibration auto-approved by the daily ticket engine (intercept 0 / slope 1 — no-op baseline mapping; a fitted Platt calibration supersedes it once approved)',
+            ['calibrationId' => $id, 'modelVersionId' => $modelId],
+            $actor
+        );
+        $funnel['calibrationBootstrap'] = 'IDENTITY_AUTO_APPROVED';
     }
 
     /** Approved calibration for the candidate's model version, or null (never invented). */

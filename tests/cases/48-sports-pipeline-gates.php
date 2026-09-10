@@ -244,3 +244,27 @@ test('optimizer: same-team candidates cannot both enter a ticket (LOW cap)', fun
     $out = $opt->optimize([$mk(1, 'Alpha', 'Beta', 2.0), $mk(2, 'Alpha', 'Gamma', 2.5)], ['targetOddsMin' => 4.0, 'targetOddsMax' => 9.0, 'maxSelections' => 2, 'maxCorrelation' => 'LOW']);
     assert_equals('NO_QUALIFIED_TICKET', $out['status'], 'same-team selections exceed the LOW correlation cap');
 });
+
+test('pipeline: require_calibration off runs the identity mapping when no calibration exists', function () {
+    $config = array_merge(fx_gate_config(), ['require_calibration' => 0]);
+    // No approved calibration: previously the flag was a dead end (the engine
+    // still rejected MODEL_NOT_CALIBRATED on an empty calibration input).
+    // Now it runs the model through the identity mapping — the raw model
+    // probability — and says so on the decision record.
+    $out = (new PredictionPipeline())->evaluate(fx_gate_match(), fx_fresh_odds(1.6), fx_gate_quality(), null, $config);
+    assert_not_contains('MODEL_NOT_CALIBRATED', implode(',', $out['rejectionReasons']), 'the flag no longer dead-ends on MODEL_NOT_CALIBRATED');
+    assert_equals('PASSED', (string) ($out['factors']['stages']['prediction'] ?? ''));
+    assert_equals('identity', (string) ($out['factors']['calibration']['version'] ?? ''));
+    assert_equals(0.0, (float) ($out['factors']['calibration']['intercept'] ?? null));
+    assert_equals(1.0, (float) ($out['factors']['calibration']['slope'] ?? null));
+    // ...and an existing APPROVED calibration is still honoured when the
+    // flag is off — the identity mapping is the fallback, not the override.
+    $withCal = (new PredictionPipeline())->evaluate(fx_gate_match(), fx_fresh_odds(1.6), fx_gate_quality(), fx_approved_calibration(), $config);
+    assert_equals('test', (string) ($withCal['factors']['calibration']['version'] ?? ''));
+});
+
+test('pipeline: require_calibration on (default) still rejects without a calibration', function () {
+    $out = (new PredictionPipeline())->evaluate(fx_gate_match(), fx_fresh_odds(1.6), fx_gate_quality(), null, fx_gate_config());
+    assert_equals('REJECTED', $out['decision']);
+    assert_true(in_array('MODEL_NOT_CALIBRATED', $out['rejectionReasons'], true), 'the default remains fail-closed');
+});
