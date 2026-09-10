@@ -185,6 +185,65 @@ class AIWorkforce_model extends CI_Model
 
         $this->sports = new class($db) implements AIWorkforce\Persistence\SportsRepository {
             public function __construct(private object $db) {}
+
+            /**
+             * Normalise an RFC-3339/ISO-8601 value (the form gmdate('c')
+             * produces — '2026-09-10T19:10:08+00:00') into the literal every
+             * temporal column accepts. The Phase-3 sports tables declare
+             * DATETIME (MySQL) / TIMESTAMP (PostgreSQL) columns, while the
+             * older sports tables store timestamps as VARCHAR(32). In strict
+             * SQL mode — the production connection sets stricton=true —
+             * MySQL/MariaDB REJECT the 'T'/offset literal for a DATETIME
+             * column with error 1292; with db_debug=false that failed INSERT
+             * was swallowed and the row simply never existed. That is exactly
+             * how the identity bootstrap calibration vanished on the
+             * 2026-09-10 run (CALIBRATION_PERSIST_FAILED). 'Y-m-d H:i:s' in
+             * UTC is accepted by MySQL, PostgreSQL and SQLite TEXT alike.
+             * Plain dates ('Y-m-d') and already-canonical values are left
+             * untouched so date-keyed lookups (e.g. performance snapshots)
+             * keep matching on every driver.
+             */
+            private static function toSqlDateTime($v)
+            {
+                if (!is_string($v) || $v === '') return $v;
+                $hasT = str_contains($v, 'T');
+                $hasOffset = (bool) preg_match('/(?:[+-]\d{2}:?\d{2}|Z)$/', trim($v));
+                if (($hasT || $hasOffset) && preg_match('/^\d{4}-\d{2}-\d{2}/', $v)) {
+                    $ts = strtotime($v);
+                    if ($ts !== false) return gmdate('Y-m-d H:i:s', $ts);
+                }
+                return $v;
+            }
+
+            /** Normalise the named temporal keys of a row/patch in place. */
+            private static function withSqlTimestamps(array $row, array $keys): array
+            {
+                foreach ($keys as $key) {
+                    if (array_key_exists($key, $row)) $row[$key] = self::toSqlDateTime($row[$key]);
+                }
+                return $row;
+            }
+
+            /**
+             * db_debug is false by design, so a failed INSERT/UPDATE returns
+             * false instead of throwing. A silent failed write at this layer
+             * is the bug that left the model uncalibrated while the engine
+             * believed it had bootstrapped — turn it into an exception that
+             * carries the driver's REAL code/message and the statement.
+             */
+            private function mustWrite($ok, string $table, string $operation): void
+            {
+                if ($ok !== false) return;
+                $error = method_exists($this->db, 'error') ? $this->db->error() : [];
+                $code = $error['code'] ?? 0;
+                $message = $error['message'] ?? 'unknown database error';
+                $query = method_exists($this->db, 'last_query') ? (string) $this->db->last_query() : '';
+                throw new \RuntimeException(sprintf(
+                    'sports repository %s on %s failed: [%s] %s (SQL: %s)',
+                    strtolower($operation), $table, $code !== null ? $code : 0, $message, mb_substr($query, 0, 500)
+                ));
+            }
+
             public function ensureProvider(string $code, string $name): array {
                 $row = $this->db->get_where('sports_data_sources', ['provider_code' => $code], 1)->row_array();
                 if ($row) return $row;
@@ -223,11 +282,22 @@ class AIWorkforce_model extends CI_Model
                 return $rows;
             }
             public function latestQuality(int $matchId): ?array { $row = $this->db->where('match_id', $matchId)->order_by('assessed_at', 'DESC')->limit(1)->get('sports_data_quality_assessments')->row_array(); if ($row) { $row['missing_fields'] = json_decode((string) $row['missing_fields'], true); $row['checks_payload'] = json_decode((string) $row['checks_payload'], true); } return $row ?: null; }
-            public function saveCalibration(array $c): int { $this->db->insert('sports_calibrations', $c); return (int) $this->db->insert_id(); }
+            public function saveCalibration(array $c): int {
+                $c = self::withSqlTimestamps($c, ['created_at', 'approved_at']);
+                $ok = $this->db->insert('sports_calibrations', $c);
+                $this->mustWrite($ok, 'sports_calibrations', 'INSERT');
+                $id = (int) $this->db->insert_id();
+                if ($id <= 0) {
+                    // No driver error was raised but no id came back either:
+                    // never hand the caller a phantom id it would chase forever.
+                    $this->mustWrite(false, 'sports_calibrations', 'INSERT (no insert id returned)');
+                }
+                return $id;
+            }
             public function findCalibration(int $id): ?array { $row = $this->db->get_where('sports_calibrations', ['id' => $id], 1)->row_array(); if ($row) $row['bins'] = json_decode((string) ($row['bins'] ?: '[]'), true); return $row ?: null; }
             public function listCalibrations(?int $modelVersionId = null, ?string $status = null, int $limit = 50): array { if ($modelVersionId !== null) $this->db->where('model_version_id', $modelVersionId); if ($status !== null) $this->db->where('status', $status); $rows = $this->db->order_by('created_at', 'DESC')->limit(min(200, max(1, $limit)))->get('sports_calibrations')->result_array(); foreach ($rows as &$row) $row['bins'] = json_decode((string) ($row['bins'] ?: '[]'), true); return $rows; }
             public function activeCalibration(int $modelVersionId): ?array { $row = $this->db->where(['model_version_id' => $modelVersionId, 'status' => 'APPROVED'])->order_by('created_at', 'DESC')->limit(1)->get('sports_calibrations')->row_array(); if ($row) $row['bins'] = json_decode((string) ($row['bins'] ?: '[]'), true); return $row ?: null; }
-            public function updateCalibrationStatus(int $id, string $status, ?string $actor = null): void { $patch = ['status' => $status]; if ($actor !== null) { $patch['approved_by'] = $actor; $patch['approved_at'] = gmdate('c'); } $this->db->where('id', $id)->update('sports_calibrations', $patch); }
+            public function updateCalibrationStatus(int $id, string $status, ?string $actor = null): void { $patch = ['status' => $status]; if ($actor !== null) { $patch['approved_by'] = $actor; $patch['approved_at'] = gmdate('Y-m-d H:i:s'); } $ok = $this->db->where('id', $id)->update('sports_calibrations', self::withSqlTimestamps($patch, ['approved_at'])); $this->mustWrite($ok, 'sports_calibrations', 'UPDATE'); }
             public function listModelVersions(): array { return $this->db->order_by('id', 'ASC')->get('sports_model_versions')->result_array(); }
             public function findModelVersion(int $id): ?array { return $this->db->get_where('sports_model_versions', ['id' => $id], 1)->row_array() ?: null; }
             public function listPredictions(array $filter = [], int $limit = 200): array {
@@ -262,7 +332,7 @@ class AIWorkforce_model extends CI_Model
             }
             public function activeConfiguration(): ?array { $row = $this->db->order_by('version', 'DESC')->limit(1)->get('sports_configurations')->row_array(); if ($row) { $row['allowed_markets'] = json_decode((string) $row['allowed_markets'], true) ?: []; $row['allowed_leagues'] = json_decode((string) $row['allowed_leagues'], true) ?: []; } return $row ?: null; }
             public function listConfigurations(int $limit = 20): array { $rows = $this->db->order_by('version', 'DESC')->limit(min(200, max(1, $limit)))->get('sports_configurations')->result_array(); foreach ($rows as &$row) { $row['allowed_markets'] = json_decode((string) $row['allowed_markets'], true) ?: []; $row['allowed_leagues'] = json_decode((string) $row['allowed_leagues'], true) ?: []; } return $rows; }
-            public function saveConfiguration(array $c): int { $this->db->insert('sports_configurations', $c); return (int) $this->db->insert_id(); }
+            public function saveConfiguration(array $c): int { $c = self::withSqlTimestamps($c, ['created_at']); $ok = $this->db->insert('sports_configurations', $c); $this->mustWrite($ok, 'sports_configurations', 'INSERT'); return (int) $this->db->insert_id(); }
             public function findConfiguration(int $id): ?array { $row = $this->db->get_where('sports_configurations', ['id' => $id], 1)->row_array(); if ($row) { $row['allowed_markets'] = json_decode((string) $row['allowed_markets'], true) ?: []; $row['allowed_leagues'] = json_decode((string) $row['allowed_leagues'], true) ?: []; } return $row ?: null; }
             public function findResultByMatch(int $matchId): ?array { $row = $this->db->where('match_id', $matchId)->order_by('verified', 'DESC')->order_by('id', 'DESC')->limit(1)->get('sports_results')->row_array(); if ($row) $row['payload'] = json_decode((string) $row['payload'], true); return $row ?: null; }
             public function recordTicketOutcome(string $ticketId, float $pnl): void { $this->db->where('id', $ticketId)->update('sports_tickets', ['pnl' => $pnl]); }
@@ -278,13 +348,15 @@ class AIWorkforce_model extends CI_Model
                 }
                 return null;
             }
-            public function deleteOldJobRuns(string $cutoff): void { $this->db->where('started_at <', $cutoff)->delete('sports_job_runs'); }
+            public function deleteOldJobRuns(string $cutoff): void { $this->db->where('started_at <', self::toSqlDateTime($cutoff))->delete('sports_job_runs'); }
             public function deleteOldHealth(string $cutoff): void { $this->db->where('observed_at <', $cutoff)->delete('sports_provider_health'); }
             public function startJobRun(array $run): ?array {
                 if ($this->db->get_where('sports_job_runs', ['execution_key' => $run['executionKey']], 1)->row_array()) return null;
-                $this->db->insert('sports_job_runs', ['id' => $run['id'], 'job_type' => $run['jobType'], 'status' => 'RUNNING', 'started_at' => gmdate('c'), 'execution_key' => $run['executionKey'], 'provider' => $run['provider'] ?? null]); return $run;
+                $ok = $this->db->insert('sports_job_runs', ['id' => $run['id'], 'job_type' => $run['jobType'], 'status' => 'RUNNING', 'started_at' => gmdate('Y-m-d H:i:s'), 'execution_key' => $run['executionKey'], 'provider' => $run['provider'] ?? null]);
+                $this->mustWrite($ok, 'sports_job_runs', 'INSERT');
+                return $run;
             }
-            public function finishJobRun(string $id, array $result): void { $this->db->where('id', $id)->update('sports_job_runs', ['status' => $result['status'], 'ended_at' => gmdate('c'), 'records_processed' => $result['processed'] ?? 0, 'records_created' => $result['created'] ?? 0, 'records_updated' => $result['updated'] ?? 0, 'errors' => json_encode($result['errors'] ?? [])]); }
+            public function finishJobRun(string $id, array $result): void { $ok = $this->db->where('id', $id)->update('sports_job_runs', ['status' => $result['status'], 'ended_at' => gmdate('Y-m-d H:i:s'), 'records_processed' => $result['processed'] ?? 0, 'records_created' => $result['created'] ?? 0, 'records_updated' => $result['updated'] ?? 0, 'errors' => json_encode($result['errors'] ?? [])]); $this->mustWrite($ok, 'sports_job_runs', 'UPDATE'); }
             public function releaseJobRun(string $id): void {
                 $row = $this->db->get_where('sports_job_runs', ['id' => $id], 1)->row_array();
                 if (!$row) return;
@@ -294,19 +366,24 @@ class AIWorkforce_model extends CI_Model
                 $this->db->where('id', $id)->update('sports_job_runs', ['execution_key' => mb_substr($key, 0, 120) . '#released:' . substr($id, 0, 36)]);
             }
             public function listJobRuns(?string $jobType = null, int $limit = 50): array { if ($jobType !== null) $this->db->where('job_type', $jobType); $rows = $this->db->order_by('started_at', 'DESC')->limit(min(500, max(1, $limit)))->get('sports_job_runs')->result_array(); foreach ($rows as &$row) $row['errors'] = json_decode((string) ($row['errors'] ?: '[]'), true); return $rows; }
-            public function saveBacktest(array $b): void { $this->db->insert('sports_backtests', $b); }
+            public function saveBacktest(array $b): void { $ok = $this->db->insert('sports_backtests', self::withSqlTimestamps($b, ['created_at'])); $this->mustWrite($ok, 'sports_backtests', 'INSERT'); }
             public function findBacktest(string $id): ?array { $row = $this->db->get_where('sports_backtests', ['id' => $id], 1)->row_array(); if ($row) { $row['params'] = json_decode((string) $row['params'], true); $row['report'] = json_decode((string) $row['report'], true); } return $row ?: null; }
             public function listBacktests(int $limit = 20): array { $rows = $this->db->order_by('created_at', 'DESC')->limit(min(200, max(1, $limit)))->get('sports_backtests')->result_array(); foreach ($rows as &$row) { $row['params'] = json_decode((string) $row['params'], true); $row['report'] = json_decode((string) $row['report'], true); } return $rows; }
-            public function saveModelMetrics(array $m): void { $this->db->insert('sports_model_metrics', $m); }
+            public function saveModelMetrics(array $m): void { $ok = $this->db->insert('sports_model_metrics', self::withSqlTimestamps($m, ['computed_at'])); $this->mustWrite($ok, 'sports_model_metrics', 'INSERT'); }
             public function listModelMetrics(?int $modelVersionId = null, ?int $windowDays = null, ?string $sampleType = null, int $limit = 200): array { if ($modelVersionId !== null) $this->db->where('model_version_id', $modelVersionId); if ($windowDays !== null) $this->db->where('window_days', $windowDays); if ($sampleType !== null) $this->db->where('sample_type', $sampleType); return $this->db->order_by('computed_at', 'DESC')->limit(min(1000, max(1, $limit)))->get('sports_model_metrics')->result_array(); }
             public function findDailyTicket(string $date): ?array { $row = $this->db->get_where('sports_daily_tickets', ['date' => $date], 1)->row_array(); if ($row) $row['rejection_summary'] = json_decode((string) ($row['rejection_summary'] ?: '{}'), true); return $row ?: null; }
-            public function saveDailyTicket(array $d): void { $row = $this->db->get_where('sports_daily_tickets', ['date' => $d['date']], 1)->row_array(); if ($row) $this->db->where('date', $d['date'])->update('sports_daily_tickets', $d); else $this->db->insert('sports_daily_tickets', $d); }
-            public function updateDailyTicket(string $date, array $patch): void { $this->db->where('date', $date)->update('sports_daily_tickets', array_merge($patch, ['updated_at' => gmdate('c')])); }
+            public function saveDailyTicket(array $d): void { $d = self::withSqlTimestamps($d, ['created_at', 'updated_at']); $row = $this->db->get_where('sports_daily_tickets', ['date' => $d['date']], 1)->row_array(); if ($row) { $ok = $this->db->where('date', $d['date'])->update('sports_daily_tickets', $d); $this->mustWrite($ok, 'sports_daily_tickets', 'UPDATE'); } else { $ok = $this->db->insert('sports_daily_tickets', $d); $this->mustWrite($ok, 'sports_daily_tickets', 'INSERT'); } }
+            public function updateDailyTicket(string $date, array $patch): void { $patch = self::withSqlTimestamps(array_merge($patch, ['updated_at' => gmdate('Y-m-d H:i:s')]), ['updated_at']); $ok = $this->db->where('date', $date)->update('sports_daily_tickets', $patch); $this->mustWrite($ok, 'sports_daily_tickets', 'UPDATE'); }
             public function listDailyTickets(int $limit = 60): array { $rows = $this->db->order_by('date', 'DESC')->limit(min(366, max(1, $limit)))->get('sports_daily_tickets')->result_array(); foreach ($rows as &$row) $row['rejection_summary'] = json_decode((string) ($row['rejection_summary'] ?: '{}'), true); return $rows; }
             public function savePerformanceSnapshot(string $asOf, string $window, array $payload): void {
+                // Normalise the lookup key AND the stored value together —
+                // as_of is a DATETIME column — so an RFC-3339 input matches
+                // itself on the read-back.
+                $asOf = self::toSqlDateTime($asOf);
                 $existing = $this->db->get_where('sports_performance_snapshots', ['as_of' => $asOf, 'window' => $window], 1)->row_array();
-                $data = ['as_of' => $asOf, 'window' => $window, 'payload' => json_encode($payload)];
-                if ($existing) $this->db->where('id', $existing['id'])->update('sports_performance_snapshots', $data); else $this->db->insert('sports_performance_snapshots', $data);
+                $data = self::withSqlTimestamps(['as_of' => $asOf, 'window' => $window, 'payload' => json_encode($payload)], ['as_of']);
+                if ($existing) { $ok = $this->db->where('id', $existing['id'])->update('sports_performance_snapshots', $data); $this->mustWrite($ok, 'sports_performance_snapshots', 'UPDATE'); }
+                else { $ok = $this->db->insert('sports_performance_snapshots', $data); $this->mustWrite($ok, 'sports_performance_snapshots', 'INSERT'); }
             }
             public function performanceSnapshots(string $window, int $limit = 30): array { $rows = $this->db->where('window', $window)->order_by('as_of', 'DESC')->limit(min(366, max(1, $limit)))->get('sports_performance_snapshots')->result_array(); foreach ($rows as &$row) $row['payload'] = json_decode((string) $row['payload'], true); return $rows; }
             public function settledSelections(array $filter = []): array {

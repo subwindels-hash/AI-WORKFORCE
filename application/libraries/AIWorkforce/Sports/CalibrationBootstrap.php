@@ -71,19 +71,33 @@ final class CalibrationBootstrap
             }
         }
 
-        $id = $this->repo->saveCalibration([
-            'model_version_id' => $modelId,
-            'method' => self::method(),
-            'intercept' => 0.0,
-            'slope' => 1.0,
-            'brier' => null,
-            'ece' => null,
-            'samples' => 0,
-            'bins' => json_encode([]),
-            'status' => 'PENDING',
-            'created_by' => $actor,
-            'created_at' => gmdate('c'),
-        ]);
+        $dbError = null;
+        try {
+            $id = $this->repo->saveCalibration([
+                'model_version_id' => $modelId,
+                'method' => self::method(),
+                'intercept' => 0.0,
+                'slope' => 1.0,
+                'brier' => null,
+                'ece' => null,
+                'samples' => 0,
+                'bins' => json_encode([]),
+                'status' => 'PENDING',
+                'created_by' => $actor,
+                // 'Y-m-d H:i:s' UTC: the literal MySQL DATETIME / PostgreSQL
+                // TIMESTAMP columns accept on every driver (the repository
+                // normalises any RFC-3339 value anyway, but the bootstrap
+                // itself writes the canonical form).
+                'created_at' => gmdate('Y-m-d H:i:s'),
+            ]);
+        } catch (\Throwable $e) {
+            // The repository no longer swallows a failed write (db_debug=
+            // false): it throws with the driver's real code/message. Carry
+            // that exact error so an operator fixes the DATABASE (schema,
+            // constraint, grant), not the engine's gate.
+            $id = 0;
+            $dbError = mb_substr($e->getMessage(), 0, 500);
+        }
         // Verify the row survived the database round-trip BEFORE reporting
         // success. A driver that silently truncates or swallows a failed
         // insert (CI3 db_debug=false) must produce an honest failure here —
@@ -95,10 +109,10 @@ final class CalibrationBootstrap
             $this->audit->emit(
                 'SPORTS_CALIBRATION_PERSIST_FAIL',
                 'Identity calibration bootstrap did not survive the database round-trip (check the sports_calibrations schema — the method column must fit the marker — and the DB error log)',
-                ['modelVersionId' => $modelId, 'insertId' => $id, 'storedMethod' => $stored['method'] ?? null, 'storedStatus' => $stored['status'] ?? null],
+                ['modelVersionId' => $modelId, 'insertId' => $id, 'storedMethod' => $stored['method'] ?? null, 'storedStatus' => $stored['status'] ?? null, 'dbError' => $dbError],
                 $actor
             );
-            return ['ok' => false, 'reason' => 'CALIBRATION_PERSIST_FAILED', 'modelVersionId' => $modelId];
+            return ['ok' => false, 'reason' => 'CALIBRATION_PERSIST_FAILED', 'modelVersionId' => $modelId, 'dbError' => $dbError];
         }
         $this->audit->emit(
             'SPORTS_CALIBRATION_BOOTSTRAPPED',

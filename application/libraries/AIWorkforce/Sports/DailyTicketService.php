@@ -256,25 +256,54 @@ class DailyTicketService
 
                         // ── Stage 5: prediction feasibility (shared upstream) ─
                         // Mandatory market data missing, or no approved
-                        // calibration → the model cannot compute ANY market
-                        // for this fixture: one rejection, not one per market.
-                        if (!empty($qualityAssessment['missingMandatory'])) {
-                            $rejections++;
-                            $this->countRejection($rejectionSummary, 'INSUFFICIENT_DATA', $reasonProviders, $provider);
-                            $funnel['fixturesMissingMandatoryData']++;
-                            continue;
-                        }
+                        // calibration, or below the quality floor → the model
+                        // cannot honestly compute ANY market for this fixture:
+                        // one rejection, not one per market. Every requirement
+                        // is evaluated (not just the first failure) and recorded
+                        // per fixture so "0 sufficient-data fixtures" is never a
+                        // black box — the gate diagnostic names the blocker.
                         $calibration = $this->calibrationFor($matchRow);
-                        if ($requireCalibration && $calibration === null) {
-                            $rejections++;
-                            $this->countRejection($rejectionSummary, 'MODEL_NOT_CALIBRATED', $reasonProviders, $provider);
-                            $funnel['fixturesWithoutCalibration']++;
-                            continue;
+                        $missingMandatory = array_values((array) ($qualityAssessment['missingMandatory'] ?? []));
+                        $mandatoryOk = $missingMandatory === [];
+                        $calibrationOk = !$requireCalibration || $calibration !== null;
+                        $qualityOk = ((int) ($qualityAssessment['score'] ?? 0) >= $minQuality && !empty($qualityAssessment['eligibleForTicket']));
+                        if ($mandatoryOk && $calibrationOk && $qualityOk) {
+                            $failedRequirement = null;
+                            $primaryReason = null;
+                        } elseif (!$mandatoryOk) {
+                            $failedRequirement = 'MANDATORY_MODEL_DATA';
+                            $primaryReason = 'INSUFFICIENT_DATA';
+                        } elseif (!$calibrationOk) {
+                            $failedRequirement = 'APPROVED_CALIBRATION';
+                            $primaryReason = 'MODEL_NOT_CALIBRATED';
+                        } else {
+                            $failedRequirement = 'DATA_QUALITY_FLOOR';
+                            $primaryReason = 'LOW_DATA_QUALITY';
                         }
-                        if (($qualityAssessment['score'] ?? 0) < $minQuality || empty($qualityAssessment['eligibleForTicket'])) {
+                        $this->recordSufficientDataGate($funnel, [
+                            'matchId' => (int) $saved['id'],
+                            'externalId' => (string) ($match['externalId'] ?? ''),
+                            'homeTeam' => (string) ($match['homeTeam'] ?? ''),
+                            'awayTeam' => (string) ($match['awayTeam'] ?? ''),
+                            'competition' => (string) ($match['competition'] ?? ''),
+                            'kickoff' => (string) ($match['kickoff'] ?? ''),
+                            'provider' => (string) $provider,
+                            'oddsMarkets' => $markets,
+                            'passed' => $failedRequirement === null,
+                            'failedRequirement' => $failedRequirement,
+                            'primaryReason' => $primaryReason,
+                            'requirements' => [
+                                'MANDATORY_MODEL_DATA' => ['ok' => $mandatoryOk, 'missingMandatory' => $missingMandatory, 'mandatoryFields' => array_values((array) ($qualityAssessment['mandatoryFields'] ?? ['recentForm']))],
+                                'APPROVED_CALIBRATION' => ['ok' => $calibrationOk, 'required' => (bool) $requireCalibration, 'calibrationId' => $calibration['id'] ?? null, 'method' => $calibration['method'] ?? null, 'bootstrapState' => $funnel['calibrationBootstrap'] ?? null],
+                                'DATA_QUALITY_FLOOR' => ['ok' => $qualityOk, 'score' => (int) ($qualityAssessment['score'] ?? 0), 'minScore' => (int) $minQuality, 'band' => (string) ($qualityAssessment['band'] ?? 'UNKNOWN'), 'eligibleForTicket' => (bool) ($qualityAssessment['eligibleForTicket'] ?? false)],
+                            ],
+                        ]);
+                        if ($failedRequirement !== null) {
                             $rejections++;
-                            $this->countRejection($rejectionSummary, 'LOW_DATA_QUALITY', $reasonProviders, $provider);
-                            $funnel['fixturesBelowQualityFloor']++;
+                            $this->countRejection($rejectionSummary, $primaryReason, $reasonProviders, $provider);
+                            if ($failedRequirement === 'MANDATORY_MODEL_DATA') $funnel['fixturesMissingMandatoryData']++;
+                            elseif ($failedRequirement === 'APPROVED_CALIBRATION') $funnel['fixturesWithoutCalibration']++;
+                            else $funnel['fixturesBelowQualityFloor']++;
                             continue;
                         }
                         $funnel['sufficientDataFixtures']++;
@@ -443,10 +472,11 @@ class DailyTicketService
                         }
                         if (($funnel['fixturesWithoutCalibration'] ?? 0) > 0) {
                             $bootstrapState = (string) ($funnel['calibrationBootstrap'] ?? '');
+                            $dbError = !empty($funnel['calibrationBootstrapError']) ? ' — database error: ' . $funnel['calibrationBootstrapError'] : '';
                             $message .= $bootstrapState === 'REJECTED_BY_ADMIN'
                                 ? ' — the identity bootstrap calibration was REJECTED by an administrator, so no APPROVED calibration exists for the deployed model version (re-approve it, or fit and approve a real calibration, to unblock prediction)'
-                                : (in_array($bootstrapState, ['BOOTSTRAP_UNREADABLE', 'CALIBRATION_PERSIST_FAILED'], true)
-                                    ? ' — the engine created its identity bootstrap calibration but the row did not survive the database round-trip (' . $bootstrapState . '): check the sports_calibrations table (the method column must fit the bootstrap marker) and the DB error log, then re-run'
+                                : (in_array($bootstrapState, ['BOOTSTRAP_UNREADABLE', 'CALIBRATION_PERSIST_FAILED', 'APPROVE_PERSIST_FAILED'], true)
+                                    ? ' — the engine created its identity bootstrap calibration but the row did not survive the database round-trip (' . $bootstrapState . '): check the sports_calibrations table (the method column must fit the bootstrap marker) and the DB error log, then re-run' . $dbError
                                     : ' — no APPROVED calibration for the deployed model version (create one via POST /api/sports/calibrations/bootstrap-identity, then approve it)');
                         }
                     }
@@ -537,6 +567,31 @@ class DailyTicketService
         $reasonProviders[$reason][$provider] = ($reasonProviders[$reason][$provider] ?? 0) + 1;
     }
 
+    /**
+     * Record one fresh-odds fixture's evaluation against the sufficient-data
+     * gate: mandatory model inputs (e.g. verified recentForm), an APPROVED
+     * calibration, and the data-quality floor. Every requirement's result is
+     * kept — the first failed one is flagged as the primary blocker — so a
+     * "0 sufficient-data fixtures" day shows the exact requirement (and the
+     * concrete missing fields) for each fixture instead of an aggregate zero.
+     */
+    private function recordSufficientDataGate(array &$funnel, array $row): void
+    {
+        $gate = &$funnel['sufficientDataGate'];
+        if ($row['passed']) $gate['passed']++;
+        else {
+            $gate['failed']++;
+            $requirement = (string) ($row['failedRequirement'] ?? 'UNKNOWN');
+            $funnel['sufficientDataFailuresByRequirement'][$requirement]
+                = ($funnel['sufficientDataFailuresByRequirement'][$requirement] ?? 0) + 1;
+        }
+        if (count($gate['fixtures']) < (int) $gate['limit']) {
+            $gate['fixtures'][] = $row;
+        } else {
+            $gate['truncated'] = true;
+        }
+    }
+
     /** Funnel counters for one evaluated candidate (per market:selection). */
     private function trackCandidateFunnel(array $candidate, array &$funnel, float $minConfidence, float $minEv): void
     {
@@ -565,8 +620,21 @@ class DailyTicketService
             'fixturesMissingMandatoryData' => 0,
             'fixturesWithoutCalibration' => 0,
             'calibrationBootstrap' => null,
+            'calibrationBootstrapError' => null,
+            'calibrationId' => null,
             'fixturesBelowQualityFloor' => 0,
             'sufficientDataFixtures' => 0,
+            // One explicit row per fresh-odds fixture, naming exactly which
+            // sufficient-data requirement it failed (no black-box zero).
+            'sufficientDataFailuresByRequirement' => [],
+            'sufficientDataGate' => [
+                'requirements' => ['MANDATORY_MODEL_DATA', 'APPROVED_CALIBRATION', 'DATA_QUALITY_FLOOR'],
+                'limit' => 100,
+                'truncated' => false,
+                'passed' => 0,
+                'failed' => 0,
+                'fixtures' => [],
+            ],
             'generationCap' => 0,
             'fixturesDeferred' => 0,
             'predictionsGenerated' => 0,
@@ -1135,6 +1203,7 @@ class DailyTicketService
             $result = (new CalibrationBootstrap($this->repo, $this->audit))->bootstrapIdentity($actor);
             if (empty($result['ok'])) {
                 $funnel['calibrationBootstrap'] = (string) ($result['reason'] ?? 'UNAVAILABLE');
+                if (!empty($result['dbError'])) $funnel['calibrationBootstrapError'] = (string) $result['dbError'];
                 return;
             }
             $pending = $identityRows('PENDING');
@@ -1149,7 +1218,32 @@ class DailyTicketService
             $funnel['calibrationBootstrap'] = 'BOOTSTRAP_UNREADABLE';
             return;
         }
-        $this->repo->updateCalibrationStatus($id, 'APPROVED', $actor);
+        // The APPROVE write is verified on the SAME record it targeted
+        // (requirement: insert/update round-trip verified by read-back). A
+        // swallowed UPDATE failure used to leave a PENDING row while the
+        // engine believed it was approved — the model then died on
+        // MODEL_NOT_CALIBRATED for no visible reason. Surface the real
+        // database error instead.
+        try {
+            $this->repo->updateCalibrationStatus($id, 'APPROVED', $actor);
+        } catch (\Throwable $e) {
+            $funnel['calibrationBootstrap'] = 'CALIBRATION_PERSIST_FAILED';
+            $funnel['calibrationBootstrapError'] = mb_substr($e->getMessage(), 0, 500);
+            return;
+        }
+        $approvedRow = $this->repo->findCalibration($id);
+        $active = $this->repo->activeCalibration($modelId);
+        if ($approvedRow === null
+            || strtoupper((string) ($approvedRow['status'] ?? '')) !== 'APPROVED'
+            || !CalibrationBootstrap::isIdentityMethod((string) ($approvedRow['method'] ?? ''))
+            || $active === null
+            || (int) ($active['id'] ?? 0) !== $id) {
+            $funnel['calibrationBootstrap'] = 'APPROVE_PERSIST_FAILED';
+            $funnel['calibrationBootstrapError'] = 'the APPROVED update did not survive the database round-trip on calibration id ' . $id
+                . ' (stored status: ' . var_export($approvedRow['status'] ?? null, true)
+                . ', active calibration id: ' . ($active['id'] ?? 'null') . ')';
+            return;
+        }
         $this->audit->emit(
             'SPORTS_CALIBRATION_AUTO_APPROVED',
             'Identity bootstrap calibration auto-approved by the daily ticket engine (intercept 0 / slope 1 — no-op baseline mapping; a fitted Platt calibration supersedes it once approved)',
@@ -1157,6 +1251,7 @@ class DailyTicketService
             $actor
         );
         $funnel['calibrationBootstrap'] = 'IDENTITY_AUTO_APPROVED';
+        $funnel['calibrationId'] = $id;
     }
 
     /** Approved calibration for the candidate's model version, or null (never invented). */

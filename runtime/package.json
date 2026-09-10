@@ -11,5 +11,8 @@
   "dependencies": {
     "@php-wasm/node": "3.1.50",
     "@php-wasm/universal": "3.1.50"
+  },
+  "devDependencies": {
+    "lite4mariadb": "^0.1.2"
   }
 }
