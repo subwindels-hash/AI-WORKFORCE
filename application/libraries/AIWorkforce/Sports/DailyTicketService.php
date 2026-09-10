@@ -2,6 +2,7 @@
 namespace AIWorkforce\Sports;
 
 use AIWorkforce\Backtest\Backtester;
+use AIWorkforce\Football\CanonicalMatch;
 use AIWorkforce\Persistence\AuditRepository;
 use AIWorkforce\Persistence\SportsRepository;
 use AIWorkforce\Sports\Providers\SportsDataProvider;
@@ -131,23 +132,30 @@ class DailyTicketService
                 $message = 'NO VALUE TICKET TODAY — no sports provider configured (DISABLED_NO_PROVIDER); nothing is fabricated';
                 $dataState = 'NO_PROVIDER';
             } else {
-                $attempt = $this->providers->withFallback('fixtures', fn($p) => $p->fixtures(['from' => $date, 'to' => $date]));
-                if (!$attempt['ok']) {
+                // All-provider intake: every registered feed is asked once (one
+                // health probe per provider per run, the circuit breaker
+                // honoured for each), and every answer is kept. A single
+                // provider behaves exactly as before; with several, the same
+                // real match arriving under several ids is merged below and
+                // evaluated once through its most complete row.
+                $sources = $this->fetchFixtureSources($date, $errors);
+                if (!$sources['ok']) {
                     // Every provider failed. This is a DATA outage, not a
                     // prediction outcome: report it as such, keep the
                     // per-provider status codes, and do not claim "no
                     // qualified games" for a day nobody could look at.
                     $status = 'DATA_UNAVAILABLE';
                     $dataState = 'DATA_UNAVAILABLE';
-                    $providerFailures = $attempt['failures'];
-                    $providerStatuses = $attempt['failureStatuses'] ?? [];
-                    $message = 'NO VALUE TICKET TODAY — all configured sports-data providers failed; no data was fabricated — ' . ($attempt['summary'] ?: SportsProviderManager::summarize('fixtures', $providerStatuses));
-                    $errors[] = 'provider failure: ' . json_encode($attempt['failures']);
+                    $providerFailures = $sources['failures'];
+                    $providerStatuses = $sources['failureStatuses'] ?? [];
+                    $message = 'NO VALUE TICKET TODAY — all configured sports-data providers failed; no data was fabricated — ' . ($sources['summary'] ?: SportsProviderManager::summarize('fixtures', $providerStatuses));
+                    $errors[] = 'provider failure: ' . json_encode($sources['failures']);
                     $funnel['providersConfigured'] = count($this->providers->all());
                 } else {
-                    $provider = $attempt['provider'];
-                    $providerId = (int) $this->repo->ensureProvider($provider, $provider)['id'];
+                    $sourceCodes = array_map(fn(array $s): string => $s['provider'], $sources['sources']);
+                    $provider = count($sourceCodes) === 1 ? $sourceCodes[0] : implode(',', $sourceCodes);
                     $funnel['providersConfigured'] = count($this->providers->all());
+                    $funnel['fixtureProviders'] = $sourceCodes;
                     $runtimeNow = time();
 
                     // ── Calibration cold start ────────────────────────────
@@ -175,35 +183,128 @@ class DailyTicketService
                     // Enrichment now runs ONLY on fixtures that already passed
                     // the fixture-eligibility gate, and form verified by an
                     // earlier run is carried forward instead of re-fetched.
-                    $eligibleRaw = [];
-                    $screenedOut = [];
-                    foreach ($attempt['result'] as $rawFixture) {
-                        $rawFixture = $this->carryForwardStoredForm($providerId, $rawFixture, $runtimeNow, $funnel);
-                        try { $probe = SportsDataNormalizer::fixture($rawFixture, $provider); }
-                        catch (\Throwable $e) { $screenedOut[] = $rawFixture; continue; }
-                        if ($this->fixtureEligibleForDailyTicket($probe, $runtimeNow)) $eligibleRaw[] = $rawFixture;
-                        else $screenedOut[] = $rawFixture;
+                    // ── Canonical merge across providers ────────────────────────
+                    // Every source's rows are normalized under their OWN
+                    // provider id, then grouped by canonical identity
+                    // (normalized teams + kickoff date + competition). One real
+                    // match arriving from three feeds is saved three times
+                    // (provider ids stay separate) but evaluated ONCE, through
+                    // the most complete row: eligible beats ineligible (a status
+                    // disagreement must never lose the match), id-carrying rows
+                    // beat bare ones, and registration order breaks ties.
+                    $primaries = [];
+                    $duplicates = [];
+                    $screenedInvalid = [];
+                    $arrival = 0;
+                    $groups = [];
+                    foreach ($sources['sources'] as $source) {
+                        $sourceCode = $source['provider'];
+                        $sourceProviderId = (int) $source['providerId'];
+                        foreach ($source['fixtures'] as $rawFixture) {
+                            $order = $arrival++;
+                            if (!is_array($rawFixture)) {
+                                $screenedInvalid[] = ['provider' => $sourceCode, 'providerId' => $sourceProviderId, 'raw' => [], 'duplicateOf' => null, 'order' => $order];
+                                continue;
+                            }
+                            $rawFixture = $this->carryForwardStoredForm($sourceProviderId, $rawFixture, $runtimeNow, $funnel);
+                            try { $probe = SportsDataNormalizer::fixture($rawFixture, $sourceCode); }
+                            catch (\Throwable $e) { $screenedInvalid[] = ['provider' => $sourceCode, 'providerId' => $sourceProviderId, 'raw' => $rawFixture, 'duplicateOf' => null, 'order' => $order]; continue; }
+                            $groups[$this->canonicalGroupKey($probe)][] = [
+                                'provider' => $sourceCode, 'providerId' => $sourceProviderId, 'raw' => $rawFixture,
+                                'probe' => $probe, 'eligible' => $this->fixtureEligibleForDailyTicket($probe, $runtimeNow),
+                                'duplicateOf' => null, 'order' => $order,
+                            ];
+                        }
                     }
-                    $funnel['formEnrichmentCandidates'] = count($eligibleRaw);
-                    // Enrich the ticket-eligible fixtures, then hand the whole
-                    // day's list (ineligible ones untouched) to the screening
-                    // loop so evaluation counts and rejection reasons stay
-                    // exactly as honest as before.
-                    $enrichedFixtures = array_merge($this->formResolver->enrich($this->providers->provider($provider), $eligibleRaw), $screenedOut);
+                    foreach ($groups as $groupKey => $entries) {
+                        $best = null;
+                        $bestScore = null;
+                        foreach ($entries as $entry) {
+                            $score = $this->canonicalEntryScore($entry);
+                            if ($best === null || $score > $bestScore) { $best = $entry; $bestScore = $score; }
+                        }
+                        $primaries[] = $best;
+                        if (count($entries) === 1) continue;
+                        $primaryRef = $best['provider'] . ':' . $best['probe']['externalId'];
+                        $dropped = [];
+                        foreach ($entries as $entry) {
+                            if ($entry['order'] === $best['order']) continue;
+                            $entry['duplicateOf'] = $primaryRef;
+                            $duplicates[] = $entry;
+                            $dropped[] = $entry['provider'] . ':' . $entry['probe']['externalId'];
+                        }
+                        $dupRows = &$funnel['duplicateFixtures']['rows'];
+                        if (count($dupRows) < 50) $dupRows[] = ['canonical' => $groupKey, 'kept' => $primaryRef, 'dropped' => $dropped];
+                        else $funnel['duplicateFixtures']['truncated'] = true;
+                        unset($dupRows);
+                    }
+                    usort($primaries, fn(array $a, array $b) => $a['order'] <=> $b['order']);
+
+                    // ── Form enrichment, spent where it can still win a ticket,
+                    // per fixture provider (team ids are provider-specific). Only
+                    // eligible PRIMARIES are enriched — duplicates never reach a
+                    // gate, so spending lookups on them would burn quota for
+                    // rows the engine throws away.
+                    $eligiblePrimaryIndexes = [];
+                    foreach ($primaries as $i => $entry) {
+                        if ($entry['eligible']) $eligiblePrimaryIndexes[$entry['provider']][] = $i;
+                    }
+                    $funnel['formEnrichmentCandidates'] = array_sum(array_map('count', $eligiblePrimaryIndexes));
+                    $instanceByCode = [];
+                    foreach ($sources['sources'] as $source) $instanceByCode[$source['provider']] = $source['instance'];
+                    $formStats = ['lookupsUsed' => 0, 'lookupFailures' => 0, 'budgetSkips' => 0, 'budget' => 0, 'providerCapable' => true];
+                    foreach ($eligiblePrimaryIndexes as $code => $indexes) {
+                        $raws = [];
+                        foreach ($indexes as $i) $raws[] = $primaries[$i]['raw'];
+                        $enriched = $this->formResolver->enrich($instanceByCode[$code], $raws);
+                        foreach ($indexes as $k => $i) $primaries[$i]['raw'] = $enriched[$k] ?? $primaries[$i]['raw'];
+                        $stats = $this->formResolver->stats();
+                        $formStats['lookupsUsed'] += (int) ($stats['lookupsUsed'] ?? 0);
+                        $formStats['lookupFailures'] += (int) ($stats['lookupFailures'] ?? 0);
+                        $formStats['budgetSkips'] += (int) ($stats['budgetSkips'] ?? 0);
+                        $formStats['budget'] = (int) ($stats['budget'] ?? 0);
+                        $formStats['providerCapable'] = $formStats['providerCapable'] && !empty($stats['providerCapable']);
+                    }
+                    // The screening queue keeps the established shape — enriched
+                    // eligible rows first, everything else in arrival order — so
+                    // evaluation counts and rejection reasons stay exactly as
+                    // honest as before.
+                    $screeningQueue = [];
+                    foreach ($primaries as $entry) {
+                        if ($entry['eligible']) $screeningQueue[] = $entry;
+                    }
+                    $tail = [];
+                    foreach ($primaries as $entry) {
+                        if (!$entry['eligible']) $tail[] = $entry;
+                    }
+                    foreach ($duplicates as $entry) $tail[] = $entry;
+                    foreach ($screenedInvalid as $entry) $tail[] = $entry;
+                    usort($tail, fn(array $a, array $b) => $a['order'] <=> $b['order']);
+                    foreach ($tail as $entry) $screeningQueue[] = $entry;
                     // Form enrichment is the single most common INSUFFICIENT_DATA
                     // cause, and it used to be invisible. Count what enrichment
                     // actually delivered and why, and carry both on the funnel.
                     $formEnriched = 0;
-                    foreach ($enrichedFixtures as $f) {
-                        if (!empty($f['context']['recentForm'])) $formEnriched++;
+                    foreach ($screeningQueue as $queued) {
+                        if (!empty($queued['raw']['context']['recentForm'])) $formEnriched++;
                     }
                     $funnel['fixturesWithRecentForm'] = $formEnriched;
-                    $funnel['formResolver'] = $this->formResolver->stats();
+                    $funnel['formResolver'] = $formStats;
                     // Bulk-fetch the day's odds in one round() call per
-                    // matchday when the fixture provider exposes the round
-                    // endpoint (round ids are provider-specific — only the
-                    // fixture's own provider is asked).
-                    $roundOdds = $this->fetchRoundOdds($this->providers->provider($provider), $enrichedFixtures, $errors);
+                    // matchday when a fixture provider exposes the round
+                    // endpoint (round ids are provider-specific — each provider
+                    // is asked only for its own ELIGIBLE primaries' rounds, so
+                    // no request is spent on fixtures the gates throw away).
+                    $roundOdds = [];
+                    foreach ($sources['sources'] as $source) {
+                        $code = $source['provider'];
+                        $eligibleRaws = [];
+                        foreach ($primaries as $entry) {
+                            if ($entry['eligible'] && $entry['provider'] === $code) $eligibleRaws[] = $entry['raw'];
+                        }
+                        if ($eligibleRaws === []) continue;
+                        $roundOdds[$code] = $this->fetchRoundOdds($source['instance'], $eligibleRaws, $errors);
+                    }
                     $candidates = [];
                     $allCandidates = [];        // every generated candidate, qualified or not (Top Picks pool)
                     $minConfidence = (float) $config['min_confidence'];
@@ -215,20 +316,32 @@ class DailyTicketService
                     // ── Screening: every shared upstream gate, cheap, no model.
                     // A fixture that fails here is rejected ONCE with one
                     // primary reason — never per market:selection.
-                    foreach ($enrichedFixtures as $rawFixture) {
+                    foreach ($screeningQueue as $queued) {
+                        $itemProvider = (string) $queued['provider'];
+                        $itemProviderId = (int) $queued['providerId'];
                         try {
-                            $match = SportsDataNormalizer::fixture($rawFixture, $provider);
-                            $saved = $this->repo->saveMatch($providerId, $match);
+                            $match = SportsDataNormalizer::fixture($queued['raw'], $itemProvider);
+                            $saved = $this->repo->saveMatch($itemProviderId, $match);
                         } catch (\Throwable $e) {
                             $errors[] = 'fixture rejected: ' . mb_substr($e->getMessage(), 0, 200);
                             continue;
                         }
                         $evaluated++;
 
+                        // Merged duplicate: saved under its own provider (ids
+                        // stay separate) but never evaluated — its canonical
+                        // primary carries the match through the gates exactly
+                        // once. A duplicate is neither a rejection nor a
+                        // deferral; it is counted, never hidden.
+                        if (!empty($queued['duplicateOf'])) {
+                            $funnel['fixturesDeduped']++;
+                            continue;
+                        }
+
                         // ── Stage 1: fixture eligibility ─────────────────────
                         if (!$this->fixtureEligibleForDailyTicket($match, $runtimeNow)) {
                             $rejections++;
-                            $this->countRejection($rejectionSummary, 'FIXTURE_NOT_NS_OR_TOO_SOON', $reasonProviders, $provider);
+                            $this->countRejection($rejectionSummary, 'FIXTURE_NOT_NS_OR_TOO_SOON', $reasonProviders, $itemProvider);
                             continue;
                         }
                         $funnel['eligibleFixtures']++;
@@ -239,10 +352,10 @@ class DailyTicketService
                         $contextFields = $this->contextFields($matchRow);
 
                         // ── Stage 3: odds availability / freshness ──────────
-                        $oddsStage = $this->resolveUsableOdds($matchRow, $provider, $roundOdds, $errors, $runtimeNow, $funnel);
+                        $oddsStage = $this->resolveUsableOdds($matchRow, $itemProvider, $roundOdds[$itemProvider] ?? [], $errors, $runtimeNow, $funnel);
                         if (!$oddsStage['ok']) {
                             $rejections++;
-                            $this->countRejection($rejectionSummary, $oddsStage['reason'], $reasonProviders, $oddsStage['provider'] ?? $provider);
+                            $this->countRejection($rejectionSummary, $oddsStage['reason'], $reasonProviders, $oddsStage['provider'] ?? $itemProvider);
                             continue;
                         }
                         $usableOdds = $oddsStage['rows'];
@@ -250,7 +363,7 @@ class DailyTicketService
 
                         // ── Stage 4: data quality (market-aware, transparent) ─
                         $markets = array_values(array_unique(array_map(fn($r) => $r['market'], $usableOdds)));
-                        $reliability = (float) ($this->providerHealth($provider)['reliability'] ?? 0);
+                        $reliability = (float) ($this->providerHealth($itemProvider)['reliability'] ?? 0);
                         $qualityAssessment = $this->quality->assess($match, $this->qualityContext($contextFields, $oddsStage, $reliability, $markets, $minQuality));
                         $this->repo->saveQuality((int) $saved['id'], $qualityAssessment);
 
@@ -287,7 +400,7 @@ class DailyTicketService
                             'awayTeam' => (string) ($match['awayTeam'] ?? ''),
                             'competition' => (string) ($match['competition'] ?? ''),
                             'kickoff' => (string) ($match['kickoff'] ?? ''),
-                            'provider' => (string) $provider,
+                            'provider' => $itemProvider,
                             'oddsMarkets' => $markets,
                             'passed' => $failedRequirement === null,
                             'failedRequirement' => $failedRequirement,
@@ -300,7 +413,7 @@ class DailyTicketService
                         ]);
                         if ($failedRequirement !== null) {
                             $rejections++;
-                            $this->countRejection($rejectionSummary, $primaryReason, $reasonProviders, $provider);
+                            $this->countRejection($rejectionSummary, $primaryReason, $reasonProviders, $itemProvider);
                             if ($failedRequirement === 'MANDATORY_MODEL_DATA') $funnel['fixturesMissingMandatoryData']++;
                             elseif ($failedRequirement === 'APPROVED_CALIBRATION') $funnel['fixturesWithoutCalibration']++;
                             else $funnel['fixturesBelowQualityFloor']++;
@@ -311,6 +424,7 @@ class DailyTicketService
                         $predictable[] = [
                             'match' => $match,
                             'matchRow' => $matchRow,
+                            'provider' => $itemProvider,
                             'quality' => $qualityAssessment,
                             'calibration' => $calibration,
                             'odds' => $usableOdds,
@@ -322,17 +436,47 @@ class DailyTicketService
 
                     // ── Generation: bounded, deterministic, never regenerating
                     // a stored prediction. MAXIMUM GENERATION is capped (50 by
-                    // default); fixtures past the cap are DEFERRED — honestly
-                    // reported, never silently dropped — and the deterministic
-                    // (kickoff, externalId) order keeps pages stable.
+                    // default); the fixtures most in need of fresh predictions
+                    // are generated first, and fixtures past the cap whose
+                    // markets already have reusable stored predictions are
+                    // still EVALUATED (linked, never re-recorded) so the
+                    // ticket pool covers the full stored pool. Fixtures past
+                    // the cap with nothing reusable are DEFERRED — honestly
+                    // reported and named, never silently dropped — and the
+                    // deterministic order keeps pages stable.
                     $funnel['generationCap'] = $this->generationCap();
-                    usort($predictable, fn(array $a, array $b) => [$a['kickoff'], $a['externalId']] <=> [$b['kickoff'], $b['externalId']]);
+                    if ($predictable !== []) {
+                        // The model version is constant for the whole run (the
+                        // lookup ignores the calibration label), so resolve it
+                        // once instead of per candidate — and read every
+                        // fixture's reusable stored predictions BEFORE slicing,
+                        // so the capped slice covers the fixtures that need
+                        // generation most. On a fresh run every fixture ties
+                        // and the order is exactly (kickoff, externalId).
+                        $modelVersionId = $this->modelVersionIdFor([
+                            'modelName' => PredictionEngine::MODEL_NAME,
+                            'modelVersion' => PredictionEngine::MODEL_VERSION,
+                            'featureVersion' => FeatureEngineeringEngine::VERSION,
+                        ]);
+                        foreach ($predictable as &$predictableItem) {
+                            $predictableItem['previousByKey'] = $this->previousPredictionsFor((int) $predictableItem['matchRow']['id'], $recordedThisRun);
+                            $missing = 0;
+                            foreach ($predictableItem['odds'] as $oddsRow) {
+                                $prev = $predictableItem['previousByKey'][$oddsRow['market'] . ':' . $oddsRow['selection']] ?? null;
+                                if (!$this->reusablePrevious($prev, $modelVersionId, $oddsRow['decimalOdds'] ?? null, $oddsRow['observedAt'] ?? null)) $missing++;
+                            }
+                            $predictableItem['missingCoverage'] = $missing;
+                        }
+                        unset($predictableItem);
+                    }
+                    usort($predictable, fn(array $a, array $b) => [$b['missingCoverage'] ?? 0, $a['kickoff'], $a['externalId']] <=> [$a['missingCoverage'] ?? 0, $b['kickoff'], $b['externalId']]);
                     $generate = array_slice($predictable, 0, $funnel['generationCap']);
-                    $funnel['fixturesDeferred'] = count($predictable) - count($generate);
+                    $beyondCap = array_slice($predictable, $funnel['generationCap']);
+                    $fixturesDeferred = 0;
 
                     foreach ($generate as $item) {
                         $matchRow = $item['matchRow'];
-                        $previousByKey = $this->previousPredictionsFor((int) $matchRow['id'], $recordedThisRun);
+                        $previousByKey = $item['previousByKey'];
 
                         // ── Stages 6–10: per-market prediction → probability →
                         // confidence → data quality → value/edge → risk ──────
@@ -368,13 +512,8 @@ class DailyTicketService
                             // Intelligent refresh: a stored prediction of the
                             // same selection, model version and identical odds
                             // is REUSED, never duplicated by paging or re-runs.
-                            if ($modelVersionId === null) $modelVersionId = $this->modelVersionIdFor($candidate['prediction']);
                             $previous = $previousByKey[$odds['market'] . ':' . $odds['selection']] ?? null;
-                            if ($previous !== null
-                                && $modelVersionId !== null
-                                && (int) ($previous['model_version_id'] ?? 0) === $modelVersionId
-                                && is_numeric($previous['odds'] ?? null) && (float) $previous['odds'] === (float) $candidate['odds']
-                                && (string) ($previous['odds_timestamp'] ?? '') === (string) $candidate['oddsTimestamp']) {
+                            if ($this->reusablePrevious($previous, $modelVersionId, $candidate['odds'], $candidate['oddsTimestamp'])) {
                                 $funnel['predictionsReused']++;
                                 $candidate['predictionId'] = $previous['id'] ?? null;
                             } else {
@@ -401,12 +540,53 @@ class DailyTicketService
                             if ($candidate['decision'] === 'REJECTED') {
                                 $rejections++;
                                 $primary = $candidate['primaryReason'] ?? ($candidate['rejectionReasons'][0] ?? 'NO_PREDICTION');
-                                $this->countRejection($rejectionSummary, $primary, $reasonProviders, $odds['oddsSource'] ?? $provider);
+                                $this->countRejection($rejectionSummary, $primary, $reasonProviders, $odds['oddsSource'] ?? $item['provider']);
                             } else {
                                 $candidates[] = $candidate;
                             }
                         }
                     }
+
+                    // Past the cap: no new predictions are RECORDED, but every
+                    // market with a reusable stored prediction is still
+                    // evaluated (the stored id is linked, the pipeline re-runs
+                    // on the same inputs) so a NO_QUALIFIED_TICKET verdict and
+                    // the Top Picks pool reflect the whole stored pool — not
+                    // just the capped slice. A fixture with nothing reusable
+                    // stays deferred: named on the funnel, never evaluated.
+                    foreach ($beyondCap as $item) {
+                        $evaluatedMarkets = 0;
+                        foreach ($item['odds'] as $odds) {
+                            $previous = $item['previousByKey'][$odds['market'] . ':' . $odds['selection']] ?? null;
+                            if (!$this->reusablePrevious($previous, $modelVersionId, $odds['decimalOdds'] ?? null, $odds['observedAt'] ?? null)) continue;
+                            $candidate = $this->pipeline->evaluate($item['matchRow'], $odds, $item['quality'], $item['calibration'], $config, $runtimeNow, [
+                                'marketPrices' => $item['marketPrices'][$odds['market']] ?? [],
+                                'previousPrediction' => $previous,
+                                'matchUpdatedAt' => $item['matchRow']['updated_at'] ?? null,
+                            ]);
+                            $candidate['predictionId'] = $previous['id'] ?? null;
+                            $funnel['predictionsReused']++;
+                            $this->trackCandidateFunnel($candidate, $funnel, $minConfidence, $minEv);
+                            $allCandidates[] = $candidate;
+                            if ($candidate['decision'] === 'REJECTED') {
+                                $rejections++;
+                                $primary = $candidate['primaryReason'] ?? ($candidate['rejectionReasons'][0] ?? 'NO_PREDICTION');
+                                $this->countRejection($rejectionSummary, $primary, $reasonProviders, $odds['oddsSource'] ?? $item['provider']);
+                            } else {
+                                $candidates[] = $candidate;
+                            }
+                            $evaluatedMarkets++;
+                        }
+                        if ($evaluatedMarkets === 0) {
+                            $fixturesDeferred++;
+                            $deferredRows = &$funnel['deferredFixtures']['rows'];
+                            if (count($deferredRows) < 50) {
+                                $deferredRows[] = ['matchId' => (int) $item['matchRow']['id'], 'externalId' => (string) $item['externalId'], 'provider' => (string) $item['provider'], 'kickoff' => (string) $item['kickoff']];
+                            } else $funnel['deferredFixtures']['truncated'] = true;
+                            unset($deferredRows);
+                        }
+                    }
+                    $funnel['fixturesDeferred'] = $fixturesDeferred;
 
                     // ── Stage 11: correlation → final ticket ────────────────
                     if (count($candidates) > 0) {
@@ -430,14 +610,18 @@ class DailyTicketService
                                 $message = $status === 'APPROVED' ? 'ticket generated and auto-approved (AUTOMATED_EXECUTION); no external execution' : 'odds prediction ticket generated; awaiting user approval';
                             }
                         } else {
-                            $message = 'NO VALUE TICKET TODAY — ' . ($optimized['reason'] ?? 'no compliant combination');
+                            // No compliant combination: an honest no-ticket day,
+                            // with the optimizer's reason kept as the diagnosis.
+                            $message = 'NO QUALIFIED TICKET — ' . "Today's available matches did not meet the configured prediction requirements"
+                                . ' (' . ($optimized['reason'] ?? 'no compliant combination') . ')';
                         }
                     }
                     if ($ticketId === null && $message === '') {
-                        $confidenceFloor = number_format((float) ($config['min_confidence'] ?? 30.0), 0);
+                        $confidenceFloor = number_format((float) ($config['min_confidence'] ?? 75.0), 0);
                         $message = $evaluated === 0
                             ? 'NO VALUE TICKET TODAY — no verified fixtures received for ' . $date
-                            : 'NO VALUE TICKET TODAY — no candidate passed the eligibility, odds, ' . $confidenceFloor . '%+ confidence, quality, risk/value and correlation gates';
+                            : 'NO QUALIFIED TICKET — ' . "Today's available matches did not meet the configured prediction requirements"
+                                . ' (no candidate passed the eligibility, odds, ' . $confidenceFloor . '%+ confidence, quality, risk/value and correlation gates)';
                     }
                     if ($ticketId === null) {
                         // Targeted diagnosis of the two most common upstream dead
@@ -608,6 +792,14 @@ class DailyTicketService
     {
         return [
             'providersConfigured' => 0,
+            // Every provider that delivered fixtures this run (all-provider
+            // intake), in registration order.
+            'fixtureProviders' => [],
+            // Canonical duplicates merged away: saved under their own provider,
+            // evaluated once through the primary. Rows are capped; the count
+            // never is.
+            'fixturesDeduped' => 0,
+            'duplicateFixtures' => ['truncated' => false, 'rows' => []],
             'eligibleFixtures' => 0,
             'fixturesWithRecentForm' => 0,
             'fixturesWithCarriedForwardForm' => 0,
@@ -637,6 +829,10 @@ class DailyTicketService
             ],
             'generationCap' => 0,
             'fixturesDeferred' => 0,
+            // Fixtures past the generation cap with no reusable stored
+            // prediction — honestly unevaluated for this run's ticket, named
+            // here instead of vanishing. Rows are capped; the count never is.
+            'deferredFixtures' => ['truncated' => false, 'rows' => []],
             'predictionsGenerated' => 0,
             'predictionsReused' => 0,
             'sufficientDataCandidates' => 0,
@@ -674,6 +870,7 @@ class DailyTicketService
     private function funnelSummary(array $funnel, int $evaluated, int $recorded, int $rejections): string
     {
         $extra = '';
+        if (!empty($funnel['fixturesDeduped'])) $extra .= sprintf(', %d merged duplicates evaluated once', (int) $funnel['fixturesDeduped']);
         if (!empty($funnel['fixturesDeferred'])) $extra .= sprintf(', %d deferred by the %d-generation cap', (int) $funnel['fixturesDeferred'], (int) ($funnel['generationCap'] ?? 0));
         if (!empty($funnel['predictionsReused'])) $extra .= sprintf(', %d reused', (int) $funnel['predictionsReused']);
         if (!empty($funnel['fixturesWithCarriedForwardForm'])) $extra .= sprintf(', %d form carried forward', (int) $funnel['fixturesWithCarriedForwardForm']);
@@ -741,15 +938,24 @@ class DailyTicketService
         });
         $picks = [];
         foreach (array_slice($ready, 0, $this->fairValueConfiguration()->picksLimit()) as $c) {
+            // The transparent output row: internal match id, league, teams,
+            // kickoff, odds provider, market, selection, price + timestamp,
+            // confidence, quality, value/edge, risk and decision status — every
+            // field the row behind a pick must answer, none invented.
             $picks[] = [
+                'matchId' => $c['matchId'] ?? null,
                 'match' => ($c['match']['homeTeam'] ?? '?') . ' vs ' . ($c['match']['awayTeam'] ?? '?'),
+                'homeTeam' => $c['match']['homeTeam'] ?? null,
+                'awayTeam' => $c['match']['awayTeam'] ?? null,
                 'kickoff' => $c['match']['kickoff'] ?? null,
                 'competition' => $c['match']['competition'] ?? null,
+                'provider' => $c['oddsSource'] ?? null,
                 'market' => $c['market'],
                 'selection' => $c['selection'],
                 'modelProbability' => $c['prediction']['calibratedProbability'] ?? null,
                 'windelsFairOdds' => $c['value']['fairOdds'] ?? null,
                 'marketOdds' => $c['value']['marketOdds'] ?? null,
+                'oddsTimestamp' => $c['oddsTimestamp'] ?? null,
                 'marketFairOdds' => $c['value']['marketFairOdds'] ?? null,
                 'marginPoints' => $c['value']['marginPoints'] ?? null,
                 'edgePoints' => $c['value']['edgePoints'] ?? null,
@@ -759,10 +965,12 @@ class DailyTicketService
                 'valueReason' => $c['value']['valueReason'] ?? null,
                 'confidence' => $c['confidence']['confidence'] ?? null,
                 'dataQuality' => $c['quality']['score'] ?? null,
+                'risk' => ['classification' => $c['risk']['classification'] ?? null, 'approved' => !empty($c['risk']['approved'])],
                 'intelligenceScore' => ['score' => $c['intelligenceScore']['score'] ?? null, 'band' => $c['intelligenceScore']['band'] ?? null],
                 'stability' => ['state' => $c['stability']['state'] ?? null, 'movementPoints' => $c['stability']['movementPoints'] ?? null],
                 'why' => $this->whyOf($c['drivers'] ?? null),
                 'qualified' => ($c['decision'] ?? '') === 'QUALIFIED',
+                'status' => $c['decision'] ?? null,
                 'primaryReason' => $c['primaryReason'] ?? null,
             ];
         }
@@ -802,6 +1010,88 @@ class DailyTicketService
             if ($existing === null || $created > (int) strtotime((string) ($existing['created_at'] ?? ''))) $out[$key] = $row;
         }
         return $out;
+    }
+
+    /**
+     * Fixture intake across every registered provider: each feed is asked once
+     * (circuit breaker and one health probe per provider per run), and every
+     * answer is kept with its own provider row id. A failed provider is
+     * recorded and skipped; only when NO provider answered is the day a data
+     * outage.
+     *
+     * @return array{ok:bool, sources?:list<array{provider:string, providerId:int, instance:?SportsDataProvider, fixtures:array}>, failures:array<string,string>, failureStatuses:array<string,string>, summary:string}
+     */
+    private function fetchFixtureSources(string $date, array &$errors): array
+    {
+        $collected = $this->providers->collectAll('fixtures', fn(SportsDataProvider $p) => $p->fixtures(['from' => $date, 'to' => $date]));
+        $sources = [];
+        foreach ($collected['results'] as $code => $fixtures) {
+            if (!is_array($fixtures)) {
+                $collected['failures'][$code] = 'DATA_ERROR: provider returned no fixture list';
+                $collected['failureStatuses'][$code] = 'DATA_ERROR';
+                $errors[] = 'provider failure: ' . $code . ' returned no fixture list';
+                continue;
+            }
+            try {
+                $providerId = (int) $this->repo->ensureProvider($code, $code)['id'];
+            } catch (\Throwable $e) {
+                $collected['failures'][$code] = 'DATA_ERROR: ' . mb_substr($e->getMessage(), 0, 160);
+                $collected['failureStatuses'][$code] = 'DATA_ERROR';
+                $errors[] = 'provider failure: ' . $code . ' provider row unavailable';
+                continue;
+            }
+            $sources[] = ['provider' => $code, 'providerId' => $providerId, 'instance' => $this->providers->provider($code), 'fixtures' => $fixtures];
+        }
+        if ($sources === []) {
+            return ['ok' => false, 'failures' => $collected['failures'], 'failureStatuses' => $collected['failureStatuses'], 'summary' => $collected['summary']];
+        }
+        return ['ok' => true, 'sources' => $sources, 'failures' => $collected['failures'], 'failureStatuses' => $collected['failureStatuses'], 'summary' => ''];
+    }
+
+    /**
+     * Canonical group key for cross-provider merging: normalized teams +
+     * kickoff date + normalized competition. Rows that group together are one
+     * real match under several provider ids; rows that do not are evaluated
+     * separately. The competition is part of the key so same-club fixtures in
+     * different competitions (men/women, league/cup) never merge.
+     */
+    private function canonicalGroupKey(array $probe): string
+    {
+        $identity = CanonicalMatch::identity((string) ($probe['homeTeam'] ?? ''), (string) ($probe['awayTeam'] ?? ''), (string) ($probe['kickoff'] ?? ''));
+        $competition = CanonicalMatch::slug((string) ($probe['competition'] ?? ''));
+        return $identity . '|' . $competition;
+    }
+
+    /**
+     * Which row of a canonical group carries the match through the gates.
+     * Eligible beats ineligible (a cross-provider status disagreement must
+     * never lose the match), id-carrying rows beat bare ones (form is only
+     * resolvable with ids), then season, then already-present form. Ties keep
+     * registration order — deterministic, operator-controlled priority.
+     */
+    private function canonicalEntryScore(array $entry): int
+    {
+        $raw = $entry['raw'];
+        $score = !empty($entry['eligible']) ? 8 : 0;
+        if (!empty($raw['homeTeamId']) && !empty($raw['awayTeamId']) && (!empty($raw['leagueId']) || !empty($entry['probe']['leagueId']))) $score += 4;
+        if (trim((string) ($raw['season'] ?? '')) !== '') $score += 2;
+        if (!empty($raw['context']['recentForm'])) $score += 1;
+        return $score;
+    }
+
+    /**
+     * Whether a stored prediction row is reusable for a market price: same
+     * model version, identical decimal odds and identical observed timestamp.
+     * The pipeline still re-runs on reuse (a fresh evaluation); only the
+     * duplicate RECORD is skipped — paging and re-runs never duplicate one.
+     */
+    private function reusablePrevious(?array $previous, ?int $modelVersionId, mixed $decimalOdds, mixed $observedAt): bool
+    {
+        return $previous !== null
+            && $modelVersionId !== null
+            && (int) ($previous['model_version_id'] ?? 0) === $modelVersionId
+            && is_numeric($previous['odds'] ?? null) && (float) $previous['odds'] === (float) $decimalOdds
+            && (string) ($previous['odds_timestamp'] ?? '') === (string) $observedAt;
     }
 
     /** The bounded per-run generation cap (MAXIMUM GENERATION, design §9). */
@@ -916,6 +1206,8 @@ class DailyTicketService
      * inside the TTL is used as-is, never re-fetched, never marked stale
      * merely because it was not refreshed during this run.
      *
+     * @param array $roundOdds the fixture provider's OWN bulk rows, keyed by
+     * that provider's external fixture id (round namespaces never mix).
      * @return array{ok:bool, reason?:string, provider?:string, rows:array, staleCount:int, refreshTried:bool}
      */
     private function resolveUsableOdds(array $matchRow, string $fixtureProvider, array $roundOdds, array &$errors, int $now, array &$funnel): array
@@ -1093,7 +1385,11 @@ class DailyTicketService
             $decimal = $row['decimalOdds'] ?? $row['decimal_odds'] ?? null;
             $observed = $row['observedAt'] ?? $row['observed_at'] ?? null;
             if ($market === '' || $selection === '') continue;
-            if (!is_numeric($decimal) || (float) $decimal <= 1.0 || !is_finite((float) $decimal)) continue;
+            // Stored rows are re-validated on the way out: a corrupted price
+            // written before the ingestion guard existed (zero, absurd, or
+            // above the market's plausibility ceiling) is skipped here — a
+            // legacy row must never become a ticket leg.
+            if (!OddsBounds::validDecimalOdds($decimal, $market)) continue;
             if (!$observed) continue;
             $key = $market . ':' . $selection;
             if (!isset($latest[$key]) || strcmp((string) $observed, (string) $latest[$key]['observedAt']) > 0) {

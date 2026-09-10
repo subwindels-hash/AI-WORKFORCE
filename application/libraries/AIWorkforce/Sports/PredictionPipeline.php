@@ -108,8 +108,13 @@ class PredictionPipeline
         $candidate = [
             'matchId' => $match['id'] ?? null,
             'match' => $intel['match'],
-            'market' => $odds ? strtoupper((string) ($odds['market'] ?? '')) : 'TOTAL_GOALS',
-            'selection' => $odds ? strtoupper((string) ($odds['selection'] ?? '')) : 'OVER_1_5',
+            // With no odds row there is no market and no selection — never a
+            // defaulted TOTAL_GOALS/OVER_1_5. The odds-availability stage
+            // below rejects such a candidate as ODDS_UNAVAILABLE; the nulls
+            // only make the absence explicit on the record instead of wearing
+            // another market's clothes.
+            'market' => $odds ? strtoupper((string) ($odds['market'] ?? '')) : null,
+            'selection' => $odds ? strtoupper((string) ($odds['selection'] ?? '')) : null,
             'odds' => $odds ? (float) ($odds['decimalOdds'] ?? $odds['decimal_odds'] ?? 0) : null,
             'oddsTimestamp' => $odds ? ($odds['observedAt'] ?? $odds['observed_at'] ?? null) : null,
             // Odds provenance, stored with every candidate/decision record.
@@ -210,7 +215,7 @@ class PredictionPipeline
         $stage('dataQuality', ($quality['score'] ?? 0) >= $minQuality ? 'PASSED' : 'FAILED', 'LOW_DATA_QUALITY');
 
         // ── Stage 7: value / edge (model probability vs real market odds) ─
-        $value = $this->value->assess($prediction ?? ['decision' => 'NO_PREDICTION'], $odds !== null ? ['decimalOdds' => (float) ($odds['decimalOdds'] ?? $odds['decimal_odds'] ?? 0)] : ['decimalOdds' => 0]);
+        $value = $this->value->assess($prediction ?? ['decision' => 'NO_PREDICTION'], $odds !== null ? ['decimalOdds' => (float) ($odds['decimalOdds'] ?? $odds['decimal_odds'] ?? 0), 'market' => (string) $candidate['market']] : ['decimalOdds' => 0]);
         if (!$predictionReady) {
             $stage('valueEdge', 'SKIPPED', null);
         } else {

@@ -323,9 +323,10 @@ class AIWorkforce_model extends CI_Model
                 foreach ($rows as $row) {
                     $total = (int) $row['home_score'] + (int) $row['away_score'];
                     // Binary outcome per predicted market; unknown markets are excluded (never guessed).
-                    if ($row['market'] === 'TOTAL_GOALS' && $row['selection'] === 'OVER_1_5') $row['outcome'] = $total > 1 ? 1 : 0;
-                    elseif ($row['market'] === 'TOTAL_GOALS' && $row['selection'] === 'UNDER_1_5') $row['outcome'] = $total <= 1 ? 1 : 0;
-                    else continue;
+                    $outcomeLine = $row['market'] === 'TOTAL_GOALS' ? \AIWorkforce\Sports\PredictionEngine::totalsLine((string) ($row['selection'] ?? '')) : null;
+                    if ($outcomeLine === null) continue;
+                    $outcomeOver = $total > $outcomeLine[0];
+                    $row['outcome'] = (($outcomeLine[1] === 'OVER') ? $outcomeOver : !$outcomeOver) ? 1 : 0;
                     $out[] = $row;
                 }
                 return $out;
@@ -430,7 +431,23 @@ class AIWorkforce_model extends CI_Model
             }
             public function finishSync(string $id, array $result): void { $this->db->where('id', $id)->update('sports_sync_runs', ['status' => $result['status'], 'ended_at' => gmdate('c'), 'records_processed' => $result['processed'] ?? 0, 'records_created' => $result['created'] ?? 0, 'records_updated' => $result['updated'] ?? 0, 'errors' => json_encode($result['errors'] ?? [])]); }
             public function listSyncRuns(?string $jobType = null, int $limit = 50): array { if ($jobType !== null) $this->db->where('job_type', $jobType); $rows = $this->db->order_by('started_at', 'DESC')->limit(min(500, max(1, $limit)))->get('sports_sync_runs')->result_array(); foreach ($rows as &$row) { $row['errors'] = json_decode((string) ($row['errors'] ?? '[]'), true) ?: []; } return $rows; }
-            public function ensureModelVersion(array $m): int { $row = $this->db->get_where('sports_model_versions', ['model_name' => $m['modelName'], 'model_version' => $m['modelVersion']], 1)->row_array(); if ($row) return (int)$row['id']; $this->db->insert('sports_model_versions', ['model_name' => $m['modelName'], 'model_version' => $m['modelVersion'], 'feature_version' => $m['featureVersion'], 'calibration_version' => $m['calibrationVersion'] ?? null, 'status' => $m['status'] ?? 'DRAFT', 'created_at' => gmdate('c')]); return (int)$this->db->insert_id(); }
+            public function ensureModelVersion(array $m): int {
+                $row = $this->db->get_where('sports_model_versions', ['model_name' => $m['modelName'], 'model_version' => $m['modelVersion']], 1)->row_array();
+                if ($row) return (int)$row['id'];
+                $ok = $this->db->insert('sports_model_versions', ['model_name' => $m['modelName'], 'model_version' => $m['modelVersion'], 'feature_version' => $m['featureVersion'], 'calibration_version' => $m['calibrationVersion'] ?? null, 'status' => $m['status'] ?? 'DRAFT', 'created_at' => gmdate('c')]);
+                $id = (int)$this->db->insert_id();
+                if ($ok === false || $id <= 0) {
+                    // A concurrent run may have won the insert race (duplicate
+                    // key): re-read before failing, so the loser uses the
+                    // winner's row instead of a phantom id 0 that would orphan
+                    // every calibration lookup downstream (a MODEL_NOT_CALIBRATED
+                    // lock-out with no visible cause).
+                    $row = $this->db->get_where('sports_model_versions', ['model_name' => $m['modelName'], 'model_version' => $m['modelVersion']], 1)->row_array();
+                    if ($row) return (int)$row['id'];
+                    $this->mustWrite(false, 'sports_model_versions', $id <= 0 ? 'INSERT (no insert id returned)' : 'INSERT');
+                }
+                return $id;
+            }
             public function savePrediction(array $p): void { $this->db->insert('sports_predictions', $p); }
             public function saveTicket(array $t): void { $this->db->insert('sports_tickets', $t); }
             public function saveTicketSelection(array $s): void { $this->db->insert('sports_ticket_selections', $s); }

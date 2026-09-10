@@ -20,13 +20,13 @@ class TicketOptimizer
     {
         $min = max(5.0, (float) ($config['targetOddsMin'] ?? 5.0));
         $max = min(8.0, (float) ($config['targetOddsMax'] ?? 8.0));
-        $limit = min(6, max(1, (int) ($config['maxSelections'] ?? 6)));
+        $limit = min(6, max(1, (int) ($config['maxSelections'] ?? 5)));
         // Absolute floors mirror the configuration validation range [30, 100]:
         // an explicit admin setting is honoured, never clamped back up to a
         // hard-coded 70/75. Defaults match ConfigurationService::defaults().
-        $minConfidence = max(30.0, isset($config['minConfidence']) && is_numeric($config['minConfidence']) ? (float) $config['minConfidence'] : 30.0);
-        $minQuality = max(50, isset($config['minDataQuality']) && is_numeric($config['minDataQuality']) ? (int) $config['minDataQuality'] : 60);
-        $maxCorrelation = strtoupper((string) ($config['maxCorrelation'] ?? 'MEDIUM'));
+        $minConfidence = max(30.0, isset($config['minConfidence']) && is_numeric($config['minConfidence']) ? (float) $config['minConfidence'] : 75.0);
+        $minQuality = max(50, isset($config['minDataQuality']) && is_numeric($config['minDataQuality']) ? (int) $config['minDataQuality'] : 80);
+        $maxCorrelation = strtoupper((string) ($config['maxCorrelation'] ?? 'LOW'));
         $allowedMarkets = (array) ($config['allowedMarkets'] ?? []);
         $allowedLeagues = (array) ($config['allowedLeagues'] ?? []);
 
@@ -74,7 +74,7 @@ class TicketOptimizer
 
         if ($best === null) {
             $confidenceFloor = number_format($minConfidence, 0);
-            return ['status' => 'NO_QUALIFIED_TICKET', 'reason' => 'NO VALUE TICKET TODAY — no verified candidate combination satisfies the 5.00–8.00 odds, ' . $confidenceFloor . '%+ confidence, quality, risk, value, freshness and correlation constraints', 'poolSize' => count($pool), 'config' => $config];
+            return ['status' => 'NO_QUALIFIED_TICKET', 'reason' => 'no verified candidate combination satisfies the 5.00–8.00 odds, ' . $confidenceFloor . '%+ confidence, quality, risk, value, freshness and correlation constraints', 'poolSize' => count($pool), 'config' => $config];
         }
         return ['status' => 'QUALIFIED', 'ticketId' => 'tkt_' . bin2hex(random_bytes(8)), 'totalOdds' => round($best['totalOdds'], 4), 'selectionCount' => count($best['selections']), 'selections' => $best['selections'], 'optimizationScore' => round($best['score'], 6), 'poolSize' => count($pool), 'config' => $config];
     }

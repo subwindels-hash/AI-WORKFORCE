@@ -29,7 +29,10 @@ class PredictionEngine
     /** @var array<string,list<string>> */
     public const SUPPORTED_MARKETS = [
         'MATCH_RESULT' => ['HOME', 'DRAW', 'AWAY'],
-        'TOTAL_GOALS' => ['OVER_1_5'],
+        // Every totals line the goal-expectancy model can price. UNDER_1_5
+        // deliberately stays out: it is an overround companion price, never
+        // a ticket candidate.
+        'TOTAL_GOALS' => ['OVER_1_5', 'OVER_2_5', 'OVER_3_5', 'UNDER_2_5', 'UNDER_3_5'],
         'BTTS' => ['YES'],
         'DOUBLE_CHANCE' => ['HOME_OR_DRAW', 'AWAY_OR_DRAW', 'HOME_OR_AWAY'],
     ];
@@ -63,6 +66,20 @@ class PredictionEngine
     public static function supportedMarkets(): array
     {
         return array_keys(self::SUPPORTED_MARKETS);
+    }
+
+    /**
+     * Parse a totals selection (OVER_2_5, UNDER_3_5, …) into [line, side].
+     * Null when the selection is not a totals line. Shared by the model,
+     * settlement and the backtester so a line means the same everywhere:
+     * the over wins when the total exceeds the line.
+     *
+     * @return array{0:float,1:string}|null
+     */
+    public static function totalsLine(string $selection): ?array
+    {
+        if (!preg_match('/^(OVER|UNDER)_(\d+)_(\d+)$/', strtoupper(trim($selection)), $m)) return null;
+        return [(float) ($m[2] . '.' . $m[3]), $m[1]];
     }
 
     public function predictOver15(array $featureSet, array $calibration): array
@@ -111,7 +128,13 @@ class PredictionEngine
         $total = (float)$f['expectedGoalsProxy'];
 
         if ($market === 'TOTAL_GOALS') {
-            return $this->logistic($total - 1.5);
+            // Every totals line uses the same goal-expectancy model: the
+            // over probability is the logistic distance above the line, the
+            // under probability its complement.
+            $line = self::totalsLine($selection);
+            if ($line === null) return 0.01;
+            $over = $this->logistic($total - $line[0]);
+            return $line[1] === 'OVER' ? $over : 1.0 - $over;
         }
         if ($market === 'BTTS') {
             $bothScorePressure = min($homeStrength, $awayStrength) - 0.75;

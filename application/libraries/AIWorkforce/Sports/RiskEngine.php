@@ -21,7 +21,7 @@ class RiskEngine
 
     public function assess(array $value, array $quality, array $config = [], array $context = []): array
     {
-        $minQuality = (int) ($config['min_data_quality'] ?? $config['minDataQuality'] ?? 60);
+        $minQuality = (int) ($config['min_data_quality'] ?? $config['minDataQuality'] ?? 80);
         $minEv = (float) ($config['min_expected_value'] ?? $config['minExpectedValue'] ?? 0.02);
         $minLiquidity = $config['min_liquidity'] ?? $config['minLiquidity'] ?? null;
         $reasons = [];
@@ -32,6 +32,15 @@ class RiskEngine
         if ($minLiquidity !== null && isset($context['liquidity']) && is_numeric($context['liquidity']) && (float) $context['liquidity'] < (float) $minLiquidity) $reasons[] = 'INSUFFICIENT_LIQUIDITY';
         if ($reasons) return ['classification' => 'REJECTED', 'approved' => false, 'reasons' => array_values(array_unique($reasons))];
         $risk = ($quality['score'] >= 90 && ($value['expectedValue'] ?? 0) >= .08) ? 'LOW' : (($quality['score'] >= 80) ? 'MEDIUM' : 'HIGH');
+        // A CONSERVATIVE risk level only approves LOW risk: a MEDIUM leg is
+        // upgraded to HIGH, so the pipeline and the optimizer reject it like
+        // any other high-risk candidate. Callers without a risk_level keep
+        // the legacy behaviour (MEDIUM approved).
+        $riskLevel = strtoupper((string) ($config['risk_level'] ?? $config['riskLevel'] ?? ''));
+        if ($riskLevel === 'CONSERVATIVE' && $risk === 'MEDIUM') {
+            $risk = 'HIGH';
+            $reasons[] = 'MEDIUM_RISK_REJECTED_CONSERVATIVE';
+        }
         // Volatile market movement upgrades MEDIUM to HIGH (never downgrades).
         $order = ['LOW' => 0, 'MEDIUM' => 1, 'HIGH' => 2];
         if (isset($context['oddsMovement']) && is_numeric($context['oddsMovement']) && abs((float) $context['oddsMovement']) > self::MAX_ODDS_MOVEMENT) {
