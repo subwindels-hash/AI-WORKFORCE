@@ -429,3 +429,39 @@ CREATE TABLE IF NOT EXISTS football_competition_mapping (
   UNIQUE KEY uq_football_competition_internal (internal_id, provider_code),
   INDEX idx_football_competition_premium (premium, active)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Prediction revisions. One row per calculation of a fixture's prediction, kept
+-- because the prediction row itself is unique per (fixture, kind, model version)
+-- and is REPLACED when a stated reason justifies regenerating it. Movement — the
+-- difference between what WINDELS said and what it now says — is only measurable
+-- against a record of the earlier figure, so the trail is stored rather than
+-- remembered. Keyed by prediction_id, which makes a re-run of the same sweep
+-- idempotent instead of manufacturing a second data point.
+CREATE TABLE IF NOT EXISTS football_prediction_revisions (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  prediction_id VARCHAR(40) NOT NULL,
+  fixture_id BIGINT NOT NULL,
+  provider_id INT NULL,
+  model_version_id INT NULL,
+  prediction_kind VARCHAR(16) NOT NULL DEFAULT 'PRE_MATCH',
+  probability_home DECIMAL(8,6) NULL,
+  probability_draw DECIMAL(8,6) NULL,
+  probability_away DECIMAL(8,6) NULL,
+  predicted_result VARCHAR(8) NULL,
+  predicted_home_score INT NULL,
+  predicted_away_score INT NULL,
+  confidence DECIMAL(6,2) NULL,
+  data_quality_score INT NULL,
+  data_quality_band VARCHAR(16) NULL,
+  movement_points DECIMAL(7,4) NULL,
+  movement_selection VARCHAR(24) NULL,
+  previous_prediction_id VARCHAR(40) NULL,
+  stability_state VARCHAR(16) NOT NULL DEFAULT 'BASELINE',
+  trigger_codes TEXT NULL,
+  kickoff_at VARCHAR(32) NULL,
+  recorded_at VARCHAR(32) NOT NULL,
+  created_at VARCHAR(32) NOT NULL,
+  UNIQUE KEY uq_football_revision_prediction (prediction_id),
+  INDEX idx_football_revision_fixture (fixture_id, prediction_kind, recorded_at),
+  INDEX idx_football_revision_model (model_version_id, recorded_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

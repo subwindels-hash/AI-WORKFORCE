@@ -739,6 +739,8 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
     public array $scoreProbabilities = [];
     /** @var list<array{matchId:string,market:string,selection:string,decimalOdds:float,observedAt:?string}> odds the feed quoted */
     public array $marketOdds = [];
+    /** @var list<array<string,mixed>> one row per stored calculation of a prediction */
+    public array $predictionRevisions = [];
     /** @var list<array<string,mixed>> canonical match rows, one per (provider, provider match id) */
     public array $providerMatches = [];
     /** @var list<array<string,mixed>> competition mapping rows, one per (provider, provider competition id) */
@@ -1462,6 +1464,51 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
         }
         unset($rows);
         return $out;
+    }
+
+    /**
+     * One row per stored calculation of a prediction, newest first per fixture —
+     * the movement history the stability reading compares against. Keyed by
+     * prediction id, so re-running a sweep over the same fixture re-uses the row
+     * instead of inventing a second data point (the database's UNIQUE key).
+     */
+    public function savePredictionRevision(array $row): array
+    {
+        $predictionId = (string) ($row['prediction_id'] ?? '');
+        if ($predictionId === '') throw new \InvalidArgumentException('a prediction revision requires a prediction_id');
+        foreach ($this->predictionRevisions as $existing) {
+            if ((string) ($existing['prediction_id'] ?? '') === $predictionId) return ['row' => $existing, 'created' => false];
+        }
+        $stored = array_merge(['id' => $this->id(), 'stability_state' => 'BASELINE', 'trigger_codes' => [],
+            'created_at' => gmdate('c'), 'recorded_at' => gmdate('c')], self::normalise($row));
+        $this->predictionRevisions[] = $stored;
+        $this->writes[] = 'predictionRevision:' . $predictionId;
+        return ['row' => $stored, 'created' => true];
+    }
+
+    public function listPredictionRevisions(array $fixtureIds, string $kind, int $limitPerFixture = 5): array
+    {
+        $wanted = [];
+        foreach ($fixtureIds as $id) if ((int) $id > 0) $wanted[(int) $id] = true;
+        if ($wanted === []) return [];
+        $out = [];
+        foreach (array_reverse($this->predictionRevisions) as $row) {
+            $fixtureId = (int) ($row['fixture_id'] ?? 0);
+            if (!isset($wanted[$fixtureId])) continue;
+            if ((string) ($row['prediction_kind'] ?? 'PRE_MATCH') !== $kind) continue;
+            if (count($out[$fixtureId] ?? []) >= max(1, $limitPerFixture)) continue;
+            $out[$fixtureId][] = $row;
+        }
+        return $out;
+    }
+
+    public function prunePredictionRevisions(int $olderThanDays = 90): int
+    {
+        $cutoff = gmdate('c', time() - max(1, $olderThanDays) * 86400);
+        $before = count($this->predictionRevisions);
+        $this->predictionRevisions = array_values(array_filter($this->predictionRevisions,
+            static fn(array $row): bool => (string) ($row['recorded_at'] ?? '') >= $cutoff));
+        return $before - count($this->predictionRevisions);
     }
 
     public function listCompetitions(array $filter = [], int $limit = 200): array

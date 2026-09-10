@@ -144,6 +144,119 @@ final class PredictionMarkets
     }
 
     /**
+     * Every price the odds feed quoted for the *market* a catalogue key belongs
+     * to, not only for the selection being shown.
+     *
+     * A margin can only be taken out of a complete set: the 1X2 overround is the
+     * sum of Home, Draw and Away, and a sheet holding two of those three has no
+     * overround at all. `evaluate()` therefore reads the whole family, so
+     * `OddsIntelligence` can say which of the three states it is looking at —
+     * priced complete, priced partially, or not priced.
+     *
+     * @param list<array{market:string,selection:string,decimalOdds:float,observedAt:?string}> $odds
+     * @return array{state:string,family:string,line:?float,expected:list<string>,quotes:array<string,array{odds:float,observedAt:?string,low:float,high:float,quotes:int}>,ignored:int,note:?string}
+     */
+    public function priceSheet(array $odds, string $marketKey, ?float $line = null): array
+    {
+        $family = self::priceFamily($marketKey);
+        $expected = self::FAMILY_SELECTIONS[$family] ?? [];
+        $lineChecked = self::familyCarriesLine($family);
+        $line = $line ?? self::catalogLine($marketKey);
+        $quotes = [];
+        $ignored = 0;
+        foreach ($odds as $row) {
+            $rawMarket = (string) ($row['market'] ?? '');
+            if (!self::providerMarketMatches(self::normalizeProviderMarket($rawMarket), $marketKey)) continue;
+            $selection = self::normalizeProviderSelection($rawMarket, (string) ($row['selection'] ?? ''));
+            // A leg outside the priced set is not evidence about this market: a
+            // draw price on Draw No Bet, or a scoreline on Correct Score, is
+            // counted as ignored rather than folded into an overround.
+            if ($expected !== [] && !in_array($selection, $expected, true)) { $ignored++; continue; }
+            $quotedLine = self::lineOf((string) ($row['selection'] ?? ''));
+            if ($lineChecked && ($quotedLine === null || abs($quotedLine - (float) $line) > 1e-9)) { $ignored++; continue; }
+            $price = is_numeric($row['decimalOdds'] ?? null) ? (float) $row['decimalOdds'] : null;
+            if ($price === null || $price <= 1.0) { $ignored++; continue; }
+            $observed = (string) ($row['observedAt'] ?? '');
+            $seen = (array) ($quotes[$selection] ?? null);
+            $newest = $seen === null || $observed >= (string) ($seen['observedAt'] ?? '');
+            $quotes[$selection] = [
+                'odds' => $newest ? $price : (float) $seen['odds'],
+                'observedAt' => $newest && $observed !== '' ? $observed : ($seen['observedAt'] ?? null),
+                'low' => $seen === null ? $price : min((float) $seen['low'], $price),
+                'high' => $seen === null ? $price : max((float) $seen['high'], $price),
+                'quotes' => (int) ($seen['quotes'] ?? 0) + 1,
+            ];
+        }
+        $priced = array_keys($quotes);
+        $complete = $expected !== [] && count(array_intersect($expected, $priced)) === count($expected);
+        $state = $quotes === [] ? OddsIntelligence::PRICE_NONE
+            : ($expected === [] ? OddsIntelligence::PRICE_NOT_EXHAUSTIVE
+                : ($complete ? OddsIntelligence::PRICE_COMPLETE : OddsIntelligence::PRICE_PARTIAL));
+        $note = null;
+        if ($state === OddsIntelligence::PRICE_NOT_EXHAUSTIVE) {
+            $note = 'This market does not price out a set of mutually exclusive outcomes, so no overround exists to remove '
+                . 'and no margin-free probability can be derived from it.';
+        } elseif ($state === OddsIntelligence::PRICE_PARTIAL) {
+            $note = 'Only ' . count($priced) . ' of the ' . count($expected) . ' legs of this market are priced, so the margin '
+                . 'cannot be removed; the comparison is made against the quoted price as it stands.';
+        } elseif ($state === OddsIntelligence::PRICE_NONE) {
+            $note = 'No odds row exists for this market, so WINDELS\' probability has no price to be compared with.';
+        } elseif ($ignored > 0) {
+            $note = $ignored . ' quoted leg' . ($ignored === 1 ? ' was' : 's were') . ' outside this market'
+                . ($lineChecked ? ' or off the ' . self::lineLabel($line) . ' line' : '') . ' and was not used.';
+        }
+        return ['state' => $state, 'family' => $family, 'line' => $lineChecked ? $line : null,
+            'expected' => $expected, 'quotes' => $quotes, 'ignored' => $ignored, 'note' => $note];
+    }
+
+    /**
+     * Which quoted family a catalogue key belongs to. Over/Under and Under are
+     * one market to a bookmaker and two keys here, so the family — not the key —
+     * decides what a complete set of prices looks like.
+     */
+    private static function priceFamily(string $key): string
+    {
+        return match ($key) {
+            'OVER_0_5', 'OVER_1_5', 'OVER_2_5', 'OVER_3_5', 'UNDER_1_5', 'UNDER_2_5', 'UNDER_3_5' => 'OVER_UNDER',
+            'FIRST_HALF_OVER_UNDER' => 'FIRST_HALF_OVER_UNDER',
+            'FIRST_HALF_WINNER' => 'FIRST_HALF_WINNER',
+            default => $key,
+        };
+    }
+
+    /** Markets whose price belongs to a stated line: an "Over 3.5" quote is not an "Over 2.5" quote. */
+    private static function familyCarriesLine(string $family): bool
+    {
+        return in_array($family, ['OVER_UNDER', 'FIRST_HALF_OVER_UNDER', 'ASIAN_HANDICAP'], true);
+    }
+
+    /** The catalogue's own line for a market key, when the market states one. */
+    private static function catalogLine(string $marketKey): ?float
+    {
+        foreach (self::MARKETS as $market) {
+            if ((string) ($market['key'] ?? '') === $marketKey) return isset($market['line']) ? (float) $market['line'] : null;
+        }
+        return null;
+    }
+
+    /**
+     * The legs that make one market exhaustive. A family missing from this map
+     * is one whose full set WINDELS cannot know (Correct Score, Corners, Cards),
+     * and such a market is never de-vigged.
+     */
+    private const FAMILY_SELECTIONS = [
+        'MATCH_WINNER' => ['HOME', 'DRAW', 'AWAY'],
+        'FIRST_HALF_WINNER' => ['HOME', 'DRAW', 'AWAY'],
+        'DOUBLE_CHANCE' => ['HOME_OR_DRAW', 'HOME_OR_AWAY', 'AWAY_OR_DRAW'],
+        'DRAW_NO_BET' => ['HOME', 'AWAY'],
+        'OVER_UNDER' => ['OVER', 'UNDER'],
+        'FIRST_HALF_OVER_UNDER' => ['OVER', 'UNDER'],
+        'BTTS' => ['YES', 'NO'],
+        'BTTS_AND_OVER_2_5' => ['YES', 'NO'],
+        'ASIAN_HANDICAP' => ['HOME', 'AWAY'],
+    ];
+
+    /**
      * The risk level of one prediction result.
      *
      * Deterministic, and derived only from what is actually known about the
@@ -212,6 +325,12 @@ final class PredictionMarkets
         // Odds are attached per selection from the rows the provider actually
         // sent. Nothing here derives a price from a probability: an implied
         // price would be a number the feed never quoted.
+        //
+        // The price *sheet* is read over the whole market rather than per
+        // selection, because the margin is a property of the market: it is the
+        // amount by which all its prices together exceed certainty, and it can
+        // only be taken out of a set of mutually exclusive ones.
+        $sheet = $this->fairValue()->withFairValues($this->priceSheet($odds, $key, $line));
         foreach ($rows as &$row) {
             $quoted = $this->quoted($odds, $key, (string) $row['selection'], $line);
             $row['odds'] = $quoted['decimalOdds'];
@@ -220,6 +339,14 @@ final class PredictionMarkets
             $row['edge'] = $row['impliedProbability'] !== null ? round((float) $row['probability'] - $row['impliedProbability'], 6) : null;
             $row['oddsObservedAt'] = $quoted['observedAt'];
             $row['oddsState'] = $quoted['decimalOdds'] === null ? self::STATE_UNAVAILABLE : self::STATE_AVAILABLE;
+            $value = $this->fairValue()->assess($sheet, (string) $row['selection'],
+                is_numeric($row['probability'] ?? null) ? (float) $row['probability'] : null);
+            $row['windelsFairOdds'] = $value['windelsFairOdds'];
+            $row['fairOdds'] = $value['fairOdds'];
+            $row['fairProbability'] = $value['fairProbability'];
+            $row['expectedValue'] = $value['expectedValue'];
+            $row['valueClass'] = $value['valueClass'];
+            $row['valueLabel'] = $value['valueLabel'];
         }
         unset($row);
 
@@ -230,6 +357,12 @@ final class PredictionMarkets
         }
         $risk = $this->risk($state, $coverage, (string) ($prediction['data_quality_band'] ?? QualityBand::REJECTED),
             $best['probability'] ?? null, $best['odds'] ?? null, $best['edge'] ?? null, $source);
+        // The market-level answer to "is this price attractive": WINDELS' own
+        // fair price, the market's price, the margin inside the market's price,
+        // the gap in probability points, and the expected return per unit — with
+        // the class the gap earns and the sentence that explains it.
+        $value = $this->fairValue()->assess($sheet, (string) ($best['selection'] ?? ''),
+            isset($best['probability']) && is_numeric($best['probability']) ? (float) $best['probability'] : null);
         return [
             'key' => $key,
             'label' => (string) $market['label'],
@@ -251,6 +384,24 @@ final class PredictionMarkets
             'odds' => $best['odds'] ?? null,
             'impliedProbability' => $best['impliedProbability'] ?? null,
             'edge' => $best['edge'] ?? null,
+            'value' => $value,
+            'pricing' => [
+                'state' => (string) $sheet['state'],
+                'family' => (string) $sheet['family'],
+                'line' => $sheet['line'],
+                'legsPriced' => count((array) $sheet['quotes']),
+                'legsExpected' => count((array) $sheet['expected']),
+                'overround' => $sheet['overround'] ?? null,
+                'marginPoints' => $sheet['marginPoints'] ?? null,
+                'marginMethod' => $sheet['marginMethod'] ?? null,
+                'pricedAt' => $sheet['pricedAt'] ?? null,
+                'pricedAgoSeconds' => $sheet['pricedAgoSeconds'] ?? null,
+                'priceStale' => (bool) ($sheet['priceStale'] ?? false),
+                'staleAfterSeconds' => $sheet['staleAfterSeconds'] ?? null,
+                'note' => $sheet['note'],
+                'disclaimer' => OddsIntelligence::DISCLAIMER,
+            ],
+
             'confidence' => isset($prediction['confidence']) ? round((float) $prediction['confidence'], 1) : null,
             'dataQuality' => (int) ($prediction['data_quality_score'] ?? 0),
             'band' => (string) ($prediction['data_quality_band'] ?? QualityBand::REJECTED),
@@ -742,5 +893,14 @@ final class PredictionMarkets
         'EXACT_SCORE' => 'CORRECT_SCORE',
     ];
 
-    public function __construct(private FootballConfiguration $config) {}
+    public function __construct(private FootballConfiguration $config, private ?OddsIntelligence $fairValue = null)
+    {
+        $this->fairValue = $fairValue ?? new OddsIntelligence($this->config);
+    }
+
+    /** The fair-value engine that turns a priced market into a verdict. */
+    public function fairValue(): OddsIntelligence
+    {
+        return $this->fairValue;
+    }
 }

@@ -364,7 +364,6 @@ CREATE TABLE IF NOT EXISTS "football_provider_sync_logs" (
   CONSTRAINT "uq_football_sync_key" UNIQUE ("execution_key")
 );
 CREATE INDEX IF NOT EXISTS "idx_football_sync_job" ON "football_provider_sync_logs" ("job_type", "started_at");
-
 CREATE TABLE IF NOT EXISTS "football_provider_matches" (
   "id" BIGSERIAL PRIMARY KEY,
   "internal_match_id" VARCHAR(190) NOT NULL,
@@ -376,7 +375,7 @@ CREATE TABLE IF NOT EXISTS "football_provider_matches" (
   "kickoff_date" VARCHAR(10) NOT NULL,
   "competition_internal_id" VARCHAR(190) NULL,
   "matched_by" VARCHAR(32) NOT NULL DEFAULT 'PROVIDER_ID',
-  "confidence" NUMERIC(5,4) NULL,
+  "confidence" DECIMAL(5,4) NULL,
   "first_seen_at" VARCHAR(32) NOT NULL,
   "last_seen_at" VARCHAR(32) NOT NULL,
   CONSTRAINT "uq_football_provider_match" UNIQUE ("provider_code", "provider_match_id"),
@@ -384,7 +383,6 @@ CREATE TABLE IF NOT EXISTS "football_provider_matches" (
 );
 CREATE INDEX IF NOT EXISTS "idx_football_match_internal" ON "football_provider_matches" ("internal_match_id");
 CREATE INDEX IF NOT EXISTS "idx_football_match_teams" ON "football_provider_matches" ("home_team_normalized", "away_team_normalized", "kickoff_date");
-
 CREATE TABLE IF NOT EXISTS "football_competition_mapping" (
   "id" BIGSERIAL PRIMARY KEY,
   "internal_id" VARCHAR(190) NOT NULL,
@@ -402,3 +400,31 @@ CREATE TABLE IF NOT EXISTS "football_competition_mapping" (
   CONSTRAINT "uq_football_competition_internal" UNIQUE ("internal_id", "provider_code")
 );
 CREATE INDEX IF NOT EXISTS "idx_football_competition_premium" ON "football_competition_mapping" ("premium", "active");
+CREATE TABLE IF NOT EXISTS "football_prediction_revisions" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "prediction_id" VARCHAR(40) NOT NULL,
+  "fixture_id" BIGINT NOT NULL,
+  "provider_id" INTEGER NULL,
+  "model_version_id" INTEGER NULL,
+  "prediction_kind" VARCHAR(16) NOT NULL DEFAULT 'PRE_MATCH',
+  "probability_home" DECIMAL(8,6) NULL,
+  "probability_draw" DECIMAL(8,6) NULL,
+  "probability_away" DECIMAL(8,6) NULL,
+  "predicted_result" VARCHAR(8) NULL,
+  "predicted_home_score" INTEGER NULL,
+  "predicted_away_score" INTEGER NULL,
+  "confidence" DECIMAL(6,2) NULL,
+  "data_quality_score" INTEGER NULL,
+  "data_quality_band" VARCHAR(16) NULL,
+  "movement_points" DECIMAL(7,4) NULL,
+  "movement_selection" VARCHAR(24) NULL,
+  "previous_prediction_id" VARCHAR(40) NULL,
+  "stability_state" VARCHAR(16) NOT NULL DEFAULT 'BASELINE',
+  "trigger_codes" TEXT NULL,
+  "kickoff_at" VARCHAR(32) NULL,
+  "recorded_at" VARCHAR(32) NOT NULL,
+  "created_at" VARCHAR(32) NOT NULL,
+  CONSTRAINT "uq_football_revision_prediction" UNIQUE ("prediction_id")
+);
+CREATE INDEX IF NOT EXISTS "idx_football_revision_fixture" ON "football_prediction_revisions" ("fixture_id", "prediction_kind", "recorded_at");
+CREATE INDEX IF NOT EXISTS "idx_football_revision_model" ON "football_prediction_revisions" ("model_version_id", "recorded_at");

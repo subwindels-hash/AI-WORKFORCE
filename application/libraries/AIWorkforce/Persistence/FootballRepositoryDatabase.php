@@ -23,6 +23,7 @@ class FootballRepositoryDatabase implements FootballRepository
         'capabilities', 'coverage', 'payload', 'quality_components', 'feature_snapshot',
         'probabilities_matrix', 'alternative_scores', 'evidence', 'outcome', 'rejection_reasons',
         'parameters', 'lifecycle_history', 'reliability_bins', 'matches', 'last_matches', 'errors',
+        'trigger_codes',
     ];
 
     public function __construct(private object $db) {}
@@ -1225,6 +1226,82 @@ class FootballRepositoryDatabase implements FootballRepository
         if ($providerId !== null) $this->db->where('provider_id', $providerId);
         $row = $this->db->order_by('started_at', 'DESC')->get('football_provider_sync_logs', 1)->row_array();
         return $row ? $this->decode($row) : null;
+    }
+
+    // ── prediction revisions (the movement history) ───────────────────────────
+
+    /**
+     * Columns of one revision. The probabilities are stored alongside the
+     * movement measured from the previous revision so the number a reader sees
+     * can be re-derived from the row without consulting the model again.
+     */
+    private const REVISION_COLUMNS = [
+        'prediction_id', 'fixture_id', 'provider_id', 'model_version_id', 'prediction_kind',
+        'probability_home', 'probability_draw', 'probability_away', 'predicted_result',
+        'predicted_home_score', 'predicted_away_score', 'confidence', 'data_quality_score',
+        'data_quality_band', 'movement_points', 'movement_selection', 'previous_prediction_id',
+        'stability_state', 'trigger_codes', 'kickoff_at', 'recorded_at',
+    ];
+
+    public function savePredictionRevision(array $row): array
+    {
+        if (!$this->db->table_exists('football_prediction_revisions')) {
+            // A database that has not run the migration yet cannot record a trail.
+            // The read path reports BASELINE for that case, so nothing downstream
+            // is entitled to infer stability from the absence of rows.
+            return ['row' => [], 'created' => false];
+        }
+        $predictionId = (string) ($row['prediction_id'] ?? '');
+        if ($predictionId === '') throw new \InvalidArgumentException('a prediction revision requires a prediction_id');
+        $existing = $this->db->get_where('football_prediction_revisions', ['prediction_id' => $predictionId], 1)->row_array();
+        if ($existing !== null && $existing !== []) return ['row' => $this->decode($existing), 'created' => false];
+        $data = self::only($row, self::REVISION_COLUMNS);
+        $data['prediction_id'] = $predictionId;
+        foreach (['probability_home', 'probability_draw', 'probability_away', 'movement_points'] as $column) {
+            if (array_key_exists($column, $data) && $data[$column] !== null) $data[$column] = (float) $data[$column];
+        }
+        foreach (['fixture_id', 'provider_id', 'model_version_id', 'predicted_home_score', 'predicted_away_score',
+            'data_quality_score'] as $column) {
+            if (array_key_exists($column, $data) && $data[$column] !== null) $data[$column] = (int) $data[$column];
+        }
+        if (isset($data['trigger_codes']) && !is_string($data['trigger_codes'])) {
+            $data['trigger_codes'] = json_encode(array_values((array) $data['trigger_codes']));
+        }
+        $data['created_at'] = gmdate('c');
+        $this->db->insert('football_prediction_revisions', $data);
+        $stored = $this->db->get_where('football_prediction_revisions', ['prediction_id' => $predictionId], 1)->row_array();
+        return ['row' => $stored ? $this->decode($stored) : $data, 'created' => true];
+    }
+
+    public function listPredictionRevisions(array $fixtureIds, string $kind, int $limitPerFixture = 5): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $fixtureIds), static fn(int $id): bool => $id > 0)));
+        if ($ids === [] || !$this->db->table_exists('football_prediction_revisions')) return [];
+        // One read for a whole page, capped rather than unbounded: 50 matches at
+        // five revisions each is the most any board can show, and a page that
+        // fetched the entire history of a fixture would grow forever.
+        $rows = $this->db->where_in('fixture_id', $ids)->where('prediction_kind', $kind)
+            ->order_by('recorded_at', 'DESC')
+            ->limit(count($ids) * max(1, $limitPerFixture))
+            ->get('football_prediction_revisions')->result_array();
+        $out = [];
+        $seen = [];
+        foreach ($rows as $row) {
+            $fixtureId = (int) ($row['fixture_id'] ?? 0);
+            if (($seen[$fixtureId] ?? 0) >= max(1, $limitPerFixture)) continue;
+            $seen[$fixtureId] = ($seen[$fixtureId] ?? 0) + 1;
+            $out[$fixtureId][] = $this->decode($row);
+        }
+        return $out;
+    }
+
+    public function prunePredictionRevisions(int $olderThanDays = 90): int
+    {
+        if (!$this->db->table_exists('football_prediction_revisions')) return 0;
+        $cutoff = gmdate('c', time() - max(1, $olderThanDays) * 86400);
+        $this->db->where('recorded_at <', $cutoff);
+        $this->db->delete('football_prediction_revisions');
+        return is_object($this->db) && method_exists($this->db, 'affected_rows') ? (int) $this->db->affected_rows() : 0;
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────

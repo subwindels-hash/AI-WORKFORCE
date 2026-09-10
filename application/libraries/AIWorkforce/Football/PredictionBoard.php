@@ -22,8 +22,18 @@ final class PredictionBoard
         private ModelRegistry $models,
         private FootballConfiguration $config,
         private ?MatchFeed $feed = null,
+        private ?IntelligenceReport $report = null,
     ) {
-        $this->feed ??= new MatchFeed($repo, $predictions, $models, $config);
+        $this->feed ??= new MatchFeed($repo, $predictions, $models, $config, null, $report);
+        // The same report instance the feed decorates with: a board row and the
+        // API match it mirrors must not be assembled by two different assemblers.
+        $this->report ??= $this->feed->report();
+    }
+
+    /** The intelligence layer the board decorates its rows with. */
+    public function report(): IntelligenceReport
+    {
+        return $this->report;
     }
 
     /**
@@ -133,6 +143,34 @@ final class PredictionBoard
             $card['market'] = $marketsByPrediction[(string) ($card['predictionId'] ?? '')] ?? null;
         }
         unset($card);
+        // The page's intelligence blocks, assembled once for the table rows and
+        // then read back by fixture id for the cards, so a figure cannot appear
+        // one way in the table and another way in the card under it.
+        $intelligenceEntries = [];
+        foreach ($fixtures as $index => $fixture) {
+            $intelligenceEntries[] = [
+                'fixture' => (array) $fixture,
+                'prediction' => $this->predictions->existing($fixture, $modelVersionId, PredictionService::KIND_PRE_MATCH),
+                'market' => (array) ($markets[$index] ?? []),
+            ];
+        }
+        $blocks = $this->report->forPage($intelligenceEntries);
+        $byFixture = [];
+        foreach ($rows as $index => $row) {
+            if (!isset($blocks[$index])) continue;
+            $rows[$index]['intelligence'] = $blocks[$index];
+            $byFixture[(int) ($row['fixtureId'] ?? 0)] = $blocks[$index];
+        }
+        foreach ($cards as &$card) {
+            $fixtureId = (int) ($card['fixtureId'] ?? 0);
+            if (isset($byFixture[$fixtureId])) $card['intelligence'] = $byFixture[$fixtureId];
+        }
+        unset($card);
+        // The ranked reading of the page. Built from the same blocks, so a pick
+        // can never cite a number the table does not show.
+        $picks = $this->report->picks($rows, (string) ($market['market']['label'] ?? ''));
+        $intelligenceSummary = $this->report->summary($rows);
+
         usort($cards, static fn(array $a, array $b) => [$b['confidence'], $b['dataQuality']['score']] <=> [$a['confidence'], $a['dataQuality']['score']]);
         $tiers = $this->config->confidenceTiers();
         $lowest = 60.0;
@@ -205,6 +243,11 @@ final class PredictionBoard
             // selected market's answer. The cards below group the same matches
             // by confidence; both read the identical stored prediction.
             'rows' => $rows,
+            // ⭐ The page's ranked reading, and how the intelligence layer sees
+            // the page as a whole. Both are assembled from the same rows the table
+            // renders, so a pick cannot quote a figure the table does not show.
+            'picks' => $picks,
+            'intelligence' => $intelligenceSummary,
             'emptyReason' => $emptyReason,
             'message' => $message,
             'model' => [
@@ -321,12 +364,9 @@ final class PredictionBoard
     /** @return array{level:string,basis:string} */
     private function risk(string $band, ?float $confidence): array
     {
-        if ($confidence === null) return ['level' => 'UNKNOWN', 'basis' => 'no prediction is stored for this match'];
-        if ($band !== QualityBand::QUALIFIED || $confidence < 55.0) {
-            return ['level' => 'HIGH', 'basis' => 'data quality ' . $band . ' and model confidence ' . number_format($confidence, 1) . '%'];
-        }
-        if ($confidence < 70.0) return ['level' => 'MEDIUM', 'basis' => 'model confidence ' . number_format($confidence, 1) . '%'];
-        return ['level' => 'LOW', 'basis' => 'qualified data and model confidence ' . number_format($confidence, 1) . '%'];
+        // One definition, shared with the intelligence block, so the table's risk
+        // column and the panel under it cannot disagree.
+        return IntelligenceReport::risk($band, $confidence);
     }
 
     /**

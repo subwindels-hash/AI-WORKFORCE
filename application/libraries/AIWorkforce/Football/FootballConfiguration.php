@@ -158,6 +158,110 @@ final class FootballConfiguration
         return max(1, min(500, (int) $this->num('WINDELS_FOOTBALL_ANALYSIS_LIMIT', 120)));
     }
 
+    // ── fair value, stability and the intelligence score ──────────────────────
+
+    /**
+     * The cut lines the value classification is made of, in *percentage points*
+     * of implied probability (model minus market), not in price.
+     *
+     * Points of probability are the honest unit: a 4-point edge is worth the same
+     * judgement at 1.20 and at 12.00, while a 4-point edge measured in *price*
+     * would be enormous on a short price and meaningless on a long one.
+     *
+     * `strong` is the least a selection may show and still be called
+     * STRONG_VALUE, `positive` is the floor of a real edge (anything smaller is
+     * noise inside the vig), and `avoid` is how negative the model has to be
+     * about a price before the panel says to stay away rather than merely
+     * "negative". They are configuration because different leagues and feeds
+     * carry different margins; they are *shared* by the board, the API and the
+     * ticket layer so the same price cannot be "value" on one screen and
+     * "fair" on another.
+     *
+     * @return array{strong:float,positive:float,avoid:float}
+     */
+    public function valueThresholds(): array
+    {
+        $strong = max(0.0, (float) $this->num('WINDELS_FOOTBALL_VALUE_STRONG_PP', 4.0)) / 100.0;
+        $positive = max(0.0, (float) $this->num('WINDELS_FOOTBALL_VALUE_POSITIVE_PP', 1.0)) / 100.0;
+        $avoid = max(0.0, (float) $this->num('WINDELS_FOOTBALL_VALUE_AVOID_PP', 4.0)) / 100.0;
+        // A positive floor above the strong line would invert the scale; the
+        // narrower of the two wins so a misconfiguration degrades rather than
+        // mislabels.
+        if ($positive > $strong) $positive = $strong;
+        return ['strong' => $strong, 'positive' => $positive, 'avoid' => $avoid];
+    }
+
+    /**
+     * How far the model's own probability has to move between two stored
+     * revisions of the same prediction before the panel stops calling it stable.
+     *
+     * A point or two is arithmetic settling — a recalibrated temperature, a
+     * truncated grid row. These are the lines past which a reader should know
+     * the number moved, and past the second of which the number itself is not
+     * yet trustworthy.
+     *
+     * @return array{moved:float,unstable:float}
+     */
+    public function stabilityThresholds(): array
+    {
+        $moved = max(0.1, (float) $this->num('WINDELS_FOOTBALL_STABILITY_MOVED_PP', 2.0)) / 100.0;
+        $unstable = max($moved, (float) $this->num('WINDELS_FOOTBALL_STABILITY_UNSTABLE_PP', 8.0)) / 100.0;
+        return ['moved' => $moved, 'unstable' => $unstable];
+    }
+
+    /**
+     * How many matches the "Top WINDELS Picks" panel may list for a page.
+     *
+     * Bounded and small on purpose: a pick list is a reading of the page that is
+     * on screen, and a list of fifty "picks" is the same undisciplined dump the
+     * panel exists to prevent. A page with fewer qualifying matches shows fewer.
+     */
+    public function picksLimit(): int
+    {
+        return max(1, min(10, (int) $this->num('WINDELS_FOOTBALL_PICKS_LIMIT', 5)));
+    }
+
+    /**
+     * The weights behind the WINDELS Intelligence Score, keyed by the component
+     * that earns them.
+     *
+     * The score answers one question — *how good is our read of this match* — so
+     * the market price is deliberately absent: value is a separate verdict and is
+     * never allowed to raise a score. The weights sum to 1 when every component is
+     * available; when one is missing the rest are renormalised over what is
+     * present, and the missing one is listed as excluded rather than scored zero.
+     */
+    public function intelligenceWeights(): array
+    {
+        $defaults = ['confidence' => 0.30, 'dataQuality' => 0.30, 'coverage' => 0.15,
+            'calibration' => 0.10, 'stability' => 0.15];
+        $out = [];
+        foreach ($defaults as $key => $weight) {
+            $value = (float) $this->num('WINDELS_FOOTBALL_SCORE_W_' . strtoupper($key), $weight * 100);
+            // A weight an operator has pinned to 0 is a decision, not a typo: it
+            // is honoured, and the component then reports itself as excluded.
+            $out[$key] = max(0.0, min(1.0, $value / 100.0));
+        }
+        return $out;
+    }
+
+    /** The bands the intelligence score is read against. */
+    public function intelligenceBands(): array
+    {
+        return [
+            'excellent' => (int) $this->num('WINDELS_FOOTBALL_SCORE_EXCELLENT', 85),
+            'strong' => (int) $this->num('WINDELS_FOOTBALL_SCORE_STRONG', 70),
+            'moderate' => (int) $this->num('WINDELS_FOOTBALL_SCORE_MODERATE', 55),
+            'thin' => (int) $this->num('WINDELS_FOOTBALL_SCORE_THIN', 40),
+        ];
+    }
+
+    /** How long the movement history of a prediction is kept for. */
+    public function revisionRetentionDays(): int
+    {
+        return max(7, (int) $this->num('WINDELS_FOOTBALL_REVISION_RETENTION_DAYS', 90));
+    }
+
     /**
      * Matches per page — and therefore matches per generation request.
      *
@@ -321,6 +425,7 @@ final class FootballConfiguration
         'results' => 86400,           // finished fixture still waiting for its final score
         'live' => 300,                // in-play data older than five minutes is not live
         'h2h' => 1095 * 86400,        // three seasons, then the head-to-head weight halves
+        'odds' => 1800,               // a quoted price older than 30 min is shown as aged
     ];
 
     /** Data age beyond which the numbers behind a fixture are treated as stale. */
@@ -390,6 +495,21 @@ final class FootballConfiguration
             ],
             'maxDataAgeSeconds' => $this->maxDataAgeSummary(),
             'minRequestSpacingMs' => $this->minRequestSpacingMs(),
+            // Fair-value cut lines in probability points, the stability movement
+            // lines, the picks cap and the score weights: every one of them is
+            // read by the intelligence layer, so listing them here says what an
+            // operator can actually change.
+            'valueThresholdsPoints' => (function (array $t): array {
+                return ['strong' => round($t['strong'] * 100, 2), 'positive' => round($t['positive'] * 100, 2),
+                    'avoid' => round($t['avoid'] * 100, 2)];
+            })($this->valueThresholds()),
+            'stabilityThresholdsPoints' => (function (array $t): array {
+                return ['moved' => round($t['moved'] * 100, 2), 'unstable' => round($t['unstable'] * 100, 2)];
+            })($this->stabilityThresholds()),
+            'picksLimit' => $this->picksLimit(),
+            'intelligenceWeights' => $this->intelligenceWeights(),
+            'intelligenceBands' => $this->intelligenceBands(),
+            'revisionRetentionDays' => $this->revisionRetentionDays(),
             'analysisLimit' => $this->analysisLimit(),
             'matchPageSize' => $this->matchPageSize(),
             'maxMatchPageSize' => MatchFeed::MAX_PAGE_SIZE,

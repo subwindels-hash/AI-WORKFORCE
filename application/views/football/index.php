@@ -341,6 +341,83 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
         </div>
         <?php endif; ?>
 
+        <!-- ── Top WINDELS Picks (the ranked reading of this page) ────────── -->
+        <?php $picksBlock = is_array($board['picks'] ?? null) ? $board['picks'] : []; ?>
+        <?php $picks = is_array($picksBlock['picks'] ?? null) ? $picksBlock['picks'] : []; ?>
+        <?php if ($picks !== []): ?>
+          <div style="margin-top:16px;padding:12px;border:1px solid var(--line);border-left:3px solid var(--violet,#6d28d9);border-radius:10px">
+            <h4 style="margin:0 0 4px">⭐ Top WINDELS Picks
+              <span class="dim" style="font-weight:400;font-size:11px">(<?= count($picks) ?> of <?= (int) ($picksBlock['eligible'] ?? 0) ?> eligible on this page · ranked by intelligence score, then value, then confidence)</span>
+            </h4>
+            <table style="width:100%;border-collapse:collapse;font-size:12px">
+              <thead>
+                <tr style="text-align:left;border-bottom:1px solid var(--line)">
+                  <th style="padding:4px 6px">#</th>
+                  <th style="padding:4px 6px">Match</th>
+                  <th style="padding:4px 6px">Pick</th>
+                  <th style="padding:4px 6px" class="mono">Score</th>
+                  <th style="padding:4px 6px" class="mono">WINDELS</th>
+                  <th style="padding:4px 6px" class="mono">Odds</th>
+                  <th style="padding:4px 6px" class="mono">Fair</th>
+                  <th style="padding:4px 6px" class="mono">Value</th>
+                  <th style="padding:4px 6px" class="mono">DQ</th>
+                  <th style="padding:4px 6px">Movement</th>
+                </tr>
+              </thead>
+              <tbody>
+                <?php foreach ($picks as $pick): ?>
+                  <tr style="border-bottom:1px solid var(--line)">
+                    <td style="padding:4px 6px" class="mono"><?= (int) ($pick['rank'] ?? 0) ?></td>
+                    <td style="padding:4px 6px">
+                      <?php $pickId = (int) ($pick['fixtureId'] ?? 0); ?>
+                      <?php if ($pickId > 0): ?>
+                        <a href="/football/match/<?= $pickId ?>" style="font-weight:600"><?= e((string) ($pick['homeTeam'] ?? '—')) ?> vs <?= e((string) ($pick['awayTeam'] ?? '—')) ?></a>
+                      <?php else: ?>
+                        <span style="font-weight:600"><?= e((string) ($pick['homeTeam'] ?? '—')) ?> vs <?= e((string) ($pick['awayTeam'] ?? '—')) ?></span>
+                      <?php endif; ?>
+                      <div class="dim" style="font-size:10px"><?= e((string) ($pick['kickoffLabel'] ?? '')) ?></div>
+                    </td>
+                    <td style="padding:4px 6px"><?= e((string) ($pick['selectionLabel'] ?? '—')) ?></td>
+                    <td style="padding:4px 6px" class="mono"><b><?= (int) ($pick['score'] ?? 0) ?></b>/100</td>
+                    <td style="padding:4px 6px" class="mono"><?= is_numeric($pick['probability'] ?? null) ? number_format((float) $pick['probability'] * 100, 1) . '%' : '—' ?></td>
+                    <td style="padding:4px 6px" class="mono"><?= is_numeric($pick['odds'] ?? null) ? number_format((float) $pick['odds'], 2) : '—' ?></td>
+                    <td style="padding:4px 6px" class="mono"><?= is_numeric($pick['fairOdds'] ?? null) ? number_format((float) $pick['fairOdds'], 2) : '—' ?></td>
+                    <td style="padding:4px 6px" class="mono <?= (float) ($pick['expectedValue'] ?? 0) >= 0 ? 'up' : 'down' ?>"
+                        title="<?= e((string) ($pick['classificationMeaning'] ?? '')) ?>"><?= e((string) ($pick['valueLabel'] ?? '')) ?> · 
+                      <?= is_numeric($pick['expectedValue'] ?? null) ? ($pick['expectedValue'] >= 0 ? '+' : '') . number_format((float) $pick['expectedValue'] * 100, 1) . '%' : e((string) ($pick['valueLabel'] ?? '—')) ?>
+                      <div class="dim" style="font-size:10px"><?= e((string) ($pick['valueLabel'] ?? '')) ?></div>
+                    </td>
+                    <td style="padding:4px 6px" class="mono"><?= (int) ($pick['dataQuality'] ?? 0) ?></td>
+                    <td style="padding:4px 6px">
+                      <?php $movement = (string) ($pick['stabilityState'] ?? ''); $movementWhy = (string) ($pick['stabilityReason'] ?? ''); ?>
+                      <?php if ($movement === \AIWorkforce\Football\StabilityMonitor::UNSTABLE): ?>
+                        <span class="down" title="Excluded from the list when the movement crosses the unstable threshold; shown here only if the row was ranked before that check.">unstable</span>
+                      <?php elseif ($movement === \AIWorkforce\Football\StabilityMonitor::MOVED): ?>
+                        <span class="dim">moved</span>
+                      <?php elseif ($movement === \AIWorkforce\Football\StabilityMonitor::STABLE): ?>
+                        <span class="dim">stable</span>
+                      <?php else: ?>
+                        <span class="dim">first reading</span>
+                      <?php endif; ?>
+                    </td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+            <p class="dim" style="font-size:10px;margin:8px 0 0"><?= e((string) ($picksBlock['disclaimer'] ?? '')) ?></p>
+            <?php if (!empty($picksBlock['excluded'])): ?>
+              <p class="dim" style="font-size:10px;margin:4px 0 0">
+                Not on the list, and why:
+                <?php foreach (array_slice((array) $picksBlock['excluded'], 0, 6) as $skipped): ?>
+                  <?= e(trim((string) ($skipped['homeTeam'] ?? '') . ' vs ' . (string) ($skipped['awayTeam'] ?? ''))) ?>
+                  — <?= e((string) ($skipped['reason'] ?? 'excluded')) ?><?= e('; ') ?>
+                <?php endforeach; ?>
+                <?php if (count((array) $picksBlock['excluded']) > 6): ?>+<?= count((array) $picksBlock['excluded']) - 6 ?> more<?php endif; ?>
+              </p>
+            <?php endif; ?>
+          </div>
+        <?php endif; ?>
+
         <!-- ── the page as a market table ─────────────────────────────────── -->
         <?php $rows = is_array($board['rows'] ?? null) ? $board['rows'] : []; ?>
         <?php if ($rows !== []): ?>
@@ -355,6 +432,7 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                   <th style="padding:6px">Competition</th>
                   <th style="padding:6px">Kickoff</th>
                   <th style="padding:6px">Prediction</th>
+                  <th style="padding:6px" title="WINDELS' own grade of this prediction: how sure the model is, how good the data behind it is, how far the evidence reaches and how much it has moved. It is not the market's opinion and it is not the stake.">Intelligence</th>
                   <th style="padding:6px">Odds</th>
                   <th style="padding:6px">Confidence</th>
                 </tr>
@@ -383,8 +461,13 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                     <td style="padding:6px"><?= e((string) ($row['competition'] ?? '—')) ?></td>
                     <td style="padding:6px" class="mono"><?= e((string) ($row['kickoffLabel'] ?? '—')) ?></td>
                     <td style="padding:6px">
-                      <?php if (($row['analysisState'] ?? '') !== 'ANALYZED'): ?>
-                        <span class="dim">Not analyzed</span>
+                              <?php if (($row['analysisState'] ?? '') !== 'ANALYZED'): ?>
+                        <?php $rowWithheld = (array) ((array) ($row['intelligence'] ?? []))['withheld'] ?? []; ?>
+                        <?php if (!empty($rowWithheld['withheld'])): ?>
+                          <span class="down" title="<?= e((string) ($rowWithheld['reason'] ?? '')) ?>"><?= e((string) ($rowWithheld['headline'] ?? 'Prediction withheld — insufficient verified data')) ?></span>
+                        <?php else: ?>
+                          <span class="dim">Not analyzed</span>
+                        <?php endif; ?>
                       <?php else: ?>
                         <b><?= e((string) ($m['selectionLabel'] ?? '—')) ?></b>
                         <div class="dim" style="font-size:10px"><?= e((string) ($row['resultLabel'] ?? '—')) ?><?= !empty($row['prediction']['predictedScore']['label']) ? ' · ' . e((string) $row['prediction']['predictedScore']['label']) : '' ?></div>
@@ -398,6 +481,28 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                         <div class="dim" style="font-size:10px">implied <?= $implied === null ? '—' : number_format((float) $implied * 100, 1) . '%' ?></div>
                       <?php endif; ?>
                     </td>
+                    <?php $intel = is_array($row['intelligence'] ?? null) ? $row['intelligence'] : []; ?>
+                    <?php $scoreBlock = is_array($intel['score'] ?? null) ? $intel['score'] : []; ?>
+                    <?php $stabBlock = is_array($intel['stability'] ?? null) ? $intel['stability'] : []; ?>
+                    <?php $freshBlock = is_array($intel['freshness'] ?? null) ? $intel['freshness'] : []; ?>
+                    <td style="padding:6px" class="mono">
+                      <?php if (is_numeric($scoreBlock['score'] ?? null)): ?>
+                        <b title="<?= e((string) ($scoreBlock['label'] ?? '')) ?>"><?= (int) $scoreBlock['score'] ?><span class="dim">/100</span></b>
+                        <span class="dim" style="font-size:10px"><?= e((string) ($scoreBlock['band'] ?? '')) ?></span>
+                      <?php else: ?>
+                        <span class="dim" title="<?= e((string) ($scoreBlock['note'] ?? 'No grade is published when the inputs that would form it are not stored.')) ?>">no score</span>
+                      <?php endif; ?>
+                      <?php if (($stabBlock['state'] ?? '') === \AIWorkforce\Football\StabilityMonitor::UNSTABLE): ?>
+                        <div class="down" style="font-size:10px" title="<?= e((string) ($stabBlock['reason'] ?? '')) ?>">⚠ Prediction unstable — significant model movement</div>
+                      <?php elseif (($stabBlock['state'] ?? '') === \AIWorkforce\Football\StabilityMonitor::MOVED): ?>
+                        <div class="dim" style="font-size:10px" title="<?= e((string) ($stabBlock['reason'] ?? '')) ?>">moved <?= e(number_format((float) ($stabBlock['movementPoints'] ?? 0), 1)) ?>pp</div>
+                      <?php elseif (($stabBlock['state'] ?? '') === \AIWorkforce\Football\StabilityMonitor::STABLE): ?>
+                        <div class="dim" style="font-size:10px">stable</div>
+                      <?php endif; ?>
+                      <?php if (!empty($freshBlock['verdict'])): ?>
+                        <div class="dim" style="font-size:10px" title="prediction · data · odds, each with its own clock"><?= e((string) $freshBlock['verdict']) ?></div>
+                      <?php endif; ?>
+                    </td>
                     <td style="padding:6px" class="mono">
                       <?= is_numeric($row['confidence'] ?? null) ? number_format((float) $row['confidence'], 1) . '%' : '—' ?>
                       <div class="dim" style="font-size:10px">DQ <?= (int) ($row['dataQuality'] ?? 0) ?>/100 · risk <?= e(strtolower((string) ($row['risk']['level'] ?? 'unknown'))) ?></div>
@@ -405,7 +510,7 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                   </tr>
                   <?php if (($row['analysisState'] ?? '') === 'ANALYZED'): ?>
                     <tr style="border-bottom:1px solid var(--line)">
-                      <td colspan="6" style="padding:0 6px 8px">
+                      <td colspan="7" style="padding:0 6px 8px">
                         <details>
                           <summary class="dim" style="font-size:11px;cursor:pointer">Model detail, price and risk</summary>
                           <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:6px;font-size:11px">
@@ -449,6 +554,65 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                               <div class="dim">frozen at kickoff · model v<?= e((string) ($m['modelVersion'] ?? '—')) ?></div>
                             </div>
                           </div>
+                          <!-- The three separate questions, kept apart on purpose. -->
+                          <?php $fairBlock = is_array($intel['fairValue'] ?? null) ? $intel['fairValue'] : []; ?>
+                          <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:11px">
+                            <div>
+                              <div class="dim">WINDELS probability</div>
+                              <div class="mono"><b><?= is_numeric($row['confidence'] ?? null) ? number_format((float) $row['confidence'], 1) . '%' : '—' ?></b> <span class="dim">what the data suggests</span></div>
+                              <div class="dim">Data quality <?= (int) ($intel['quality']['score'] ?? 0) ?>/100 — <?= e((string) ($intel['quality']['band'] ?? '—')) ?></div>
+                            </div>
+                            <div>
+                              <div class="dim">Market odds</div>
+                              <div class="mono"><b><?= is_numeric($odds ?? null) ? number_format((float) $odds, 2) : 'no price quoted' ?></b> <span class="dim">the price offered</span></div>
+                              <?php if (is_numeric($fairBlock['fairOdds'] ?? null)): ?>
+                                <div class="dim">fair (margin removed) <?= number_format((float) $fairBlock['fairOdds'], 2) ?></div>
+                              <?php else: ?>
+                                <div class="dim"><?= e((string) ($fairBlock['note'] ?? 'no margin estimate')) ?></div>
+                              <?php endif; ?>
+                            </div>
+                            <div>
+                              <div class="dim">WINDELS Edge / Value</div>
+                              <?php if (($fairBlock['state'] ?? '') === 'AVAILABLE' && is_numeric($fairBlock['expectedValue'] ?? null)): ?>
+                                <b class="<?= (float) $fairBlock['expectedValue'] >= 0 ? 'up' : 'down' ?>"
+                                   title="expected value: model probability × the price − 1"><?= ($fairBlock['expectedValue'] >= 0 ? '+' : '') . number_format((float) $fairBlock['expectedValue'] * 100, 1) ?>%</b>
+                                <div class="mono"><?= e((string) ($fairBlock['valueLabel'] ?? '')) ?></div>
+                                <div class="dim"><?= e((string) ($fairBlock['valueReason'] ?? '')) ?></div>
+                              <?php else: ?>
+                                <span class="dim"><?= e((string) ($fairBlock['state'] ?? 'UNPRICED')) ?></span>
+                                <div class="dim"><?= e((string) ($fairBlock['note'] ?? 'no price to compare against')) ?></div>
+                              <?php endif; ?>
+                            </div>
+                            <div>
+                              <div class="dim">Why this selection</div>
+                              <?php $driverRows = (array) ($intel['drivers']['drivers'] ?? []); ?>
+                              <?php if ($driverRows === []): ?>
+                                <div class="dim">No drivers are published for this match.</div>
+                              <?php else: ?>
+                                <ul style="margin:2px 0 0;padding-left:14px">
+                                <?php foreach ($driverRows as $driver): ?>
+                                  <li><?= e((string) ($driver['label'] ?? '')) ?>: <span class="dim" style="font-size:11px"><?= e((string) ($driver['detail'] ?? '')) ?></span></li>
+                                <?php endforeach; ?>
+                                </ul>
+                                <div class="dim" style="margin-top:4px"><?= e((string) ($intel['drivers']['headline'] ?? '')) ?></div>
+                              <?php endif; ?>
+                            </div>
+                          </div>
+                          <!-- Last updated, as three clocks. One timestamp would answer a
+                               question this panel is not asking: a prediction can be
+                               current while the odds beside it are half an hour old. -->
+                          <?php if (!empty($freshBlock['clocks'])): ?>
+                            <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:11px">
+                              <?php foreach ($freshBlock['clocks'] as $clock): ?>
+                                <div>
+                                  <div class="dim"><?= e((string) ($clock['label'] ?? '')) ?></div>
+                                  <div><?= e((string) ($clock['ageLabel'] ?? '—')) ?> <span class="dim"><?= e((string) ($clock['state'] ?? '')) ?></span></div>
+                                  <div class="dim"><?= e((string) ($clock['note'] ?? ($clock['meaning'] ?? ''))) ?></div>
+                                </div>
+                              <?php endforeach; ?>
+                            </div>
+                          <?php endif; ?>
+                          <p class="dim" style="font-size:10px;margin:8px 0 0"><?= e((string) ($fairBlock['disclaimer'] ?? '')) ?></p>
                         </details>
                       </td>
                     </tr>

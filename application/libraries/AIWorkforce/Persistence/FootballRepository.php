@@ -240,6 +240,37 @@ interface FootballRepository
      */
     public function listMarketOdds(array $matchIds): array;
 
+    // ── prediction revisions (the movement history) ───────────────────────────
+
+    /**
+     * Record one calculation of a fixture's prediction.
+     *
+     * A prediction row is unique per (fixture, kind, model version) and is
+     * *replaced* when a stated reason justifies it, so the figure it carried
+     * would otherwise disappear with the row. Movement can only be measured
+     * against a record of what was said before, which is what this is for.
+     *
+     * Keyed by `prediction_id`: storing the same prediction twice — an idempotent
+     * re-run of a sweep — returns the existing revision instead of adding another,
+     * so a repeated job cannot manufacture a movement trail.
+     *
+     * @param array<string,mixed> $row
+     * @return array{row:array<string,mixed>,created:bool}
+     */
+    public function savePredictionRevision(array $row): array;
+
+    /**
+     * The movement history of the given fixtures, newest first — one read for a
+     * whole page, in the same shape as `listPredictionsForFixtures()`.
+     *
+     * @param list<int> $fixtureIds
+     * @return array<int,list<array<string,mixed>>> keyed by fixture id
+     */
+    public function listPredictionRevisions(array $fixtureIds, string $kind, int $limitPerFixture = 5): array;
+
+    /** How many revision rows are older than the retention window. */
+    public function prunePredictionRevisions(int $olderThanDays = 90): int;
+
     // ── settlements + performance ───────────────────────────────────────────
     /** Insert-once keyed by prediction_id; a second call returns the existing
      *  row with created=false (idempotent settlement jobs). */

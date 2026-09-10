@@ -217,7 +217,14 @@ final class FootballCronService
     {
         $pruned = $this->repo->pruneSyncLogs(120);
         $orphans = $this->repo->pruneOrphanScoreRows();
-        return ['status' => 'COMPLETED', 'processed' => $pruned + $orphans, 'created' => 0, 'updated' => 0,
-            'syncLogsRemoved' => $pruned, 'orphanScoreRowsRemoved' => $orphans, 'requests' => 0];
+        // The revision trail is operational history, not a published forecast: it
+        // exists to explain a movement the reader can still see on the page. Once
+        // the prediction it describes has aged out of the board, keeping it serves
+        // nobody — but the window is configured, because an operator auditing a
+        // model's drift over a season needs the trail to outlive the fixture list.
+        $revisions = $this->repo->prunePredictionRevisions($this->football->config()->revisionRetentionDays());
+        return ['status' => 'COMPLETED', 'processed' => $pruned + $orphans + $revisions, 'created' => 0, 'updated' => 0,
+            'syncLogsRemoved' => $pruned, 'orphanScoreRowsRemoved' => $orphans, 'revisionRowsRemoved' => $revisions,
+            'retentionDays' => $this->football->config()->revisionRetentionDays(), 'requests' => 0];
     }
 }

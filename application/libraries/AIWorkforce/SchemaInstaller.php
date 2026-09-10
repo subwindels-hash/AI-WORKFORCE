@@ -47,7 +47,7 @@ final class SchemaInstaller
         'football_model_versions', 'football_calibration_versions', 'football_match_predictions',
         'football_score_probabilities', 'football_prediction_settlements',
         'football_model_performance', 'football_provider_sync_logs',
-        'football_provider_matches', 'football_competition_mapping',
+        'football_provider_matches', 'football_competition_mapping', 'football_prediction_revisions',
         'languages', 'user_language_profiles', 'language_assessments', 'learning_paths',
         'learning_modules', 'lesson_attempts', 'study_sessions', 'language_progress',
         'conversation_sessions', 'writing_attempts', 'vocabulary', 'user_vocabulary',
@@ -74,7 +74,7 @@ final class SchemaInstaller
      * Persistent cache version for the request-time schema guard. Bump whenever
      * idempotent upgrade logic changes without a matching SQL-file mtime change.
      */
-    private const STAMP_VERSION = '2026-09-09-sports-confidence-floor-v1';
+    private const STAMP_VERSION = '2026-09-10-football-prediction-revisions-v1';
 
     public static function databaseDir(): string
     {

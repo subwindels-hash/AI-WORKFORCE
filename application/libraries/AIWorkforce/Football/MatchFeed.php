@@ -80,6 +80,7 @@ final class MatchFeed
         private ModelRegistry $models,
         private FootballConfiguration $config,
         private ?PredictionMarkets $markets = null,
+        private ?IntelligenceReport $report = null,
     ) {
         $this->markets ??= new PredictionMarkets($config);
     }
@@ -88,6 +89,53 @@ final class MatchFeed
     public function markets(): PredictionMarkets
     {
         return $this->markets;
+    }
+
+    /**
+     * The intelligence layer — WINDELS' score, the data-quality checklist, the
+     * drivers behind the selection, the fair-value comparison, the stability
+     * verdict and the three freshness clocks.
+     *
+     * Built here as well as in the facade so a feed assembled by hand still
+     * decorates its rows: the block must never depend on which door was used.
+     */
+    public function report(): IntelligenceReport
+    {
+        return $this->report ??= new IntelligenceReport(
+            $this->repo,
+            $this->config,
+            new StabilityMonitor($this->repo, $this->config),
+            new IntelligenceScore($this->config),
+            new PredictionDrivers(),
+            new FreshnessTracker($this->config),
+        );
+    }
+
+    /**
+     * The intelligence block for every match on a page, in page order.
+     *
+     * One batched revision read for the page, one for the last fixture sweep —
+     * the same rule that keeps market selection free of per-match queries.
+     * Decorating never generates, never refetches and never re-reads a provider.
+     *
+     * @param list<array<string,mixed>> $fixtures
+     * @param list<array<string,mixed>|null> $predictions one row (or null) per fixture
+     * @param list<array<string,mixed>> $markets one evaluated market per fixture
+     * @param list<array<string,mixed>> $refusals why an unanalyzed match has no row
+     * @return list<array<string,mixed>>
+     */
+    public function decorate(array $fixtures, array $predictions, array $markets, array $refusals = []): array
+    {
+        $entries = [];
+        foreach ($fixtures as $index => $fixture) {
+            $entries[] = [
+                'fixture' => (array) $fixture,
+                'prediction' => is_array($predictions[$index] ?? null) ? (array) $predictions[$index] : null,
+                'market' => (array) ($markets[$index] ?? []),
+                'predictionRefusal' => (array) ($refusals[$index] ?? []),
+            ];
+        }
+        return $this->report()->forPage($entries);
     }
 
     /**
@@ -261,9 +309,18 @@ final class MatchFeed
         $matches = [];
         $reused = 0;
         $entries = [];
+        $pagePredictions = [];
+        $refusals = [];
         foreach ($fixtures as $index => $fixture) {
             $prediction = $this->predictions->existing($fixture, $modelVersionId, PredictionService::KIND_PRE_MATCH);
             $outcome = $generation['matches'][$index] ?? [];
+            $pagePredictions[$index] = $prediction;
+            // Why an empty slot is empty — carried into the intelligence block so
+            // "not analyzed" names its own reason instead of being a blank row.
+            if ($prediction === null) {
+                $refusals[$index] = ['code' => (string) ($outcome['code'] ?? 'NO_PREDICTION'),
+                    'reason' => (string) ($outcome['reason'] ?? '')];
+            }
             $source = $prediction !== null
                 ? ($outcome['state'] === PredictionService::MISSING_GENERATED ? self::SOURCE_GENERATED : self::SOURCE_STORED)
                 : (string) ($outcome['source'] ?? self::SOURCE_REFUSED);
@@ -283,6 +340,27 @@ final class MatchFeed
             $matches[$index]['market'] = $this->predictionResult($markets[$index], $match, $fixtures[$index] ?? [],
                 $sources[(string) ($match['matchId'] ?? '')] ?? []);
         }
+        // The intelligence block rides on the same rows the page is already
+        // holding: the score, the quality checklist, the drivers, the fair-value
+        // comparison, the stability verdict and the three clocks. It costs one
+        // batched revision read and one sync-log read for the whole page — never
+        // a provider call, and never a per-match query.
+        $intelligence = $this->decorate($fixtures, $pagePredictions, $markets, $refusals);
+        foreach ($matches as $index => $match) $matches[$index]['intelligence'] = $intelligence[$index] ?? null;
+        $summary = $this->report()->summary(array_map(
+            static fn(array $match): array => [
+                'intelligence' => (array) ($match['intelligence'] ?? []),
+                'analysisState' => (string) ($match['analysisState'] ?? ''),
+                'market' => (array) ($match['market'] ?? []),
+                'matchId' => (string) ($match['matchId'] ?? ''),
+                'fixtureId' => (int) ($match['fixtureId'] ?? 0),
+                'homeTeam' => (string) ($match['homeTeam'] ?? ''),
+                'awayTeam' => (string) ($match['awayTeam'] ?? ''),
+                'kickoffLabel' => (string) ($match['kickoffLabel'] ?? ''),
+                'confidence' => $match['prediction']['confidence'] ?? null,
+            ],
+            $matches
+        ));
 
         // Counted with the same filter as the page: with a competition selected,
         // "how many are analyzed" means analyzed in that competition (or group
@@ -347,6 +425,10 @@ final class MatchFeed
                 'missing' => $missing,
                 'returned' => $returned,
             ],
+            // How the intelligence layer reads this page: how much of it is
+            // priced, judged, settled or withheld. Computed over the page on
+            // screen and labelled as such, never over the date silently.
+            'intelligenceSummary' => $summary,
             'model' => [
                 'state' => (string) $model['state'],
                 'label' => (string) $model['label'],

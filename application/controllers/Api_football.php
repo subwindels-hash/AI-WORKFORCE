@@ -171,6 +171,66 @@ class Api_football extends Api_controller
     }
 
     /**
+     * The page's ranked reading: the matches on it sorted by the evidence behind
+     * them, not by the size of the price. Reads the board's stored rows, so it
+     * never regenerates a prediction and never spends provider quota.
+     *
+     * `competition`, `market` and `line` narrow the same way `/matches` narrows a
+     * page — they change which rows are ranked, not how they were produced.
+     */
+    public function picks()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        $date = \AIWorkforce\Football\RequestParams::date($g, 'date', gmdate('Y-m-d'), $notes);
+        $page = \AIWorkforce\Football\RequestParams::int($g, 'page', 1, 1, \AIWorkforce\Football\MatchFeed::MAX_PAGE, $notes);
+        $options = $this->feedOptions($g, $notes);
+        $limit = \AIWorkforce\Football\RequestParams::int($g, 'limit', \AIWorkforce\Football\MatchFeed::DEFAULT_PAGE_SIZE,
+            1, \AIWorkforce\Football\MatchFeed::MAX_PAGE_SIZE, $notes);
+        $payload = $this->football()->picks($date, $page, $limit, $options);
+        $payload['request'] = ['date' => $date, 'page' => $page, 'options' => $options, 'notes' => array_values($notes)];
+        $this->json($payload);
+    }
+
+    /**
+     * The whole intelligence block for one fixture: WINDELS' probability, the
+     * market's price, the value of that gap, the intelligence score, the drivers,
+     * the stability verdict and the three clocks.
+     *
+     * Read-only by default. `generate=1` is the documented exception, and it still
+     * refuses a match whose kickoff has passed or whose data is too thin — the
+     * answer then comes back as the refusal, with the reason attached.
+     */
+    public function match_intelligence($fixtureIdSegment = 0)
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        // The id may arrive as a path segment (`/intelligence/123`) or as a query
+        // parameter; the segment wins, because a URL that names a fixture should
+        // not be overruled by a stale `fixtureId` left in a query string.
+        $fixtureId = (int) $fixtureIdSegment;
+        if ($fixtureId <= 0) $fixtureId = \AIWorkforce\Football\RequestParams::int($g, 'fixtureId', 0, 1, 100000000000, $notes);
+        if ($fixtureId <= 0) {
+            $this->json(['status' => 'INVALID', 'code' => 'FIXTURE_ID_REQUIRED',
+                'reason' => 'fixtureId is required: the intelligence report is about one stored fixture.',
+                'request' => ['notes' => array_values($notes)], 'generatedAt' => gmdate('c')]);
+            return;
+        }
+        $market = trim((string) ($g['market'] ?? ''));
+        $line = isset($g['line']) && is_numeric($g['line']) ? (float) $g['line'] : null;
+        $generate = in_array(strtolower((string) ($g['generate'] ?? '')), ['1', 'true', 'yes'], true);
+        // The same rule `/matches/:id/prediction` follows: writing a prediction row
+        // is a managed action even when it rides on a read endpoint.
+        if ($generate && !$this->requirePermission('sports.manage', false)) return;
+        $payload = $this->football()->intelligenceFor($fixtureId, $market !== '' ? $market : null, $line, $generate);
+        $payload['request'] = ['fixtureId' => $fixtureId, 'market' => $market !== '' ? $market : null,
+            'line' => $line, 'generate' => $generate, 'notes' => array_values($notes)];
+        $this->json($payload);
+    }
+
+    /**
      * `competition` and `market` from a request. Both are selections over rows
      * that are already stored; an unusable value is reported through `$notes`
      * rather than silently becoming a different selection.
