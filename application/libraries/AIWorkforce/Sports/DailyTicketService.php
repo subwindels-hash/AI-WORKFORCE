@@ -799,7 +799,10 @@ class DailyTicketService
         if ($externalId === '') return $rawFixture;
         try { $stored = $this->repo->findMatch($providerId, $externalId); }
         catch (\Throwable $e) { return $rawFixture; }
-        $payload = is_array($stored['payload'] ?? null) ? $stored['payload'] : [];
+        // The stored document, in whichever shape the repository read gave it
+        // back (decoded array or raw JSON text) — a text payload is still the
+        // verified reading of the previous run, never "no stored form".
+        $payload = SportsDataNormalizer::document($stored['payload'] ?? null);
         $form = $payload['context']['recentForm'] ?? null;
         if (!is_array($form)) return $rawFixture;
         foreach (FeatureEngineeringEngine::REQUIRED_FORM_FIELDS as $field) {
@@ -826,7 +829,7 @@ class DailyTicketService
     /** Data fields present in the stored match context (quality + gating inputs). */
     private function contextFields(array $matchRow): array
     {
-        $payload = is_array($matchRow['payload'] ?? null) ? $matchRow['payload'] : [];
+        $payload = SportsDataNormalizer::document($matchRow['payload'] ?? null);
         $context = is_array($payload['context'] ?? null) ? $payload['context'] : [];
         $present = [];
         foreach ($context as $key => $value) {
@@ -987,7 +990,7 @@ class DailyTicketService
     private function fixtureIdsByProvider(array $matchRow, string $fixtureProvider): array
     {
         $ids = [$fixtureProvider => (string) $matchRow['external_id']];
-        $payload = is_array($matchRow['payload'] ?? null) ? $matchRow['payload'] : [];
+        $payload = SportsDataNormalizer::document($matchRow['payload'] ?? null);
         foreach ((array) ($payload['crossReferences'] ?? []) as $providerCode => $extId) {
             $providerCode = (string) $providerCode;
             $extId = trim((string) $extId);
@@ -1027,11 +1030,11 @@ class DailyTicketService
             $key = $market . ':' . $selection;
             if (!isset($latest[$key]) || strcmp((string) $observed, (string) $latest[$key]['observedAt']) > 0) {
                 $source = (string) ($providerCodes[(int) ($row['provider_id'] ?? 0)] ?? '');
-                if ($source === '') {
-                    $payload = is_array($row['payload'] ?? null) ? $row['payload'] : [];
-                    $source = (string) ($payload['provider'] ?? '');
-                }
-                $latest[$key] = ['market' => $market, 'selection' => $selection, 'decimalOdds' => (float) $decimal, 'observedAt' => (string) $observed, 'payload' => $row['payload'] ?? []] + ($source !== '' ? ['oddsSource' => $source] : []);
+                // Normalise the document once: the freshness and value stages
+                // downstream read it as a document, not as column text.
+                $payload = SportsDataNormalizer::document($row['payload'] ?? null);
+                if ($source === '') $source = (string) ($payload['provider'] ?? '');
+                $latest[$key] = ['market' => $market, 'selection' => $selection, 'decimalOdds' => (float) $decimal, 'observedAt' => (string) $observed, 'payload' => $payload] + ($source !== '' ? ['oddsSource' => $source] : []);
             }
         }
         return array_values($latest);

@@ -25,7 +25,7 @@ class MatchIntelligenceEngine
 
     public function analyze(array $match, ?array $latestOdds, array $verifiedContext = [], ?int $now = null): array
     {
-        $payload = is_array($match['payload'] ?? null) ? $match['payload'] : [];
+        $payload = SportsDataNormalizer::document($match['payload'] ?? null);
         $storedContext = is_array($payload['context'] ?? null) ? $payload['context'] : [];
         $context = array_merge($storedContext, $verifiedContext);
         $odds = $this->freshness->assess(

@@ -167,7 +167,7 @@ class SportsCronService
         $updated = 0; $errors = [];
         foreach ($matches as $match) {
             try {
-                $payload = is_array($match['payload'] ?? null) ? $match['payload'] : [];
+                $payload = SportsDataNormalizer::document($match['payload'] ?? null);
                 $matchArr = array_merge($match, ['externalId' => $match['external_id'], 'homeTeam' => $match['home_team'], 'awayTeam' => $match['away_team'], 'kickoff' => $match['kickoff_at'], 'context' => $payload['context'] ?? null, 'sourceTimestamp' => $match['source_timestamp']]);
                 $odds = $this->repo->latestOdds((int) $match['id'], 'TOTAL_GOALS', 'OVER_1_5');
                 $provider = $this->providerById($this->repo->listProviders(), (int) $match['provider_id']);

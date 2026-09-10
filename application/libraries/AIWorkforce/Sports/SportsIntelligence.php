@@ -413,7 +413,7 @@ class SportsIntelligence
             if (!in_array($matchStatus, LiveScoreService::LIVE_STATUSES, true)) continue;
             $updatedTs = strtotime((string) ($m['updated_at'] ?? ''));
             if ($updatedTs === false || ($now - $updatedTs) > $threshold) continue;
-            $payload = is_array($m['payload'] ?? null) ? $m['payload'] : [];
+            $payload = SportsDataNormalizer::document($m['payload'] ?? null);
             $m['liveState'] = is_array($payload['live'] ?? null) ? $payload['live'] : [];
             $m['simulated'] = !empty($payload['simulated']);
             $live[] = $m;

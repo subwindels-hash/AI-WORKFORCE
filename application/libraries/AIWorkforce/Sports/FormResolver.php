@@ -71,6 +71,29 @@ class FormResolver
     }
 
     /**
+     * The season to ask a provider's standings endpoint for when the fixture
+     * row itself stated none.
+     *
+     * api-football REQUIRES `season` on /standings, so an empty value is a
+     * request that cannot be answered — that is how every fixture arriving
+     * without a season (cups, friendlies: `league.season` is null there) stayed
+     * an INSUFFICIENT_DATA rejection although its league table exists. Its
+     * tables are keyed by the year the season starts, so that is what is asked,
+     * and a year with no table for that league returns nothing rather than a
+     * substituted season — no number is ever extrapolated.
+     *
+     * TheSportsDB answers with its CURRENT table when the season is omitted
+     * (and wants a `2025-2026` range otherwise, where a bare year matches no
+     * table at all), and SportMonks addresses seasons by internal id, where a
+     * year is not a valid key. Both are therefore asked with no season, and an
+     * unanswered lookup is counted and reported rather than papered over.
+     */
+    private function seasonFallback(SportsDataProvider $provider): string
+    {
+        return $provider instanceof ApiFootballProvider ? (string) date('Y') : '';
+    }
+
+    /**
      * Enrich a list of fixtures with recentForm context using provider APIs.
      *
      * @param SportsDataProvider $provider The provider that originally supplied the fixtures
@@ -96,7 +119,12 @@ class FormResolver
             $homeTeamId = $fixture['homeTeamId'] ?? null;
             $awayTeamId = $fixture['awayTeamId'] ?? null;
             $leagueId = $fixture['leagueId'] ?? null;
-            $season = $fixture['season'] ?? (string) date('Y');
+            // A fixture whose provider row stated no season (api-football's
+            // `league.season` is null for cups and friendlies) must not be read
+            // as "season=" — see seasonFallback() for which provider that empty
+            // value helps and which it breaks.
+            $season = trim((string) ($fixture['season'] ?? ''));
+            if ($season === '') $season = $this->seasonFallback($provider);
 
             // Skip if we already have form data (e.g. from sandbox)
             if (!empty($fixture['context']['recentForm'])) continue;

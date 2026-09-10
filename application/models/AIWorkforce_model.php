@@ -329,10 +329,19 @@ class AIWorkforce_model extends CI_Model
             public function saveMatch(int $providerId, array $m): array {
                 $row = $this->db->get_where('sports_matches', ['provider_id' => $providerId, 'external_id' => $m['externalId']], 1)->row_array();
                 $data = ['sport' => $m['sport'], 'competition' => $m['competition'], 'home_team' => $m['homeTeam'], 'away_team' => $m['awayTeam'], 'kickoff_at' => $m['kickoff'], 'status' => $m['status'], 'source_timestamp' => $m['sourceTimestamp'], 'round_id' => (string) ($m['roundId'] ?? '') !== '' ? (string) $m['roundId'] : null, 'payload' => json_encode($m), 'updated_at' => gmdate('c')];
-                if ($row) { $this->db->where('id', $row['id'])->update('sports_matches', $data); return array_merge($row, $data); }
-                $this->db->insert('sports_matches', array_merge(['provider_id' => $providerId, 'external_id' => $m['externalId'], 'created_at' => gmdate('c')], $data)); return array_merge($data, ['id' => (int)$this->db->insert_id(), 'provider_id' => $providerId, 'external_id' => $m['externalId']]);
+                // The returned row is the row a caller could re-read, so its
+                // `payload` is the DECODED document (the array), never the
+                // column text: a caller that trusts the read shape must not
+                // see the same fixture as "no stored context" one call later.
+                if ($row) { $this->db->where('id', $row['id'])->update('sports_matches', $data); return array_merge($row, $data, ['payload' => $m]); }
+                $this->db->insert('sports_matches', array_merge(['provider_id' => $providerId, 'external_id' => $m['externalId'], 'created_at' => gmdate('c')], $data)); return array_merge($data, ['payload' => $m], ['id' => (int)$this->db->insert_id(), 'provider_id' => $providerId, 'external_id' => $m['externalId']]);
             }
-            public function findMatch(int $providerId, string $externalId): ?array { return $this->db->get_where('sports_matches', ['provider_id' => $providerId, 'external_id' => $externalId], 1)->row_array() ?: null; }
+            /** `payload` is decoded here exactly as in findMatchById/listMatches. */
+            public function findMatch(int $providerId, string $externalId): ?array {
+                $row = $this->db->get_where('sports_matches', ['provider_id' => $providerId, 'external_id' => $externalId], 1)->row_array();
+                if ($row) $row['payload'] = json_decode((string) $row['payload'], true);
+                return $row ?: null;
+            }
             public function saveOdds(int $matchId, int $providerId, array $odds): void { $this->db->insert('sports_odds', ['match_id' => $matchId, 'provider_id' => $providerId, 'market' => $odds['market'], 'selection' => $odds['selection'], 'decimal_odds' => $odds['decimalOdds'], 'observed_at' => $odds['observedAt'], 'payload' => json_encode($odds)]); }
             public function saveResult(int $matchId, int $providerId, array $r): void { $row=$this->db->get_where('sports_results',['match_id'=>$matchId,'provider_id'=>$providerId],1)->row_array(); $data=['home_score'=>$r['homeScore'],'away_score'=>$r['awayScore'],'status'=>$r['status'],'verified'=>0,'source_timestamp'=>$r['sourceTimestamp'],'verified_at'=>null,'payload'=>json_encode($r['payload'])]; if($row)$this->db->where('id',$row['id'])->update('sports_results',$data); else $this->db->insert('sports_results',array_merge(['match_id'=>$matchId,'provider_id'=>$providerId],$data)); }
             public function findResult(int $matchId,int $providerId): ?array { return $this->db->get_where('sports_results',['match_id'=>$matchId,'provider_id'=>$providerId],1)->row_array() ?: null; }
