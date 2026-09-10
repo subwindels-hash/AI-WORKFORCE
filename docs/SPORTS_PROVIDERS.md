@@ -23,11 +23,11 @@ A provider is registered only when its credential exists. Multiple configured pr
 
 ## Capabilities
 
-| Provider | Fixtures | Results | Odds | Top players |
-|---|---:|---:|---:|---:|
-| API-Football | Yes | Yes | Yes, via the odds endpoint | Yes (scorers / assists / yellow cards / red cards) |
-| TheSportsDB | Yes | Yes | No bookmaker odds endpoint | No |
-| SportMonks | Yes (incl. full-round bulk fetch) | Yes | Yes, per fixture and per round (odds add-on) | No |
+| Provider | Fixtures | Results | Odds | Form source (standings / team stats) | Top players |
+|---|---:|---:|---:|---:|---:|
+| API-Football | Yes | Yes | Yes, via the odds endpoint | Team statistics + season standings fallback | Yes (scorers / assists / yellow cards / red cards) |
+| TheSportsDB | Yes | Yes | No bookmaker odds endpoint | Season table (`lookuptable.php`) | No |
+| SportMonks | Yes (incl. full-round bulk fetch) | Yes | Yes, per fixture and per round (odds add-on) | Season standings | No |
 
 All upstream responses are converted to the internal fixture, odds, and result shapes before they reach the normalizers and persistence layer. The provider adapters do not expose credentials to the frontend.
 
@@ -91,6 +91,14 @@ normalises `1`/`2`/`3` (and an empty key) to `123`, and normalises a base URL th
 contains the key segment (`.../api/v1/json/3`) or points at the premium-only
 v2 root back to `https://www.thesportsdb.com/api/v1/json`. Free tier is
 limited to 30 requests/minute (HTTP 429 → `RATE_LIMITED`).
+
+`standings($leagueId, $season)` wraps the documented v1 season table
+(`lookuptable.php?l={leagueId}&s={season}`) and maps `intPlayed`,
+`intGoalsFor` and `intGoalsAgainst` per team. TheSportsDB has no
+team-statistics endpoint, so this table is the provider's **only** verified
+form source — without it every fixture from a TheSportsDB-only installation
+is rejected `INSUFFICIENT_DATA` regardless of odds quality. Rows without an
+`idTeam` are dropped rather than guessed.
 
 **Free tier limits, verified live:** list endpoints are capped —
 `all_leagues.php` returns 5 leagues, `eventsday.php` a partial day, and
@@ -413,11 +421,43 @@ TTL and only refreshes when the maximum age is actually exceeded:
   generating one rejected prediction per market.
 * **Diagnostics**: the run result (and the stored `rejection_summary` under
   the reserved `_diagnostics` key) carries a funnel — fixtures evaluated →
-  eligible → fresh odds → sufficient data → predictions → confidence-qualified
+  eligible → with form → fresh odds → sufficient data → predictions → confidence-qualified
   → positive value → risk-qualified → correlation-qualified → final — plus the
   top rejection reasons with the provider that caused each failure, refresh
   attempts, and the active thresholds. The console's no-ticket panel renders
   it; `POST /api/sports/run_ticket_engine` returns it as `diagnostics`.
+
+## Recent form — the model's mandatory input
+
+Every supported market (`MATCH_RESULT`, `TOTAL_GOALS`, `BTTS`,
+`DOUBLE_CHANCE`) has exactly one mandatory data field: verified
+`recentForm` (home/away goals and conceded per match). No form → no
+probability → an explicit `INSUFFICIENT_DATA` rejection. Nothing is
+extrapolated to fill the gap.
+
+Provider fixture responses never carry form, so the `FormResolver` fetches it:
+
+* **Any provider that publishes a league table** serves form — one
+  `standings()` request per *(league, season)* covers every team in that
+  league, cached for the whole run. api-football additionally uses its
+  per-team `/teams/statistics` endpoint and falls back to the table when a
+  team has no statistics yet (season opener, cup entry).
+* **The lookup budget is spent where a ticket can still be won.** The daily
+  ticket engine screens fixture eligibility *before* enrichment, so
+  `WINDELS_SPORTS_FORM_LOOKUPS` (default 30) is never burned on matches that
+  already kicked off or start inside the 2-hour cut-off. Only live requests
+  are charged against it; reading an already-cached league table is free.
+* **Verified form is carried forward, not re-fetched.** Form stored on a
+  fixture by an earlier run is reused while it is inside
+  `WINDELS_SPORTS_FORM_MAX_AGE` (default 7 days), keeping its original
+  `source` and `timestamp` on the decision record. Older form is dropped and
+  re-read; form without a timestamp is never reused.
+* **Observability**: the funnel carries `formEnrichmentCandidates` (eligible
+  fixtures offered to the resolver), `fixturesWithRecentForm`,
+  `fixturesWithCarriedForwardForm`, and the resolver's own stats (`lookupsUsed`
+  / `budget` / `lookupFailures` / `budgetSkips` / `providerCapable`). When no
+  fixture resolved form, the no-ticket message names the cause — missing
+  endpoint, failed lookups, or a starved budget with the numbers to fix it.
 
 ## Odds Prediction Ticket compliance rules
 

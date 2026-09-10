@@ -127,6 +127,15 @@ class SportsDataNormalizer
             }
             if (count($form) === 4) {
                 $form['source'] = is_string($raw['recentForm']['source'] ?? null) ? $raw['recentForm']['source'] : null;
+                // When the resolver stated WHEN the form was read, keep it.
+                // The stored timestamp is what lets a later run tell verified
+                // form that is still current from form that has gone stale —
+                // without it, carried-forward context has no measurable age.
+                $stamp = $raw['recentForm']['timestamp'] ?? null;
+                if (is_string($stamp) && trim($stamp) !== '') {
+                    try { $form['timestamp'] = (new \DateTimeImmutable($stamp))->setTimezone(new \DateTimeZone('UTC'))->format('c'); }
+                    catch (\Throwable $e) { /* an unparseable stamp is simply dropped */ }
+                }
                 $out['recentForm'] = $form;
             }
         }

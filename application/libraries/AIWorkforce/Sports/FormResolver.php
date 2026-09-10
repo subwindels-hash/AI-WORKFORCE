@@ -151,30 +151,40 @@ class FormResolver
 
         $cacheKey = $teamId . ':' . ($leagueId ?? '') . ':' . ($season ?? '');
         if (isset($cache[$cacheKey])) return $cache[$cacheKey];
-        // Quota budget: cache hits are free, live lookups stop at the cap so a
-        // big fixture pull cannot burn the daily quota before odds/results sync.
-        if ($lookups >= $this->maxTeamLookups) { $this->budgetSkips++; return null; }
+        // Quota budget: only LIVE requests are charged. A league table already
+        // fetched this run is free to read — charging it made a small budget
+        // starve every team after the first, which is the opposite of what the
+        // cap is for. Each branch below guards its own request.
+        $standingsCached = $leagueId !== null && isset($this->standingsByLeague[$provider->id() . ':' . $leagueId . ':' . ($season ?? '')]);
+        if (!$standingsCached && $lookups >= $this->maxTeamLookups) { $this->budgetSkips++; return null; }
 
         try {
-            if ($provider instanceof ApiFootballProvider && $leagueId && $season) {
+            if ($provider instanceof ApiFootballProvider && $leagueId && $season && !$standingsCached && $lookups < $this->maxTeamLookups) {
                 $lookups++;
                 $stats = $provider->teamStatistics($teamId, $leagueId, $season);
                 $played = (int) ($stats['played'] ?? 0);
-                if ($played < 1) return null;
-                $goalsFor = (int) ($stats['goalsForTotal'] ?? 0);
-                $goalsAgainst = (int) ($stats['goalsAgainstTotal'] ?? 0);
-                $form = [
-                    'goalsPerMatch' => round($goalsFor / $played, 3),
-                    'concededPerMatch' => round($goalsAgainst / $played, 3),
-                ];
-                $cache[$cacheKey] = $form;
-                return $form;
+                // A team with no played matches yet (season opener, cup entry)
+                // has no per-team statistics — fall through to the league
+                // table below rather than declaring the fixture unresolvable.
+                if ($played >= 1) {
+                    $goalsFor = (int) ($stats['goalsForTotal'] ?? 0);
+                    $goalsAgainst = (int) ($stats['goalsAgainstTotal'] ?? 0);
+                    $form = [
+                        'goalsPerMatch' => round($goalsFor / $played, 3),
+                        'concededPerMatch' => round($goalsAgainst / $played, 3),
+                    ];
+                    $cache[$cacheKey] = $form;
+                    return $form;
+                }
             }
 
-            if ($provider instanceof SportMonksProvider && $leagueId) {
-                // One standings request per (league, season) serves EVERY team
-                // in the league — the fetched table is cached and reused for
-                // all of the league's fixtures in this run.
+            // Standings fallback — used by EVERY provider that publishes a
+            // league table (SportMonks, TheSportsDB, and api-football when its
+            // per-team statistics endpoint gave nothing usable). One request
+            // per (league, season) serves EVERY team in that league: the
+            // fetched table is cached and reused for all of the league's
+            // fixtures in this run.
+            if ($leagueId && method_exists($provider, 'standings')) {
                 $standingsKey = $provider->id() . ':' . $leagueId . ':' . ($season ?? '');
                 if (!isset($this->standingsByLeague[$standingsKey])) {
                     if ($lookups >= $this->maxTeamLookups) { $this->budgetSkips++; return null; }
