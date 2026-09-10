@@ -72,7 +72,10 @@ test('football: the documented freshness windows are the ones the model reads', 
     // buckets in the constant — nothing unread advertised, nothing real hidden.
     $default = new \AIWorkforce\Football\FootballConfiguration();
     assert_equals(1095, $default->headToHeadStaleAfterDays(), 'three seasons by default, as documented');
-    assert_equals(['fixtures' => 86400, 'results' => 86400, 'live' => 300, 'h2h' => 94608000],
+    // 'odds' joined the list because a reader now asks a second question about a
+    // price — not only "is it fresh enough to use" but "is it still the price the
+    // page is quoting". It is consulted by FreshnessTracker; it is not decoration.
+    assert_equals(['fixtures' => 86400, 'results' => 86400, 'live' => 300, 'h2h' => 94608000, 'odds' => 1800],
         $default->describe()['maxDataAgeSeconds'], 'the shipped windows are the documented numbers');
 
     [$repo, , $module] = fx_fb_harness([], ['skipHistory' => true], ['WINDELS_FOOTBALL_MAX_AGE_H2H' => (string) (60 * 86400)]);

@@ -111,6 +111,11 @@ upstream did not deliver.
 | calibration not supported by history | `CALIBRATION_PENDING`, confidence labelled `RAW`, and the raw share capped by the data-quality ceiling |
 | model not yet ACTIVE | `MODEL_DRAFT` / `MODEL_APPROVED`-style label from `ModelRegistry::usable()`; a high-confidence badge requires an ACTIVE version |
 | kickoff passed | `NO_PREDICTION` + `KICKOFF_PASSED`; the stored pre-match row (if any) is returned next to it, unmodified |
+| market quoted no price | `UNPRICED` with the price fields `null`; the model's probability is shown and is never converted into a price |
+| book incomplete (not all legs quoted) | `PARTIAL_MARKET` / `NOT_EXHAUSTIVE_MARKET`; the margin is left unestimated rather than guessed |
+| score has no measurable component | "no score" — `score: null`, band `INSUFFICIENT_EVIDENCE`; never `0/100` |
+| prediction has no revision trail | stability `DATA_UNAVAILABLE`, stated as unknown, never as stable |
+| data quality below the floor | `Prediction withheld — insufficient verified data`, and the match is excluded from the pick list with that reason |
 
 `MODEL_NOT_CALIBRATED` remains the odds prediction ticket engine's decision code
 (`AIWorkforce\Sports`); the football module uses `CALIBRATION_PENDING` so the two
@@ -352,6 +357,169 @@ The market list is exposed by `GET /api/football/markets`, and the page payload
 carries the same `market.available` array, with `state` and `oddsAvailable` per
 market so the console can mark the ones that have a real price behind them.
 
+## The intelligence layer: probability, price, value
+
+Everything above answers *how a match was predicted*. This layer answers what a
+reader actually wants to know about it, and it deliberately splits that into
+three questions that must never be merged into one number:
+
+| Question | Field | Who owns it |
+| --- | --- | --- |
+| **What does WINDELS believe?** | `intelligence.probability`, `confidence`, `quality.score` | `OutcomePredictor` over the stored features; the model's own estimate, never derived from a price |
+| **What does the market charge?** | `market.odds`, `impliedProbability`, `pricing.overround` | `OddsIntelligence` over the odds rows the connected feed sent |
+| **Is the gap worth anything?** | `intelligence.fairValue.expectedValue`, `valueClass` | the comparison of the two above |
+
+A fourth number grades the read itself — the **WINDELS Intelligence Score** — and
+it is composed only from stored measurements, so it can always be opened and
+checked.
+
+### Odds intelligence (`OddsIntelligence`)
+
+`PredictionMarkets::priceSheet()` collects the quoted legs of one market;
+`OddsIntelligence::withFairValues()` then works out what the bookmaker's margin
+was, and `assess()` compares one selection against it.
+
+1. **Normalise.** The provider's own market and selection names are folded onto
+   the catalogue (matching naming variants, rejecting legs that belong to another
+   line — an Over 3.5 price is never the price of Over 2.5). Duplicate quotes for
+   one leg collapse to the newest, with the count of quotes and the spread kept.
+   A decimal price of 1.00 or below is not a price; it is dropped and the drop is
+   stated.
+2. **Remove the margin.** The summed implied probability of a *complete* book is
+   its overround. `PROPORTIONAL_OVERROUND` divides each leg's implied share by
+   that total, so the fair book sums to 100% and each leg keeps its relative
+   shape. This is only done where the market allows it: a 1X2 needs all three
+   legs, Over/Under, BTTS, DNB and the handicap need both sides, Double Chance
+   needs all three. A partial book is `PARTIAL_MARKET`, a market with legs outside
+   the priced set is `NOT_EXHAUSTIVE_MARKET`, and **neither gets a margin
+   estimate** — guessing where the unquoted leg's share went would be inventing a
+   number to compare a real one against.
+3. **Compare.** Implied probability is `1/odds`. `edge` is the model's share minus
+   that (probability points); `expectedValue` is `model × odds − 1` (what the
+   stake returns on average). They are different quantities and both are
+   published, because a reader who is shown only one cannot tell a fat price from a
+   good bet. `breakEvenProbability` is published too — the share the model has to
+   beat for that exact price to pay.
+4. **Classify.** `STRONG_VALUE`, `POSITIVE_VALUE`, `FAIR`, `NEGATIVE_VALUE`,
+   `AVOID`, `UNPRICED`, with the thresholds from `valueThresholds()` echoed in the
+   payload. `STRONG_VALUE` additionally requires the edge to survive margin
+   removal: a selection that looks valuable against a padded price and ordinary
+   against the de-vigged one is a reading of the vig, not of the football.
+
+Nothing in this pipeline is a promise. The disclaimer that ships with every value
+block says the class describes a price, not an outcome; no label on this engine
+says "guaranteed", "sure" or "free", and a test asserts it.
+
+The market price is *never* an input to the model's probability here: the
+probability in the payload is the model's own, so `blendWithMarket()` is not
+called on this path. The comparison happens after the estimate is fixed, which is
+the whole point of calling it independent.
+
+### The WINDELS Intelligence Score (`IntelligenceScore`)
+
+0–100, weighted over five components: model confidence, data quality, scoreline
+coverage, calibration state and prediction stability.
+
+* A component with no stored measurement is **excluded and the remaining weights
+  renormalised**; it is never scored zero. `0/100` would say *we know this is
+  bad*; exclusion says *we do not know*, and the payload names which of the two it
+  is (`NOT_MEASURABLE` vs `WEIGHT_ZEROED_BY_CONFIGURATION`).
+* A first reading is `BASELINE`, which is also not measurable movement — the
+  stability component is excluded rather than being credited for having nothing to
+  move.
+* `marketPriceIncluded` is `false` in the payload and enforced: value is a separate
+  verdict, and a rich price must not be able to raise a score.
+* Bands from `intelligenceBands()`: `EXCELLENT` ≥ 85, `STRONG` ≥ 70, `MODERATE`
+  ≥ 55, `THIN` ≥ 40, otherwise `INSUFFICIENT_EVIDENCE`. When nothing is
+  measurable there is no score at all, and the surface says "no score" rather than
+  printing `0/100`.
+
+### Stability (`StabilityMonitor`) and `football_prediction_revisions`
+
+`football_match_predictions` holds only the current reading — a `UNIQUE` key over
+(fixture, kind, model version) means a refresh overwrites the row, which is what a
+fan-facing page needs. So the value being moved *away from* is copied into
+`football_prediction_revisions` at the moment it is superseded, by
+`PredictionService::predict()` whenever a row is written, together with the
+regeneration codes that authorised the calculation. Movement and cause are stored
+on the same row, so "it changed" is never left as a bare fact.
+
+The state is measured in **percentage points on the selection the reader was
+shown**:
+
+| Movement | State | What the page says |
+| --- | --- | --- |
+| nothing stored to compare with | `DATA_UNAVAILABLE` | "no history" — explicitly *not* "stable" |
+| first reading | `BASELINE` | "first reading" |
+| inside `stabilityThresholds().moved` (default 2 pp) | `STABLE` | stable |
+| past it (default 8 pp) | `UNSTABLE` | "Prediction unstable — significant model movement" |
+| the recommended outcome flipped | at least `MOVED` | a flip is never a stable reading, however small the arithmetic move |
+
+The whole trail travels with the verdict (`revisions`), each row carrying the
+probabilities that were stored, the movement, and the trigger codes. It is read
+for a page in **one** query (`listPredictionRevisions`), never per match.
+`FootballCronService`'s cleanup job prunes it after `revisionRetentionDays()`.
+
+### Why a prediction was selected (`PredictionDrivers`)
+
+Bulleted reasons, each one a restatement of a stored field: home and away goal
+output, expected-goals difference, head-to-head, squad availability, recent form,
+the market price and the evidence the model actually had. Verdicts are
+`STRONG / FAVOURABLE / NEUTRAL / WEAK / UNFAVOURABLE / DATA_UNAVAILABLE`, derived
+from documented goal-rate bands (the bands are wording-only — they never feed the
+model). A field the provider never sent is reported as `DATA_UNAVAILABLE` with a
+sentence saying so; it is never printed as `0.00`, because a zero is a measurement
+and an absence is not.
+
+### Last updated (`FreshnessTracker`)
+
+Three independent clocks, because one timestamp would answer a question nobody
+asked:
+
+| Clock | Measured from | Window |
+| --- | --- | --- |
+| Prediction generated | `football_match_predictions.generated_at` | `predictionTtlSeconds()` (frozen at kickoff regardless) |
+| Data refreshed | `football_fixtures.source_timestamp`, falling back to the last `football-fixtures` sweep row and naming that fallback | `maxDataAgeSeconds('fixtures')` |
+| Odds refreshed | the newest `observedAt` among the quotes the page actually used | `maxDataAgeSeconds('odds')` (default 1800 s) |
+
+Each is `CURRENT` (< 50 % of its window), `AGING`, `STALE` or
+`DATA_UNAVAILABLE`; the match's state is the worst of the three. A prediction can
+therefore be current while the price beside it is twenty minutes old, and the
+page says so instead of letting the two blur.
+
+### Top WINDELS Picks (`IntelligenceReport::picks()`)
+
+A ranking of the page that is on screen, not of the season:
+
+* **Eligibility** first, and it is a stated filter: analyzed, `QUALIFIED` data
+  quality, not withheld, an actual selection in the chosen market, and not
+  `UNSTABLE`.
+* **Order**: intelligence score, then the edge in probability points, then
+  confidence — value alone cannot put a thinly-evidenced match at the top, and
+  confidence alone cannot put a well-evidenced no-gap match there.
+* **Size**: `picksLimit()` (default 5, capped at 10). `considered`, `eligible`,
+  `shown` and `beyondList` are all published, so "5 of 9 eligible" is checkable
+  rather than implied.
+* **Exclusions are listed with their reason** — an unstable, limited-data or
+  unanalyzed match appears in `excluded` with the sentence that kept it out, so
+  the absence can be audited.
+
+The panel's caption is fixed by `IntelligenceReport::PICKS_DISCLAIMER`: these are
+model-based selections ranked by how well evidenced they are, not guarantees, and
+they are not stake advice.
+
+### The one assembler (`IntelligenceReport`)
+
+`forPage()` decorates a page in one pass — one batched revision read and one sync
+row for the whole page — and `forMatch()` is the single-match version of the same
+assembly. `PredictionBoard`, `MatchFeed`, `/api/football/picks`,
+`/api/football/intelligence/:id` and the match page all read this one class, so a
+figure cannot be computed twice and differ. It also publishes the reader's
+`risk` (`HIGH / MEDIUM / LOW` from the quality band and the confidence — never
+from the price), the withheld verdict (`Prediction withheld — insufficient verified
+data`) and `summary()`, which counts how much of the page is scored, priced,
+partial or withheld.
+
 ## Multi-provider: three feeds, one canonical match
 
 Three providers can be connected at once, and any of them — or all of them — can
@@ -569,6 +737,8 @@ GET /api/football/fixtures/live
 GET /api/football/matches                 ?date=&page=1&limit=50&competition=&market=&line=   the paginated feed (50 per page)
 GET /api/football/competitions          ?date=&providerId=   competitions stored for the date, premium marked
 GET /api/football/markets               ?date=   the odds-prediction markets and which can be answered
+GET /api/football/picks                 ?date=&page=1&limit=50&competition=&market=&line=   "Top WINDELS Picks": the page ranked by evidence, with every exclusion's reason
+GET /api/football/intelligence/:id      ?market=&line=&generate=   one fixture's whole intelligence block — score, quality checklist, drivers, fair value, stability, three clocks
 GET /api/football/matches/:id            fixture + statistics + H2H as stored
 GET /api/football/matches/:id/analysis
 GET /api/football/matches/:id/prediction
@@ -755,6 +925,21 @@ WINDELS_FOOTBALL_PREMIUM_COMPETITIONS=English Premier League  comma-separated li
                                              and "Premier League" are one premium competition
 WINDELS_FOOTBALL_DEFAULT_MARKET=MATCH_WINNER the market a request is answered in when it names none
 WINDELS_FOOTBALL_FIRST_HALF_SHARE=0.45       goal expectancy attributed to the first half (0.20..0.80); named in the market basis
+WINDELS_FOOTBALL_MAX_AGE_ODDS=1800         how old a quoted price may be before the board labels it aged; read by the
+                                           fair-value sheet (`priceStale`) and by the "odds refreshed" clock
+WINDELS_FOOTBALL_VALUE_STRONG_PP=4         edge in probability points that reads STRONG_VALUE
+WINDELS_FOOTBALL_VALUE_POSITIVE_PP=1       the smaller edge that still reads POSITIVE_VALUE; below it, FAIR
+WINDELS_FOOTBALL_VALUE_AVOID_PP=4          how negative (in points) before the price reads AVOID
+WINDELS_FOOTBALL_STABILITY_MOVED_PP=2      movement that earns a "prediction moved" note
+WINDELS_FOOTBALL_STABILITY_UNSTABLE_PP=8   movement that earns "prediction unstable"
+WINDELS_FOOTBALL_REVISION_RETENTION_DAYS=90 days the prediction revision trail is kept before cleanup prunes it
+WINDELS_FOOTBALL_SCORE_W_CONFIDENCE=30     the five weights behind the intelligence score (percent, renormalised over
+WINDELS_FOOTBALL_SCORE_W_DATAQUALITY=30    whichever components are measurable — an unmeasurable component is
+WINDELS_FOOTBALL_SCORE_W_COVERAGE=15       excluded and listed, never scored zero)
+WINDELS_FOOTBALL_SCORE_W_CALIBRATION=10
+WINDELS_FOOTBALL_SCORE_W_STABILITY=15
+WINDELS_FOOTBALL_SCORE_EXCELLENT=85        the four score band cut lines (STRONG/MODERATE/THIN below it)
+WINDELS_FOOTBALL_PICKS_LIMIT=5             how many picks the "Top WINDELS Picks" panel may list for a page (1..10)
 WINDELS_FOOTBALL_MAX_GOALS=8                 scoreline grid width per team (4..12)
 WINDELS_FOOTBALL_DC_RHO=-0.06                Dixon–Coles low-score adjustment (±0.25, 0 = plain Poisson)
 WINDELS_FOOTBALL_MARKET_BLEND=0.35           weight for market-implied probabilities (0 disables)

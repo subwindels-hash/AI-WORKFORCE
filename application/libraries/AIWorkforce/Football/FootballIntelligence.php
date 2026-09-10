@@ -17,6 +17,9 @@ use AIWorkforce\Sports\Providers\SportsProviderManager;
  */
 final class FootballIntelligence
 {
+    /** A fixture the engine has not produced a prediction for. */
+    public const INTELLIGENCE_WITHHELD = 'PREDICTION_WITHHELD';
+
     private ?ProviderGateway $gateway = null;
     private ?FixtureSyncService $fixtures = null;
     private ?StatisticsCollector $statistics = null;
@@ -35,6 +38,12 @@ final class FootballIntelligence
     private ?MatchIntelligenceService $intelligence = null;
     private ?PredictionMarkets $markets = null;
     private ?RefreshPolicy $refresh = null;
+    private ?OddsIntelligence $fairValue = null;
+    private ?StabilityMonitor $stability = null;
+    private ?IntelligenceScore $scoreEngine = null;
+    private ?PredictionDrivers $drivers = null;
+    private ?FreshnessTracker $freshness = null;
+    private ?IntelligenceReport $report = null;
     private ?FootballDiagnostics $diagnostics = null;
     private ?FootballCronService $cron = null;
 
@@ -118,7 +127,9 @@ final class FootballIntelligence
 
     public function predictions(): PredictionService
     {
-        return $this->predictions ??= new PredictionService($this->repo, $this->features(), $this->predictor(), $this->models(), $this->config, $this->audit);
+        return $this->predictions ??= new PredictionService(
+            $this->repo, $this->features(), $this->predictor(), $this->models(), $this->config, $this->audit, $this->stability()
+        );
     }
 
     public function live(): LiveMatchService
@@ -138,7 +149,8 @@ final class FootballIntelligence
 
     public function board(): PredictionBoard
     {
-        return $this->board ??= new PredictionBoard($this->repo, $this->predictions(), $this->models(), $this->config, $this->feed());
+        return $this->board ??= new PredictionBoard($this->repo, $this->predictions(), $this->models(), $this->config,
+            $this->feed(), $this->report());
     }
 
     /**
@@ -147,7 +159,8 @@ final class FootballIntelligence
      */
     public function feed(): MatchFeed
     {
-        return $this->feed ??= new MatchFeed($this->repo, $this->predictions(), $this->models(), $this->config, $this->markets());
+        return $this->feed ??= new MatchFeed($this->repo, $this->predictions(), $this->models(), $this->config,
+            $this->markets(), $this->report());
     }
 
     /**
@@ -170,7 +183,57 @@ final class FootballIntelligence
      */
     public function markets(): PredictionMarkets
     {
-        return $this->markets ??= new PredictionMarkets($this->config);
+        return $this->markets ??= new PredictionMarkets($this->config, $this->fairValue());
+    }
+
+    /**
+     * The Odds Intelligence Engine: normalises what the market charged, takes the
+     * bookmaker's margin out where the market allows it, and compares the result
+     * with WINDELS' own estimate.
+     *
+     * It reads prices; it does not fetch them. The odds rows it consumes are the
+     * ones the connected feed already stored, and an unpriced market is answered
+     * with `UNPRICED` rather than with a price invented from the model.
+     */
+    public function fairValue(): OddsIntelligence
+    {
+        return $this->fairValue ??= new OddsIntelligence($this->config);
+    }
+
+    /** The movement history of a prediction, and the verdict on its stability. */
+    public function stability(): StabilityMonitor
+    {
+        return $this->stability ??= new StabilityMonitor($this->repo, $this->config);
+    }
+
+    /** The 0–100 WINDELS Intelligence Score, composed from stored measurements. */
+    public function intelligenceScores(): IntelligenceScore
+    {
+        return $this->scoreEngine ??= new IntelligenceScore($this->config);
+    }
+
+    /** Why a prediction was selected, as rows the reader can check. */
+    public function drivers(): PredictionDrivers
+    {
+        return $this->drivers ??= new PredictionDrivers();
+    }
+
+    /** The three clocks behind "last updated". */
+    public function freshness(): FreshnessTracker
+    {
+        return $this->freshness ??= new FreshnessTracker($this->config);
+    }
+
+    /**
+     * The intelligence layer every surface reads: the per-match block (score,
+     * quality checklist, drivers, fair value, stability, freshness) and the
+     * ranked pick list built from it.
+     */
+    public function report(): IntelligenceReport
+    {
+        return $this->report ??= new IntelligenceReport(
+            $this->repo, $this->config, $this->stability(), $this->intelligenceScores(), $this->drivers(), $this->freshness()
+        );
     }
 
     /**
@@ -328,6 +391,82 @@ final class FootballIntelligence
             'provenance' => $features['provenance'],
             'provider' => $features['provider'],
             'prediction' => $prediction === null ? null : $this->predictions()->contract($prediction, $fixture),
+            // The same block the board and the match page read: the quality
+            // checklist, the intelligence score and the drivers, assembled from
+            // the stored row rather than recomputed from the fresh features — a
+            // page that re-derived them would be able to disagree with itself.
+            'intelligence' => $this->report()->forMatch($fixture, $prediction, []),
+            'generatedAt' => gmdate('c'),
+        ];
+    }
+
+    /**
+     * The full intelligence block for one fixture: WINDELS' score, the data-quality
+     * checklist, the drivers behind the selection, the fair-value comparison
+     * against the quoted price, the stability verdict and the three clocks.
+     *
+     * It is a read model over stored rows — the same assembly the board uses for
+     * its rows, so the match page and a page of fifty cannot disagree. Nothing
+     * here fetches: an unpriced market stays unpriced and an unanalyzed fixture
+     * stays unanalyzed, each stated as such.
+     */
+    public function intelligenceFor(int $fixtureId, ?string $marketKey = null, ?float $line = null, bool $generate = false): array
+    {
+        $fixture = $this->repo->findFixtureById($fixtureId);
+        if ($fixture === null) {
+            return ['state' => DataState::UNAVAILABLE, 'fixtureId' => $fixtureId,
+                'message' => 'Fixture ' . $fixtureId . ' is not stored, so there is nothing to report on it.',
+                'intelligence' => $this->report()->forMatch([], null, []), 'generatedAt' => gmdate('c')];
+        }
+        $model = $this->models()->usable();
+        $modelVersionId = (int) ($model['model']['id'] ?? 0);
+        $prediction = $this->repo->listPredictions(['fixtureId' => $fixtureId, 'kind' => PredictionService::KIND_PRE_MATCH], 1)[0] ?? null;
+        if ($prediction === null && $generate) {
+            $payload = $this->predictions()->predictFixture($fixtureId);
+            if (($payload['status'] ?? '') === 'PREDICTED') {
+                $prediction = $this->repo->listPredictions(['fixtureId' => $fixtureId, 'kind' => PredictionService::KIND_PRE_MATCH], 1)[0] ?? null;
+            }
+        }
+        $notes = [];
+        $market = $this->markets()->resolve($marketKey ?? $this->config->defaultMarket(), $notes);
+        $block = $this->feed()->attachMarkets([['prediction' => $prediction,
+            'matchId' => MatchFeed::matchId($fixture)]], $market['market'], $line)[0] ?? [];
+        return [
+            'state' => $prediction === null ? self::INTELLIGENCE_WITHHELD : 'AVAILABLE',
+            'fixtureId' => $fixtureId,
+            'matchId' => MatchFeed::matchId($fixture),
+            'fixture' => PredictionService::fixtureSummary($fixture),
+            // The evaluated market block, exactly as `attachMarkets` assembled it:
+            // selection, probability, quoted price, implied probability, per-outcome
+            // fair odds and edge. The view reads it rather than recomposing it, so a
+            // price cannot be rounded one way in the table and another way in a card.
+            'market' => $block + ['notes' => $notes, 'requestedLine' => $line],
+            'prediction' => $prediction === null ? null : $this->predictions()->contract($prediction, $fixture),
+            'intelligence' => $this->report()->forMatch($fixture, $prediction, (array) $block),
+            'generatedAt' => gmdate('c'),
+        ];
+    }
+
+    /**
+     * The ranked "Top WINDELS Picks" reading of one page of a date, built by the
+     * same pass that fills the board.
+     */
+    public function picks(string $date, int $page = 1, int $limit = MatchFeed::MAX_PAGE_SIZE, array $options = []): array
+    {
+        $board = $this->board()->forDate($date, false, $page, $limit, $options);
+        return [
+            'date' => (string) ($board['date'] ?? $date),
+            'page' => (int) ($board['pagination']['page'] ?? $page),
+            'market' => (array) ($board['market'] ?? []),
+            'picks' => (array) ($board['picks']['picks'] ?? []),
+            'rule' => (array) ($board['picks']['rule'] ?? []),
+            'considered' => (int) ($board['picks']['considered'] ?? 0),
+            'eligible' => (int) ($board['picks']['eligible'] ?? 0),
+            'beyondList' => (int) ($board['picks']['beyondList'] ?? 0),
+            'excluded' => (array) ($board['picks']['excluded'] ?? []),
+            'state' => (string) ($board['picks']['state'] ?? DataState::UNAVAILABLE),
+            'disclaimer' => IntelligenceReport::PICKS_DISCLAIMER,
+            'summary' => (array) ($board['intelligence'] ?? []),
             'generatedAt' => gmdate('c'),
         ];
     }
@@ -347,18 +486,37 @@ final class FootballIntelligence
             }
         }
         $rows = $this->repo->listPredictions(['fixtureId' => $fixtureId], 10);
-        $preMatch = null; $liveRows = [];
+        $preMatch = null; $preMatchRow = null; $liveRows = [];
         foreach ($rows as $row) {
-            if ((string) ($row['prediction_kind'] ?? '') === PredictionService::KIND_LIVE) $liveRows[] = $this->predictions()->contract($row, $fixture);
-            else $preMatch = $this->predictions()->contract($row, $fixture);
+            if ((string) ($row['prediction_kind'] ?? '') === PredictionService::KIND_LIVE) {
+                $liveRows[] = $this->predictions()->contract($row, $fixture);
+                continue;
+            }
+            $preMatch = $this->predictions()->contract($row, $fixture);
+            // The raw stored row, kept alongside the contract: the intelligence
+            // block reads the snapshot and evidence columns the contract does not
+            // republish, and it must read them from the row that produced the
+            // figures being explained.
+            $preMatchRow = $row;
         }
         $settlement = $preMatch === null ? null : $this->repo->findSettlement((string) ($preMatch['predictionId'] ?? ''));
+        $marketNotes = [];
+        $marketBlock = $this->feed()->attachMarkets([['prediction' => $preMatchRow,
+            'matchId' => MatchFeed::matchId($fixture)]],
+            $this->markets()->resolve($this->config->defaultMarket(), $marketNotes)['market'], null)[0] ?? [];
         return [
             'status' => $preMatch === null ? 'NO_PREDICTION' : 'OK',
             'fixture' => PredictionService::fixtureSummary($fixture),
             'prediction' => $preMatch,
             'liveEstimates' => $liveRows,
             'settlement' => $settlement,
+            // The intelligence block for this one match, assembled by the same
+            // report the board uses — not a second copy of the arithmetic.
+            'intelligence' => $this->report()->forMatch($fixture, $preMatchRow, (array) $marketBlock),
+            // The market as the board evaluates it, offered beside the contract so
+            // the match page can print price, fair price and edge without asking
+            // the model again. Null-safe by construction: no odds rows, no block.
+            'market' => (array) $marketBlock,
             'message' => $preMatch === null ? 'No prediction row is stored for this fixture' . ($generate ? ' — it was analyzed and refused (see dataQuality)' : '.') : null,
             'generatedAt' => gmdate('c'),
         ];

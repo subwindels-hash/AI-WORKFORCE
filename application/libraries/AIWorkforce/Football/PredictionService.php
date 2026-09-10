@@ -42,6 +42,15 @@ final class PredictionService
      */
     private array $resolved = [];
     private ?RegenerationPolicy $regeneration = null;
+    /**
+     * Why the calculation now in flight is happening, carried from the
+     * regeneration decision that authorised it. A movement without its cause is
+     * half a finding, so `predictMissing()` sets these codes immediately before
+     * it asks for a fresh prediction and the revision records them.
+     *
+     * @var list<string>
+     */
+    private array $pendingTriggers = [];
 
     public function __construct(
         private FootballRepository $repo,
@@ -50,7 +59,18 @@ final class PredictionService
         private ModelRegistry $models,
         private FootballConfiguration $config,
         private ?AuditRepository $audit = null,
+        private ?StabilityMonitor $stability = null,
     ) {}
+
+    /**
+     * The revision trail. It is optional by construction: a caller that assembles
+     * this service without it still gets predictions, they simply carry
+     * `DATA_UNAVAILABLE` for stability rather than an invented verdict.
+     */
+    public function stability(): StabilityMonitor
+    {
+        return $this->stability ??= new StabilityMonitor($this->repo, $this->config);
+    }
 
     /**
      * Predict one stored fixture and (when allowed) store the result.
@@ -158,7 +178,12 @@ final class PredictionService
             'isPrediction' => ((int) $row['homeGoals'] === (int) $payload['predictedScore']['home'] && (int) $row['awayGoals'] === (int) $payload['predictedScore']['away']),
         ], $payload['matrix']['rows'] ?? []));
         $payload['stored'] = ['written' => true, 'predictionId' => $id, 'predictionRowId' => $row['id'] ?? $id];
-        $payload['contract'] = $this->contract(array_merge($row, ['id' => $id]), $fixture);
+        // The row is stored, so now — and only now — is there something to compare
+        // with. The revision is written from the stored values, which keeps the
+        // trail describing what a reader can actually go and read.
+        $row = array_merge($row, ['id' => $id]);
+        $payload['stability'] = $this->stability->record($row, $fixture, $this->pendingTriggers, $kind);
+        $payload['contract'] = $this->contract($row, $fixture);
         $this->audit?->emit('FOOTBALL_PREDICTION_GENERATED', 'Football prediction ' . $payload['resultLabel'] . ' ' . ($payload['predictedScore']['home'] . '–' . $payload['predictedScore']['away']) . ' for ' . ($fixture['home_team'] ?? '') . ' v ' . ($fixture['away_team'] ?? ''), [
             'predictionId' => $id, 'confidence' => $payload['confidence'], 'confidenceBasis' => $payload['confidenceBasis'],
             'dataQuality' => $payload['dataQuality']['score'], 'band' => $payload['dataQuality']['status'],
@@ -409,7 +434,12 @@ final class PredictionService
                     // stored row is replaced by a fresh one, and both counts
                     // say so — this is a regeneration, not a second prediction.
                     $budget--;
-                    $payload = $this->predict($fixture, true, $kind);
+                    $this->pendingTriggers = $decision['codes'];
+                    try {
+                        $payload = $this->predict($fixture, true, $kind);
+                    } finally {
+                        $this->pendingTriggers = [];
+                    }
                     $replaced = $this->existing($fixture, $modelVersionId, $kind, true);
                     if ($replaced !== null) {
                         $out['refreshed']++;

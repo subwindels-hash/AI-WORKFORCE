@@ -51,3 +51,14 @@ CREATE INDEX IF NOT EXISTS idx_football_match_teams ON football_provider_matches
 
 CREATE TABLE IF NOT EXISTS football_competition_mapping (id INTEGER PRIMARY KEY AUTOINCREMENT, internal_id TEXT NOT NULL, provider_id INTEGER, provider_code TEXT NOT NULL, provider_competition_id TEXT NOT NULL, competition_name TEXT NOT NULL, country TEXT, tier TEXT NOT NULL DEFAULT 'STANDARD', premium INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(provider_code, provider_competition_id), UNIQUE(internal_id, provider_code));
 CREATE INDEX IF NOT EXISTS idx_football_competition_premium ON football_competition_mapping(premium, active);
+
+-- Prediction revisions. One row per calculation of a fixture's prediction, kept
+-- because the prediction row itself is unique per (fixture, kind, model version)
+-- and is REPLACED when a stated reason justifies regenerating it. Movement — the
+-- difference between what WINDELS said and what it now says — is only measurable
+-- against a record of the earlier figure, so the trail is stored rather than
+-- remembered. Keyed by prediction_id, which makes a re-run of the same sweep
+-- idempotent instead of manufacturing a second data point.
+CREATE TABLE IF NOT EXISTS football_prediction_revisions (id INTEGER PRIMARY KEY AUTOINCREMENT, prediction_id TEXT NOT NULL UNIQUE, fixture_id INTEGER NOT NULL, provider_id INTEGER, model_version_id INTEGER, prediction_kind TEXT NOT NULL DEFAULT 'PRE_MATCH', probability_home REAL, probability_draw REAL, probability_away REAL, predicted_result TEXT, predicted_home_score INTEGER, predicted_away_score INTEGER, confidence REAL, data_quality_score INTEGER, data_quality_band TEXT, movement_points REAL, movement_selection TEXT, previous_prediction_id TEXT, stability_state TEXT NOT NULL DEFAULT 'BASELINE', trigger_codes TEXT, kickoff_at TEXT, recorded_at TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_football_revision_fixture ON football_prediction_revisions(fixture_id, prediction_kind, recorded_at);
+CREATE INDEX IF NOT EXISTS idx_football_revision_model ON football_prediction_revisions(model_version_id, recorded_at);
