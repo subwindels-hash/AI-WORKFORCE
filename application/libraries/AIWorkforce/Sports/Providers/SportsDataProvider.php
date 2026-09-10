@@ -147,53 +147,110 @@ class SportsProviderManager
     {
         $failures = [];
         $statuses = [];
+        $ids = $this->orderedIds($preferredId);
+        foreach ($ids as $id) {
+            $result = $this->attemptProvider($operation, $this->providers[$id], $fn, $failures, $statuses);
+            if ($result !== null) return ['ok' => true, 'provider' => $id, 'result' => $result, 'failures' => $failures, 'failureStatuses' => $statuses, 'summary' => ''];
+        }
+        return ['ok' => false, 'failures' => $failures, 'failureStatuses' => $statuses, 'summary' => self::summarize($operation, $statuses)];
+    }
+
+    /**
+     * Provider fallback for one specific fixture, WITHOUT namespace
+     * collisions.
+     *
+     * `$argsByProvider` maps provider id → the fixture's id IN THAT
+     * PROVIDER'S OWN NAMESPACE: the id of the provider that supplied the
+     * fixture, plus any recorded cross-reference (e.g. TheSportsDB's
+     * idAPIfootball). Providers without a verified id for the fixture are
+     * skipped BEFORE any request is sent — querying a provider with a
+     * foreign provider's fixture id could silently attach ANOTHER match's
+     * odds, and a skipped provider never pollutes the circuit breaker.
+     *
+     * @param string $operation odds|round|results|…
+     * @param array<string,string> $argsByProvider provider id → verified external id
+     * @param callable(SportsDataProvider, string): array $fn receives the provider AND its verified id
+     * @return array{ok:bool, provider?:string, result?:array, failures:array<string,string>, failureStatuses:array<string,string>, skipped:array<string,string>, summary:string}
+     */
+    public function withFallbackIds(string $operation, array $argsByProvider, callable $fn, ?string $preferredId = null): array
+    {
+        $failures = [];
+        $statuses = [];
+        $skipped = [];
+        foreach ($this->orderedIds($preferredId) as $id) {
+            $arg = $argsByProvider[$id] ?? null;
+            if (!is_string($arg) || trim($arg) === '') {
+                $skipped[$id] = 'no verified fixture id for this provider — not requested (ids are provider-specific; a foreign id could return another match)';
+                continue;
+            }
+            $result = $this->attemptProvider($operation, $this->providers[$id], fn(SportsDataProvider $p) => $fn($p, $arg), $failures, $statuses);
+            if ($result !== null) return ['ok' => true, 'provider' => $id, 'result' => $result, 'failures' => $failures, 'failureStatuses' => $statuses, 'skipped' => $skipped, 'summary' => ''];
+        }
+        return ['ok' => false, 'failures' => $failures, 'failureStatuses' => $statuses, 'skipped' => $skipped, 'summary' => self::summarize($operation, $statuses !== [] ? $statuses : array_fill_keys(array_keys($skipped), 'SKIPPED_NO_VERIFIED_ID'))];
+    }
+
+    /** Registration order with the preferred provider first (if registered). */
+    private function orderedIds(?string $preferredId): array
+    {
         $ids = $this->order;
         if ($preferredId !== null && in_array($preferredId, $ids, true)) {
             $ids = array_merge([$preferredId], array_values(array_diff($ids, [$preferredId])));
         }
-        foreach ($ids as $id) {
-            $provider = $this->providers[$id];
-            // 1. Circuit breaker: an OPEN circuit is skipped without any network call.
-            $circuit = $this->breaker->state($id);
-            if ($circuit['state'] === ProviderCircuitBreaker::OPEN) {
-                $statuses[$id] = (string) ($circuit['reason'] ?? 'OFFLINE');
-                $failures[$id] = $statuses[$id] . ': circuit open until ' . ($circuit['retryAt'] ?? '?') . ' (skipped, no request sent)';
-                $this->notify($provider, $operation, null, ['skipped' => $statuses[$id], 'circuit' => $circuit]);
-                continue;
-            }
-            try {
-                // 2. Live health probe. Non-ONLINE self-reports are classified and
-                //    fed to the breaker too, so a provider whose /status says
-                //    "quota exhausted" is not probed again on the next fixture.
-                $health = $provider->health();
-                $this->lastHealth[$id] = $health;
-                $status = (string) ($health['status'] ?? ProviderException::OFFLINE);
-                if ($status !== 'ONLINE') {
-                    $statuses[$id] = $status;
-                    $failures[$id] = $status . ': ' . (string) ($health['detail'] ?? 'provider self-reported ' . $status);
-                    $probe = new ProviderException((string) ($health['detail'] ?? 'provider status ' . $status), self::asExceptionStatus($status), null, $health['retryAt'] ?? null ? ['retryAt' => $health['retryAt']] : []);
-                    $this->breaker->recordFailure($id, $probe);
-                    $this->notify($provider, $operation, $probe, ['skipped' => $status]);
-                    continue;
-                }
-                $result = $fn($provider);
-                $this->breaker->recordSuccess($id);
-                $this->notify($provider, $operation, null, ['ok' => true]);
-                return ['ok' => true, 'provider' => $id, 'result' => $result, 'failures' => $failures, 'failureStatuses' => $statuses, 'summary' => ''];
-            } catch (ProviderException $e) {
-                $statuses[$id] = $e->status;
-                $failures[$id] = $e->status . ': ' . ProviderHttp::redact($e->getMessage());
-                $this->breaker->recordFailure($id, $e);
-                $this->notify($provider, $operation, $e, []);
-            } catch (\Throwable $e) {
-                $wrapped = new ProviderException(ProviderHttp::redact($e->getMessage()), ProviderException::DATA_ERROR, $e);
-                $statuses[$id] = ProviderException::DATA_ERROR;
-                $failures[$id] = 'DATA_ERROR: ' . $wrapped->getMessage();
-                $this->breaker->recordFailure($id, $wrapped);
-                $this->notify($provider, $operation, $wrapped, []);
-            }
+        return $ids;
+    }
+
+    /**
+     * One provider attempt: circuit check → live health probe → call →
+     * breaker/observer recording. Returns the result on success, null on
+     * failure (failure already recorded in $failures/$statuses).
+     *
+     * @param callable(SportsDataProvider): array $fn
+     * @param array<string,string> $failures
+     * @param array<string,string> $statuses
+     */
+    private function attemptProvider(string $operation, SportsDataProvider $provider, callable $fn, array &$failures, array &$statuses): ?array
+    {
+        $id = $provider->id();
+        // 1. Circuit breaker: an OPEN circuit is skipped without any network call.
+        $circuit = $this->breaker->state($id);
+        if ($circuit['state'] === ProviderCircuitBreaker::OPEN) {
+            $statuses[$id] = (string) ($circuit['reason'] ?? 'OFFLINE');
+            $failures[$id] = $statuses[$id] . ': circuit open until ' . ($circuit['retryAt'] ?? '?') . ' (skipped, no request sent)';
+            $this->notify($provider, $operation, null, ['skipped' => $statuses[$id], 'circuit' => $circuit]);
+            return null;
         }
-        return ['ok' => false, 'failures' => $failures, 'failureStatuses' => $statuses, 'summary' => self::summarize($operation, $statuses)];
+        try {
+            // 2. Live health probe. Non-ONLINE self-reports are classified and
+            //    fed to the breaker too, so a provider whose /status says
+            //    "quota exhausted" is not probed again on the next fixture.
+            $health = $provider->health();
+            $this->lastHealth[$id] = $health;
+            $status = (string) ($health['status'] ?? ProviderException::OFFLINE);
+            if ($status !== 'ONLINE') {
+                $statuses[$id] = $status;
+                $failures[$id] = $status . ': ' . (string) ($health['detail'] ?? 'provider self-reported ' . $status);
+                $probe = new ProviderException((string) ($health['detail'] ?? 'provider status ' . $status), self::asExceptionStatus($status), null, $health['retryAt'] ?? null ? ['retryAt' => $health['retryAt']] : []);
+                $this->breaker->recordFailure($id, $probe);
+                $this->notify($provider, $operation, $probe, ['skipped' => $status]);
+                return null;
+            }
+            $result = $fn($provider);
+            $this->breaker->recordSuccess($id);
+            $this->notify($provider, $operation, null, ['ok' => true]);
+            return $result;
+        } catch (ProviderException $e) {
+            $statuses[$id] = $e->status;
+            $failures[$id] = $e->status . ': ' . ProviderHttp::redact($e->getMessage());
+            $this->breaker->recordFailure($id, $e);
+            $this->notify($provider, $operation, $e, []);
+        } catch (\Throwable $e) {
+            $wrapped = new ProviderException(ProviderHttp::redact($e->getMessage()), ProviderException::DATA_ERROR, $e);
+            $statuses[$id] = ProviderException::DATA_ERROR;
+            $failures[$id] = 'DATA_ERROR: ' . $wrapped->getMessage();
+            $this->breaker->recordFailure($id, $wrapped);
+            $this->notify($provider, $operation, $wrapped, []);
+        }
+        return null;
     }
 
     /** "fixtures: all 4 provider(s) failed — api-football DAILY_QUOTA_EXHAUSTED, sportmonks NOT_FOUND, ..." */

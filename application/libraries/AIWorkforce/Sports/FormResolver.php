@@ -19,20 +19,47 @@ use AIWorkforce\Sports\Providers\SportMonksProvider;
  *
  * Form data is **sourced from actual provider data** — never fabricated.
  * When the provider cannot supply form, the fixture stays without context
- * (the pipeline handles it honestly: no prediction, explicit rejection).
+ * and the pipeline handles it honestly (explicit INSUFFICIENT_DATA with the
+ * missing fields, counted once — never silently degraded).
+ *
+ * Request efficiency:
+ *   • SportMonks standings are fetched ONCE per (league, season) and serve
+ *     every team in that league — previously each team in the same league
+ *     triggered an identical standings request.
+ *   • api-football team statistics stay per (team, league, season), cached.
+ *   • Everything shares one lookup budget per run (constructor / env), so a
+ *     big fixture pull cannot burn the daily quota before odds/results sync.
  */
 class FormResolver
 {
+    public const ENV_BUDGET = 'WINDELS_SPORTS_FORM_LOOKUPS';
+    public const DEFAULT_BUDGET = 30;
+
+    /** @var array<string,array> (provider:league:season) → standings rows — one request serves a whole league */
+    private array $standingsByLeague = [];
+
     /**
-     * @param int $maxTeamLookups per-enrich() budget of team-statistics API
-     *        calls. A 14-day worldwide fixture pull can hold hundreds of
-     *        unique teams; uncapped enrichment burns the whole daily quota
-     *        (api-football free = 100 req/day) before odds/results sync.
-     *        Fixtures past the budget keep no recentForm context and the
-     *        pipeline handles them honestly (no prediction, explicit
-     *        rejection) instead of failing the sync.
+     * @param int|null $maxTeamLookups per-enrich() budget of team-statistics
+     *        API calls (null = env WINDELS_SPORTS_FORM_LOOKUPS or 30). A
+     *        14-day worldwide fixture pull can hold hundreds of unique teams;
+     *        uncapped enrichment burns the whole daily quota (api-football
+     *        free = 100 req/day) before odds/results sync. Fixtures past the
+     *        budget keep no recentForm context and the pipeline handles them
+     *        honestly (no prediction, explicit rejection) instead of failing
+     *        the sync.
      */
-    public function __construct(private int $maxTeamLookups = 30) {}
+    public function __construct(private ?int $maxTeamLookups = null)
+    {
+        $this->maxTeamLookups = $this->resolveBudget($maxTeamLookups);
+    }
+
+    private function resolveBudget(?int $explicit): int
+    {
+        if ($explicit !== null && $explicit >= 0) return $explicit;
+        $env = getenv(self::ENV_BUDGET);
+        if (is_string($env) && $env !== '' && is_numeric($env) && (int) $env >= 0) return (int) $env;
+        return self::DEFAULT_BUDGET;
+    }
 
     /**
      * Enrich a list of fixtures with recentForm context using provider APIs.
@@ -116,10 +143,16 @@ class FormResolver
             }
 
             if ($provider instanceof SportMonksProvider && $leagueId) {
-                // Use standings as a proxy for team form
-                $lookups++;
-                $standings = $provider->standings($leagueId, $season ?? '');
-                foreach ($standings as $entry) {
+                // One standings request per (league, season) serves EVERY team
+                // in the league — the fetched table is cached and reused for
+                // all of the league's fixtures in this run.
+                $standingsKey = $provider->id() . ':' . $leagueId . ':' . ($season ?? '');
+                if (!isset($this->standingsByLeague[$standingsKey])) {
+                    if ($lookups >= $this->maxTeamLookups) return null;
+                    $lookups++;
+                    $this->standingsByLeague[$standingsKey] = $provider->standings($leagueId, $season ?? '');
+                }
+                foreach ($this->standingsByLeague[$standingsKey] as $entry) {
                     if ((string) ($entry['teamId'] ?? '') === $teamId) {
                         $played = (int) ($entry['played'] ?? 0);
                         if ($played < 1) return null;

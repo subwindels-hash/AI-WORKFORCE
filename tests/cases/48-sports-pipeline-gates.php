@@ -54,10 +54,55 @@ test('pipeline: qualified candidate carries full decision factors', function () 
     assert_true($out['value']['expectedValue'] > 0);
 });
 
-test('pipeline: stale odds → STALE_ODDS rejection', function () {
-    $out = (new PredictionPipeline())->evaluate(fx_gate_match(), fx_fresh_odds(1.6, 7200), fx_gate_quality(), fx_approved_calibration(), fx_gate_config());
+test('pipeline: stale odds → STALE_ODDS as the single primary reason', function () {
+    // 25h old: beyond every configured TTL → stale.
+    $out = (new PredictionPipeline())->evaluate(fx_gate_match(), fx_fresh_odds(1.6, 25 * 3600), fx_gate_quality(), fx_approved_calibration(), fx_gate_config());
     assert_equals('REJECTED', $out['decision']);
+    assert_equals('STALE_ODDS', $out['primaryReason'], 'the first failed stage is the primary reason');
     assert_contains('STALE_ODDS', implode(',', $out['rejectionReasons']));
+    assert_equals(['odds'], $out['rejectionDetail']['staleFields'], 'the actual stale field is exposed');
+    assert_not_null($out['oddsUpdatedAt']);
+    assert_not_null($out['oddsAgeSeconds']);
+});
+
+test('pipeline: odds inside the TTL are fresh even though this run did not refresh them', function () {
+    // 2h old: inside the 6h default TTL — an earlier sync is usable as-is.
+    $out = (new PredictionPipeline())->evaluate(fx_gate_match(), fx_fresh_odds(1.6, 2 * 3600), fx_gate_quality(), fx_approved_calibration(), fx_gate_config());
+    assert_equals('QUALIFIED', $out['decision']);
+    assert_equals('FRESH', $out['oddsStatus']);
+    // The TTL is configurable: 10 minutes max age makes 2h-old odds stale.
+    $strict = array_merge(fx_gate_match(), ['payload' => ['context' => ['recentForm' => ['homeGoalsPerMatch' => 1.6, 'awayGoalsPerMatch' => 1.4, 'homeConcededPerMatch' => 1.0, 'awayConcededPerMatch' => 0.9, 'source' => 'v'], 'maxOddsAgeSeconds' => 600]]]);
+    $out2 = (new PredictionPipeline())->evaluate($strict, fx_fresh_odds(1.6, 2 * 3600), fx_gate_quality(), fx_approved_calibration(), fx_gate_config());
+    assert_equals('REJECTED', $out2['decision']);
+    assert_equals('STALE_ODDS', $out2['primaryReason']);
+});
+
+test('pipeline: one failure is recorded once — no double STALE_ODDS + INSUFFICIENT_DATA', function () {
+    // Stale odds AND missing form: the odds stage fails first, so the
+    // candidate carries STALE_ODDS as its single primary reason and never a
+    // duplicated INSUFFICIENT_DATA count.
+    $match = fx_gate_match();
+    $match['payload'] = ['context' => []];
+    $out = (new PredictionPipeline())->evaluate($match, fx_fresh_odds(1.6, 25 * 3600), fx_gate_quality(), fx_approved_calibration(), fx_gate_config());
+    assert_equals('REJECTED', $out['decision']);
+    assert_equals('STALE_ODDS', $out['primaryReason']);
+    assert_not_contains('INSUFFICIENT_DATA', implode(',', $out['rejectionReasons']), 'prediction is not even attempted when odds already failed the stage');
+});
+
+test('pipeline: missing market-mandatory data lists the exact missing fields', function () {
+    $match = fx_gate_match();
+    $match['payload'] = ['context' => ['recentForm' => ['homeGoalsPerMatch' => 1.6, 'source' => 'v']]];
+    $out = (new PredictionPipeline())->evaluate($match, fx_fresh_odds(1.6), fx_gate_quality(), fx_approved_calibration(), fx_gate_config());
+    assert_equals('REJECTED', $out['decision']);
+    assert_equals('INSUFFICIENT_DATA', $out['primaryReason']);
+    $missing = implode(',', $out['rejectionDetail']['missingFields']);
+    assert_contains('awayGoalsPerMatch', $missing);
+    assert_contains('homeConcededPerMatch', $missing);
+    assert_contains('awayConcededPerMatch', $missing);
+    // Optional sources (injuries, lineups, H2H…) are never rejection reasons.
+    assert_not_contains('injuries', $missing);
+    assert_not_contains('lineups', $missing);
+    assert_not_contains('historical', $missing);
 });
 
 test('pipeline: missing verified form → INSUFFICIENT_DATA rejection', function () {
@@ -142,13 +187,23 @@ test('risk: volatile odds movement upgrades risk to HIGH', function () {
     assert_contains('ODDS_VOLATILE', implode(',', $volatile['reasons']));
 });
 
-test('risk: low confidence and low liquidity are explicit rejections', function () {
+test('risk: low liquidity is an explicit rejection; confidence is gated once, upstream', function () {
     $eng = new RiskEngine();
     $value = ['qualified' => true, 'expectedValue' => 0.2, 'odds' => 2.0];
     $quality = ['score' => 100, 'eligibleForTicket' => true];
+    // The 70%+ confidence floor is the PIPELINE's gate (on the WINDELS
+    // confidence value, in stage order) — the risk engine no longer
+    // duplicates it as a second LOW_CONFIDENCE rejection.
     $lowConf = $eng->assess($value, $quality, ['min_data_quality' => 75, 'min_confidence' => 80], ['confidence' => 70]);
-    assert_equals('REJECTED', $lowConf['classification']);
-    assert_contains('LOW_CONFIDENCE', implode(',', $lowConf['reasons']));
+    assert_equals('LOW', $lowConf['classification']);
+    assert_not_contains('LOW_CONFIDENCE', implode(',', $lowConf['reasons']));
+    // …and the pipeline DOES reject the candidate, exactly once, on the
+    // actual WINDELS confidence value (weak data quality caps the blend).
+    $out = (new PredictionPipeline())->evaluate(fx_gate_match(), fx_fresh_odds(1.6), fx_gate_quality(55), fx_approved_calibration(), fx_gate_config());
+    assert_equals('REJECTED', $out['decision']);
+    $lowConfCount = substr_count(implode(',', $out['rejectionReasons']), 'LOW_CONFIDENCE');
+    assert_equals(1, $lowConfCount, 'LOW_CONFIDENCE recorded once, never duplicated');
+    // Insufficient liquidity remains a risk-engine rejection.
     $lowLiq = $eng->assess($value, $quality, ['min_data_quality' => 80, 'min_liquidity' => 10000], ['confidence' => 90, 'liquidity' => 500]);
     assert_equals('REJECTED', $lowLiq['classification']);
     assert_contains('INSUFFICIENT_LIQUIDITY', implode(',', $lowLiq['reasons']));

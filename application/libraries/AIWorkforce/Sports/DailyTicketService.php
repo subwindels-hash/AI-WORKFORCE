@@ -4,21 +4,34 @@ namespace AIWorkforce\Sports;
 use AIWorkforce\Backtest\Backtester;
 use AIWorkforce\Persistence\AuditRepository;
 use AIWorkforce\Persistence\SportsRepository;
-use AIWorkforce\Sports\Providers\ProviderException;
 use AIWorkforce\Sports\Providers\SportsDataProvider;
 use AIWorkforce\Sports\Providers\SportsProviderManager;
 
 /**
  * AI Ticket Engine (spec §16/§17/§19) — the daily end-to-end pipeline:
  *
- *   fixtures sync → odds sync → data quality → match intelligence → features
- *   → prediction → calibration → value → confidence → risk → correlation
- *   → ticket optimization → governance (user approval by default)
+ *   fixtures sync → odds sync (freshness TTL + provider fallback) →
+ *   fixture eligibility → data normalization → odds availability/freshness →
+ *   prediction (mandatory market data + calibration) → probability →
+ *   confidence → data quality → value/edge → risk → correlation →
+ *   ticket optimization → governance (user approval by default)
  *
- * Idempotent per (date, configuration version): running the same job twice
- * never creates duplicate tickets. When nothing qualifies the engine stores
- * NO_QUALIFIED_TICKET with the exact rejection summary — an expected,
- * first-class outcome (spec §3).
+ * Fixtures that fail a SHARED upstream stage (eligibility, odds, mandatory
+ * data, calibration, quality floor) are rejected ONCE at the fixture level
+ * with a single primary reason — the engine never generates hundreds of
+ * per-market predictions just to reject them all for the same upstream
+ * problem. Per-market predictions are only produced when the model can
+ * actually compute them, and each rejected candidate counts exactly one
+ * primary blocking reason (all reasons stay on the decision record).
+ *
+ * The run result always carries a `diagnostics` funnel (fixtures with fresh
+ * odds, sufficient-data candidates, confidence ≥ floor, positive value,
+ * risk-qualified, correlation-qualified, final) plus the top rejection
+ * reasons with the provider that caused each failure.
+ *
+ * Idempotent per (date, configuration version). When nothing qualifies the
+ * engine stores NO_QUALIFIED_TICKET with the exact rejection summary — an
+ * expected, first-class outcome (spec §3).
  *
  * A provider outage is NOT that outcome. When every configured data provider
  * fails (quota exhausted, 400/404 misconfiguration, offline) the run stores
@@ -28,7 +41,26 @@ use AIWorkforce\Sports\Providers\SportsProviderManager;
  */
 class DailyTicketService
 {
+    /** Never generate more than this many fixtures' predictions in one run (design §9: MAXIMUM GENERATION = 50). */
+    public const DEFAULT_MAX_GENERATION = 50;
+
+    /** Hard ceiling for the operator-tunable generation cap — still bounded, never 500/1000/5000. */
+    public const MAX_GENERATION_CEILING = 500;
+
+    public const ENV_MAX_GENERATION = 'WINDELS_SPORTS_MAX_GENERATION';
+
+    /** Travels with every Top WINDELS Picks list. */
+    public const TOP_PICKS_DISCLAIMER = 'Top WINDELS Picks are model-based selections ranked by evidence — not guarantees. '
+        . 'A value class is not a probability of winning, and no pick is certain.';
+
     private FormResolver $formResolver;
+    private OddsFreshnessEngine $oddsFreshness;
+    private ?\AIWorkforce\Football\FootballConfiguration $fairConfig = null;
+
+    /** @var array<string,array> provider id → health, cached per run (one health probe per provider, not per fixture) */
+    private array $healthCache = [];
+    /** @var array<int,string> provider row id → provider code, cached per run */
+    private array $providerCodes = [];
 
     public function __construct(
         private SportsRepository $repo,
@@ -41,8 +73,10 @@ class DailyTicketService
         private TicketGovernance $governance,
         private DecisionRecorder $decisions,
         ?FormResolver $formResolver = null,
+        ?OddsFreshnessEngine $oddsFreshness = null,
     ) {
         $this->formResolver = $formResolver ?? new FormResolver();
+        $this->oddsFreshness = $oddsFreshness ?? new OddsFreshnessEngine();
     }
 
     public function runDaily(?string $date = null, ?string $executionKey = null): array
@@ -52,6 +86,9 @@ class DailyTicketService
         $key = $executionKey ?? 'daily-ticket:' . $date . ':v' . $config['version'];
         $run = $this->repo->startJobRun(['id' => Backtester::uuid(), 'jobType' => 'DAILY_TICKET', 'executionKey' => $key]);
         if ($run === null) return ['status' => 'DUPLICATE_SKIPPED', 'executionKey' => $key];
+        // Prediction ids written by THIS run — the only rows the intelligent
+        // refresh may never reuse as "previous" readings.
+        $recordedThisRun = [];
 
         $errors = [];
         $status = 'NO_QUALIFIED_TICKET';
@@ -66,6 +103,7 @@ class DailyTicketService
         $providerFailures = [];   // providerId → "STATUS: detail" (redacted)
         $providerStatuses = [];   // providerId → STATUS
         $dataState = 'OK';        // OK | DATA_UNAVAILABLE | NO_PROVIDER | DISABLED
+        $funnel = $this->emptyFunnel();
 
         try {
             if (!(bool) $config['module_enabled']) {
@@ -93,17 +131,30 @@ class DailyTicketService
                     $providerStatuses = $attempt['failureStatuses'] ?? [];
                     $message = 'NO VALUE TICKET TODAY — all configured sports-data providers failed; no data was fabricated — ' . ($attempt['summary'] ?: SportsProviderManager::summarize('fixtures', $providerStatuses));
                     $errors[] = 'provider failure: ' . json_encode($attempt['failures']);
+                    $funnel['providersConfigured'] = count($this->providers->all());
                 } else {
                     $provider = $attempt['provider'];
                     $providerId = (int) $this->repo->ensureProvider($provider, $provider)['id'];
+                    $funnel['providersConfigured'] = count($this->providers->all());
                     // Enrich raw fixtures with recentForm from team statistics
                     $enrichedFixtures = $this->formResolver->enrich($this->providers->provider($provider), $attempt['result']);
                     // Bulk-fetch the day's odds in one round() call per
-                    // matchday when the provider exposes the round endpoint.
-                    // Matches it does not cover fall back to per-fixture odds().
-                    $roundOdds = $this->fetchRoundOdds($provider, $this->providers->provider($provider), $enrichedFixtures, $errors);
+                    // matchday when the fixture provider exposes the round
+                    // endpoint (round ids are provider-specific — only the
+                    // fixture's own provider is asked).
+                    $roundOdds = $this->fetchRoundOdds($this->providers->provider($provider), $enrichedFixtures, $errors);
                     $candidates = [];
+                    $allCandidates = [];        // every generated candidate, qualified or not (Top Picks pool)
                     $runtimeNow = time();
+                    $minConfidence = (float) $config['min_confidence'];
+                    $minQuality = (int) $config['min_data_quality'];
+                    $minEv = (float) ($config['min_expected_value'] ?? 0.02);
+                    $reasonProviders = [];  // primary reason → provider → count
+                    $predictable = [];      // fixtures that passed every shared upstream gate
+
+                    // ── Screening: every shared upstream gate, cheap, no model.
+                    // A fixture that fails here is rejected ONCE with one
+                    // primary reason — never per market:selection.
                     foreach ($enrichedFixtures as $rawFixture) {
                         try {
                             $match = SportsDataNormalizer::fixture($rawFixture, $provider);
@@ -113,84 +164,162 @@ class DailyTicketService
                             continue;
                         }
                         $evaluated++;
+
+                        // ── Stage 1: fixture eligibility ─────────────────────
+                        if (!$this->fixtureEligibleForDailyTicket($match, $runtimeNow)) {
+                            $rejections++;
+                            $this->countRejection($rejectionSummary, 'FIXTURE_NOT_NS_OR_TOO_SOON', $reasonProviders, $provider);
+                            continue;
+                        }
+                        $funnel['eligibleFixtures']++;
                         $matchRow = $this->repo->findMatchById((int) $saved['id']);
                         if ($matchRow === null) continue;
 
-                        if (!$this->fixtureEligibleForDailyTicket($match, $runtimeNow)) {
+                        // ── Stage 2: data normalization (payload context) ───
+                        $contextFields = $this->contextFields($matchRow);
+
+                        // ── Stage 3: odds availability / freshness ──────────
+                        $oddsStage = $this->resolveUsableOdds($matchRow, $provider, $roundOdds, $errors, $runtimeNow, $funnel);
+                        if (!$oddsStage['ok']) {
                             $rejections++;
-                            $reason = 'FIXTURE_NOT_NS_OR_TOO_SOON';
-                            $rejectionSummary[$reason] = ($rejectionSummary[$reason] ?? 0) + 1;
+                            $this->countRejection($rejectionSummary, $oddsStage['reason'], $reasonProviders, $oddsStage['provider'] ?? $provider);
                             continue;
                         }
+                        $usableOdds = $oddsStage['rows'];
+                        $funnel['fixturesWithFreshOdds']++;
 
-                        $oddsRows = method_exists($this->repo, 'listOdds') ? $this->repo->listOdds((int) $saved['id'], 200) : [];
-                        if ($oddsRows === []) {
-                            // Prefer the bulk round fetch (one request per
-                            // matchday) over a per-fixture odds() call.
-                            $rawOdds = $roundOdds[$match['externalId']] ?? null;
-                            $oddsProvider = $provider;
-                            if ($rawOdds === null) {
-                                $oddsAttempt = $this->providers->withFallback('odds', fn($p) => $p->odds($match['externalId']), $provider);
-                                if ($oddsAttempt['ok'] && is_array($oddsAttempt['result'] ?? null)) {
-                                    $rawOdds = $oddsAttempt['result'];
-                                    $oddsProvider = (string) ($oddsAttempt['provider'] ?? $provider);
-                                }
-                            }
-                            if (is_array($rawOdds) && $rawOdds !== []) {
-                                foreach ($rawOdds as $rawOddsRow) {
-                                    try {
-                                        if (!empty($rawOddsRow['fixtureId']) && (string) $rawOddsRow['fixtureId'] !== (string) $match['externalId']) throw new \InvalidArgumentException('odds fixture id mismatch');
-                                        $oddsProviderId = (int) $this->repo->ensureProvider($oddsProvider, $oddsProvider)['id'];
-                                        $this->repo->saveOdds((int) $saved['id'], $oddsProviderId, SportsDataNormalizer::odds($rawOddsRow, $oddsProvider));
-                                    } catch (\Throwable $e) {
-                                        $errors[] = 'odds rejected: ' . mb_substr($e->getMessage(), 0, 200);
-                                    }
-                                }
-                                $oddsRows = method_exists($this->repo, 'listOdds') ? $this->repo->listOdds((int) $saved['id'], 200) : [];
-                            }
-                        }
-                        $supportedOdds = $this->supportedOddsRows($oddsRows);
-                        if ($supportedOdds === []) {
+                        // ── Stage 4: data quality (market-aware, transparent) ─
+                        $markets = array_values(array_unique(array_map(fn($r) => $r['market'], $usableOdds)));
+                        $reliability = (float) ($this->providerHealth($provider)['reliability'] ?? 0);
+                        $qualityAssessment = $this->quality->assess($match, $this->qualityContext($contextFields, $oddsStage, $reliability, $markets, $minQuality));
+                        $this->repo->saveQuality((int) $saved['id'], $qualityAssessment);
+
+                        // ── Stage 5: prediction feasibility (shared upstream) ─
+                        // Mandatory market data missing, or no approved
+                        // calibration → the model cannot compute ANY market
+                        // for this fixture: one rejection, not one per market.
+                        if (!empty($qualityAssessment['missingMandatory'])) {
                             $rejections++;
-                            $reason = 'SUPPORTED_ODDS_UNAVAILABLE';
-                            $rejectionSummary[$reason] = ($rejectionSummary[$reason] ?? 0) + 1;
+                            $this->countRejection($rejectionSummary, 'INSUFFICIENT_DATA', $reasonProviders, $provider);
+                            $funnel['fixturesMissingMandatoryData']++;
                             continue;
                         }
-
-                        $health = $this->providers->provider($provider)?->health() ?? [];
-                        $quality = $this->quality->assess($match, $this->qualityContext($match, $supportedOdds[0], (float) ($health['reliability'] ?? 0)));
-                        $this->repo->saveQuality((int) $saved['id'], $quality);
-
                         $calibration = $this->calibrationFor($matchRow);
-                        foreach ($supportedOdds as $odds) {
-                            $candidate = $this->pipeline->evaluate($matchRow, $odds, $quality, $calibration, $config, $runtimeNow);
+                        if (($config['require_calibration'] ?? 1) && $calibration === null) {
+                            $rejections++;
+                            $this->countRejection($rejectionSummary, 'MODEL_NOT_CALIBRATED', $reasonProviders, $provider);
+                            $funnel['fixturesWithoutCalibration']++;
+                            continue;
+                        }
+                        if (($qualityAssessment['score'] ?? 0) < $minQuality || empty($qualityAssessment['eligibleForTicket'])) {
+                            $rejections++;
+                            $this->countRejection($rejectionSummary, 'LOW_DATA_QUALITY', $reasonProviders, $provider);
+                            $funnel['fixturesBelowQualityFloor']++;
+                            continue;
+                        }
+                        $funnel['sufficientDataFixtures']++;
+
+                        $predictable[] = [
+                            'match' => $match,
+                            'matchRow' => $matchRow,
+                            'quality' => $qualityAssessment,
+                            'calibration' => $calibration,
+                            'odds' => $usableOdds,
+                            'marketPrices' => $oddsStage['marketPrices'],
+                            'kickoff' => (string) $match['kickoff'],
+                            'externalId' => (string) $match['externalId'],
+                        ];
+                    }
+
+                    // ── Generation: bounded, deterministic, never regenerating
+                    // a stored prediction. MAXIMUM GENERATION is capped (50 by
+                    // default); fixtures past the cap are DEFERRED — honestly
+                    // reported, never silently dropped — and the deterministic
+                    // (kickoff, externalId) order keeps pages stable.
+                    $funnel['generationCap'] = $this->generationCap();
+                    usort($predictable, fn(array $a, array $b) => [$a['kickoff'], $a['externalId']] <=> [$b['kickoff'], $b['externalId']]);
+                    $generate = array_slice($predictable, 0, $funnel['generationCap']);
+                    $funnel['fixturesDeferred'] = count($predictable) - count($generate);
+
+                    foreach ($generate as $item) {
+                        $matchRow = $item['matchRow'];
+                        $previousByKey = $this->previousPredictionsFor((int) $matchRow['id'], $recordedThisRun);
+
+                        // ── Stages 6–10: per-market prediction → probability →
+                        // confidence → data quality → value/edge → risk ──────
+                        foreach ($item['odds'] as $odds) {
+                            $candidate = $this->pipeline->evaluate($matchRow, $odds, $item['quality'], $item['calibration'], $config, $runtimeNow, [
+                                // the WHOLE market's fresh prices (companion
+                                // selections included) for margin removal
+                                'marketPrices' => $item['marketPrices'][$odds['market']] ?? [],
+                                'previousPrediction' => $previousByKey[$odds['market'] . ':' . $odds['selection']] ?? null,
+                                'matchUpdatedAt' => $matchRow['updated_at'] ?? null,
+                            ]);
 
                             $factors = array_merge(['market' => $candidate['market'], 'selection' => $candidate['selection']], $candidate['factors']);
-                            $predictionId = $this->decisions->recordPrediction(
-                                (int) $saved['id'],
-                                $candidate['prediction'] + ['market' => $candidate['market'], 'selection' => $candidate['selection']],
-                                $candidate['value'],
-                                $candidate['risk'],
-                                $quality,
-                                $factors,
-                                is_numeric($candidate['confidence']['confidence'] ?? null) ? (float) $candidate['confidence']['confidence'] : null,
-                                $candidate['odds'],
-                                $candidate['oddsTimestamp'],
-                                'LOW'
-                            );
-                            $candidate['predictionId'] = $predictionId;
-                            $recorded++;
+                            // WINDELS model numbers vs bookmaker market numbers,
+                            // kept side by side and clearly separated on the
+                            // immutable decision record (spec §28/§29).
+                            $factors['model'] = [
+                                'rawProbability' => $candidate['prediction']['rawModelProbability'] ?? null,
+                                'probability' => $candidate['prediction']['calibratedProbability'] ?? null,
+                                'fairOdds' => $candidate['prediction']['fairOdds'] ?? null,
+                            ];
+                            $factors['value'] = [
+                                'marketOdds' => $candidate['value']['marketOdds'] ?? null,
+                                'impliedProbability' => $candidate['value']['impliedProbability'] ?? null,
+                                'fairOdds' => $candidate['value']['fairOdds'] ?? null,
+                                'marketFairOdds' => $candidate['value']['marketFairOdds'] ?? null,
+                                'edge' => $candidate['value']['edge'] ?? null,
+                                'edgePoints' => $candidate['value']['edgePoints'] ?? null,
+                                'expectedValue' => $candidate['value']['expectedValue'] ?? null,
+                                'valueClass' => $candidate['value']['valueClass'] ?? null,
+                            ];
+
+                            // Intelligent refresh: a stored prediction of the
+                            // same selection, model version and identical odds
+                            // is REUSED, never duplicated by paging or re-runs.
                             if ($modelVersionId === null) $modelVersionId = $this->modelVersionIdFor($candidate['prediction']);
+                            $previous = $previousByKey[$odds['market'] . ':' . $odds['selection']] ?? null;
+                            if ($previous !== null
+                                && $modelVersionId !== null
+                                && (int) ($previous['model_version_id'] ?? 0) === $modelVersionId
+                                && is_numeric($previous['odds'] ?? null) && (float) $previous['odds'] === (float) $candidate['odds']
+                                && (string) ($previous['odds_timestamp'] ?? '') === (string) $candidate['oddsTimestamp']) {
+                                $funnel['predictionsReused']++;
+                                $candidate['predictionId'] = $previous['id'] ?? null;
+                            } else {
+                                $predictionId = $this->decisions->recordPrediction(
+                                    (int) $matchRow['id'],
+                                    $candidate['prediction'] + ['market' => $candidate['market'], 'selection' => $candidate['selection']],
+                                    $candidate['value'],
+                                    $candidate['risk'],
+                                    $item['quality'],
+                                    $factors,
+                                    is_numeric($candidate['confidence']['confidence'] ?? null) ? (float) $candidate['confidence']['confidence'] : null,
+                                    $candidate['odds'],
+                                    $candidate['oddsTimestamp'],
+                                    'LOW'
+                                );
+                                $candidate['predictionId'] = $predictionId;
+                                $recordedThisRun[] = $predictionId;
+                                $recorded++;
+                                $funnel['predictionsGenerated']++;
+                            }
+                            $this->trackCandidateFunnel($candidate, $funnel, $minConfidence, $minEv);
+                            $allCandidates[] = $candidate;
 
                             if ($candidate['decision'] === 'REJECTED') {
                                 $rejections++;
-                                foreach ($candidate['rejectionReasons'] as $r) $rejectionSummary[$r] = ($rejectionSummary[$r] ?? 0) + 1;
+                                $primary = $candidate['primaryReason'] ?? ($candidate['rejectionReasons'][0] ?? 'NO_PREDICTION');
+                                $this->countRejection($rejectionSummary, $primary, $reasonProviders, $odds['oddsSource'] ?? $provider);
                             } else {
                                 $candidates[] = $candidate;
                             }
                         }
                     }
 
+                    // ── Stage 11: correlation → final ticket ────────────────
                     if (count($candidates) > 0) {
                         $optimized = $this->optimizer->optimize($candidates, [
                             'targetOddsMin' => (float) $config['target_odds_min'],
@@ -202,20 +331,47 @@ class DailyTicketService
                             'allowedMarkets' => $config['allowed_markets'],
                             'allowedLeagues' => $config['allowed_leagues'],
                         ]);
+                        $funnel['correlationQualifiedCandidates'] = (int) ($optimized['poolSize'] ?? 0);
                         if ($optimized['status'] === 'QUALIFIED') {
                             $rec = $this->governance->record($optimized, (string) $config['version'], $modelVersionId, $config);
                             if (($rec['status'] ?? '') !== 'NO_QUALIFIED_TICKET') {
                                 $status = $rec['status'] === 'APPROVED_NOT_EXECUTED' ? 'APPROVED' : 'PENDING_USER_APPROVAL';
                                 $ticketId = $rec['ticketId'];
+                                $funnel['finalQualifiedCandidates'] = (int) ($optimized['selectionCount'] ?? 0);
                                 $message = $status === 'APPROVED' ? 'ticket generated and auto-approved (AUTOMATED_EXECUTION); no external execution' : 'odds prediction ticket generated; awaiting user approval';
                             }
                         } else {
                             $message = 'NO VALUE TICKET TODAY — ' . ($optimized['reason'] ?? 'no compliant combination');
                         }
-                    } else {
-                        $confidenceFloor = number_format((float) ($config['min_confidence'] ?? 70.0), 0);
-                        $message = $evaluated === 0 ? 'NO VALUE TICKET TODAY — no verified fixtures received for ' . $date : 'NO VALUE TICKET TODAY — no candidate passed the eligibility, odds, ' . $confidenceFloor . '%+ confidence, quality, risk/value and correlation gates';
                     }
+                    if ($ticketId === null && $message === '') {
+                        $confidenceFloor = number_format((float) ($config['min_confidence'] ?? 70.0), 0);
+                        $message = $evaluated === 0
+                            ? 'NO VALUE TICKET TODAY — no verified fixtures received for ' . $date
+                            : 'NO VALUE TICKET TODAY — no candidate passed the eligibility, odds, ' . $confidenceFloor . '%+ confidence, quality, risk/value and correlation gates';
+                    }
+                    if ($ticketId === null) $message .= ' ' . $this->funnelSummary($funnel, $evaluated, $recorded, $rejections);
+                    $funnel['topRejectionReasons'] = $this->topRejectionReasons($rejectionSummary);
+                    $funnel['rejectionReasonsByProvider'] = $reasonProviders;
+                    $funnel['topPicks'] = $this->topPicks($allCandidates);
+                    $funnel['topPicksDisclaimer'] = self::TOP_PICKS_DISCLAIMER;
+                    $fairConfig = $this->fairValueConfiguration();
+                    $funnel['thresholds'] = [
+                        'minConfidence' => $minConfidence,
+                        'minDataQuality' => $minQuality,
+                        'minExpectedValue' => $minEv,
+                        'oddsMaxAgeSeconds' => $this->oddsFreshness->maxAge(),
+                        'targetOdds' => [(float) $config['target_odds_min'], (float) $config['target_odds_max']],
+                        'maxCorrelation' => $config['max_correlation'],
+                        'generationCap' => $funnel['generationCap'],
+                        'valueThresholdsPoints' => (function (array $t): array {
+                            return ['strong' => round($t['strong'] * 100, 2), 'positive' => round($t['positive'] * 100, 2), 'avoid' => round($t['avoid'] * 100, 2)];
+                        })($fairConfig->valueThresholds()),
+                        'stabilityThresholdsPoints' => (function (array $t): array {
+                            return ['moved' => round($t['moved'] * 100, 2), 'unstable' => round($t['unstable'] * 100, 2)];
+                        })($fairConfig->stabilityThresholds()),
+                    ];
+                    $funnel['pipeline'] = 'fixture eligibility → data normalization → odds availability/freshness → prediction → probability → confidence → data quality → value/edge (margin removed) → risk → correlation → ticket';
                 }
             }
         } catch (\Throwable $e) {
@@ -223,13 +379,17 @@ class DailyTicketService
             $errors[] = $message;
         }
 
+        $diagnostics = $this->buildDiagnostics($funnel, $date, $evaluated, $recorded, $rejections);
+
         // The rejection summary doubles as the provider-failure ledger on a
         // DATA_UNAVAILABLE day: PROVIDER:<id> → status, so the stored row, the
-        // dashboard and the API all show WHICH feed failed and WHY.
+        // dashboard and the API all show WHICH feed failed and WHY. The
+        // diagnostics funnel is stored under a reserved key.
         $storedSummary = $rejectionSummary;
         if ($dataState === 'DATA_UNAVAILABLE') {
             foreach ($providerStatuses as $pid => $st) $storedSummary['PROVIDER:' . $pid] = $st;
         }
+        $storedSummary['_diagnostics'] = $diagnostics;
         $this->repo->saveDailyTicket([
             'date' => $date, 'ticket_id' => $ticketId, 'status' => $status,
             'configuration_version' => (int) $config['version'],
@@ -248,17 +408,240 @@ class DailyTicketService
         }
         $this->audit->emit($dataState === 'DATA_UNAVAILABLE' ? 'SPORTS_DAILY_TICKET_BLOCKED' : 'SPORTS_DAILY_TICKET_RUN', 'Daily ticket run ' . $date . ' → ' . $status, [
             'date' => $date, 'status' => $status, 'dataState' => $dataState, 'ticketId' => $ticketId, 'evaluated' => $evaluated,
-            'rejections' => $rejections, 'rejectionSummary' => $rejectionSummary, 'message' => $message, 'provider' => $provider,
+            'rejections' => $rejections, 'rejectionSummary' => $rejectionSummary, 'diagnostics' => $diagnostics, 'message' => $message, 'provider' => $provider,
             'providerFailures' => $providerFailures, 'providerStatuses' => $providerStatuses, 'errors' => $errors,
         ]);
         return [
             'status' => $status, 'dataState' => $dataState, 'ticketId' => $ticketId, 'date' => $date, 'message' => $message,
             'evaluated' => $evaluated, 'predictionsRecorded' => $recorded, 'rejections' => $rejections, 'rejectionSummary' => $rejectionSummary,
+            'diagnostics' => $diagnostics,
             'provider' => $provider, 'providerFailures' => $providerFailures, 'providerStatuses' => $providerStatuses,
             'runId' => $run['id'], 'errors' => $errors,
         ];
     }
 
+    /** Count one rejection under its single primary reason, with provider attribution. */
+    private function countRejection(array &$summary, string $reason, array &$reasonProviders, string $provider): void
+    {
+        $summary[$reason] = ($summary[$reason] ?? 0) + 1;
+        $reasonProviders[$reason][$provider] = ($reasonProviders[$reason][$provider] ?? 0) + 1;
+    }
+
+    /** Funnel counters for one evaluated candidate (per market:selection). */
+    private function trackCandidateFunnel(array $candidate, array &$funnel, float $minConfidence, float $minEv): void
+    {
+        $ready = ($candidate['prediction']['decision'] ?? '') === 'PREDICTION_READY';
+        if ($ready) $funnel['sufficientDataCandidates']++;
+        if (is_numeric($candidate['confidence']['confidence'] ?? null) && (float) $candidate['confidence']['confidence'] >= $minConfidence) $funnel['confidenceQualifiedCandidates']++;
+        if (!empty($candidate['value']['qualified']) && (float) ($candidate['value']['expectedValue'] ?? -1) > 0) $funnel['positiveValueCandidates']++;
+        if (!empty($candidate['value']['qualified']) && (float) ($candidate['value']['expectedValue'] ?? -1) >= $minEv) $funnel['minEdgeMetCandidates']++;
+        $riskClass = (string) ($candidate['risk']['classification'] ?? 'REJECTED');
+        if (!empty($candidate['risk']['approved']) && $riskClass !== 'HIGH' && $riskClass !== 'REJECTED') $funnel['riskQualifiedCandidates']++;
+    }
+
+    private function emptyFunnel(): array
+    {
+        return [
+            'providersConfigured' => 0,
+            'eligibleFixtures' => 0,
+            'fixturesWithSupportedOdds' => 0,
+            'fixturesWithFreshOdds' => 0,
+            'fixturesRejectedStaleOdds' => 0,
+            'fixturesRejectedNoOdds' => 0,
+            'fixturesMissingMandatoryData' => 0,
+            'fixturesWithoutCalibration' => 0,
+            'fixturesBelowQualityFloor' => 0,
+            'sufficientDataFixtures' => 0,
+            'generationCap' => 0,
+            'fixturesDeferred' => 0,
+            'predictionsGenerated' => 0,
+            'predictionsReused' => 0,
+            'sufficientDataCandidates' => 0,
+            'confidenceQualifiedCandidates' => 0,
+            'positiveValueCandidates' => 0,
+            'minEdgeMetCandidates' => 0,
+            'riskQualifiedCandidates' => 0,
+            'correlationQualifiedCandidates' => 0,
+            'finalQualifiedCandidates' => 0,
+            'oddsRefreshAttempts' => 0,
+            'oddsRefreshedFixtures' => 0,
+            'oddsProvidersUsed' => [],
+            'oddsProviderFailures' => [],
+            'oddsProviderFailureStatuses' => [],
+            'oddsProvidersNoCoverage' => [],
+            'topRejectionReasons' => [],
+            'rejectionReasonsByProvider' => [],
+            'topPicks' => [],
+            'topPicksDisclaimer' => self::TOP_PICKS_DISCLAIMER,
+            'thresholds' => [],
+            'pipeline' => '',
+        ];
+    }
+
+    private function buildDiagnostics(array $funnel, string $date, int $evaluated, int $recorded, int $rejections): array
+    {
+        $funnel['date'] = $date;
+        $funnel['fixturesEvaluated'] = $evaluated;
+        $funnel['predictionsRecorded'] = $recorded;
+        $funnel['totalRejections'] = $rejections;
+        return $funnel;
+    }
+
+    /** Compact one-line funnel for the human-readable message. */
+    private function funnelSummary(array $funnel, int $evaluated, int $recorded, int $rejections): string
+    {
+        $extra = '';
+        if (!empty($funnel['fixturesDeferred'])) $extra .= sprintf(', %d deferred by the %d-generation cap', (int) $funnel['fixturesDeferred'], (int) ($funnel['generationCap'] ?? 0));
+        if (!empty($funnel['predictionsReused'])) $extra .= sprintf(', %d reused', (int) $funnel['predictionsReused']);
+        return sprintf(
+            '(%d evaluated, %d predictions, %d rejections%s; funnel: %d eligible → %d fresh-odds → %d sufficient-data fixtures → %d predictions → %d confidence-qualified → %d positive-value → %d risk-qualified → %d final)',
+            $evaluated,
+            $recorded,
+            $rejections,
+            $extra,
+            $funnel['eligibleFixtures'],
+            $funnel['fixturesWithFreshOdds'],
+            $funnel['sufficientDataFixtures'],
+            $funnel['predictionsGenerated'],
+            $funnel['confidenceQualifiedCandidates'],
+            $funnel['positiveValueCandidates'],
+            $funnel['riskQualifiedCandidates'],
+            $funnel['finalQualifiedCandidates']
+        );
+    }
+
+    /**
+     * Top WINDELS Picks: the best-evidenced generated candidates of the run,
+     * ranked (qualified first, then intelligence score, then edge). A reading
+     * of the day's evidence — never a guarantee, and never a second ticket.
+     *
+     * @param array $candidates every candidate generated this run
+     */
+    /**
+     * Why a pick was picked: the shared driver headline when the selection has
+     * a predicted side (match-winner markets), otherwise the driver rows
+     * restated as "reading: verdict" pairs — the stored figures behind the
+     * prediction, never a manufactured narrative.
+     */
+    private function whyOf(?array $drivers): ?string
+    {
+        if ($drivers === null) return null;
+        $headline = $drivers['headline'] ?? null;
+        if (is_string($headline) && $headline !== '') return $headline;
+        $parts = [];
+        foreach ((array) ($drivers['drivers'] ?? []) as $row) {
+            if (!is_array($row) || !isset($row['label'], $row['verdict'])) continue;
+            $parts[] = $row['label'] . ': ' . $row['verdict'];
+        }
+        return $parts === [] ? null : implode('; ', $parts) . '.';
+    }
+
+    private function topPicks(array $candidates): array
+    {
+        $ready = array_values(array_filter($candidates, fn(array $c) => ($c['prediction']['decision'] ?? '') === 'PREDICTION_READY'));
+        // usort's callback must return an INT — returning the tuple directly
+        // would coerce a non-empty array to 1 on every call and scramble the
+        // order, so each key is compared until one differs.
+        usort($ready, function (array $a, array $b): int {
+            $cmp = ((($b['decision'] ?? '') === 'QUALIFIED') <=> (($a['decision'] ?? '') === 'QUALIFIED'));
+            if ($cmp !== 0) return $cmp;
+            $cmp = (int) ($b['intelligenceScore']['score'] ?? -1) <=> (int) ($a['intelligenceScore']['score'] ?? -1);
+            if ($cmp !== 0) return $cmp;
+            $cmp = (float) ($b['value']['edgePoints'] ?? -999.0) <=> (float) ($a['value']['edgePoints'] ?? -999.0);
+            if ($cmp !== 0) return $cmp;
+            return (float) ($b['confidence']['confidence'] ?? -1.0) <=> (float) ($a['confidence']['confidence'] ?? -1.0);
+        });
+        $picks = [];
+        foreach (array_slice($ready, 0, $this->fairValueConfiguration()->picksLimit()) as $c) {
+            $picks[] = [
+                'match' => ($c['match']['homeTeam'] ?? '?') . ' vs ' . ($c['match']['awayTeam'] ?? '?'),
+                'kickoff' => $c['match']['kickoff'] ?? null,
+                'competition' => $c['match']['competition'] ?? null,
+                'market' => $c['market'],
+                'selection' => $c['selection'],
+                'modelProbability' => $c['prediction']['calibratedProbability'] ?? null,
+                'windelsFairOdds' => $c['value']['fairOdds'] ?? null,
+                'marketOdds' => $c['value']['marketOdds'] ?? null,
+                'marketFairOdds' => $c['value']['marketFairOdds'] ?? null,
+                'marginPoints' => $c['value']['marginPoints'] ?? null,
+                'edgePoints' => $c['value']['edgePoints'] ?? null,
+                'expectedValue' => $c['value']['expectedValue'] ?? null,
+                'valueClass' => $c['value']['valueClass'] ?? 'UNPRICED',
+                'valueLabel' => $c['value']['valueLabel'] ?? null,
+                'valueReason' => $c['value']['valueReason'] ?? null,
+                'confidence' => $c['confidence']['confidence'] ?? null,
+                'dataQuality' => $c['quality']['score'] ?? null,
+                'intelligenceScore' => ['score' => $c['intelligenceScore']['score'] ?? null, 'band' => $c['intelligenceScore']['band'] ?? null],
+                'stability' => ['state' => $c['stability']['state'] ?? null, 'movementPoints' => $c['stability']['movementPoints'] ?? null],
+                'why' => $this->whyOf($c['drivers'] ?? null),
+                'qualified' => ($c['decision'] ?? '') === 'QUALIFIED',
+                'primaryReason' => $c['primaryReason'] ?? null,
+            ];
+        }
+        return $picks;
+    }
+
+    /**
+     * The newest stored prediction per (market, selection) of a match from
+     * BEFORE this run — the reuse and stability input. Rows written by this
+     * run itself are never "previous".
+     *
+     * @return array<string,array> "MARKET:SELECTION" → prediction row
+     */
+    /**
+     * The stored predictions a fixture can reuse: the newest row per
+     * market:selection that was NOT written by this run. Exclusion is by id,
+     * not by timestamp — second-granularity created_at values would make
+     * back-to-back runs (a retry seconds later, or two cron sweeps) miss
+     * perfectly reusable stored predictions.
+     *
+     * @param array<int,string> $excludeIds prediction ids recorded by this run
+     */
+    private function previousPredictionsFor(int $matchId, array $excludeIds): array
+    {
+        try {
+            $rows = $this->repo->listPredictions(['matchId' => $matchId], 500);
+        } catch (\Throwable $e) {
+            return [];
+        }
+        $out = [];
+        foreach ($rows as $row) {
+            if (in_array((string) ($row['id'] ?? ''), $excludeIds, true)) continue;
+            $created = strtotime((string) ($row['created_at'] ?? ''));
+            if ($created === false) continue;
+            $key = strtoupper((string) ($row['market'] ?? '')) . ':' . strtoupper((string) ($row['selection'] ?? ''));
+            $existing = $out[$key] ?? null;
+            if ($existing === null || $created > (int) strtotime((string) ($existing['created_at'] ?? ''))) $out[$key] = $row;
+        }
+        return $out;
+    }
+
+    /** The bounded per-run generation cap (MAXIMUM GENERATION, design §9). */
+    private function generationCap(): int
+    {
+        $env = getenv(self::ENV_MAX_GENERATION);
+        if (is_string($env) && $env !== '' && is_numeric($env)) {
+            $value = (int) $env;
+            if ($value >= 1) return min(self::MAX_GENERATION_CEILING, $value);
+        }
+        return self::DEFAULT_MAX_GENERATION;
+    }
+
+    /** Shared value/stability/picks configuration (identical to the Football board's). */
+    private function fairValueConfiguration(): \AIWorkforce\Football\FootballConfiguration
+    {
+        if ($this->fairConfig === null) $this->fairConfig = new \AIWorkforce\Football\FootballConfiguration();
+        return $this->fairConfig;
+    }
+
+
+    /** Top rejection reasons (primary-reason counts), largest first. */
+    private function topRejectionReasons(array $summary, int $limit = 6): array
+    {
+        $reasons = array_filter($summary, fn($v) => is_int($v));
+        arsort($reasons);
+        return array_slice($reasons, 0, $limit, true);
+    }
 
     /**
      * Daily odds-prediction ticket eligibility: football only, provider state
@@ -277,8 +660,197 @@ class DailyTicketService
         return $kickoff > ($now + 2 * 3600);
     }
 
-    /** Return latest provider odds for the supported ticket markets only. */
-    private function supportedOddsRows(array $rows): array
+    /** Data fields present in the stored match context (quality + gating inputs). */
+    private function contextFields(array $matchRow): array
+    {
+        $payload = is_array($matchRow['payload'] ?? null) ? $matchRow['payload'] : [];
+        $context = is_array($payload['context'] ?? null) ? $payload['context'] : [];
+        $present = [];
+        foreach ($context as $key => $value) {
+            if ($value !== null && $value !== []) $present[] = (string) $key;
+        }
+        return $present;
+    }
+
+    /**
+     * Resolve the fixture's usable (supported AND fresh) odds rows.
+     *
+     * Order: stored rows → bulk round rows (already fetched, one request per
+     * matchday) → per-fixture refresh across every configured provider that
+     * has a VERIFIED fixture id (cross-references included). Odds are only
+     * refreshed when no fresh row exists — a once-a-day sync that is still
+     * inside the TTL is used as-is, never re-fetched, never marked stale
+     * merely because it was not refreshed during this run.
+     *
+     * @return array{ok:bool, reason?:string, provider?:string, rows:array, staleCount:int, refreshTried:bool}
+     */
+    private function resolveUsableOdds(array $matchRow, string $fixtureProvider, array $roundOdds, array &$errors, int $now, array &$funnel): array
+    {
+        $matchId = (int) $matchRow['id'];
+        $externalId = (string) $matchRow['external_id'];
+
+        // Select the newest row per market:selection, judge freshness once per
+        // row, and build the WHOLE-market price sheets used for margin removal
+        // (companion selections — UNDER_1_5, BTTS NO — are prices, never
+        // candidates: the overround needs the complete market).
+        $select = function () use ($matchId, $now): array {
+            $rows = method_exists($this->repo, 'listOdds') ? $this->repo->listOdds($matchId, 200) : [];
+            $latest = $this->latestOddsRows($rows, $this->providerCodeMap());
+            $marketPrices = [];
+            $supported = 0;
+            $usable = [];
+            $staleCount = 0;
+            foreach ($latest as $row) {
+                $assessment = $this->oddsFreshness->assess($row, null, $now);
+                $fresh = !empty($assessment['fresh']);
+                if ($fresh) {
+                    $marketPrices[$row['market']][$row['selection']] = ['odds' => $row['decimalOdds'], 'observedAt' => $row['observedAt']];
+                }
+                if (!PredictionEngine::isSupportedMarketSelection($row['market'], $row['selection'])) continue;
+                $supported++;
+                $row['oddsStatus'] = $assessment['oddsStatus'];
+                $row['oddsUpdatedAt'] = $assessment['oddsUpdatedAt'];
+                $row['oddsAgeSeconds'] = $assessment['oddsAgeSeconds'];
+                $row['maxOddsAgeSeconds'] = $assessment['maxAgeSeconds'];
+                if (!empty($row['oddsSource'])) $row['provider'] = $row['oddsSource'];
+                if ($fresh) $usable[] = $row;
+                else $staleCount++;
+            }
+            return [$supported, $usable, $staleCount, $marketPrices];
+        };
+
+        [$supported, $usable, $staleCount, $marketPrices] = $select();
+
+        if ($usable === []) {
+            // Refresh only when needed. Bulk round rows first (one request per
+            // matchday), then the per-fixture cross-provider fallback.
+            $rawOdds = $roundOdds[$externalId] ?? null;
+            $saved = 0;
+            if ($rawOdds !== null) {
+                $funnel['oddsRefreshAttempts']++;
+                $saved = $this->persistOdds($matchId, $rawOdds, $fixtureProvider, $externalId, $errors);
+                if ($saved > 0) {
+                    $funnel['oddsRefreshedFixtures']++;
+                    $funnel['oddsProvidersUsed'][$fixtureProvider] = ($funnel['oddsProvidersUsed'][$fixtureProvider] ?? 0) + 1;
+                }
+            }
+            if ($saved === 0) {
+                // Walk every configured provider that has a VERIFIED fixture
+                // id (fixture provider first, then cross-referenced ones).
+                // A provider answering "no odds for this fixture" (empty, not
+                // an error) is not a failure — the next provider is tried
+                // before the candidate is rejected.
+                $idsByProvider = $this->fixtureIdsByProvider($matchRow, $fixtureProvider);
+                foreach ($idsByProvider as $pid => $fid) {
+                    $oddsAttempt = $this->providers->withFallbackIds('odds', [$pid => $fid], fn(SportsDataProvider $p, string $id) => $p->odds($id));
+                    $funnel['oddsRefreshAttempts']++;
+                    foreach ($oddsAttempt['failureStatuses'] ?? [] as $failedPid => $st) {
+                        $funnel['oddsProviderFailures'][$failedPid] = ($funnel['oddsProviderFailures'][$failedPid] ?? 0) + 1;
+                        $funnel['oddsProviderFailureStatuses'][$failedPid] = $st;
+                    }
+                    if (!$oddsAttempt['ok'] || !is_array($oddsAttempt['result'] ?? null)) continue;
+                    if ($oddsAttempt['result'] === []) {
+                        $funnel['oddsProvidersNoCoverage'][$pid] = ($funnel['oddsProvidersNoCoverage'][$pid] ?? 0) + 1;
+                        continue;
+                    }
+                    $saved = $this->persistOdds($matchId, $oddsAttempt['result'], (string) $oddsAttempt['provider'], (string) $fid, $errors);
+                    if ($saved > 0) {
+                        $funnel['oddsRefreshedFixtures']++;
+                        $funnel['oddsProvidersUsed'][(string) $oddsAttempt['provider']] = ($funnel['oddsProvidersUsed'][(string) $oddsAttempt['provider']] ?? 0) + 1;
+                        break;
+                    }
+                }
+            }
+            [$supported, $usable, $staleCount, $marketPrices] = $select();
+        }
+
+        if ($supported > 0) $funnel['fixturesWithSupportedOdds']++;
+        if ($supported === 0) {
+            $funnel['fixturesRejectedNoOdds']++;
+            return ['ok' => false, 'reason' => 'SUPPORTED_ODDS_UNAVAILABLE', 'provider' => $fixtureProvider, 'rows' => [], 'staleCount' => 0, 'marketPrices' => []];
+        }
+        if ($usable === []) {
+            // Real rows exist but every one exceeded the configured TTL and no
+            // provider could refresh them. One fixture-level rejection —
+            // never one per market:selection row.
+            $funnel['fixturesRejectedStaleOdds']++;
+            return ['ok' => false, 'reason' => 'STALE_ODDS', 'provider' => $fixtureProvider, 'rows' => [], 'staleCount' => $staleCount, 'marketPrices' => []];
+        }
+        return ['ok' => true, 'rows' => $usable, 'staleCount' => $staleCount, 'marketPrices' => $marketPrices];
+    }
+
+    /** Persist freshly fetched raw odds rows (never invented, fixture id verified per provider namespace). Returns rows stored. */
+    private function persistOdds(int $matchId, array $rawOdds, string $oddsProvider, string $requestedFixtureId, array &$errors): int
+    {
+        $saved = 0;
+        foreach ($rawOdds as $rawOddsRow) {
+            try {
+                if (!is_array($rawOddsRow)) continue;
+                if (!empty($rawOddsRow['fixtureId']) && (string) $rawOddsRow['fixtureId'] !== $requestedFixtureId) {
+                    throw new \InvalidArgumentException('odds fixture id mismatch');
+                }
+                $oddsProviderId = (int) $this->repo->ensureProvider($oddsProvider, $oddsProvider)['id'];
+                $this->providerCodes[$oddsProviderId] = $oddsProvider;
+                $this->repo->saveOdds($matchId, $oddsProviderId, SportsDataNormalizer::odds($rawOddsRow, $oddsProvider));
+                $saved++;
+            } catch (\Throwable $e) {
+                $errors[] = 'odds rejected: ' . mb_substr($e->getMessage(), 0, 200);
+            }
+        }
+        return $saved;
+    }
+
+    /** Provider row id → provider code, loaded once per run. */
+    private function providerCodeMap(): array
+    {
+        if ($this->providerCodes === []) {
+            try {
+                foreach ($this->repo->listProviders() as $p) {
+                    $this->providerCodes[(int) $p['id']] = (string) ($p['provider_code'] ?? '');
+                }
+            } catch (\Throwable $e) { /* best effort */ }
+        }
+        return $this->providerCodes;
+    }
+
+    /**
+     * Fixture ids in each provider's OWN namespace: the supplying provider's
+     * external id plus any recorded cross-references (e.g. TheSportsDB →
+     * api-football). Used for cross-provider odds fallback without id
+     * collisions — providers without a verified id are skipped upstream.
+     *
+     * @return array<string,string>
+     */
+    private function fixtureIdsByProvider(array $matchRow, string $fixtureProvider): array
+    {
+        $ids = [$fixtureProvider => (string) $matchRow['external_id']];
+        $payload = is_array($matchRow['payload'] ?? null) ? $matchRow['payload'] : [];
+        foreach ((array) ($payload['crossReferences'] ?? []) as $providerCode => $extId) {
+            $providerCode = (string) $providerCode;
+            $extId = trim((string) $extId);
+            if ($extId !== '' && $this->providers->provider($providerCode) !== null) $ids[$providerCode] = $extId;
+        }
+        return array_filter($ids, fn($v) => $v !== '');
+    }
+
+    /** Provider health, probed once per provider per run (not per fixture). */
+    private function providerHealth(string $providerId): array
+    {
+        if (!isset($this->healthCache[$providerId])) {
+            try { $this->healthCache[$providerId] = $this->providers->provider($providerId)?->health() ?? []; }
+            catch (\Throwable $e) { $this->healthCache[$providerId] = []; }
+        }
+        return $this->healthCache[$providerId];
+    }
+
+    /**
+     * The newest stored odds row per market:selection — for EVERY selection,
+     * not only the supported ticket markets. A market's overround needs all of
+     * its mutually exclusive outcomes priced, so companion selections
+     * (UNDER_1_5, BTTS NO) are returned as prices; the candidate filter (what
+     * may be predicted) is applied by the caller, never here.
+     */
+    private function latestOddsRows(array $rows, array $providerCodes = []): array
     {
         $latest = [];
         foreach ($rows as $row) {
@@ -286,25 +858,32 @@ class DailyTicketService
             $selection = strtoupper(trim((string) ($row['selection'] ?? '')));
             $decimal = $row['decimalOdds'] ?? $row['decimal_odds'] ?? null;
             $observed = $row['observedAt'] ?? $row['observed_at'] ?? null;
-            if (!PredictionEngine::isSupportedMarketSelection($market, $selection)) continue;
+            if ($market === '' || $selection === '') continue;
             if (!is_numeric($decimal) || (float) $decimal <= 1.0 || !is_finite((float) $decimal)) continue;
             if (!$observed) continue;
             $key = $market . ':' . $selection;
             if (!isset($latest[$key]) || strcmp((string) $observed, (string) $latest[$key]['observedAt']) > 0) {
-                $latest[$key] = ['market' => $market, 'selection' => $selection, 'decimalOdds' => (float) $decimal, 'observedAt' => (string) $observed, 'payload' => $row['payload'] ?? []];
+                $source = (string) ($providerCodes[(int) ($row['provider_id'] ?? 0)] ?? '');
+                if ($source === '') {
+                    $payload = is_array($row['payload'] ?? null) ? $row['payload'] : [];
+                    $source = (string) ($payload['provider'] ?? '');
+                }
+                $latest[$key] = ['market' => $market, 'selection' => $selection, 'decimalOdds' => (float) $decimal, 'observedAt' => (string) $observed, 'payload' => $row['payload'] ?? []] + ($source !== '' ? ['oddsSource' => $source] : []);
             }
         }
         return array_values($latest);
     }
 
     /**
-     * Bulk-fetch the day's odds when the provider exposes the round endpoint
-     * (SportMonks): one request per matchday instead of one per fixture.
-     * Returns externalId → raw odds rows. Fixtures without a roundId, or a
-     * failed round fetch, are simply absent — the per-match loop falls back
-     * to the per-fixture odds() call for them (no fabricated odds, ever).
+     * Bulk-fetch the day's odds when the fixture provider exposes the round
+     * endpoint (SportMonks): one request per matchday instead of one per
+     * fixture. Only the fixture's OWN provider is asked — round ids are
+     * provider-specific and a foreign round id could return another
+     * matchday's odds. Fixtures without a roundId, or a failed round fetch,
+     * are simply absent — the per-match loop falls back to the per-fixture
+     * odds() call for them (no fabricated odds, ever).
      */
-    private function fetchRoundOdds(string $preferredId, ?SportsDataProvider $provider, array $rawFixtures, array &$errors): array
+    private function fetchRoundOdds(?SportsDataProvider $provider, array $rawFixtures, array &$errors): array
     {
         if ($provider === null || !method_exists($provider, 'round')) return [];
         $roundIds = [];
@@ -314,10 +893,7 @@ class DailyTicketService
         }
         $out = [];
         foreach (array_keys($roundIds) as $roundId) {
-            $attempt = $this->providers->withFallback('round', function (SportsDataProvider $p) use ($roundId) {
-                if (!method_exists($p, 'round')) throw new ProviderException('round endpoint not supported', ProviderException::DATA_ERROR);
-                return $p->round((string) $roundId);
-            }, $preferredId);
+            $attempt = $this->providers->withFallbackIds('round', [$provider->id() => (string) $roundId], fn(SportsDataProvider $p, string $id) => $p->round($id));
             if (!$attempt['ok']) {
                 $errors[] = 'round ' . $roundId . ' bulk odds fetch failed: ' . json_encode($attempt['failures']);
                 continue;
@@ -329,23 +905,25 @@ class DailyTicketService
         return $out;
     }
 
-    private function qualityContext(array $match, ?array $odds, float $reliability): array
+    /** Market-aware quality context for the DataQualityEngine. */
+    private function qualityContext(array $contextFields, array $oddsStage, float $reliability, array $markets, int $minQuality): array
     {
-        $maxAge = 3600;
-        $age = null;
-        if ($odds !== null && !empty($odds['observedAt'])) {
-            try { $age = max(0, time() - (int) (new \DateTimeImmutable((string) $odds['observedAt']))->getTimestamp()); }
-            catch (\Throwable $e) { $age = PHP_INT_MAX; }
-        } elseif (!empty($match['sourceTimestamp'])) {
-            try { $age = max(0, time() - (int) (new \DateTimeImmutable((string) $match['sourceTimestamp']))->getTimestamp()); }
-            catch (\Throwable $e) { $age = PHP_INT_MAX; }
+        $freshestAge = null;
+        foreach ($oddsStage['rows'] as $row) {
+            if (is_numeric($row['oddsAgeSeconds'] ?? null)) {
+                $age = (int) $row['oddsAgeSeconds'];
+                $freshestAge = $freshestAge === null ? $age : min($freshestAge, $age);
+            }
         }
         return [
-            'oddsAvailable' => $odds !== null,
-            'recentFormAvailable' => !empty($match['context']['recentForm']),
+            'mandatoryFields' => DataQualityEngine::mandatoryFieldsForMarkets($markets),
+            'availableFields' => $contextFields,
+            'oddsAvailable' => true,
+            'oddsFresh' => true,
+            'oddsAgeSeconds' => $freshestAge,
+            'maxOddsAgeSeconds' => $this->oddsFreshness->maxAge(),
             'providerReliability' => $reliability,
-            'dataAgeSeconds' => $age ?? PHP_INT_MAX,
-            'maxAgeSeconds' => $maxAge,
+            'minDataQuality' => $minQuality,
         ];
     }
 
