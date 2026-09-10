@@ -409,8 +409,8 @@ class SportsIntelligence
         $rawLive = $this->repository->listMatches(['status' => LiveScoreService::LIVE_STATUSES], 200);
         $live = [];
         foreach ($rawLive as $m) {
-            $status = strtoupper((string) ($m['status'] ?? ''));
-            if (!in_array($status, LiveScoreService::LIVE_STATUSES, true)) continue;
+            $matchStatus = strtoupper((string) ($m['status'] ?? ''));
+            if (!in_array($matchStatus, LiveScoreService::LIVE_STATUSES, true)) continue;
             $updatedTs = strtotime((string) ($m['updated_at'] ?? ''));
             if ($updatedTs === false || ($now - $updatedTs) > $threshold) continue;
             $payload = is_array($m['payload'] ?? null) ? $m['payload'] : [];
