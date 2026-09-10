@@ -191,8 +191,8 @@ test('risk: low liquidity is an explicit rejection; confidence is gated once, up
     $eng = new RiskEngine();
     $value = ['qualified' => true, 'expectedValue' => 0.2, 'odds' => 2.0];
     $quality = ['score' => 100, 'eligibleForTicket' => true];
-    // The 70%+ confidence floor is the PIPELINE's gate (on the WINDELS
-    // confidence value, in stage order) — the risk engine no longer
+    // The configured confidence floor is the PIPELINE's gate (on the
+    // WINDELS confidence value, in stage order) — the risk engine no longer
     // duplicates it as a second LOW_CONFIDENCE rejection.
     $lowConf = $eng->assess($value, $quality, ['min_data_quality' => 75, 'min_confidence' => 80], ['confidence' => 70]);
     assert_equals('LOW', $lowConf['classification']);
@@ -243,4 +243,28 @@ test('optimizer: same-team candidates cannot both enter a ticket (LOW cap)', fun
     $opt = new TicketOptimizer();
     $out = $opt->optimize([$mk(1, 'Alpha', 'Beta', 2.0), $mk(2, 'Alpha', 'Gamma', 2.5)], ['targetOddsMin' => 4.0, 'targetOddsMax' => 9.0, 'maxSelections' => 2, 'maxCorrelation' => 'LOW']);
     assert_equals('NO_QUALIFIED_TICKET', $out['status'], 'same-team selections exceed the LOW correlation cap');
+});
+
+test('pipeline: require_calibration off runs the identity mapping when no calibration exists', function () {
+    $config = array_merge(fx_gate_config(), ['require_calibration' => 0]);
+    // No approved calibration: previously the flag was a dead end (the engine
+    // still rejected MODEL_NOT_CALIBRATED on an empty calibration input).
+    // Now it runs the model through the identity mapping — the raw model
+    // probability — and says so on the decision record.
+    $out = (new PredictionPipeline())->evaluate(fx_gate_match(), fx_fresh_odds(1.6), fx_gate_quality(), null, $config);
+    assert_not_contains('MODEL_NOT_CALIBRATED', implode(',', $out['rejectionReasons']), 'the flag no longer dead-ends on MODEL_NOT_CALIBRATED');
+    assert_equals('PASSED', (string) ($out['factors']['stages']['prediction'] ?? ''));
+    assert_equals('identity', (string) ($out['factors']['calibration']['version'] ?? ''));
+    assert_equals(0.0, (float) ($out['factors']['calibration']['intercept'] ?? null));
+    assert_equals(1.0, (float) ($out['factors']['calibration']['slope'] ?? null));
+    // ...and an existing APPROVED calibration is still honoured when the
+    // flag is off — the identity mapping is the fallback, not the override.
+    $withCal = (new PredictionPipeline())->evaluate(fx_gate_match(), fx_fresh_odds(1.6), fx_gate_quality(), fx_approved_calibration(), $config);
+    assert_equals('test', (string) ($withCal['factors']['calibration']['version'] ?? ''));
+});
+
+test('pipeline: require_calibration on (default) still rejects without a calibration', function () {
+    $out = (new PredictionPipeline())->evaluate(fx_gate_match(), fx_fresh_odds(1.6), fx_gate_quality(), null, fx_gate_config());
+    assert_equals('REJECTED', $out['decision']);
+    assert_true(in_array('MODEL_NOT_CALIBRATED', $out['rejectionReasons'], true), 'the default remains fail-closed');
 });

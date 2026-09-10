@@ -170,7 +170,16 @@ class PredictionPipeline
         } elseif (($config['require_calibration'] ?? 1) && $calibrationInput === null) {
             $stage('prediction', 'FAILED', 'MODEL_NOT_CALIBRATED');
         } else {
-            $prediction = $this->prediction->predict((string) $candidate['market'], (string) $candidate['selection'], $fs, $calibrationInput ?? []);
+            // require_calibration off with no approved calibration: run the
+            // model through the IDENTITY mapping (intercept 0 / slope 1 —
+            // the raw model probability, the same baseline the bootstrap and
+            // the backtester use) and flag it on the decision record.
+            $engineCalibration = $calibrationInput;
+            if ($engineCalibration === null) {
+                $engineCalibration = ['approved' => true, 'intercept' => 0.0, 'slope' => 1.0, 'version' => 'identity', 'ece' => null, 'samples' => 0, 'approvedAt' => null];
+                $factors['calibration'] = ['version' => 'identity', 'intercept' => 0.0, 'slope' => 1.0, 'ece' => null, 'samples' => 0, 'approvedAt' => null, 'note' => 'require_calibration disabled — raw model probability'];
+            }
+            $prediction = $this->prediction->predict((string) $candidate['market'], (string) $candidate['selection'], $fs, $engineCalibration);
             if (!empty($prediction['market'])) { $candidate['market'] = $prediction['market']; $candidate['selection'] = $prediction['selection']; }
             if (($prediction['decision'] ?? '') !== 'PREDICTION_READY') {
                 $stage('prediction', 'FAILED', $prediction['reason'] ?? 'NO_PREDICTION');

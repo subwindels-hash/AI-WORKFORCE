@@ -145,38 +145,63 @@ test('calibration bootstrap refuses when an APPROVED calibration exists', functi
 // 2. Deadlock broken end-to-end
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('daily ticket engine is blocked without calibration, unblocked by bootstrap + approval', function () {
+test('daily ticket engine breaks the calibration cold start with an audited identity bootstrap', function () {
     [$repo, $audit, $service] = cb_stack();
 
-    // Without any calibration the engine predicts nothing (the lock-out).
+    // No calibration at all: the engine bootstraps the identity calibration
+    // (0,1) and auto-approves it as an audited SYSTEM act — the deadlock the
+    // 2026-09-10 run hit (MODEL_NOT_CALIBRATED on a fresh install) is broken
+    // without a manual API call. Tickets remain user-approved by default.
     $run = $service->runDaily(gmdate('Y-m-d'));
-    assert_equals('NO_QUALIFIED_TICKET', $run['status']);
-    assert_equals(0, (int) $run['predictionsRecorded']);
-    assert_equals(3, (int) ($run['diagnostics']['fixturesWithoutCalibration'] ?? 0), 'every sufficient-data fixture hit the calibration gate');
-    assert_true(($run['rejectionSummary']['MODEL_NOT_CALIBRATED'] ?? 0) === 3, 'MODEL_NOT_CALIBRATED is the primary reason');
-    assert_contains('bootstrap-identity', $run['message'], 'the message names the fix');
+    assert_equals('IDENTITY_AUTO_APPROVED', $run['diagnostics']['calibrationBootstrap'], 'the funnel records the cold-start break');
+    assert_equals(0, (int) ($run['rejectionSummary']['MODEL_NOT_CALIBRATED'] ?? 0), 'no calibration rejections on a fresh install');
+    assert_equals(3, (int) ($run['diagnostics']['predictionsGenerated'] ?? 0), 'the identity calibration unblocks prediction');
 
-    // Bootstrap (PENDING) alone changes nothing — approval is the act.
-    $svc = new CalibrationBootstrap($repo, $audit);
-    $boot = $svc->bootstrapIdentity('admin-1');
-    assert_true($boot['ok']);
-    // A fresh execution key: same day, but the previous run already stored its
-    // diagnostics under the same (date, config version) slot.
-    $runPending = $service->runDaily(gmdate('Y-m-d'), 'daily-ticket:' . gmdate('Y-m-d') . ':pending-cal');
-    assert_equals(0, (int) $runPending['predictionsRecorded'], 'a PENDING calibration still predicts nothing');
-
-    $repo->updateCalibrationStatus((int) $boot['calibrationId'], 'APPROVED', 'admin-1');
-    $runApproved = $service->runDaily(gmdate('Y-m-d'), 'daily-ticket:' . gmdate('Y-m-d') . ':approved-cal');
-    assert_equals(3, (int) ($runApproved['diagnostics']['predictionsGenerated'] ?? 0), 'the approved identity calibration unblocks prediction');
-    assert_true(($runApproved['rejectionSummary']['MODEL_NOT_CALIBRATED'] ?? 0) === 0, 'no calibration rejections after approval');
+    $approved = $repo->listCalibrations(null, 'APPROVED');
+    assert_equals(1, count($approved), 'exactly one approved calibration exists');
+    assert_equals(CalibrationBootstrap::method(), (string) $approved[0]['method'], 'only the identity bootstrap is auto-approved');
+    assert_equals(0.0, (float) $approved[0]['intercept']);
+    assert_equals(1.0, (float) $approved[0]['slope']);
+    assert_equals('system:daily-ticket', (string) ($approved[0]['approved_by'] ?? ''), 'the system actor is recorded on the row');
+    $types = array_map(fn($e) => $e['type'], $audit->events);
+    assert_true(in_array('SPORTS_CALIBRATION_BOOTSTRAPPED', $types, true), 'the bootstrap is audited');
+    assert_true(in_array('SPORTS_CALIBRATION_AUTO_APPROVED', $types, true), 'the auto-approval is audited separately');
 });
 
-test('a blocked day that stored nothing stays retryable without a config bump', function () {
+test('an existing PENDING identity bootstrap is reused, never duplicated', function () {
     [$repo, $audit, $service] = cb_stack();
+    $boot = (new CalibrationBootstrap($repo, $audit))->bootstrapIdentity('admin-1');
+    assert_true($boot['ok']);
+
+    $run = $service->runDaily(gmdate('Y-m-d'), 'daily-ticket:' . gmdate('Y-m-d') . ':reuse-pending');
+    assert_equals('IDENTITY_AUTO_APPROVED', $run['diagnostics']['calibrationBootstrap']);
+    assert_equals([], $repo->listCalibrations(null, 'PENDING'), 'the pending row was approved, not left behind');
+    $approved = $repo->listCalibrations(null, 'APPROVED');
+    assert_equals(1, count($approved), 'no duplicate bootstrap row');
+    assert_equals((int) $boot['calibrationId'], (int) $approved[0]['id'], 'the admin-created row is the one approved');
+});
+
+test('an admin-REJECTED identity bootstrap is honoured, not resurrected', function () {
+    [$repo, $audit, $service] = cb_stack();
+    $boot = (new CalibrationBootstrap($repo, $audit))->bootstrapIdentity('admin-1');
+    $repo->updateCalibrationStatus((int) $boot['calibrationId'], 'REJECTED', 'admin-1');
+
+    $run = $service->runDaily(gmdate('Y-m-d'), 'daily-ticket:' . gmdate('Y-m-d') . ':veto');
+    assert_equals('NO_QUALIFIED_TICKET', $run['status']);
+    assert_equals('REJECTED_BY_ADMIN', $run['diagnostics']['calibrationBootstrap'], 'the veto is visible in the funnel');
+    assert_equals(3, (int) ($run['rejectionSummary']['MODEL_NOT_CALIBRATED'] ?? 0), 'the engine stays blocked behind an explicit veto');
+    assert_equals(1, count($repo->listCalibrations(null, 'REJECTED')), 'no duplicate bootstrap row');
+    assert_equals(0, count($repo->listCalibrations(null, 'APPROVED')), 'nothing was auto-approved over the veto');
+    assert_contains('REJECTED by an administrator', $run['message'], 'the message says the veto is what blocks');
+});
+
+test('a veto-blocked day stays retryable without a config bump', function () {
+    [$repo, $audit, $service] = cb_stack();
+    $boot = (new CalibrationBootstrap($repo, $audit))->bootstrapIdentity('admin-1');
+    $repo->updateCalibrationStatus((int) $boot['calibrationId'], 'REJECTED', 'admin-1');
     $date = gmdate('Y-m-d');
-    $first = $service->runDaily($date); // no calibration → nothing stored
+    $first = $service->runDaily($date); // veto → blocked, nothing stored
     assert_equals('NO_QUALIFIED_TICKET', $first['status']);
-    assert_equals(0, (int) $first['predictionsRecorded']);
     $second = $service->runDaily($date); // same date, same config version
     assert_not_equals('DUPLICATE_SKIPPED', $second['status'], 'a blocked day must stay retryable once the operator fixes it');
 });
@@ -210,11 +235,13 @@ test('FormResolver stats expose budget skips and lookup failures', function () {
         'homeTeamId' => '33', 'awayTeamId' => '40', 'leagueId' => '39', 'season' => '2026',
     ]];
 
-    // Budget of ONE lookup: home side is fetched, away side is skipped.
-    $resolver = new FormResolver(1);
+    // Budget of TWO lookups: the league table costs one (this transport
+    // answers it with team-statistics JSON, so it covers no team), the home
+    // side then gets its per-team statistics, and the away side hits the cap.
+    $resolver = new FormResolver(2);
     $enriched = $resolver->enrich(new ApiFootballProvider('k', 'https://api.test', 10, $okTransport), $fixture);
     $stats = $resolver->stats();
-    assert_equals(1, (int) $stats['lookupsUsed'], 'one live lookup within budget');
+    assert_equals(2, (int) $stats['lookupsUsed'], 'table + one per-team lookup within budget');
     assert_equals(1, (int) $stats['budgetSkips'], 'the away side hit the budget cap');
     assert_true(empty($enriched[0]['context']['recentForm']), 'a half-resolved fixture keeps no recentForm');
 

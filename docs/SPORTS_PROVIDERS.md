@@ -439,9 +439,12 @@ Provider fixture responses never carry form, so the `FormResolver` fetches it:
 
 * **Any provider that publishes a league table** serves form — one
   `standings()` request per *(league, season)* covers every team in that
-  league, cached for the whole run. api-football additionally uses its
-  per-team `/teams/statistics` endpoint and falls back to the table when a
-  team has no statistics yet (season opener, cup entry).
+  league, cached for the whole run. The table is the **primary** source:
+  api-football's per-team `/teams/statistics` costs two lookups per fixture
+  and starved the 30-lookup budget after ~15 fixtures (the "14 with-form"
+  dead end of the 2026-09-10 run). Per-team statistics are now the
+  **fallback** for teams the table does not cover (cup sides, mid-season
+  moves, no games yet).
 * **The lookup budget is spent where a ticket can still be won.** The daily
   ticket engine screens fixture eligibility *before* enrichment, so
   `WINDELS_SPORTS_FORM_LOOKUPS` (default 30) is never burned on matches that
@@ -459,6 +462,36 @@ Provider fixture responses never carry form, so the `FormResolver` fetches it:
   fixture resolved form, the no-ticket message names the cause — missing
   endpoint, failed lookups, or a starved budget with the numbers to fix it.
 
+## Calibration — the cold start
+
+The ticket engine predicts nothing without an **APPROVED** calibration
+(`MODEL_NOT_CALIBRATED`), and a fitted Platt calibration can only be fitted
+from 20+ SETTLED stored predictions — which only the ticket engine writes.
+A fresh installation would be locked out of itself, so the daily run breaks
+the deadlock with the documented **identity calibration**
+(`POST /api/sports/calibrations/bootstrap-identity` creates the same row
+manually):
+
+* **Auto-bootstrap + auto-approval (audited system act)**: when a run starts
+  and no APPROVED calibration exists for the deployed model version, the
+  engine bootstraps the identity mapping (intercept 0 / slope 1 — the raw
+  model probability, the same mapping the backtester uses) and approves it
+  as actor `system:daily-ticket`, emitting a `SPORTS_CALIBRATION_AUTO_APPROVED`
+  audit event. The funnel carries `calibrationBootstrap`
+  (`IDENTITY_AUTO_APPROVED` / `REJECTED_BY_ADMIN` / …).
+* **Only the identity bootstrap is auto-approved.** Fitted Platt
+  calibrations remain a human decision, and once one is approved it is the
+  newest APPROVED row, so the identity bootstrap retires itself.
+* **Explicit vetoes are honoured**: if an administrator REJECTS the identity
+  bootstrap, the engine does not resurrect it — the run stays blocked with
+  `MODEL_NOT_CALIBRATED` and a message that names the veto. `require_calibration`
+  (config) can also be set to 0, which runs the model through the identity
+  mapping without any calibration row and flags it `identity` on the
+  decision record.
+* Tickets remain gated by confidence / quality / value / risk — and, in the
+  default `USER_APPROVAL_REQUIRED` engine mode, by user approval — before
+  anything happens.
+
 ## Odds Prediction Ticket compliance rules
 
 The `🎯 Odds Prediction Ticket` builder is intentionally conservative:
@@ -466,7 +499,7 @@ The `🎯 Odds Prediction Ticket` builder is intentionally conservative:
 * It builds at most one football ticket per configured run from enabled Provider Hub feeds only (API-Football, Sportmonks, TheSportsDB where supported, or another registered `SportsDataProvider`). Missing fixture, form, odds, or provider data is reported as unavailable; it is never filled with synthetic values.
 * Runtime date/time is read when the run starts evaluating fixtures. Eligible fixtures must be football, must be provider-not-started (`NS`, or the provider adapter's explicit scheduled mapping), and must kick off strictly more than two hours after that runtime clock.
 * Current odds are accepted only when the provider returned numeric decimal odds greater than `1.00`, with a valid observation timestamp, for one of these supported markets: `MATCH_RESULT` (1X2), `TOTAL_GOALS / OVER_1_5`, `BTTS / YES`, or `DOUBLE_CHANCE`.
-* Ticket thresholds are hard floors: the WINDELS model confidence must be at least the configured `min_confidence` (default `55%`, configurable within `50–100`), data quality at least the configured `min_data_quality` (default `60/100`, configurable within `50–100`), odds must be fresh under the configured TTL, and the combined decimal odds window is always `5.00` through `8.00` inclusive. The optimizer multiplies unrounded leg odds and rounds only the stored/displayed total.
+* Ticket thresholds are hard floors: the WINDELS model confidence must be at least the configured `min_confidence` (default `30%`, configurable within `30–100`), data quality at least the configured `min_data_quality` (default `60/100`, configurable within `50–100`), odds must be fresh under the configured TTL, and the combined decimal odds window is always `5.00` through `8.00` inclusive. The optimizer multiplies unrounded leg odds and rounds only the stored/displayed total.
 * The optimizer prefers stronger confidence, quality, expected value, fresh/reliable odds, lower risk, fewer unnecessary selections, and low correlation. It does not add weak selections just to reach the odds band.
 * If no verified combination satisfies those gates, the run records `NO_QUALIFIED_TICKET` with a `NO VALUE TICKET TODAY` message rather than guessing.
 

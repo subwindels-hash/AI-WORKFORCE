@@ -21,6 +21,14 @@ use AIWorkforce\Persistence\SportsRepository;
  * a fitted calibration. Nothing is fabricated — an identity mapping adds no
  * information, it only removes the cold-start deadlock.
  *
+ * The daily ticket engine invokes this bootstrap itself when a run starts
+ * without an APPROVED calibration (DailyTicketService::ensureIdentityCalibration)
+ * and auto-approves the resulting IDENTITY row as an audited system act —
+ * the only auto-approved calibration in the system; fitted calibrations
+ * stay a human decision, and an admin-rejected bootstrap is never
+ * resurrected. Manual use of this endpoint and the
+ * api/sports/calibrations/{id}/approve flow remain available.
+ *
  * Once enough predictions have settled, fit a real calibration
  * (api/sports/calibrations/fit) and approve it; the newest APPROVED row
  * wins, so the bootstrap naturally retires itself.

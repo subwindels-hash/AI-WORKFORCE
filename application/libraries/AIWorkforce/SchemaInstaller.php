@@ -221,12 +221,13 @@ final class SchemaInstaller
         }
 
         // Lower the built-in sports ticket floors from 70% confidence / 75
-        // quality to 55% / 60 — the old defaults left real days with no
-        // ticket. Only the untouched system default row is amended;
-        // operator-authored configuration versions remain append-only and
-        // under admin control.
+        // quality to 30% / 60 — the old defaults left real days with no
+        // ticket. The confidence gate is now "30% and above"; strict
+        // operators can raise it back up (append-only, audited). Only the
+        // untouched system default row is amended; operator-authored
+        // configuration versions remain append-only and under admin control.
         try {
-            $exec("UPDATE sports_configurations SET min_confidence = 55 WHERE version = 0 AND updated_by = 'system' AND reason = 'built-in defaults' AND min_confidence > 55");
+            $exec("UPDATE sports_configurations SET min_confidence = 30 WHERE version = 0 AND updated_by = 'system' AND reason = 'built-in defaults' AND min_confidence > 30");
         } catch (\Throwable $e) { /* table may not exist yet on partial installs */ }
         try {
             $exec("UPDATE sports_configurations SET min_data_quality = 60 WHERE version = 0 AND updated_by = 'system' AND reason = 'built-in defaults' AND min_data_quality > 60");

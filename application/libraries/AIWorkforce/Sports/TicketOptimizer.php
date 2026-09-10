@@ -21,10 +21,10 @@ class TicketOptimizer
         $min = max(5.0, (float) ($config['targetOddsMin'] ?? 5.0));
         $max = min(8.0, (float) ($config['targetOddsMax'] ?? 8.0));
         $limit = min(6, max(1, (int) ($config['maxSelections'] ?? 6)));
-        // Absolute floors mirror the configuration validation range [50, 100]:
+        // Absolute floors mirror the configuration validation range [30, 100]:
         // an explicit admin setting is honoured, never clamped back up to a
         // hard-coded 70/75. Defaults match ConfigurationService::defaults().
-        $minConfidence = max(50.0, isset($config['minConfidence']) && is_numeric($config['minConfidence']) ? (float) $config['minConfidence'] : 55.0);
+        $minConfidence = max(30.0, isset($config['minConfidence']) && is_numeric($config['minConfidence']) ? (float) $config['minConfidence'] : 30.0);
         $minQuality = max(50, isset($config['minDataQuality']) && is_numeric($config['minDataQuality']) ? (int) $config['minDataQuality'] : 60);
         $maxCorrelation = strtoupper((string) ($config['maxCorrelation'] ?? 'MEDIUM'));
         $allowedMarkets = (array) ($config['allowedMarkets'] ?? []);

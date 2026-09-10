@@ -380,7 +380,9 @@ test('FormResolver enriches the away side without argument errors', function () 
     assert_equals(2.0, $form['awayGoalsPerMatch']);
     assert_equals(1.0, $form['homeConcededPerMatch']);
     assert_equals(1.0, $form['awayConcededPerMatch']);
-    assert_equals(2, $calls, 'one lookup per side');
+    // One league-table request (this transport answers it with stats JSON,
+    // so it covers no team) + one per-team lookup per side.
+    assert_equals(3, $calls, 'table lookup + one lookup per side');
 });
 
 test('FormResolver caps team-statistics lookups to protect the daily quota', function () {
@@ -392,13 +394,16 @@ test('FormResolver caps team-statistics lookups to protect the daily quota', fun
     }
     $resolver = new FormResolver(4);
     $enriched = $resolver->enrich($p, $fixtures);
+    // The league table costs the first slot (this transport answers it with
+    // stats JSON, so it covers no team); the remaining three lookups cover
+    // home/away of fixture 1 plus the home of fixture 2 — one full fixture.
     assert_equals(4, $calls, 'only 4 live lookups for 20 unique teams');
     $withForm = array_values(array_filter($enriched, fn($f) => !empty($f['context']['recentForm'])));
-    assert_equals(2, count($withForm), 'first 2 fixtures fully enriched, rest honestly unenriched');
+    assert_equals(1, count($withForm), 'first fixture fully enriched after the table slot, rest honestly unenriched');
     // The default budget keeps ordinary pulls fully enriched.
     $calls = 0;
     $resolver = new FormResolver();
     $enriched = $resolver->enrich($p, array_slice($fixtures, 0, 2));
-    assert_equals(4, $calls);
+    assert_equals(5, $calls, 'one table lookup + two per-team lookups per fixture');
     assert_true(!empty($enriched[0]['context']['recentForm']) && !empty($enriched[1]['context']['recentForm']));
 });
