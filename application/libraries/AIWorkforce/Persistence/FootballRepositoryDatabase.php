@@ -1328,7 +1328,12 @@ class FootballRepositoryDatabase implements FootballRepository
         $ids = array_values(array_unique(array_filter(array_map(static fn(array $r) => (int) ($r['competition_id'] ?? 0), $rows))));
         $lookup = [];
         if ($ids !== []) {
-            $missing = array_values(array_filter($ids, static fn(int $id): bool => !isset($this->competitionMemo[$id])));
+            // NOT a static closure: the memo lives on $this, and a static
+            // closure has no object context — `$this` inside one is a fatal
+            // Error ("Using $this when not in object context") that took the
+            // whole /football page down for every fixture that carries a
+            // competition_id.
+            $missing = array_values(array_filter($ids, fn(int $id): bool => !isset($this->competitionMemo[$id])));
             if ($missing !== []) {
                 $this->db->where_in('id', $missing);
                 foreach ($this->db->get('football_competitions')->result_array() as $competition) {
@@ -1347,7 +1352,8 @@ class FootballRepositoryDatabase implements FootballRepository
         $providerIds = array_values(array_unique(array_filter(array_map(static fn(array $r) => (int) ($r['provider_id'] ?? 0), $rows))));
         $providers = [];
         if ($providerIds !== []) {
-            $missingP = array_values(array_filter($providerIds, static fn(int $id): bool => !isset($this->providerMemo[$id])));
+            // Same reason as competitionMemo above: $this needs a bound context.
+            $missingP = array_values(array_filter($providerIds, fn(int $id): bool => !isset($this->providerMemo[$id])));
             if ($missingP !== []) {
                 $this->db->where_in('id', $missingP);
                 foreach ($this->db->get('football_providers')->result_array() as $provider) {
