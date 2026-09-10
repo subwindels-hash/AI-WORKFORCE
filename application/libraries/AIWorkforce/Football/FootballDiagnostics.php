@@ -46,10 +46,13 @@ final class FootballDiagnostics
     {
         $providerStatus = $this->gateway->status();
         $today = gmdate('Y-m-d');
-        $fixturesToday = $this->repo->listFixtures(['date' => $today], max(1, $this->config->analysisLimit()));
-        $liveFixtures = $this->repo->listFixtures(['status' => 'LIVE'], 100);
-        $finished = $this->repo->listFixtures(['status' => 'FINISHED'], 500);
-        $predictions = $this->repo->listPredictions(['date' => $today, 'kind' => PredictionService::KIND_PRE_MATCH], 500);
+        // Fast counts instead of hydrating 500 full fixture rows + 2 extra
+        // withCompetitionRef queries per listFixtures call.
+        $fixturesTodayCount = $this->repo->countFixtures(['date' => $today]);
+        $fixturesToday = $fixturesTodayCount === 0 ? [] : $this->repo->listFixtures(['date' => $today], min(5, max(1, $this->config->analysisLimit())));
+        $liveCount = $this->repo->countFixtures(['status' => 'LIVE']);
+        $finishedCount = $this->repo->countFixtures(['status' => 'FINISHED']);
+        $predictionsCount = $this->repo->countPredictions(['date' => $today, 'kind' => PredictionService::KIND_PRE_MATCH]);
         $model = $this->models->usable();
         $modelRow = $model['model'] ?? null;
         $calibrationRow = $modelRow === null ? null : $this->calibration->activeCalibration((int) ($modelRow['calibration_version_id'] ?? 0));
@@ -92,11 +95,11 @@ final class FootballDiagnostics
             ['key' => 'Provider', 'value' => $providerState, 'state' => $providerState === 'CONNECTED' ? self::READY : ($providerState === self::NOT_CONFIGURED ? self::NOT_CONFIGURED : self::DEGRADED),
                 'detail' => (string) ($providerStatus['detail'] ?? 'no provider registered'), 'action' => $providerState === self::NOT_CONFIGURED ? 'Configure a verified football data source (WINDELS_APIFOOTBALL_KEY or WINDELS_SPORTMONKS_KEY).' : null],
             ['key' => 'Fixtures', 'value' => $fixtureState === 'AVAILABLE' ? 'AVAILABLE' : self::UNAVAILABLE, 'state' => $fixtureState === 'AVAILABLE' ? self::READY : self::WAITING_FOR_DATA,
-                'detail' => count($fixturesToday) . ' stored for ' . $today, 'action' => $fixtureState === self::UNAVAILABLE ? 'Run a fixture sync for ' . $today . '.' : null],
+                'detail' => $fixturesTodayCount . ' stored for ' . $today, 'action' => $fixtureState === self::UNAVAILABLE ? 'Run a fixture sync for ' . $today . '.' : null],
             ['key' => 'Statistics', 'value' => $statisticsState === 'AVAILABLE' ? 'AVAILABLE' : self::UNAVAILABLE, 'state' => $statisticsState === 'AVAILABLE' ? self::READY : self::WAITING_FOR_DATA,
                 'detail' => $statisticsState === 'AVAILABLE' ? 'team and league statistics stored' : 'no statistics rows for today\'s fixtures', 'action' => $statisticsState === 'AVAILABLE' ? null : 'Run the statistics job (league table first, per-team fallback).'],
             ['key' => 'Prediction Engine', 'value' => $engineState, 'state' => $canPredict ? self::READY : self::WAITING_FOR_DATA,
-                'detail' => count($predictions) . ' prediction rows today · ' . count($liveFixtures) . ' live', 'action' => null],
+                'detail' => $predictionsCount . ' prediction rows today · ' . $liveCount . ' live', 'action' => null],
             ['key' => 'Model', 'value' => (string) ($modelRow['status'] ?? 'NONE'), 'state' => $modelRow === null ? 'NONE' : (string) $modelRow['status'],
                 'detail' => $modelRow === null ? 'no model version registered' : trim(($modelRow['model_name'] ?? '') . ' ' . ($modelRow['model_version'] ?? '')),
                 'action' => $modelRow === null || (string) ($modelRow['status'] ?? '') === ModelRegistry::DRAFT ? 'Validate, then approve and activate a model version from the admin panel.' : null],
@@ -113,7 +116,7 @@ final class FootballDiagnostics
                 'action' => null, 'gatesPredictions' => false],
         ];
         $schedule = $this->refresh->schedule();
-        return [
+        $result = [
             'state' => $canPredict ? ($warnings === [] ? self::READY : self::DEGRADED) : self::WAITING_FOR_DATA,
             'headline' => $canPredict
                 ? ($warnings === [] ? 'Football intelligence is reading live provider data.' : 'Football intelligence is running with reduced data quality.')
@@ -124,10 +127,10 @@ final class FootballDiagnostics
             'warnings' => $warnings,
             'canPredict' => $canPredict,
             'counts' => [
-                'fixturesToday' => count($fixturesToday),
-                'liveFixtures' => count($liveFixtures),
-                'finishedFixtures' => count($finished),
-                'predictionsToday' => count($predictions),
+                'fixturesToday' => $fixturesTodayCount,
+                'liveFixtures' => $liveCount,
+                'finishedFixtures' => $finishedCount,
+                'predictionsToday' => $predictionsCount,
                 'settled' => (int) ($settled['evaluated'] ?? 0),
                 'providers' => count((array) ($providerStatus['providers'] ?? [])),
             ],
@@ -143,6 +146,7 @@ final class FootballDiagnostics
             'demoMode' => $this->config->demoMode(),
             'generatedAt' => gmdate('c'),
         ];
+        return $result;
     }
 
     /** The four-line summary the module header used to fudge. */
@@ -182,16 +186,33 @@ final class FootballDiagnostics
     private function statisticsState(array $fixturesToday): string
     {
         if ($fixturesToday === []) return self::UNAVAILABLE;
+        // Sample at most 3 fixtures: the original loop did N * 2 queries
+        // (findTeamStatistics + deriveForm->listTeamRecentResults) which on
+        // a 40-fixture day is ~80 queries through WASM sqlite. Sampling
+        // reduces to at most 6 queries while still distinguishing
+        // AVAILABLE/LIMITED/UNAVAILABLE for the operator. When a day has many
+        // fixtures the coverage is uniform enough that a 3-sample is
+        // representative; an empty or single-fixture day is unchanged.
+        $sample = array_slice($fixturesToday, 0, 3);
         $available = 0; $limited = 0;
-        foreach ($fixturesToday as $fixture) {
+        $seen = [];
+        foreach ($sample as $fixture) {
             $providerId = (int) ($fixture['provider_id'] ?? 0);
             $teamId = (string) ($fixture['home_team_id'] ?? '');
-            $hasTeamStats = $teamId === '' ? false : $this->repo->findTeamStatistics($providerId, $teamId, null, null) !== null;
-            $hasForm = $teamId === '' ? false : (($this->stats->deriveForm($providerId, $teamId, null, 10)['played'] ?? 0) > 0);
+            if ($teamId === '') continue;
+            $key = $providerId . ':' . $teamId;
+            if (isset($seen[$key])) {
+                $hasTeamStats = $seen[$key]['hasTeamStats'];
+                $hasForm = $seen[$key]['hasForm'];
+            } else {
+                $hasTeamStats = $this->repo->findTeamStatistics($providerId, $teamId, null, null) !== null;
+                $hasForm = (($this->stats->deriveForm($providerId, $teamId, null, 5)['played'] ?? 0) > 0);
+                $seen[$key] = ['hasTeamStats' => $hasTeamStats, 'hasForm' => $hasForm];
+            }
             if ($hasTeamStats && $hasForm) $available++;
             elseif ($hasTeamStats || $hasForm) $limited++;
         }
-        if ($available >= max(1, (int) ceil(count($fixturesToday) * 0.5))) return 'AVAILABLE';
+        if ($available >= max(1, (int) ceil(count($sample) * 0.5))) return 'AVAILABLE';
         if ($available + $limited > 0) return 'LIMITED';
         return self::UNAVAILABLE;
     }

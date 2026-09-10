@@ -84,11 +84,19 @@ class FootballRepositoryDatabase implements FootballRepository
         }
     }
 
+    /** @var array{at:int,rows:array}|null — provider list changes rarely */
+    private ?array $providersMemo = null;
+
     public function listProviders(bool $enabledOnly = false): array
     {
+        if (!$enabledOnly && $this->providersMemo !== null && (time() - $this->providersMemo['at']) < 10) {
+            return $this->providersMemo['rows'];
+        }
         if ($enabledOnly) $this->db->where('enabled', 1);
         $rows = $this->db->order_by('id', 'ASC')->get('football_providers')->result_array();
-        return array_map(fn(array $r) => $this->decode($r), $rows);
+        $decoded = array_map(fn(array $r) => $this->decode($r), $rows);
+        if (!$enabledOnly) $this->providersMemo = ['at' => time(), 'rows' => $decoded];
+        return $decoded;
     }
 
     // ── competitions / teams ────────────────────────────────────────────────
@@ -1311,26 +1319,47 @@ class FootballRepositoryDatabase implements FootballRepository
      * extra query, so downstream code can key statistics by provider league id
      * without a per-fixture lookup.
      */
+    /** @var array<int,array> per-process memo for withCompetitionRef (WASM cost: 2 queries per listFixtures) */
+    private array $competitionMemo = [];
+    private array $providerMemo = [];
+
     private function withCompetitionRef(array $rows): array
     {
         $ids = array_values(array_unique(array_filter(array_map(static fn(array $r) => (int) ($r['competition_id'] ?? 0), $rows))));
         $lookup = [];
-        // A fixture the sync has not linked to a competition yet still has to
-        // come back with its provider: `match_id` is provider-scoped, so a row
-        // without `provider_code` would identify itself differently from the
-        // same match once the competition is linked.
         if ($ids !== []) {
-            $this->db->where_in('id', $ids);
-            foreach ($this->db->get('football_competitions')->result_array() as $competition) {
-                $lookup[(int) $competition['id']] = $competition;
+            $missing = array_values(array_filter($ids, static fn(int $id): bool => !isset($this->competitionMemo[$id])));
+            if ($missing !== []) {
+                $this->db->where_in('id', $missing);
+                foreach ($this->db->get('football_competitions')->result_array() as $competition) {
+                    $this->competitionMemo[(int) $competition['id']] = $competition;
+                }
+                // For ids that returned no row, store null sentinel to avoid re-query
+                foreach ($missing as $mid) {
+                    if (!isset($this->competitionMemo[$mid])) $this->competitionMemo[$mid] = [];
+                }
+            }
+            foreach ($ids as $id) {
+                $row = $this->competitionMemo[$id] ?? null;
+                if (is_array($row) && $row !== []) $lookup[$id] = $row;
             }
         }
         $providerIds = array_values(array_unique(array_filter(array_map(static fn(array $r) => (int) ($r['provider_id'] ?? 0), $rows))));
         $providers = [];
         if ($providerIds !== []) {
-            $this->db->where_in('id', $providerIds);
-            foreach ($this->db->get('football_providers')->result_array() as $provider) {
-                $providers[(int) $provider['id']] = $provider;
+            $missingP = array_values(array_filter($providerIds, static fn(int $id): bool => !isset($this->providerMemo[$id])));
+            if ($missingP !== []) {
+                $this->db->where_in('id', $missingP);
+                foreach ($this->db->get('football_providers')->result_array() as $provider) {
+                    $this->providerMemo[(int) $provider['id']] = $provider;
+                }
+                foreach ($missingP as $pid) {
+                    if (!isset($this->providerMemo[$pid])) $this->providerMemo[$pid] = [];
+                }
+            }
+            foreach ($providerIds as $pid) {
+                $row = $this->providerMemo[$pid] ?? null;
+                if (is_array($row) && $row !== []) $providers[$pid] = $row;
             }
         }
         foreach ($rows as &$row) {

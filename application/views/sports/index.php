@@ -199,7 +199,7 @@ $kickoffStamp = static function (mixed $iso): string {
                   <td class="mono dim" style="font-size:11px"><?= e(substr((string) ($m['updated_at'] ?? ''), 11, 5)) ?></td>
                 </tr>
               <?php endforeach; else: ?>
-                <tr><td colspan="6" class="dim" id="live-scores-empty">No live matches right now — the board refreshes automatically while matches are in play.</td></tr>
+                <tr><td colspan="6" class="dim" id="live-scores-empty">No matches currently live</td></tr>
               <?php endif; ?>
             </tbody>
           </table>
@@ -554,7 +554,7 @@ $kickoffStamp = static function (mixed $iso): string {
 
   function render(matches){
     if(!matches.length){
-      body.innerHTML = '<tr><td colspan="6" class="dim" id="live-scores-empty">No live matches right now — the board refreshes automatically while matches are in play.</td></tr>';
+      body.innerHTML = '<tr><td colspan="6" class="dim" id="live-scores-empty">No matches currently live</td></tr>';
     } else {
       body.innerHTML = matches.map(rowHtml).join('');
     }

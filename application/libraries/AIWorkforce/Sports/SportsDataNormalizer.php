@@ -4,6 +4,40 @@ namespace AIWorkforce\Sports;
 /** Validates and converts a provider fixture into the WINDELS-neutral shape. */
 class SportsDataNormalizer
 {
+    public const LIVE_STATUSES = ['LIVE', 'HALFTIME', 'EXTRA_TIME', 'PENALTIES'];
+    public const TERMINAL_STATUSES = ['FINISHED', 'POSTPONED', 'CANCELLED', 'SUSPENDED'];
+    public const ALLOWED_STATUSES = ['SCHEDULED', 'LIVE', 'HALFTIME', 'EXTRA_TIME', 'PENALTIES', 'FINISHED', 'POSTPONED', 'CANCELLED', 'SUSPENDED'];
+
+    /**
+     * Normalize a provider-specific status string into the canonical internal model.
+     * Accepts provider short codes (NS, 1H, HT, FT, AET, PEN, etc.), SportMonks
+     * developer names (INPLAY_1ST_HALF, FT, etc.) and already-canonical values.
+     * Unknown / empty values fall back to SCHEDULED so they never appear as live.
+     */
+    public static function canonicalStatus(string $raw): string
+    {
+        $s = strtoupper(trim($raw));
+        if ($s === '') return 'SCHEDULED';
+        if (in_array($s, self::ALLOWED_STATUSES, true)) return $s;
+        // Common variants and provider short codes
+        return match ($s) {
+            'NS', 'NOT STARTED', 'TBA', 'PENDING', 'DELAYED', 'AU' => 'SCHEDULED',
+            '1H', '2H', 'LIVE', 'IN PROGRESS', 'INPROGRESS', 'INPLAY_1ST_HALF', 'INPLAY_2ND_HALF', 'FIRST HALF', 'SECOND HALF' => 'LIVE',
+            'HT', 'HALFTIME', 'HALF TIME', 'HALF_TIME', 'HALF-TIME' => 'HALFTIME',
+            'ET', 'EXTRA TIME', 'EXTRA_TIME', 'BT', 'BREAK', 'INPLAY_ET', 'EXTRA_TIME_BREAK', 'ET BREAK' => 'EXTRA_TIME',
+            'P', 'PENALTIES', 'PENALTY', 'INPLAY_PENALTIES', 'PEN_BREAK', 'PENALTIES LIVE' => 'PENALTIES',
+            'FT', 'FINISHED', 'ENDED', 'FULL TIME', 'FULLTIME', 'MATCH FINISHED', 'COMPLETE', 'AET', 'PEN', 'FT_PEN', 'WO', 'AWARDED' => 'FINISHED',
+            'PST', 'POSTPONED' => 'POSTPONED',
+            'CANC', 'CANCELLED', 'CANCELED', 'DELETED' => 'CANCELLED',
+            'SUSP', 'SUSPENDED', 'ABANDONED', 'INTERRUPTED', 'INT' => 'SUSPENDED',
+            default => 'SCHEDULED',
+        };
+    }
+
+    public static function isLiveStatus(string $status): bool
+    {
+        return in_array(strtoupper($status), self::LIVE_STATUSES, true);
+    }
     public static function fixture(array $raw, string $provider): array
     {
         foreach (['externalId', 'homeTeam', 'awayTeam', 'competition', 'kickoff'] as $field) {
@@ -12,9 +46,9 @@ class SportsDataNormalizer
         try { $kickoff = (new \DateTimeImmutable((string) $raw['kickoff']))->setTimezone(new \DateTimeZone('UTC'))->format('c'); }
         catch (\Throwable $e) { throw new \InvalidArgumentException('fixture kickoff is invalid'); }
         $sourceStatus = strtoupper(trim((string) ($raw['statusShort'] ?? $raw['status'] ?? '')));
-        $status = strtoupper((string) ($raw['status'] ?? 'SCHEDULED'));
-        if ($status === 'NS') $status = 'SCHEDULED';
-        if (!in_array($status, ['SCHEDULED', 'LIVE', 'FINISHED', 'POSTPONED', 'CANCELLED', 'SUSPENDED'], true)) throw new \InvalidArgumentException('fixture status is invalid');
+        $statusRaw = strtoupper(trim((string) ($raw['status'] ?? 'SCHEDULED')));
+        $status = self::canonicalStatus($statusRaw);
+        if (!in_array($status, self::ALLOWED_STATUSES, true)) throw new \InvalidArgumentException('fixture status is invalid');
         return [
             'provider' => $provider, 'externalId' => (string) $raw['externalId'],
             'sport' => strtolower((string) ($raw['sport'] ?? 'football')),

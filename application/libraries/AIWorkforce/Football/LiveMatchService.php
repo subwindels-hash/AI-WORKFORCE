@@ -52,9 +52,34 @@ final class LiveMatchService
             }
         }
         $fixtures = $this->repo->listFixtures(['status' => 'LIVE'], 200);
+        if ($fixtures === []) {
+            return [
+                'status' => DataState::UNAVAILABLE,
+                'state' => 'NO_LIVE_FIXTURES',
+                'matches' => [],
+                'errors' => $errors,
+                'refreshed' => $refreshed === null ? null : ['status' => $refreshed['status'] ?? null, 'processed' => $refreshed['processed'] ?? 0, 'requests' => $refreshed['requests'] ?? 0],
+            ];
+        }
+        // Batch pre-load predictions: 1 query for all pre-match + 1 for live
+        // instead of N*2 queries. On a 10-live-fixture dashboard this is
+        // 2 queries vs 20, and avoids waking FeatureBuilder per row when
+        // refresh==false (dashboard).
+        $fixtureIds = array_map(static fn(array $f): int => (int) ($f['id'] ?? 0), $fixtures);
+        $preMap = $this->repo->listPredictionsForFixtures($fixtureIds, PredictionService::KIND_PRE_MATCH, null);
+        $liveMap = $this->repo->listPredictionsForFixtures($fixtureIds, PredictionService::KIND_LIVE, null);
         $matches = [];
         foreach ($fixtures as $fixture) {
-            $matches[] = $this->matchView($fixture, $errors);
+            $fid = (int) ($fixture['id'] ?? 0);
+            $pre = $preMap[$fid] ?? null;
+            $liveRow = $liveMap[$fid] ?? null;
+            if ($refresh) {
+                // Full view (dedicated /football/live) — compute fresh estimate
+                $matches[] = $this->matchView($fixture, $errors);
+            } else {
+                // Dashboard: no provider sync, no re-estimate — show stored rows
+                $matches[] = $this->matchViewFast($fixture, $pre, $liveRow, $errors);
+            }
         }
         return [
             'status' => $matches === [] ? DataState::UNAVAILABLE : 'OK',
@@ -124,6 +149,43 @@ final class LiveMatchService
         } else {
             $view['liveModelEstimate'] = ['state' => (string) ($estimate['code'] ?? 'NO_ESTIMATE'), 'reason' => (string) ($estimate['reason'] ?? 'the live estimate could not be computed from stored data')];
         }
+        return $view;
+    }
+
+    /**
+     * Dashboard fast path: same shape as matchView but without FeatureBuilder
+     * or predictor work — reads only the stored pre-match and live rows.
+     * Used by FootballIntelligence::dashboard (refresh=false) to avoid N
+     * FeatureBuilder::build calls on every page view.
+     */
+    public function matchViewFast(array $fixture, ?array $preMatch, ?array $liveRow, array &$errors = []): array
+    {
+        $state = $this->matchState($fixture);
+        $view = [
+            'fixture' => PredictionService::fixtureSummary($fixture),
+            'live' => $state,
+            'preMatchPrediction' => $preMatch === null ? null : $this->predictions->contract($preMatch, $fixture),
+            'preMatchPredictionState' => $preMatch === null ? 'NOT_STORED' : (string) ($preMatch['settlement_state'] ?? 'OPEN'),
+            'liveModelEstimate' => null,
+            'providers' => ['code' => (string) ($fixture['provider_code'] ?? 'DATA_UNAVAILABLE')],
+        ];
+        if ($liveRow !== null) $view['liveModelEstimate'] = $this->predictions->contract($liveRow, $fixture);
+        if ($state['state'] === DataState::UNAVAILABLE) {
+            $view['liveModelEstimate'] = ['state' => DataState::UNAVAILABLE, 'reason' => $state['reason']];
+            return $view;
+        }
+        if ($state['state'] === 'PRE_MATCH' || $state['state'] === 'COMPLETED') {
+            $view['liveModelEstimate'] = ['state' => $state['state'] === 'PRE_MATCH' ? 'MATCH_NOT_STARTED' : 'MATCH_COMPLETED',
+                'reason' => $state['state'] === 'PRE_MATCH'
+                    ? 'The match has not kicked off, so there is no live state to estimate from.'
+                    : 'The match is final; settlement holds the comparison with the pre-match prediction.',
+                'score' => $state['score']];
+            return $view;
+        }
+        // IN_PLAY but dashboard refresh==false: return stored estimate if present,
+        // otherwise report that no estimate is stored without building a new one.
+        if ($view['liveModelEstimate'] !== null) return $view;
+        $view['liveModelEstimate'] = ['state' => DataState::UNAVAILABLE, 'reason' => $state['reason'] ?? 'no live estimate is stored'];
         return $view;
     }
 

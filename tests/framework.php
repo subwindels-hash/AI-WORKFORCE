@@ -234,7 +234,14 @@ class SportsRepositoryStub implements \AIWorkforce\Persistence\SportsRepository
     public function listMatches(array $filter = [], int $limit = 200): array
     {
         $rows = $this->matches;
-        if (!empty($filter['status'])) $rows = array_values(array_filter($rows, fn($m) => ($m['status'] ?? '') === $filter['status']));
+        if (!empty($filter['status'])) {
+            if (is_array($filter['status'])) {
+                $allowed = array_map('strval', $filter['status']);
+                $rows = array_values(array_filter($rows, fn($m) => in_array((string) ($m['status'] ?? ''), $allowed, true)));
+            } else {
+                $rows = array_values(array_filter($rows, fn($m) => ($m['status'] ?? '') === $filter['status']));
+            }
+        }
         if (!empty($filter['from'])) $rows = array_values(array_filter($rows, fn($m) => ($m['kickoff_at'] ?? '') >= $filter['from']));
         if (!empty($filter['to'])) $rows = array_values(array_filter($rows, fn($m) => ($m['kickoff_at'] ?? '') <= $filter['to']));
         if (!empty($filter['competition'])) $rows = array_values(array_filter($rows, fn($m) => str_contains((string) ($m['competition'] ?? ''), (string) $filter['competition'])));

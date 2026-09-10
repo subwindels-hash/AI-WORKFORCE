@@ -431,7 +431,7 @@ final class PredictionBoard
             'confidenceLabel' => $confidence === null ? DataState::UNAVAILABLE
                 : ($calibrated ? number_format($confidence, 1) . '%' : number_format($confidence, 1) . '% (uncalibrated)'),
             'tier' => $tierLabel,
-            'highConfidence' => $band === QualityBand::QUALIFIED && $calibrated && $confidence !== null && $confidence >= (float) ($tiers[0]['min'] ?? 70) ? 'HIGH_CONFIDENCE' : null,
+            'highConfidence' => !empty($model['highConfidenceAllowed']) && $band === QualityBand::QUALIFIED && $calibrated && $confidence !== null && $confidence >= (float) ($tiers[0]['min'] ?? 70) ? 'HIGH_CONFIDENCE' : null,
             'expectedTotalGoals' => $prediction['expected_total_goals'] ?? null,
             'alternativeScores' => is_array($alternatives) ? array_slice($alternatives, 0, 3) : [],
             'matrixRows' => is_array($matrix['rows'] ?? null) ? array_slice($matrix['rows'], 0, 4) : [],
