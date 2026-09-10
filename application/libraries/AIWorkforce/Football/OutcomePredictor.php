@@ -1,6 +1,8 @@
 <?php
 namespace AIWorkforce\Football;
 
+use AIWorkforce\Football\ModelRegistry;
+
 /**
  * Turns a probability distribution into a published prediction.
  *
@@ -99,7 +101,9 @@ final class OutcomePredictor
         $confidence = min($rawConfidence, $ceiling);
         $confidence = round(min(self::MAX_DISPLAY_CONFIDENCE, $confidence), 1);
         $tiers = $this->tiers();
-        $highConfidenceAllowed = $band === QualityBand::QUALIFIED
+        $modelIsActive = $model !== null && (string) ($model['status'] ?? '') === ModelRegistry::ACTIVE;
+        $highConfidenceAllowed = $modelIsActive
+            && $band === QualityBand::QUALIFIED
             && $calibrated['basis'] === 'CALIBRATED'
             && $confidence >= $tiers['highest'];
 
