@@ -74,7 +74,7 @@ final class SchemaInstaller
      * Persistent cache version for the request-time schema guard. Bump whenever
      * idempotent upgrade logic changes without a matching SQL-file mtime change.
      */
-    private const STAMP_VERSION = '2026-09-10-football-prediction-revisions-v1';
+    private const STAMP_VERSION = '2026-09-10-football-perf-v1';
 
     public static function databaseDir(): string
     {
@@ -300,6 +300,12 @@ final class SchemaInstaller
             'CREATE INDEX ' . $ifne . 'idx_football_settlement_settled ON football_prediction_settlements (settled_at)',
             'CREATE INDEX ' . $ifne . 'idx_football_team_stats_team ON football_team_statistics (team_external_id, fetched_at)',
             'CREATE INDEX ' . $ifne . 'idx_football_sync_job ON football_provider_sync_logs (job_type, started_at)',
+            // Hot-path indexes for the WASM dashboard: countPredictions by date
+            // (kickoff_at range) and listTeamRecentResults (provider+status+kickoff)
+            // previously did full table scans under pdo_sqlite (~10ms/scan).
+            'CREATE INDEX ' . $ifne . 'idx_football_prediction_kickoff ON football_match_predictions (kickoff_at)',
+            'CREATE INDEX ' . $ifne . 'idx_football_prediction_fixture ON football_match_predictions (fixture_id, prediction_kind)',
+            'CREATE INDEX ' . $ifne . 'idx_football_fixture_provider_status ON football_fixtures (provider_id, status, kickoff_at)',
         ];
         foreach ($indexes as $sql) {
             try { $exec($sql); } catch (\Throwable $e) { /* already exists */ }

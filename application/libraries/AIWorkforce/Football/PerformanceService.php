@@ -55,7 +55,10 @@ final class PerformanceService
                 'modelVersionId' => $modelVersionId,
             ];
         }
-        $samples = $this->repo->listCalibrationSamples($filter + ['limit' => 5000]);
+                // 1000 samples is sufficient for the dashboard ECE/Brier dot
+        // (needs 50 minimum; beyond 1000 diminishing returns, but 5000
+        // forced a ~5k JOIN scan on pdo_sqlite per page).
+        $samples = $this->repo->listCalibrationSamples($filter + ['limit' => 1000]);
         $confidences = []; $hits = []; $goalErrors = [];
         foreach ($samples as $sample) {
             if (is_numeric($sample['probability_home'] ?? null) && is_numeric($sample['probability_draw'] ?? null) && is_numeric($sample['probability_away'] ?? null)
@@ -99,7 +102,7 @@ final class PerformanceService
     private function byModel(string $from, string $to): array
     {
         $out = [];
-        foreach ($this->repo->listModelVersions(null, 20) as $model) {
+                foreach ($this->repo->listModelVersions(null, 5) as $model) {
             $id = (int) ($model['id'] ?? 0);
             if ($id <= 0) continue;
             $aggregate = $this->repo->settlementAggregates(['modelVersionId' => $id, 'from' => $from, 'to' => $to]);
