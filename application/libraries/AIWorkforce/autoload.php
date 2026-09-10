@@ -222,6 +222,7 @@ spl_autoload_register(static function (string $class) use ($ai_workforceDir): vo
     'AIWorkforce\\SeoSettings' => 'SeoSettings.php',
     'AIWorkforce\\SignupProtection' => 'SignupProtection.php',
     'AIWorkforce\\Sports\\CalibrationEngine' => 'Sports/CalibrationEngine.php',
+    'AIWorkforce\\Sports\\CalibrationBootstrap' => 'Sports/CalibrationBootstrap.php',
     'AIWorkforce\\Sports\\ConfidenceEngine' => 'Sports/ConfidenceEngine.php',
     'AIWorkforce\\Sports\\ConfigurationService' => 'Sports/ConfigurationService.php',
     'AIWorkforce\\Sports\\CorrelationEngine' => 'Sports/CorrelationEngine.php',

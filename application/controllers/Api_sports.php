@@ -474,6 +474,31 @@ class Api_sports extends Api_controller
         }
     }
 
+    /**
+     * Cold-start bootstrap: create a PENDING identity calibration (intercept 0,
+     * slope 1 — the raw model probability unchanged) for the deployed model
+     * version. A fresh installation otherwise cannot produce its first
+     * predictions (the engine demands an APPROVED calibration) and therefore
+     * can never settle the 20+ samples a real calibration fit needs. The row
+     * is created PENDING — approval is still an explicit admin act via
+     * POST /api/sports/calibrations/{id}/approve, like any fitted calibration.
+     */
+    public function bootstrap_calibration()
+    {
+        $user = $this->requirePermission('sports.manage');
+        if (!$user) return;
+        $svc = new \AIWorkforce\Sports\CalibrationBootstrap($this->AIWorkforce_model->sports, $this->AIWorkforce_model->audit);
+        $result = $svc->bootstrapIdentity((string) $user['id']);
+        if (empty($result['ok'])) {
+            $reason = (string) ($result['reason'] ?? 'UNKNOWN');
+            if ($reason === 'APPROVED_CALIBRATION_EXISTS') return $this->jsonError('an APPROVED calibration already exists for this model version — nothing to bootstrap', 409);
+            // IDENTITY_ALREADY_PENDING — idempotent: report the existing row.
+            $this->json(['bootstrapped' => false, 'reason' => $reason, 'calibration' => $this->AIWorkforce_model->sports->findCalibration((int) ($result['calibrationId'] ?? 0))]);
+            return;
+        }
+        $this->json(['bootstrapped' => true, 'calibration' => $this->AIWorkforce_model->sports->findCalibration((int) $result['calibrationId'])], 201);
+    }
+
     public function approve_calibration(string $id)
     {
         $this->decide_calibration($id, 'APPROVED');

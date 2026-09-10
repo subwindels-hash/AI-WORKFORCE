@@ -245,6 +245,7 @@ $route['api/sports/models'] = 'api_sports/models';
 $route['api/sports/models/performance'] = 'api_sports/model_performance';
 $route['api/sports/calibrations'] = 'api_sports/calibrations';
 $route['api/sports/calibrations/fit'] = 'api_sports/fit_calibration';
+$route['api/sports/calibrations/bootstrap-identity'] = 'api_sports/bootstrap_calibration';
 $route['api/sports/calibrations/(:any)/approve'] = 'api_sports/approve_calibration/$1';
 $route['api/sports/calibrations/(:any)/reject'] = 'api_sports/reject_calibration/$1';
 $route['api/sports/backtests'] = 'api_sports/backtests';
