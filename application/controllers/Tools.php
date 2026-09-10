@@ -28,7 +28,7 @@ class Tools extends MY_Controller
         $footballJobs = class_exists(\AIWorkforce\Football\FootballCronService::class)
             ? implode('|', \AIWorkforce\Football\FootballCronService::JOBS)
             : 'fixtures|upcoming|live|results|statistics|predict|settle|performance|cleanup';
-        echo "AI Workforce tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n  php index.php tools marketdata        — market-data connectivity report (add --activate to go live, --probe to fetch real bars)\n  php index.php tools cron              — scheduled operations: portfolio risk scan, broker transitions, proposal expiry\n  php index.php tools scheduler [job]   — unified scheduler: runs every enabled + due job ({$groups})\n  php index.php tools sports-cron [job] — sports scheduled jobs (fixtures|odds|results|quality|ticket|settlement|performance|monitoring|cleanup)\n  php index.php tools football-cron [job] — football refresh jobs ({$footballJobs}); --force bypasses cadence\n  php index.php tools lottery-cron [job] — lottery scheduled jobs (sync|health|statistics|systems|tickets|backtests|intelligence|cleanup)\n  php index.php tools lottery-smoke     — live check of the configured lottery feed (LoteriasAPI / authorized feed); add --raw to print the vendor's own payload\n";
+        echo "AI Workforce tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n  php index.php tools marketdata        — market-data connectivity report (add --activate to go live, --probe to fetch real bars)\n  php index.php tools cron              — scheduled operations: portfolio risk scan, broker transitions, proposal expiry\n  php index.php tools scheduler [job]   — unified scheduler: runs every enabled + due job ({$groups})\n  php index.php tools sports-cron [job] [date] — sports scheduled jobs (fixtures|odds|results|quality|ticket|settlement|performance|monitoring|cleanup); optional YYYY-MM-DD re-runs a job for that day\n  php index.php tools sports-calibration-check [date] — calibration persistence check after a CALIBRATION_PERSIST_FAILED alert\n  php index.php tools football-cron [job] — football refresh jobs ({$footballJobs}); --force bypasses cadence\n  php index.php tools lottery-cron [job] — lottery scheduled jobs (sync|health|statistics|systems|tickets|backtests|intelligence|cleanup)\n  php index.php tools lottery-smoke     — live check of the configured lottery feed (LoteriasAPI / authorized feed); add --raw to print the vendor's own payload\n";
     }
 
     public function install()
@@ -112,19 +112,31 @@ class Tools extends MY_Controller
      *                  settlement | performance | monitoring | cleanup
      * `live` self-gates on WINDELS_SPORTS_LIVE_REFRESH_SECONDS, so it is also
      * safe on a every-minute schedule (tools sports-cron live).
+     *
+     * An optional UTC date re-runs a job for that day instead of today —
+     * the operational retry path when a blocked day (e.g. a
+     * CALIBRATION_PERSIST_FAILED ticket run) must be re-evaluated after the
+     * fix: php /path/to/index.php tools sports-cron ticket 2026-09-10
+     * Blocked days release their execution key, so the same date is
+     * retryable without bumping the configuration version.
      */
     public function sports_cron()
     {
         $job = trim((string) ($_SERVER['argv'][3] ?? ''));
+        $date = trim((string) ($_SERVER['argv'][4] ?? ''));
+        if ($date !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            fwrite(STDERR, 'invalid date (expected YYYY-MM-DD): ' . $date . "\n");
+            exit(1);
+        }
         $service = new \AIWorkforce\Sports\SportsCronService($this->AIWorkforce_model->sports, $this->AIWorkforce_model->audit, $this->platform->sports);
         if ($job !== '') {
             if (!in_array($job, \AIWorkforce\Sports\SportsCronService::JOBS, true)) {
                 fwrite(STDERR, 'unknown job. Valid: ' . implode(', ', \AIWorkforce\Sports\SportsCronService::JOBS) . "\n");
                 exit(1);
             }
-            $summary = $service->run($job);
+            $summary = $service->run($job, $date !== '' ? $date : null);
         } else {
-            $summary = $service->runAll();
+            $summary = $service->runAll($date !== '' ? $date : null);
         }
         echo json_encode($summary, JSON_UNESCAPED_SLASHES), "\n";
     }
@@ -174,6 +186,103 @@ class Tools extends MY_Controller
         echo json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), "\n";
         if (empty($report['configured'])) exit(2);
         exit(!empty($report['pass']) ? 0 : 1);
+    }
+
+    /**
+     * Calibration persistence check — the inspection a
+     * CALIBRATION_PERSIST_FAILED alert asks for, in one read-only command:
+     *
+     *   php index.php tools sports-calibration-check [YYYY-MM-DD]
+     *
+     * Reports, as JSON:
+     *   • the declared sports_calibrations.method column type and whether the
+     *     bootstrap marker fits it (the column must fit the marker — a narrow
+     *     legacy VARCHAR(16) is fine for the 8-char marker, anything under 8
+     *     is not),
+     *   • every stored calibration row with the bootstrap marker recognized
+     *     by prefix (so legacy truncated 'identity-bootstr' rows are visible
+     *     as what they are),
+     *   • the stored daily-ticket row for the date (status + message),
+     *   • the latest DAILY_TICKET job runs with their recorded errors (the
+     *     DB-side error ledger),
+     *   • the durable calibration/ticket audit trail.
+     */
+    public function sports_calibration_check()
+    {
+        $date = trim((string) ($_SERVER['argv'][3] ?? ''));
+        if ($date !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            fwrite(STDERR, 'invalid date (expected YYYY-MM-DD): ' . $date . "\n");
+            exit(1);
+        }
+        if ($date === '') $date = gmdate('Y-m-d');
+        $sports = $this->AIWorkforce_model->sports;
+        $marker = \AIWorkforce\Sports\CalibrationBootstrap::method();
+
+        // Declared column type, introspected per driver (best effort — a
+        // driver without information_schema access reports null, never a
+        // failure of the check itself).
+        $columnType = null;
+        try {
+            $db = $this->AIWorkforce_model->db;
+            if (\AIWorkforce\SchemaInstaller::isSqlite($db)) {
+                foreach ($db->query('PRAGMA table_info(sports_calibrations)')->result_array() as $col) {
+                    if (($col['name'] ?? '') === 'method') $columnType = strtoupper((string) $col['type']);
+                }
+            } else {
+                $row = $db->query("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sports_calibrations' AND COLUMN_NAME = 'method'")->row_array();
+                $columnType = $row['COLUMN_TYPE'] ?? null;
+            }
+        } catch (\Throwable $e) { $columnType = null; }
+        $columnWidth = preg_match('/\((\d+)\)/', (string) $columnType, $w) ? (int) $w[1] : null; // null = unbounded (TEXT) or unknown
+        $markerFits = $columnWidth === null || $columnWidth >= strlen($marker);
+
+        $calibrations = [];
+        foreach ($sports->listCalibrations(null, null, 100) as $row) {
+            $calibrations[] = [
+                'id' => (int) $row['id'], 'model_version_id' => (int) $row['model_version_id'],
+                'method' => (string) $row['method'], 'method_length' => strlen((string) $row['method']),
+                'is_identity_bootstrap' => \AIWorkforce\Sports\CalibrationBootstrap::isIdentityMethod((string) $row['method']),
+                'intercept' => (float) $row['intercept'], 'slope' => (float) $row['slope'],
+                'samples' => (int) $row['samples'], 'status' => (string) $row['status'],
+                'created_by' => $row['created_by'] ?? null, 'approved_by' => $row['approved_by'] ?? null,
+                'approved_at' => $row['approved_at'] ?? null, 'created_at' => $row['created_at'] ?? null,
+            ];
+        }
+
+        $jobRuns = [];
+        foreach ($sports->listJobRuns('DAILY_TICKET', 5) as $run) {
+            $jobRuns[] = [
+                'id' => $run['id'], 'status' => $run['status'], 'started_at' => $run['started_at'], 'ended_at' => $run['ended_at'],
+                'errors' => is_array($run['errors'] ?? null) ? $run['errors'] : json_decode((string) ($run['errors'] ?: '[]'), true),
+                'execution_key' => $run['execution_key'] ?? null,
+            ];
+        }
+
+        $auditTrail = [];
+        foreach ($this->AIWorkforce_model->audit->recent(300) as $event) {
+            $type = (string) ($event['type'] ?? '');
+            if (str_starts_with($type, 'SPORTS_CALIBRATION') || str_starts_with($type, 'SPORTS_DAILY_TICKET')) {
+                $auditTrail[] = ['type' => $type, 'at' => $event['at'] ?? null, 'actor' => $event['actor'] ?? null, 'summary' => $event['summary'] ?? null];
+            }
+            if (count($auditTrail) >= 15) break;
+        }
+
+        echo json_encode([
+            'ranAt' => gmdate('c'),
+            'date' => $date,
+            'methodColumn' => [
+                'declared_type' => $columnType, 'declared_width' => $columnWidth,
+                'bootstrap_marker' => $marker, 'marker_length' => strlen($marker),
+                'marker_fits_column' => $markerFits,
+                'note' => $markerFits
+                    ? 'the method column fits the bootstrap marker'
+                    : 'COLUMN TOO NARROW FOR THE MARKER — widen sports_calibrations.method (VARCHAR(32)) and re-run',
+            ],
+            'calibrations' => $calibrations,
+            'dailyTicket' => $sports->findDailyTicket($date),
+            'recentDailyTicketJobRuns' => $jobRuns,
+            'auditTrail' => $auditTrail,
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), "\n";
     }
 
     /**

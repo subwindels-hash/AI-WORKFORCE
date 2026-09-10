@@ -505,6 +505,48 @@ manually):
   default `USER_APPROVAL_REQUIRED` engine mode, by user approval — before
   anything happens.
 
+### Persistence contract (2026-09-10 incident)
+
+On 2026-09-10 a run reported `NO_QUALIFIED_TICKET` with every fresh-odds
+fixture rejected `MODEL_NOT_CALIBRATED` and the diagnostic
+`CALIBRATION_PERSIST_FAILED`: the engine had created its identity bootstrap,
+but the row did not survive the database round-trip. The deployed
+`sports_calibrations.method` column was still `VARCHAR(16)` and the marker of
+the time (`identity-bootstrap`, 18 characters) was truncated or rejected by
+MySQL, so the engine never recognized its own cold-start break. The contract
+that now guards this:
+
+* **The marker fits the narrowest deployed column.** The marker is
+  `identity` (8 characters) and may never rely on the widened `VARCHAR(32)`
+  — un-migrated installs with `VARCHAR(16)` must keep working
+  (`tests/cases/136-sports-column-width-contract.php` pins the widths in the
+  shipped DDL against every marker the code can write).
+* **Identity rows are recognised by prefix**, never by exact equality: the
+  old marker stored whole (`identity-bootstrap`) or truncated
+  (`identity-bootstr`) is the same bootstrap row — reused and healed, never
+  duplicated.
+* **Every write is verified against a read-back** before success is
+  reported. A driver that silently truncates or swallows the insert produces
+  an honest `CALIBRATION_PERSIST_FAILED` (audited as
+  `SPORTS_CALIBRATION_PERSIST_FAIL`), never a phantom calibration id.
+  `tests/cases/138-sports-calibration-roundtrip-db.php` exercises this
+  round-trip against the real database — the in-memory stub cannot fail a
+  round-trip, which is why the original bug shipped green.
+* **Boot-time repair**: the schema installer widens historically narrow
+  columns on existing MySQL/PostgreSQL databases
+  (`sports_calibrations.method` → `VARCHAR(32)`, `audit_logs.actor`/`type`
+  → `VARCHAR(64)`). The marker never depends on it.
+
+After fixing a `CALIBRATION_PERSIST_FAILED` day, verify and re-run:
+
+```bash
+php index.php tools sports-calibration-check 2026-09-10   # column vs marker, rows, run errors, audit trail
+php index.php tools sports-cron ticket 2026-09-10          # re-run that day (blocked days stay retryable)
+```
+
+`runtime/rerun-daily-ticket.mjs` runs the same sequence on the offline dev
+runtime (SANDBOX simulation provider, sqlite storage).
+
 ## Odds Prediction Ticket compliance rules
 
 The `🎯 Odds Prediction Ticket` builder is intentionally conservative:
