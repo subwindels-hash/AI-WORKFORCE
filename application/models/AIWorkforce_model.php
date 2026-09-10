@@ -151,6 +151,18 @@ class AIWorkforce_model extends CI_Model
 
             public function __construct(private object $db) {}
             public function emit(string $type, string $summary, array $detail = [], string $actor = 'system'): void {
+                // audit_logs.type is VARCHAR(64), actor VARCHAR(64) — both
+                // columns were historically too narrow (32/8) for the values
+                // the app writes: dynamic transition types such as
+                // 'AUTOMATIC_PROTECTION_AUTOMATIC_PAUSED' (35 chars) and the
+                // daily-ticket engine's 'system:daily-ticket' actor (19
+                // chars). MySQL rejected or mangled those inserts, and the
+                // swallowed error silently deleted the audit trail. Clamp to
+                // the stored widths so an event can never be lost by the
+                // catch below — and keep new type/actor literals inside
+                // these limits (case 136 enforces it).
+                $type = mb_substr($type, 0, 64);
+                $actor = mb_substr($actor, 0, 64);
                 $this->rows[] = [
                     'type' => $type, 'at' => gmdate('c'), 'actor' => $actor,
                     'summary' => mb_substr($summary, 0, 500), 'detail' => $detail,

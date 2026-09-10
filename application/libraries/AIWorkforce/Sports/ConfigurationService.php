@@ -32,6 +32,20 @@ class ConfigurationService
     {
         $row = $this->repo->activeConfiguration();
         if ($row === null) return self::defaults();
+        // Layer the stored row OVER the defaults. Configuration is
+        // append-only, so an active row may have been written by an older
+        // app version before a column existed (the deployed row predating
+        // require_calibration is the cautionary tale: the daily engine read
+        // the missing key as "bootstrap not needed" at one site and as
+        // "calibration enforced" at another — a hard lock-out no operator
+        // chose). Stored values always win; defaults only fill absent keys.
+        $row = array_merge(self::defaults(), $row);
+        $row['module_enabled'] = (int) (bool) $row['module_enabled'];
+        $row['ticket_engine_enabled'] = (int) (bool) $row['ticket_engine_enabled'];
+        $row['require_calibration'] = (int) (bool) $row['require_calibration'];
+        $row['min_confidence'] = (float) $row['min_confidence'];
+        $row['min_data_quality'] = (int) $row['min_data_quality'];
+        $row['version'] = (int) $row['version'];
         $row['allowed_markets'] = $row['allowed_markets'] ?? [];
         $row['allowed_leagues'] = $row['allowed_leagues'] ?? [];
         return $row;

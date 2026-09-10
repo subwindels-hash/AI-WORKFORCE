@@ -88,6 +88,13 @@ class DailyTicketService
     {
         $date = $date ?? gmdate('Y-m-d');
         $config = $this->config->active();
+        // Resolved ONCE with the same default the per-fixture gate applies
+        // (see the MODEL_NOT_CALIBRATED check in the screening loop): an
+        // older stored configuration row that predates the require_calibration
+        // column must not mean "enforce calibration but never run the
+        // cold-start bootstrap" — that combination is a hard lock-out.
+        $requireCalibration = (int) (bool) ($config['require_calibration'] ?? 1);
+        $config['require_calibration'] = $requireCalibration; // pipeline sees the same resolved truth
         $key = $executionKey ?? 'daily-ticket:' . $date . ':v' . $config['version'];
         $run = $this->repo->startJobRun(['id' => Backtester::uuid(), 'jobType' => 'DAILY_TICKET', 'executionKey' => $key]);
         if ($run === null) return ['status' => 'DUPLICATE_SKIPPED', 'executionKey' => $key];
@@ -153,7 +160,7 @@ class DailyTicketService
                     // uses). Tickets remain gated by confidence / quality /
                     // value / risk and — in the default engine mode — by
                     // user approval before anything happens.
-                    if (!empty($config['require_calibration'])) $this->ensureIdentityCalibration($funnel);
+                    if ($requireCalibration) $this->ensureIdentityCalibration($funnel);
 
                     // ── Form enrichment, spent where it can still win a ticket.
                     //
@@ -258,7 +265,7 @@ class DailyTicketService
                             continue;
                         }
                         $calibration = $this->calibrationFor($matchRow);
-                        if (($config['require_calibration'] ?? 1) && $calibration === null) {
+                        if ($requireCalibration && $calibration === null) {
                             $rejections++;
                             $this->countRejection($rejectionSummary, 'MODEL_NOT_CALIBRATED', $reasonProviders, $provider);
                             $funnel['fixturesWithoutCalibration']++;
@@ -407,21 +414,40 @@ class DailyTicketService
                         // Targeted diagnosis of the two most common upstream dead
                         // ends, so the message says what to FIX, not only what
                         // failed.
-                        if (($funnel['fixturesWithFreshOdds'] ?? 0) > 0 && ($funnel['fixturesWithRecentForm'] ?? 0) === 0) {
-                            $fr = $funnel['formResolver'] ?? [];
-                            $why = empty($fr['providerCapable']) && $fr !== []
-                                ? 'the fixture provider exposes no team-statistics endpoint'
-                                : ((int) ($fr['lookupFailures'] ?? 0) > 0
-                                    ? (int) $fr['lookupFailures'] . ' team-statistics lookup(s) failed (quota/auth/errors)'
-                                    : ((int) ($fr['budgetSkips'] ?? 0) > 0
-                                        ? 'the form lookup budget (WINDELS_SPORTS_FORM_LOOKUPS = ' . (int) ($fr['budget'] ?? 0) . ') ran out over ' . (int) ($funnel['formEnrichmentCandidates'] ?? 0) . ' ticket-eligible fixture(s) — raise it or narrow the fixture window'
-                                        : 'no provider team statistics were available'));
-                            $message .= ' — recent form could not be resolved for ANY fixture (' . $why . '); without verified recentForm the model computes no probabilities';
+                        $withForm = (int) ($funnel['fixturesWithRecentForm'] ?? 0);
+                        $freshOdds = (int) ($funnel['fixturesWithFreshOdds'] ?? 0);
+                        $formCandidates = (int) ($funnel['formEnrichmentCandidates'] ?? 0);
+                        $fr = $funnel['formResolver'] ?? [];
+                        if ($freshOdds > 0 && $withForm < max(1, $formCandidates)) {
+                            $systemic = $withForm === 0
+                                || (int) ($fr['budgetSkips'] ?? 0) > 0
+                                || (int) ($fr['lookupFailures'] ?? 0) > 0
+                                || (array_key_exists('providerCapable', $fr) && !$fr['providerCapable']);
+                            // A fixture left without recentForm is an honest
+                            // INSUFFICIENT_DATA rejection — say so when the
+                            // cause is systematic (starved budget, failing
+                            // lookups, provider without statistics), not when
+                            // teams simply had no games to resolve yet.
+                            if ($systemic) {
+                                $why = empty($fr['providerCapable']) && $fr !== []
+                                    ? 'the fixture provider exposes no team-statistics endpoint'
+                                    : ((int) ($fr['lookupFailures'] ?? 0) > 0
+                                        ? (int) $fr['lookupFailures'] . ' team-statistics lookup(s) failed (quota/auth/errors)'
+                                        : ((int) ($fr['budgetSkips'] ?? 0) > 0
+                                            ? 'the form lookup budget (WINDELS_SPORTS_FORM_LOOKUPS = ' . (int) ($fr['budget'] ?? 0) . ') ran out over ' . $formCandidates . ' ticket-eligible fixture(s) — raise it or narrow the fixture window'
+                                            : 'no provider team statistics were available'));
+                                $message .= $withForm === 0
+                                    ? ' — recent form could not be resolved for ANY fixture (' . $why . '); without verified recentForm the model computes no probabilities'
+                                    : ' — recent form was resolved for only ' . $withForm . ' of ' . $formCandidates . ' ticket-eligible fixtures (' . $why . '); every fixture left without verified recentForm is an INSUFFICIENT_DATA rejection';
+                            }
                         }
                         if (($funnel['fixturesWithoutCalibration'] ?? 0) > 0) {
-                            $message .= ($funnel['calibrationBootstrap'] ?? null) === 'REJECTED_BY_ADMIN'
+                            $bootstrapState = (string) ($funnel['calibrationBootstrap'] ?? '');
+                            $message .= $bootstrapState === 'REJECTED_BY_ADMIN'
                                 ? ' — the identity bootstrap calibration was REJECTED by an administrator, so no APPROVED calibration exists for the deployed model version (re-approve it, or fit and approve a real calibration, to unblock prediction)'
-                                : ' — no APPROVED calibration for the deployed model version (create one via POST /api/sports/calibrations/bootstrap-identity, then approve it)';
+                                : (in_array($bootstrapState, ['BOOTSTRAP_UNREADABLE', 'CALIBRATION_PERSIST_FAILED'], true)
+                                    ? ' — the engine created its identity bootstrap calibration but the row did not survive the database round-trip (' . $bootstrapState . '): check the sports_calibrations table (the method column must fit the bootstrap marker) and the DB error log, then re-run'
+                                    : ' — no APPROVED calibration for the deployed model version (create one via POST /api/sports/calibrations/bootstrap-identity, then approve it)');
                         }
                     }
                     if ($ticketId === null) $message .= ' ' . $this->funnelSummary($funnel, $evaluated, $recorded, $rejections);
@@ -583,6 +609,9 @@ class DailyTicketService
         if (!empty($funnel['fixturesDeferred'])) $extra .= sprintf(', %d deferred by the %d-generation cap', (int) $funnel['fixturesDeferred'], (int) ($funnel['generationCap'] ?? 0));
         if (!empty($funnel['predictionsReused'])) $extra .= sprintf(', %d reused', (int) $funnel['predictionsReused']);
         if (!empty($funnel['fixturesWithCarriedForwardForm'])) $extra .= sprintf(', %d form carried forward', (int) $funnel['fixturesWithCarriedForwardForm']);
+        if (!empty($funnel['formResolver']['budgetSkips'])) {
+            $extra .= sprintf(', %d form lookups skipped at the %d-lookup budget (WINDELS_SPORTS_FORM_LOOKUPS)', (int) $funnel['formResolver']['budgetSkips'], (int) ($funnel['formResolver']['budget'] ?? 0));
+        }
         return sprintf(
             '(%d evaluated, %d predictions, %d rejections%s; funnel: %d eligible → %d with-form → %d fresh-odds → %d sufficient-data fixtures → %d predictions → %d confidence-qualified → %d positive-value → %d risk-qualified → %d final)',
             $evaluated,
@@ -1076,7 +1105,6 @@ class DailyTicketService
     private function ensureIdentityCalibration(array &$funnel): void
     {
         $actor = 'system:daily-ticket';
-        $method = CalibrationBootstrap::method();
         $modelId = $this->repo->ensureModelVersion([
             'modelName' => PredictionEngine::MODEL_NAME,
             'modelVersion' => PredictionEngine::MODEL_VERSION,
@@ -1084,10 +1112,14 @@ class DailyTicketService
         ]);
         if ($this->repo->activeCalibration($modelId) !== null) return;
 
-        $identityRows = function (string $status) use ($modelId, $method): array {
+        // Prefix recognition (CalibrationBootstrap::isIdentityMethod), never
+        // exact equality: a legacy row may carry the old marker stored whole
+        // or truncated to a narrow method column, and both are the same
+        // bootstrap the engine must reuse and heal.
+        $identityRows = function (string $status) use ($modelId): array {
             return array_values(array_filter(
                 $this->repo->listCalibrations($modelId, $status, 50),
-                fn(array $c): bool => (string) ($c['method'] ?? '') === $method
+                fn(array $c): bool => CalibrationBootstrap::isIdentityMethod((string) ($c['method'] ?? ''))
             ));
         };
 
