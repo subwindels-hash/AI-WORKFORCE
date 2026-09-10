@@ -8,7 +8,12 @@
  * recovers without help and leaves an audit trail.
  *
  * The engine owns global platform state, so every case snapshots the keys it
- * touches and restores them afterwards.
+ * touches and restores them afterwards — under try/finally, because the test
+ * runner catches a failed assertion at the case level and moves on: an
+ * un-restored seed (an ACTIVE kill switch, an injected +120 s calendar event)
+ * used to leak into whichever case ran next (e.g. 28-portfolio-monitor's
+ * paper orders being rejected for 'Nonfarm Payrolls in 2 minute(s)') — one
+ * red case cascading into red files that had nothing to do with it.
  */
 use AIWorkforce\TradingProtection\AutomaticProtection as AP;
 use AIWorkforce\TradingProtection\EconomicCalendar;
@@ -97,24 +102,28 @@ test('automatic protection: defaults are the recommended safe configuration (§1
 
 test('automatic protection: admin input is validated and clamped, never widened (§9)', function () {
     $snapshot = ap_snapshot();
-    $policy = platform()->protection->updatePolicy([
-        'dailyLoss' => ['percentLimit' => 500, 'fixedLimitUsd' => '250'],   // 500 % → clamped
-        'drawdown' => ['percentLimit' => 99],
-        'news' => ['minutesBefore' => -20, 'onFeedFailure' => 'nonsense'],
-        'unknownSection' => ['nope' => 1],
-        'spread' => ['maxPoints' => 30, 'perSymbol' => ['EURUSD' => 12, 'bad' => 'x']],
-    ]);
-    assert_equals(0.5, $policy['dailyLoss']['percentLimit'], 'percentage clamped to the safe range');
-    assert_equals(250.0, $policy['dailyLoss']['fixedLimitUsd'], 'fixed monetary limit accepted');
-    assert_equals(0.9, $policy['drawdown']['percentLimit'], 'drawdown clamped');
-    assert_equals(0, $policy['news']['minutesBefore'], 'negative minutes clamped to zero');
-    assert_equals('pause', $policy['news']['onFeedFailure'], 'an unknown enum falls back to the fail-safe value');
-    assert_false(isset($policy['unknownSection']), 'unknown sections are ignored');
-    assert_equals(12.0, $policy['spread']['perSymbol']['EURUSD'], 'per-symbol override kept');
-    assert_false(isset($policy['spread']['perSymbol']['bad']), 'a non-numeric override is dropped');
-    assert_true(in_array('PROTECTION_POLICY_UPDATED', array_column(platform()->model->audit->recent(50), 'type'), true), 'the change is audited');
-    ap_restore($snapshot);
+    try {
+        $policy = platform()->protection->updatePolicy([
+            'dailyLoss' => ['percentLimit' => 500, 'fixedLimitUsd' => '250'],   // 500 % → clamped
+            'drawdown' => ['percentLimit' => 99],
+            'news' => ['minutesBefore' => -20, 'onFeedFailure' => 'nonsense'],
+            'unknownSection' => ['nope' => 1],
+            'spread' => ['maxPoints' => 30, 'perSymbol' => ['EURUSD' => 12, 'bad' => 'x']],
+        ]);
+        assert_equals(0.5, $policy['dailyLoss']['percentLimit'], 'percentage clamped to the safe range');
+        assert_equals(250.0, $policy['dailyLoss']['fixedLimitUsd'], 'fixed monetary limit accepted');
+        assert_equals(0.9, $policy['drawdown']['percentLimit'], 'drawdown clamped');
+        assert_equals(0, $policy['news']['minutesBefore'], 'negative minutes clamped to zero');
+        assert_equals('pause', $policy['news']['onFeedFailure'], 'an unknown enum falls back to the fail-safe value');
+        assert_false(isset($policy['unknownSection']), 'unknown sections are ignored');
+        assert_equals(12.0, $policy['spread']['perSymbol']['EURUSD'], 'per-symbol override kept');
+        assert_false(isset($policy['spread']['perSymbol']['bad']), 'a non-numeric override is dropped');
+        assert_true(in_array('PROTECTION_POLICY_UPDATED', array_column(platform()->model->audit->recent(50), 'type'), true), 'the change is audited');
+    } finally {
+        ap_restore($snapshot);
+    }
 });
+
 
 test('automatic protection: state machine walks NORMAL → PAUSED → KILL → RECOVERY → RESUMED (§7)', function () {
     $policy = PP::DEFAULTS;
@@ -140,78 +149,92 @@ test('automatic protection: state machine walks NORMAL → PAUSED → KILL → R
 
 test('automatic protection: high-impact news pauses trading and blocks new orders (§1)', function () {
     $snapshot = ap_snapshot();
-    $p = platform();
-    $p->setKillSwitch(false, 'test setup');       // internal: released so the engine must re-engage it
-    ap_seed_status(AP::NORMAL);
+    try {
+        $p = platform();
+        $p->setKillSwitch(false, 'test setup');       // internal: released so the engine must re-engage it
+        ap_seed_status(AP::NORMAL);
 
-    ap_calendar([180 => 'Nonfarm Payrolls']);     // inside the 5-minute…30-minute window
-    $report = $p->protection->evaluate();
-    $status = $report['status'];
+        ap_calendar([180 => 'Nonfarm Payrolls']);     // inside the 5-minute…30-minute window
+        $report = $p->protection->evaluate();
+        $status = $report['status'];
 
-    assert_true(in_array($status['state'], AP::BLOCKING, true), 'the pause blocks trading', $status['state']);
-    assert_true(in_array('NEWS_EVENT', array_column($report['triggers'], 'code'), true), 'the news trigger is reported');
-    $trigger = null;
-    foreach ($report['triggers'] as $candidate) {
-        if ($candidate['code'] === 'NEWS_EVENT') $trigger = $candidate;
+        assert_true(in_array($status['state'], AP::BLOCKING, true), 'the pause blocks trading', $status['state']);
+        assert_true(in_array('NEWS_EVENT', array_column($report['triggers'], 'code'), true), 'the news trigger is reported');
+        $trigger = null;
+        foreach ($report['triggers'] as $candidate) {
+            if ($candidate['code'] === 'NEWS_EVENT') $trigger = $candidate;
+        }
+        assert_not_null($trigger);
+        assert_contains('Nonfarm Payrolls', (string) $trigger['reason'], 'the reason names the event');
+
+        $gate = $p->protection->gate();
+        assert_false($gate['allowed'], 'no new trade may open while paused');
+        assert_true(!empty($p->state()['killSwitch']['active']), 'the engine engaged the order gate by itself');
+
+        // 8 minutes out: outside the freeze window, inside the warning lead.
+        ap_calendar([480 => 'Nonfarm Payrolls']);
+        $report = $p->protection->evaluate();
+        assert_true(in_array('NEWS_APPROACHING', array_column($report['triggers'], 'code'), true), 'an approaching event warns first');
+    } finally {
+        ap_restore($snapshot);
     }
-    assert_not_null($trigger);
-    assert_contains('Nonfarm Payrolls', (string) $trigger['reason'], 'the reason names the event');
-
-    $gate = $p->protection->gate();
-    assert_false($gate['allowed'], 'no new trade may open while paused');
-    assert_true(!empty($p->state()['killSwitch']['active']), 'the engine engaged the order gate by itself');
-
-    // 8 minutes out: outside the freeze window, inside the warning lead.
-    ap_calendar([480 => 'Nonfarm Payrolls']);
-    $report = $p->protection->evaluate();
-    assert_true(in_array('NEWS_APPROACHING', array_column($report['triggers'], 'code'), true), 'an approaching event warns first');
-
-    ap_restore($snapshot);
 });
+
 
 test('automatic protection: an approaching event warns before it freezes (§1)', function () {
     $snapshot = ap_snapshot();
-    ap_seed_status(AP::NORMAL);
-    ap_calendar([600 => 'FOMC Rate Decision']);
+    try {
+        ap_seed_status(AP::NORMAL);
+        ap_calendar([600 => 'FOMC Rate Decision']);
 
-    $report = platform()->protection->evaluate();
-    assert_equals('NEWS_APPROACHING', $report['status']['code'], '10 minutes out is a warning');
-    assert_equals(AP::WARNING, $report['status']['state'], 'WARNING, not a pause');
-    assert_true(platform()->protection->gate()['allowed'], 'a warning does not block trading');
-    ap_restore($snapshot);
+        $report = platform()->protection->evaluate();
+        assert_equals('NEWS_APPROACHING', $report['status']['code'], '10 minutes out is a warning');
+        assert_equals(AP::WARNING, $report['status']['state'], 'WARNING, not a pause');
+        assert_true(platform()->protection->gate()['allowed'], 'a warning does not block trading');
+    } finally {
+        ap_restore($snapshot);
+    }
 });
+
 
 test('automatic protection: a broken calendar fails safe, an absent one warns (§12)', function () {
     $snapshot = ap_snapshot();
-    ap_seed_status(AP::NORMAL);
+    try {
+        ap_seed_status(AP::NORMAL);
 
-    ap_calendar([], true, false, 'HTTP 500');
-    $report = platform()->protection->evaluate();
-    assert_true(in_array($status = $report['status']['state'], AP::BLOCKING, true), 'an unreadable calendar pauses trading', $status);
-    assert_false(platform()->protection->gate()['allowed'], 'protection never assumes it is safe');
+        ap_calendar([], true, false, 'HTTP 500');
+        $report = platform()->protection->evaluate();
+        assert_true(in_array($status = $report['status']['state'], AP::BLOCKING, true), 'an unreadable calendar pauses trading', $status);
+        assert_false(platform()->protection->gate()['allowed'], 'protection never assumes it is safe');
 
-    // With the fail-safe downgraded by an administrator, the same feed only warns.
-    platform()->protection->updatePolicy(['news' => ['onFeedFailure' => 'warn']]);
-    ap_seed_status(AP::NORMAL);
-    ap_calendar([], true, false, 'HTTP 500');
-    assert_equals(AP::WARNING, platform()->protection->evaluate()['status']['state'], 'warn mode still reports the problem');
-
-    ap_restore($snapshot);
+        // With the fail-safe downgraded by an administrator, the same feed only warns.
+        platform()->protection->updatePolicy(['news' => ['onFeedFailure' => 'warn']]);
+        ap_seed_status(AP::NORMAL);
+        ap_calendar([], true, false, 'HTTP 500');
+        assert_equals(AP::WARNING, platform()->protection->evaluate()['status']['state'], 'warn mode still reports the problem');
+    } finally {
+        ap_restore($snapshot);
+    }
 });
+
 
 test('automatic protection: unverifiable protection state blocks trading (§12)', function () {
     $snapshot = ap_snapshot();
-    $state = ap_state();
-    $status = AP::unverifiedStatus('simulated unverifiable state');
-    $status['evaluatedAtTs'] = time();
-    $state[AP::STATE_KEY]['status'] = $status;
-    platform()->model->state->save($state);
+    try {
+        $state = ap_state();
+        $status = AP::unverifiedStatus('simulated unverifiable state');
+        $status['evaluatedAtTs'] = time();
+        $state[AP::STATE_KEY]['status'] = $status;
+        platform()->model->state->save($state);
 
-    $gate = platform()->protection->gate();
-    assert_false($gate['allowed'], 'when safety cannot be determined the default is to pause new trading');
-    assert_equals('PROTECTION_UNVERIFIED', $gate['code']);
-    ap_restore($snapshot);
+        $gate = platform()->protection->gate();
+        assert_false($gate['allowed'], 'when safety cannot be determined the default is to pause new trading');
+        assert_equals('PROTECTION_UNVERIFIED', $gate['code']);
+    } finally {
+        ap_restore($snapshot);
+    }
 });
+
 
 test('automatic protection: the admin form speaks percentages, the policy stores fractions (§9)', function () {
     assert_equals(0.03, PP::fromPercent('3'), '3 % is stored as 0.03');
@@ -222,12 +245,16 @@ test('automatic protection: the admin form speaks percentages, the policy stores
 
     // An administrator typing "3" must get the 3 % default, not a clamped 50 %.
     $snapshot = ap_snapshot();
-    $policy = platform()->protection->updatePolicy(['dailyLoss' => ['percentLimit' => PP::fromPercent('3')]]);
-    assert_equals(0.03, $policy['dailyLoss']['percentLimit'], 'the form value round-trips');
-    platform()->protection->updatePolicy(['drawdown' => ['percentLimit' => PP::fromPercent('10')]]);
-    assert_equals(0.10, platform()->protection->policy()['drawdown']['percentLimit'], 'drawdown round-trips');
-    ap_restore($snapshot);
+    try {
+        $policy = platform()->protection->updatePolicy(['dailyLoss' => ['percentLimit' => PP::fromPercent('3')]]);
+        assert_equals(0.03, $policy['dailyLoss']['percentLimit'], 'the form value round-trips');
+        platform()->protection->updatePolicy(['drawdown' => ['percentLimit' => PP::fromPercent('10')]]);
+        assert_equals(0.10, platform()->protection->policy()['drawdown']['percentLimit'], 'drawdown round-trips');
+    } finally {
+        ap_restore($snapshot);
+    }
 });
+
 
 test('automatic protection: point sizes and spread conversion (§5)', function () {
     assert_equals(0.00001, PP::pointSize('EURUSD'), 'a 5-digit FX pair');
@@ -270,33 +297,36 @@ test('automatic protection: calendar normalisation accepts common vendor shapes 
 
 test('automatic protection: every transition is audited with the full risk picture (§13)', function () {
     $snapshot = ap_snapshot();
-    $p = platform();
-    $p->setKillSwitch(false, 'test setup');
-    ap_seed_status(AP::NORMAL);                    // guarantees the next scan is a transition
-    ap_calendar([120 => 'Nonfarm Payrolls']);
+    try {
+        $p = platform();
+        $p->setKillSwitch(false, 'test setup');
+        ap_seed_status(AP::NORMAL);                    // guarantees the next scan is a transition
+        ap_calendar([120 => 'Nonfarm Payrolls']);
 
-    $status = $p->protection->evaluate()['status'];
-    assert_true(in_array($status['state'], AP::BLOCKING, true), 'the scan blocks trading');
+        $status = $p->protection->evaluate()['status'];
+        assert_true(in_array($status['state'], AP::BLOCKING, true), 'the scan blocks trading');
 
-    $rows = $p->model->audit->recent(200);
-    $types = array_column($rows, 'type');
-    assert_true(in_array('AUTOMATIC_PROTECTION_' . $status['state'], $types, true), 'the transition itself is audited');
-    assert_true(in_array('KILL_SWITCH_ACTIVATED', $types, true), 'engaging the order gate is audited');
+        $rows = $p->model->audit->recent(200);
+        $types = array_column($rows, 'type');
+        assert_true(in_array('AUTOMATIC_PROTECTION_' . $status['state'], $types, true), 'the transition itself is audited');
+        assert_true(in_array('KILL_SWITCH_ACTIVATED', $types, true), 'engaging the order gate is audited');
 
-    $row = null;
-    foreach ($rows as $candidate) {
-        if ($candidate['type'] === 'AUTOMATIC_PROTECTION_' . $status['state']) { $row = $candidate; break; }
+        $row = null;
+        foreach ($rows as $candidate) {
+            if ($candidate['type'] === 'AUTOMATIC_PROTECTION_' . $status['state']) { $row = $candidate; break; }
+        }
+        assert_not_null($row);
+        $detail = is_array($row['detail']) ? $row['detail'] : [];
+        foreach (['from', 'to', 'reason', 'triggers'] as $key) {
+            assert_true(array_key_exists($key, $detail), "the audit record carries $key");
+        }
+        assert_true(isset($detail['metrics']['equity'], $detail['metrics']['dailyPnl'], $detail['metrics']['drawdownPct']), 'the record carries equity, daily P&L and drawdown');
+        assert_true(isset($detail['metrics']['openPositions']), 'the record carries open positions');
+    } finally {
+        ap_restore($snapshot);
     }
-    assert_not_null($row);
-    $detail = is_array($row['detail']) ? $row['detail'] : [];
-    foreach (['from', 'to', 'reason', 'triggers'] as $key) {
-        assert_true(array_key_exists($key, $detail), "the audit record carries $key");
-    }
-    assert_true(isset($detail['metrics']['equity'], $detail['metrics']['dailyPnl'], $detail['metrics']['drawdownPct']), 'the record carries equity, daily P&L and drawdown');
-    assert_true(isset($detail['metrics']['openPositions']), 'the record carries open positions');
-
-    ap_restore($snapshot);
 });
+
 
 test('automatic protection: the engine owns the gate — no manual control exists (§8, §11)', function () {
     foreach (['engage', 'release', 'toggle', 'activate', 'deactivate', 'setActive'] as $method) {
