@@ -1190,6 +1190,53 @@ class TheSportsDbProvider implements SportsDataProvider
         return $this->mapResults(is_array($events) ? $events : []);
     }
 
+    /**
+     * League table for a season (GET /lookuptable.php?l=<leagueId>&s=<season>).
+     *
+     * TheSportsDB has no team-statistics endpoint, but the season table it
+     * DOES publish carries played / goals-for / goals-against per team — the
+     * exact verified inputs the FormResolver needs. Exposing it here is what
+     * lets a thesportsdb-only installation resolve recentForm at all; without
+     * it every fixture is rejected INSUFFICIENT_DATA no matter how good the
+     * odds are.
+     *
+     * The shape matches the other providers' standings() rows so the resolver
+     * stays provider-neutral. Nothing is invented: a team the vendor gave no
+     * played count for keeps played = 0 and is skipped upstream.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public function standings(string $leagueId, string $season): array
+    {
+        if (trim($leagueId) === '') return [];
+        $path = '/lookuptable.php?l=' . rawurlencode($leagueId);
+        if (trim($season) !== '') $path .= '&s=' . rawurlencode($season);
+        $json = $this->decodeJson($this->doRequest($path));
+        $rows = $json['table'] ?? null;
+        if (!is_array($rows)) return [];
+        $out = [];
+        foreach ($rows as $r) {
+            if (!is_array($r)) continue;
+            $teamId = self::refId($r['idTeam'] ?? null);
+            if ($teamId === null) continue;
+            $out[] = [
+                'leagueId' => $leagueId,
+                'season' => (string) ($r['strSeason'] ?? $season),
+                'rank' => (int) ($r['intRank'] ?? 0),
+                'team' => (string) ($r['strTeam'] ?? ''),
+                'teamId' => $teamId,
+                'played' => (int) ($r['intPlayed'] ?? 0),
+                'wins' => (int) ($r['intWin'] ?? 0),
+                'draws' => (int) ($r['intDraw'] ?? 0),
+                'losses' => (int) ($r['intLoss'] ?? 0),
+                'goalsFor' => (int) ($r['intGoalsFor'] ?? 0),
+                'goalsAgainst' => (int) ($r['intGoalsAgainst'] ?? 0),
+                'points' => (int) ($r['intPoints'] ?? 0),
+            ];
+        }
+        return $out;
+    }
+
     /** Fetch all leagues available on TheSportsDB for soccer. */
     public function soccerLeagues(): array
     {

@@ -49,6 +49,11 @@ class DailyTicketService
 
     public const ENV_MAX_GENERATION = 'WINDELS_SPORTS_MAX_GENERATION';
 
+    /** Verified recentForm stays usable for this long before it must be re-read. */
+    public const DEFAULT_FORM_MAX_AGE_SECONDS = 7 * 86400;
+
+    public const ENV_FORM_MAX_AGE = 'WINDELS_SPORTS_FORM_MAX_AGE';
+
     /** Travels with every Top WINDELS Picks list. */
     public const TOP_PICKS_DISCLAIMER = 'Top WINDELS Picks are model-based selections ranked by evidence — not guarantees. '
         . 'A value class is not a probability of winning, and no pick is certain.';
@@ -136,8 +141,36 @@ class DailyTicketService
                     $provider = $attempt['provider'];
                     $providerId = (int) $this->repo->ensureProvider($provider, $provider)['id'];
                     $funnel['providersConfigured'] = count($this->providers->all());
-                    // Enrich raw fixtures with recentForm from team statistics
-                    $enrichedFixtures = $this->formResolver->enrich($this->providers->provider($provider), $attempt['result']);
+                    $runtimeNow = time();
+
+                    // ── Form enrichment, spent where it can still win a ticket.
+                    //
+                    // The lookup budget (WINDELS_SPORTS_FORM_LOOKUPS, 30 by
+                    // default) used to be spent walking the WHOLE provider
+                    // response in arrival order — a worldwide pull is mostly
+                    // matches that already kicked off or start within two
+                    // hours, so the quota was exhausted on fixtures the very
+                    // next gate throws away and every ticket-eligible fixture
+                    // was left without recentForm → INSUFFICIENT_DATA.
+                    //
+                    // Enrichment now runs ONLY on fixtures that already passed
+                    // the fixture-eligibility gate, and form verified by an
+                    // earlier run is carried forward instead of re-fetched.
+                    $eligibleRaw = [];
+                    $screenedOut = [];
+                    foreach ($attempt['result'] as $rawFixture) {
+                        $rawFixture = $this->carryForwardStoredForm($providerId, $rawFixture, $runtimeNow, $funnel);
+                        try { $probe = SportsDataNormalizer::fixture($rawFixture, $provider); }
+                        catch (\Throwable $e) { $screenedOut[] = $rawFixture; continue; }
+                        if ($this->fixtureEligibleForDailyTicket($probe, $runtimeNow)) $eligibleRaw[] = $rawFixture;
+                        else $screenedOut[] = $rawFixture;
+                    }
+                    $funnel['formEnrichmentCandidates'] = count($eligibleRaw);
+                    // Enrich the ticket-eligible fixtures, then hand the whole
+                    // day's list (ineligible ones untouched) to the screening
+                    // loop so evaluation counts and rejection reasons stay
+                    // exactly as honest as before.
+                    $enrichedFixtures = array_merge($this->formResolver->enrich($this->providers->provider($provider), $eligibleRaw), $screenedOut);
                     // Form enrichment is the single most common INSUFFICIENT_DATA
                     // cause, and it used to be invisible. Count what enrichment
                     // actually delivered and why, and carry both on the funnel.
@@ -154,7 +187,6 @@ class DailyTicketService
                     $roundOdds = $this->fetchRoundOdds($this->providers->provider($provider), $enrichedFixtures, $errors);
                     $candidates = [];
                     $allCandidates = [];        // every generated candidate, qualified or not (Top Picks pool)
-                    $runtimeNow = time();
                     $minConfidence = (float) $config['min_confidence'];
                     $minQuality = (int) $config['min_data_quality'];
                     $minEv = (float) ($config['min_expected_value'] ?? 0.02);
@@ -370,7 +402,7 @@ class DailyTicketService
                                 : ((int) ($fr['lookupFailures'] ?? 0) > 0
                                     ? (int) $fr['lookupFailures'] . ' team-statistics lookup(s) failed (quota/auth/errors)'
                                     : ((int) ($fr['budgetSkips'] ?? 0) > 0
-                                        ? 'the form lookup budget (WINDELS_SPORTS_FORM_LOOKUPS) ran out'
+                                        ? 'the form lookup budget (WINDELS_SPORTS_FORM_LOOKUPS = ' . (int) ($fr['budget'] ?? 0) . ') ran out over ' . (int) ($funnel['formEnrichmentCandidates'] ?? 0) . ' ticket-eligible fixture(s) — raise it or narrow the fixture window'
                                         : 'no provider team statistics were available'));
                             $message .= ' — recent form could not be resolved for ANY fixture (' . $why . '); without verified recentForm the model computes no probabilities';
                         }
@@ -483,6 +515,8 @@ class DailyTicketService
             'providersConfigured' => 0,
             'eligibleFixtures' => 0,
             'fixturesWithRecentForm' => 0,
+            'fixturesWithCarriedForwardForm' => 0,
+            'formEnrichmentCandidates' => 0,
             'formResolver' => [],
             'fixturesWithSupportedOdds' => 0,
             'fixturesWithFreshOdds' => 0,
@@ -533,13 +567,15 @@ class DailyTicketService
         $extra = '';
         if (!empty($funnel['fixturesDeferred'])) $extra .= sprintf(', %d deferred by the %d-generation cap', (int) $funnel['fixturesDeferred'], (int) ($funnel['generationCap'] ?? 0));
         if (!empty($funnel['predictionsReused'])) $extra .= sprintf(', %d reused', (int) $funnel['predictionsReused']);
+        if (!empty($funnel['fixturesWithCarriedForwardForm'])) $extra .= sprintf(', %d form carried forward', (int) $funnel['fixturesWithCarriedForwardForm']);
         return sprintf(
-            '(%d evaluated, %d predictions, %d rejections%s; funnel: %d eligible → %d fresh-odds → %d sufficient-data fixtures → %d predictions → %d confidence-qualified → %d positive-value → %d risk-qualified → %d final)',
+            '(%d evaluated, %d predictions, %d rejections%s; funnel: %d eligible → %d with-form → %d fresh-odds → %d sufficient-data fixtures → %d predictions → %d confidence-qualified → %d positive-value → %d risk-qualified → %d final)',
             $evaluated,
             $recorded,
             $rejections,
             $extra,
             $funnel['eligibleFixtures'],
+            $funnel['fixturesWithRecentForm'],
             $funnel['fixturesWithFreshOdds'],
             $funnel['sufficientDataFixtures'],
             $funnel['predictionsGenerated'],
@@ -698,6 +734,49 @@ class DailyTicketService
         try { $kickoff = (new \DateTimeImmutable((string) ($match['kickoff'] ?? '')))->getTimestamp(); }
         catch (\Throwable $e) { return false; }
         return $kickoff > ($now + 2 * 3600);
+    }
+
+    /**
+     * Reuse recentForm that a PREVIOUS run already verified for this fixture.
+     *
+     * A provider's fixtures() response never carries form, so before this the
+     * engine threw away perfectly good form the moment a lookup budget ran
+     * out or a quota died, and asked the API for it again. Team season
+     * averages move by a fraction of a goal per week, so form stored inside
+     * the TTL is reused as-is — with its original source and timestamp intact
+     * so the decision record still says exactly where the numbers came from
+     * and when they were read. Older or absent form is left absent: nothing
+     * is extrapolated, and the fixture is enriched or honestly rejected.
+     */
+    private function carryForwardStoredForm(int $providerId, array $rawFixture, int $now, array &$funnel): array
+    {
+        if (!empty($rawFixture['context']['recentForm'])) return $rawFixture;
+        $externalId = trim((string) ($rawFixture['externalId'] ?? ''));
+        if ($externalId === '') return $rawFixture;
+        try { $stored = $this->repo->findMatch($providerId, $externalId); }
+        catch (\Throwable $e) { return $rawFixture; }
+        $payload = is_array($stored['payload'] ?? null) ? $stored['payload'] : [];
+        $form = $payload['context']['recentForm'] ?? null;
+        if (!is_array($form)) return $rawFixture;
+        foreach (FeatureEngineeringEngine::REQUIRED_FORM_FIELDS as $field) {
+            if (!isset($form[$field]) || !is_numeric($form[$field])) return $rawFixture;
+        }
+        $stamp = is_string($form['timestamp'] ?? null) ? $form['timestamp'] : null;
+        if ($stamp === null) return $rawFixture;   // unmeasurable age → never reused
+        try { $age = $now - (new \DateTimeImmutable($stamp))->getTimestamp(); }
+        catch (\Throwable $e) { return $rawFixture; }
+        if ($age < 0 || $age > $this->formMaxAgeSeconds()) return $rawFixture;
+        $rawFixture['context'] = array_merge($rawFixture['context'] ?? [], ['recentForm' => $form]);
+        $funnel['fixturesWithCarriedForwardForm'] = (int) ($funnel['fixturesWithCarriedForwardForm'] ?? 0) + 1;
+        return $rawFixture;
+    }
+
+    /** How long verified recentForm stays usable (env-tunable, default 7 days). */
+    private function formMaxAgeSeconds(): int
+    {
+        $env = getenv(self::ENV_FORM_MAX_AGE);
+        if (is_string($env) && $env !== '' && is_numeric($env) && (int) $env > 0) return (int) $env;
+        return self::DEFAULT_FORM_MAX_AGE_SECONDS;
     }
 
     /** Data fields present in the stored match context (quality + gating inputs). */
