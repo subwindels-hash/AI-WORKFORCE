@@ -31,6 +31,8 @@ class LiveScoreService
     public const DEFAULT_REFRESH_SECONDS = 60;
     public const MIN_REFRESH_SECONDS = 10;
     public const MAX_REFRESH_SECONDS = 86400;
+    /** Canonical statuses that mean the match is currently in progress. */
+    public const LIVE_STATUSES = ['LIVE', 'HALFTIME', 'EXTRA_TIME', 'PENALTIES'];
 
     public function __construct(
         private SportsRepository $repo,
@@ -50,6 +52,18 @@ class LiveScoreService
         $raw = (int) (getenv('WINDELS_SPORTS_LIVE_REFRESH_SECONDS') ?: 0);
         if ($raw <= 0) $raw = self::DEFAULT_REFRESH_SECONDS;
         return max(self::MIN_REFRESH_SECONDS, min(self::MAX_REFRESH_SECONDS, $raw));
+    }
+
+    /**
+     * How long a stored live match may remain on the board without a fresh
+     * provider confirmation before it is considered stale and hidden.
+     * Three poll intervals, clamped to 5-10 minutes so a low interval does not
+     * hide a match too eagerly and a high one does not retain stale data.
+     */
+    public function staleThresholdSeconds(): int
+    {
+        $interval = $this->refreshIntervalSeconds();
+        return max(300, min(600, $interval * 3));
     }
 
     /**
@@ -122,29 +136,52 @@ class LiveScoreService
     }
 
     /**
-     * True when a stored match could currently be on the pitch: any LIVE
-     * match, or a kickoff within the last 3 hours (90' + halftime + delays)
-     * or the next 10 minutes. Read purely from stored fixtures — the gate
-     * itself costs no provider request.
+     * True when a stored match could currently be on the pitch: any live
+     * status (LIVE / HALFTIME / EXTRA_TIME / PENALTIES) that was confirmed
+     * recently, or a kickoff within the last 3 h / next 10 min. The live
+     * check respects staleness so an abandoned feed does not keep the window
+     * open forever on stale rows.
      */
     private function matchWindowOpen(int $now): bool
     {
-        if ($this->repo->listMatches(['status' => 'LIVE'], 1) !== []) return true;
+        $cutoff = $now - $this->staleThresholdSeconds();
+        foreach ($this->repo->listMatches(['status' => self::LIVE_STATUSES], 200) as $row) {
+            $updated = strtotime((string) ($row['updated_at'] ?? ''));
+            if ($updated !== false && $updated >= $cutoff) return true;
+            // Legacy rows without updated_at: fall back to kickoff window
+            // instead of falsely keeping the sweep alive.
+        }
         $from = gmdate('c', $now - 10800);
         $to = gmdate('c', $now + 600);
         return $this->repo->listMatches(['from' => $from, 'to' => $to], 1) !== [];
     }
 
     /**
-     * The stored live board — no provider call. Every match currently LIVE
-     * with its last observed minute/score, plus goal events recorded at or
-     * after $since (ISO-8601) for the UI's GOAL flash. A null score stays
-     * null in the payload: the reader shows "—" rather than guessing 0-0.
+     * The stored live board — no provider call. Only matches whose canonical
+     * status is in LIVE_STATUSES (LIVE, HALFTIME, EXTRA_TIME, PENALTIES) and
+     * whose last provider confirmation is recent are returned — finished
+     * (FT/AET/PEN/ENDED/CANCELLED/POSTPONED) and stale rows are never shown
+     * as live, and live is never inferred from kickoff time. A null score
+     * stays null: the reader shows "—" rather than guessing 0-0.
      */
-    public function board(?string $since = null, int $limit = 50): array
+    public function board(?string $since = null, int $limit = 50, ?int $now = null): array
     {
+        $now = $now ?? time();
+        $threshold = $this->staleThresholdSeconds();
+        $cutoff = $now - $threshold;
         $matches = [];
-        foreach ($this->repo->listMatches(['status' => 'LIVE'], min(200, max(1, $limit))) as $row) {
+        foreach ($this->repo->listMatches(['status' => self::LIVE_STATUSES], min(200, max(1, $limit))) as $row) {
+            $status = strtoupper((string) ($row['status'] ?? ''));
+            if (!in_array($status, self::LIVE_STATUSES, true)) continue;
+            $updatedAt = $row['updated_at'] ?? null;
+            $updatedTs = $updatedAt !== null ? strtotime((string) $updatedAt) : false;
+            if ($updatedTs === false) {
+                // No timestamp to prove recency — treat as stale.
+                continue;
+            }
+            if ($now - $updatedTs > $threshold) {
+                continue;
+            }
             $payload = is_array($row['payload'] ?? null) ? $row['payload'] : [];
             $live = is_array($payload['live'] ?? null) ? $payload['live'] : [];
             $matches[] = [
@@ -159,6 +196,7 @@ class LiveScoreService
                 'awayScore' => $live['awayScore'] ?? null,
                 'scoreKnown' => isset($live['homeScore'], $live['awayScore']),
                 'statusDetail' => $live['statusShort'] ?? null,
+                'status' => $status,
                 'simulated' => !empty($payload['simulated']),
                 'updatedAt' => $row['updated_at'] ?? null,
             ];
@@ -168,6 +206,7 @@ class LiveScoreService
             'matches' => $matches,
             'goalEvents' => $since !== null ? $this->goalEventsSince($since) : [],
             'refreshIntervalSeconds' => $this->refreshIntervalSeconds(),
+            'staleThresholdSeconds' => $threshold,
         ];
     }
 

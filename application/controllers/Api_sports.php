@@ -99,6 +99,7 @@ class Api_sports extends Api_controller
                 'retryInSeconds' => $refreshed['retryInSeconds'] ?? null,
             ],
             'refreshIntervalSeconds' => $board['refreshIntervalSeconds'],
+            'staleThresholdSeconds' => $board['staleThresholdSeconds'] ?? $svc->staleThresholdSeconds(),
             'serverTime' => gmdate('c'),
         ]);
     }

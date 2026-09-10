@@ -185,7 +185,10 @@ class AIWorkforce_model extends CI_Model
             public function latestHealth(int $providerId): ?array { $row = $this->db->where('provider_id', $providerId)->order_by('observed_at', 'DESC')->limit(1)->get('sports_provider_health')->row_array(); if ($row) $row['missing_fields'] = json_decode((string) ($row['missing_fields'] ?: '[]'), true); return $row ?: null; }
             public function findMatchById(int $id): ?array { $row = $this->db->get_where('sports_matches', ['id' => $id], 1)->row_array(); if ($row) $row['payload'] = json_decode((string) $row['payload'], true); return $row ?: null; }
             public function listMatches(array $filter = [], int $limit = 200): array {
-                if (!empty($filter['status'])) $this->db->where('status', $filter['status']);
+                if (!empty($filter['status'])) {
+                    if (is_array($filter['status'])) $this->db->where_in('status', $filter['status']);
+                    else $this->db->where('status', $filter['status']);
+                }
                 if (!empty($filter['from'])) $this->db->where('kickoff_at >=', $filter['from']);
                 if (!empty($filter['to'])) $this->db->where('kickoff_at <=', $filter['to']);
                 if (!empty($filter['competition'])) $this->db->like('competition', $filter['competition'], 'after');

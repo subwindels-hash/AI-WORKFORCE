@@ -77,7 +77,7 @@ class SportsCronService
     {
         $end = gmdate('Y-m-d', strtotime($date . ' +1 day')) . 'T00:00:00+00:00';
         $matches = $this->repo->listMatches(['from' => $date . 'T00:00:00+00:00', 'to' => $end, 'status' => 'SCHEDULED'], 500);
-        $matches = array_merge($matches, $this->repo->listMatches(['status' => 'LIVE'], 200));
+        $matches = array_merge($matches, $this->repo->listMatches(['status' => \AIWorkforce\Sports\LiveScoreService::LIVE_STATUSES], 200));
         $out = []; $processed = 0; $created = 0; $errors = [];
         // Split: matches that are round-addressable (stored round_id on a
         // provider with the round endpoint) sync as whole matchdays in one
@@ -163,7 +163,7 @@ class SportsCronService
         $run = $this->repo->startJobRun(['id' => Backtester::uuid(), 'jobType' => 'QUALITY_RECALC', 'executionKey' => $key]);
         if ($run === null) return ['status' => 'DUPLICATE_SKIPPED', 'executionKey' => $key];
         $end = gmdate('Y-m-d', strtotime($date . ' +1 day')) . 'T00:00:00+00:00';
-        $matches = array_merge($this->repo->listMatches(['from' => $date . 'T00:00:00+00:00', 'to' => $end, 'status' => 'SCHEDULED'], 500), $this->repo->listMatches(['status' => 'LIVE'], 200));
+        $matches = array_merge($this->repo->listMatches(['from' => $date . 'T00:00:00+00:00', 'to' => $end, 'status' => 'SCHEDULED'], 500), $this->repo->listMatches(['status' => \AIWorkforce\Sports\LiveScoreService::LIVE_STATUSES], 200));
         $updated = 0; $errors = [];
         foreach ($matches as $match) {
             try {

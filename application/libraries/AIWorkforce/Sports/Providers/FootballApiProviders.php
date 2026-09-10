@@ -1020,14 +1020,17 @@ class ApiFootballProvider implements SportsDataProvider
 
     private function mapApiFootballStatus(string $short): string
     {
-        return match ($short) {
+        $s = strtoupper(trim($short));
+        return match ($s) {
             'NS' => 'SCHEDULED',
-            '1H', 'HT', '2H', 'ET', 'BT', 'P', 'LIVE' => 'LIVE',
-            'FT', 'AET', 'PEN' => 'FINISHED',
-            'PST' => 'POSTPONED',
-            'CANC' => 'CANCELLED',
-            'SUSP' => 'SUSPENDED',
-            'INT' => 'SUSPENDED',
+            '1H', '2H', 'LIVE' => 'LIVE',
+            'HT' => 'HALFTIME',
+            'ET', 'BT' => 'EXTRA_TIME',
+            'P' => 'PENALTIES',
+            'FT', 'ENDED', 'AET', 'PEN' => 'FINISHED',
+            'PST', 'POSTPONED' => 'POSTPONED',
+            'CANC', 'CANCELLED' => 'CANCELLED',
+            'SUSP', 'SUSPENDED', 'INT' => 'SUSPENDED',
             default => 'SCHEDULED',
         };
     }
@@ -1360,7 +1363,10 @@ class TheSportsDbProvider implements SportsDataProvider
     {
         $s = strtoupper(trim($raw));
         return match (true) {
-            $s === 'FINISHED' || $s === 'COMPLETE' || $s === 'MATCH FINISHED' => 'FINISHED',
+            $s === 'FINISHED' || $s === 'COMPLETE' || $s === 'MATCH FINISHED' || $s === 'ENDED' || $s === 'AET' || $s === 'FT' || $s === 'PEN' => 'FINISHED',
+            $s === 'HT' || $s === 'HALFTIME' || str_contains($s, 'HALF TIME') => 'HALFTIME',
+            $s === 'ET' || $s === 'EXTRA TIME' || str_contains($s, 'EXTRA') => 'EXTRA_TIME',
+            $s === 'PENALTIES' || str_contains($s, 'PENALTIES') || $s === 'P' => 'PENALTIES',
             str_contains($s, 'LIVE') || str_contains($s, 'IN PROGRESS') => 'LIVE',
             $s === 'POSTPONED' => 'POSTPONED',
             $s === 'CANCELLED' || $s === 'CANCELED' => 'CANCELLED',
@@ -1986,11 +1992,14 @@ class SportMonksProvider implements SportsDataProvider
     {
         return match ($stateId) {
             1, 13, 16, 19, 26 => 'SCHEDULED',    // NS, TBA, DELAYED, AU, PENDING
-            2, 3, 4, 6, 9, 21, 22, 25 => 'LIVE', // 1st half, HT, ET break, ET, penalties, ET break, 2nd half, pen break
+            2, 22 => 'LIVE',                     // 1st half, 2nd half
+            3 => 'HALFTIME',                     // HT
+            4, 6, 21 => 'EXTRA_TIME',            // ET break, ET, extra_time_break
+            9, 25 => 'PENALTIES',                // in penalties, pen break
             5, 7, 8, 14, 17 => 'FINISHED',       // FT, AET, FT_PEN, WO, AWARDED
-            10 => 'POSTPONED',                    // POSTPONED
-            11, 15, 18 => 'SUSPENDED',            // SUSPENDED, ABANDONED, INTERRUPTED
-            12, 20 => 'CANCELLED',                // CANCELLED, DELETED
+            10 => 'POSTPONED',
+            11, 15, 18 => 'SUSPENDED',
+            12, 20 => 'CANCELLED',
             default => 'SCHEDULED',
         };
     }
@@ -2002,7 +2011,10 @@ class SportMonksProvider implements SportsDataProvider
         if ($c === '') return null;
         return match ($c) {
             'NS', 'TBA', 'DELAYED', 'AU', 'PENDING' => 'SCHEDULED',
-            'LIVE', 'INPLAY_1ST_HALF', 'INPLAY_2ND_HALF', 'HT', 'BREAK', 'INPLAY_ET', 'EXTRA_TIME_BREAK', 'INPLAY_PENALTIES', 'PEN_BREAK' => 'LIVE',
+            'LIVE', 'INPLAY_1ST_HALF', 'INPLAY_2ND_HALF' => 'LIVE',
+            'HT' => 'HALFTIME',
+            'BREAK', 'INPLAY_ET', 'EXTRA_TIME_BREAK' => 'EXTRA_TIME',
+            'INPLAY_PENALTIES', 'PEN_BREAK' => 'PENALTIES',
             'FT', 'AET', 'FT_PEN', 'WO', 'AWARDED' => 'FINISHED',
             'POSTPONED' => 'POSTPONED',
             'SUSPENDED', 'ABANDONED', 'INTERRUPTED' => 'SUSPENDED',

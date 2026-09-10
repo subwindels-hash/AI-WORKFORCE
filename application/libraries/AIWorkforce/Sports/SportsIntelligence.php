@@ -401,15 +401,24 @@ class SportsIntelligence
         $dayEnd = $day . 'T23:59:59+00:00';
         $dayStart = $day . 'T00:00:00+00:00';
         $upcoming = $this->repository->listMatches(['status' => 'SCHEDULED', 'from' => $dayStart, 'to' => $dayEnd], 50);
-        // Live rows carry their last observed minute/score (payload.live) so
-        // the console can render the live board server-side; the browser then
-        // keeps it fresh via /api/sports/live (throttled auto refresh).
-        $live = array_map(static function (array $m): array {
+        // Live board: only matches with a canonical in-progress status
+        // (LIVE, HALFTIME, EXTRA_TIME, PENALTIES) that were confirmed recently.
+        // Never inferred from kickoff time; stale or terminal rows are hidden.
+        $threshold = $this->liveScores->staleThresholdSeconds();
+        $now = time();
+        $rawLive = $this->repository->listMatches(['status' => LiveScoreService::LIVE_STATUSES], 200);
+        $live = [];
+        foreach ($rawLive as $m) {
+            $status = strtoupper((string) ($m['status'] ?? ''));
+            if (!in_array($status, LiveScoreService::LIVE_STATUSES, true)) continue;
+            $updatedTs = strtotime((string) ($m['updated_at'] ?? ''));
+            if ($updatedTs === false || ($now - $updatedTs) > $threshold) continue;
             $payload = is_array($m['payload'] ?? null) ? $m['payload'] : [];
             $m['liveState'] = is_array($payload['live'] ?? null) ? $payload['live'] : [];
             $m['simulated'] = !empty($payload['simulated']);
-            return $m;
-        }, $this->repository->listMatches(['status' => 'LIVE'], 50));
+            $live[] = $m;
+            if (count($live) >= 50) break;
+        }
         $todayPredictions = $this->repository->listPredictions(['from' => $dayStart, 'to' => $dayEnd], 500);
         $qualified = array_values(array_filter($todayPredictions, fn($p) => ($p['decision'] ?? '') === 'PREDICTION_READY'));
         $rejected = array_values(array_filter($todayPredictions, fn($p) => ($p['decision'] ?? '') !== 'PREDICTION_READY'));
