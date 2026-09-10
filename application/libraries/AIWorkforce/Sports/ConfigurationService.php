@@ -52,9 +52,10 @@ class ConfigurationService
             // Usable-by-default floors, matching the football module's
             // realistic tiers: most matches are decided at 40–60% model
             // confidence, so a 70% default left real days with no ticket.
-            // Strict operators can still raise these to 70+; the validation
-            // floor (50) only rules out self-contradictory gates.
-            'min_confidence' => 55.0,
+            // The built-in floor is now 30 — only self-contradictory gates
+            // are ruled out by validation; strict operators can still raise
+            // the floor to 70+ at any time (append-only, audited).
+            'min_confidence' => 30.0,
             'min_expected_value' => 0.02,
             'max_correlation' => 'MEDIUM',
             'min_data_quality' => 60,
@@ -146,7 +147,7 @@ class ConfigurationService
         $maxSel = (int) $c['max_selections'];
         if ($maxSel < 1 || $maxSel > 12) return 'max_selections must be within [1, 12]';
         $conf = (float) $c['min_confidence'];
-        if ($conf < 50 || $conf > 100) return 'min_confidence must be within [50, 100]';
+        if ($conf < 30 || $conf > 100) return 'min_confidence must be within [30, 100]';
         if ((float) $c['min_expected_value'] < 0) return 'min_expected_value must be >= 0';
         $dq = (int) $c['min_data_quality'];
         if ($dq < 50 || $dq > 100) return 'min_data_quality must be within [50, 100]';

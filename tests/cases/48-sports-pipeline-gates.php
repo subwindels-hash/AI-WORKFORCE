@@ -191,8 +191,8 @@ test('risk: low liquidity is an explicit rejection; confidence is gated once, up
     $eng = new RiskEngine();
     $value = ['qualified' => true, 'expectedValue' => 0.2, 'odds' => 2.0];
     $quality = ['score' => 100, 'eligibleForTicket' => true];
-    // The 70%+ confidence floor is the PIPELINE's gate (on the WINDELS
-    // confidence value, in stage order) — the risk engine no longer
+    // The configured confidence floor is the PIPELINE's gate (on the
+    // WINDELS confidence value, in stage order) — the risk engine no longer
     // duplicates it as a second LOW_CONFIDENCE rejection.
     $lowConf = $eng->assess($value, $quality, ['min_data_quality' => 75, 'min_confidence' => 80], ['confidence' => 70]);
     assert_equals('LOW', $lowConf['classification']);

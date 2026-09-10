@@ -15,24 +15,25 @@ test('ticket optimizer never combines same-match selections', function () {
 });
 
 test('ticket optimizer enforces WINDELS daily ticket hard floors', function () {
-    // The absolute floors are 50/50 — an explicit admin setting is honoured,
-    // never clamped back up to a hard-coded 70/75 — so only sub-50 candidates
+    // The absolute floors are 30/30 — an explicit admin setting is honoured,
+    // never clamped back up to a hard-coded 70/75 — so only sub-30 candidates
     // are excluded when the caller asks for 10.
     $out = (new TicketOptimizer())->optimize([
         fx_candidate(1, 4.9, .50),
-        array_merge(fx_candidate(2, 5.5, .50), ['confidence' => ['confidence' => 49.99]]),
-        array_merge(fx_candidate(3, 5.6, .50), ['quality' => ['score' => 49]]),
+        array_merge(fx_candidate(2, 5.5, .50), ['confidence' => ['confidence' => 29.99]]),
+        array_merge(fx_candidate(3, 5.6, .50), ['quality' => ['score' => 29]]),
         fx_candidate(4, 8.01, .50),
         fx_candidate(5, 6.0, .50),
     ], ['targetOddsMin' => 1.1, 'targetOddsMax' => 99, 'maxSelections' => 1, 'minConfidence' => 10, 'minDataQuality' => 10]);
     assert_equals('QUALIFIED', $out['status']);
-    assert_equals(3, $out['poolSize'], 'below-50 candidates are excluded even when the caller asks for 10');
+    assert_equals(3, $out['poolSize'], 'below-30 candidates are excluded even when the caller asks for 10');
     assert_equals(1, $out['selectionCount']);
-    // ...and usable mid-range candidates are admitted at the new defaults.
+    // ...and a 35% confidence candidate is admitted at the new 30% floor
+    // (the data-quality floor stays 50 — only the confidence gate moved).
     $usable = (new TicketOptimizer())->optimize([
-        array_merge(fx_candidate(2, 5.5, .50), ['confidence' => ['confidence' => 55.0]]),
+        array_merge(fx_candidate(2, 5.5, .50), ['confidence' => ['confidence' => 35.0]]),
         array_merge(fx_candidate(3, 5.6, .50), ['quality' => ['score' => 60]]),
-    ], ['targetOddsMin' => 1.1, 'targetOddsMax' => 99, 'maxSelections' => 12, 'minConfidence' => 55, 'minDataQuality' => 60]);
-    assert_equals(2, $usable['poolSize'], '55% confidence / 60 quality candidates enter the pool');
+    ], ['targetOddsMin' => 1.1, 'targetOddsMax' => 99, 'maxSelections' => 12, 'minConfidence' => 30, 'minDataQuality' => 60]);
+    assert_equals(2, $usable['poolSize'], 'a 35% confidence candidate enters the pool at the 30% floor');
     assert_equals('QUALIFIED', $usable['status']);
 });
