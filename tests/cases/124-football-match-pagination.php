@@ -461,10 +461,10 @@ test('football: the feed payload is complete, finite and honest about what it di
 
 test('football: a card below the lowest confidence tier is still reported, not dropped', function () {
     // Paging reads the board page by page, so a card that silently falls out of
-    // every category would look like a match the pager lost. The four fixtures
-    // below are deliberately unevenly matched: one clears the 70% tier, the
-    // others sit at ~70%, ~63% and ~54% — qualified on data quality, below some
-    // confidence cut lines. None of them may disappear.
+    // every category would look like a match the pager lost. The tiers are
+    // pinned high here so the deliberately uneven fixtures below all fall under
+    // the lowest cut line whatever the model outputs — qualified on data
+    // quality, below every confidence cut line. None of them may disappear.
     $day = gmdate('Y-m-d', time() + 2 * 86400);
     $combos = [['10', '30'], ['30', '20'], ['40', '30'], ['20', '10']];
     $names = ['10' => 'Manchester City', '20' => 'Everton', '30' => 'Brighton', '40' => 'Burnley'];
@@ -473,7 +473,8 @@ test('football: a card below the lowest confidence tier is still reported, not d
         $rows[] = fx_fb_row('fx-tier-' . $n, gmdate('c', (int) strtotime($day . 'T00:' . (30 + $n) . ':00+00:00')),
             $names[$home], $names[$away], $home, $away);
     }
-    [, , $module] = fx_fb_harness($rows);
+    [, , $module] = fx_fb_harness($rows, [], ['WINDELS_FOOTBALL_TIER_HIGHEST' => '95',
+        'WINDELS_FOOTBALL_TIER_STRONG' => '90', 'WINDELS_FOOTBALL_TIER_STANDARD' => '85']);
     fx_fb_sync_today($module, $day);
     $module->predictions()->predictDay($day);
     $board = $module->board()->forDate($day);
@@ -486,22 +487,26 @@ test('football: a card below the lowest confidence tier is still reported, not d
     foreach ((array) $board['categories'] as $index => $category) {
         foreach ((array) ($category['items'] ?? []) as $item) {
             $placed[] = (string) ($item['predictionId'] ?? '');
-            if ((string) ($category['key'] ?? '') === 'limitedData') $belowTier[] = (string) ($item['predictionId'] ?? '');
+            if ((string) ($category['key'] ?? '') === 'developing') $belowTier[] = (string) ($item['predictionId'] ?? '');
         }
     }
     assert_equals(count($cards), count($placed), 'every card sits in exactly one category');
     assert_equals(count($placed), count(array_unique($placed)), 'and in no category twice');
 
     $tiers = $module->config()->confidenceTiers();
-    $lowest = 60.0;
-    foreach ($tiers as $tier) $lowest = min($lowest, (float) ($tier['min'] ?? 60));
+    $lowest = 100.0;
+    foreach ($tiers as $tier) $lowest = min($lowest, (float) ($tier['min'] ?? 100));
+    assert_equals(85.0, $lowest, 'the pinned tiers are honoured');
     $qualifiedBelow = array_values(array_filter($cards, static fn(array $c): bool =>
         (string) $c['band'] === QualityBand::QUALIFIED && $c['confidence'] !== null && (float) $c['confidence'] < $lowest));
     assert_true(count($qualifiedBelow) >= 1, 'the fixtures really do include a qualified card below the cut line');
     foreach ($qualifiedBelow as $card) {
         assert_in_array((string) $card['predictionId'], $belowTier, 'a qualified card below the tier is reported, not dropped');
-        assert_equals('Limited Data', (string) $card['tier'], 'and labelled as below the cut lines');
+        assert_equals('Developing', (string) $card['tier'], 'and labelled as well-evidenced but uncertain — not as thin data');
     }
     $last = (array) end($board['categories']);
+    assert_equals('developing', (string) ($last['key'] ?? ''), 'the trailing category is Developing');
     assert_equals('below ' . number_format($lowest, 0), (string) ($last['range'] ?? ''), 'the trailing category states its own cut line');
+    $keys = array_column((array) $board['categories'], 'key');
+    assert_in_array('limitedData', $keys, 'and the Limited Data category still exists for thinner evidence');
 });

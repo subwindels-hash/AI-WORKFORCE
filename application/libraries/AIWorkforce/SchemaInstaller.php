@@ -220,11 +220,16 @@ final class SchemaInstaller
             try { $exec($sql); } catch (\Throwable $e) { /* column already exists */ }
         }
 
-        // Lower the built-in sports ticket confidence floor from 80% to 70%.
-        // Only the untouched system default row is amended; operator-authored
-        // configuration versions remain append-only and under admin control.
+        // Lower the built-in sports ticket floors from 70% confidence / 75
+        // quality to 55% / 60 — the old defaults left real days with no
+        // ticket. Only the untouched system default row is amended;
+        // operator-authored configuration versions remain append-only and
+        // under admin control.
         try {
-            $exec("UPDATE sports_configurations SET min_confidence = 70 WHERE version = 0 AND updated_by = 'system' AND reason = 'built-in defaults' AND min_confidence > 70");
+            $exec("UPDATE sports_configurations SET min_confidence = 55 WHERE version = 0 AND updated_by = 'system' AND reason = 'built-in defaults' AND min_confidence > 55");
+        } catch (\Throwable $e) { /* table may not exist yet on partial installs */ }
+        try {
+            $exec("UPDATE sports_configurations SET min_data_quality = 60 WHERE version = 0 AND updated_by = 'system' AND reason = 'built-in defaults' AND min_data_quality > 60");
         } catch (\Throwable $e) { /* table may not exist yet on partial installs */ }
 
         $userBrokers = $pick(

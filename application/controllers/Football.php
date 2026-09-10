@@ -155,6 +155,57 @@ class Football extends App_Controller
         $this->render('football/match', $data);
     }
 
+    /**
+     * Analyze one fixture now: run the prediction engine over its stored data
+     * and store the result, then return to the match page (sports.manage).
+     *
+     * This is the per-match half of "Generate this page": the same engine, the
+     * same stored row, the same contract — bounded to one match the operator
+     * asked about. A match that already has a prediction keeps it (the engine
+     * is never re-run over it here); a refusal comes back with its reason
+     * instead of a silent redirect.
+     */
+    public function analyze(string $id)
+    {
+        if (!ctype_digit($id)) { show_404(); return; }
+        $fixtureId = (int) $id;
+        if ($this->input->method(true) !== 'POST') { redirect('/football/match/' . $fixtureId); return; }
+        if (!$this->requireFootballPermission('sports.manage', 'match analysis')) return;
+        try {
+            // A match that already has a prediction keeps it: this action only
+            // ever writes the missing row, so a stored (possibly frozen)
+            // prediction is never rewritten by pressing Analyze twice.
+            $existing = $this->platform->football->predictionFor($fixtureId, false);
+            if (($existing['status'] ?? '') === 'NOT_FOUND') { show_404(); return; }
+            if (($existing['prediction'] ?? null) !== null) {
+                $this->flash('notice', 'This match already has a stored prediction — it was reused, not regenerated.');
+                redirect('/football/match/' . $fixtureId);
+                return;
+            }
+            $payload = $this->platform->football->predictionFor($fixtureId, true);
+        } catch (Throwable $e) {
+            $this->flash('error', 'Analysis refused: ' . $e->getMessage());
+            redirect('/football/match/' . $fixtureId);
+            return;
+        }
+        $status = (string) ($payload['status'] ?? 'NO_PREDICTION');
+        if ($status === 'NOT_FOUND') { show_404(); return; }
+        if ($status === 'OK' && ($payload['prediction'] ?? null) !== null) {
+            $contract = $payload['prediction'];
+            $p = $contract['prediction'] ?? [];
+            $this->flash('notice', sprintf('Analyzed: %s %d–%d at %s%% confidence (%s, data quality %d/100). The odds prediction below is usable.',
+                (string) ($p['result'] ?? '—'),
+                (int) ($p['predictedScore']['home'] ?? 0), (int) ($p['predictedScore']['away'] ?? 0),
+                is_numeric($p['confidence'] ?? null) ? number_format((float) $p['confidence'], 1) : '—',
+                (string) ($p['confidenceBasis'] ?? 'RAW'),
+                (int) ($contract['dataQuality']['score'] ?? 0)));
+        } else {
+            $reason = trim((string) ($payload['reason'] ?? 'the engine refused this match.'));
+            $this->flash('error', 'No prediction was stored for this match — ' . rtrim($reason, '.') . '.');
+        }
+        redirect('/football/match/' . $fixtureId);
+    }
+
     /** Model lifecycle + calibration state, straight from stored rows. */
     public function models()
     {

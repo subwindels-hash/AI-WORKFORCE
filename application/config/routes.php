@@ -261,6 +261,7 @@ $route['api/sports/correlation'] = 'api_sports/correlation_monitor';
 
 // Football Intelligence — console (§10/§11/§16)
 $route['football'] = 'football';
+$route['football/match/(:num)/analyze'] = 'football/analyze/$1';
 $route['football/match/(:num)'] = 'football/match/$1';
 $route['football/live'] = 'football/live';
 $route['football/models'] = 'football/models';

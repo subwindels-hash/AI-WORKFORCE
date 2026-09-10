@@ -385,13 +385,36 @@ final class FootballConfiguration
         return max(10, (int) $this->num('WINDELS_FOOTBALL_MIN_CALIBRATION_SAMPLES', 50));
     }
 
-    /** Confidence tiers of the daily board (percent, descending cut lines). */
+    /**
+     * Confidence tiers of the daily board (percent, descending cut lines).
+     *
+     * These are football-realistic cut lines for a 1X2 model: most matches are
+     * decided at 40–60% model confidence, and only extreme mismatches clear
+     * 70%+. Tiers at 70/75/80 therefore left almost every analyzed match below
+     * the lowest tier — analyzed but unusable. The board now reads:
+     * Highest ≥60, Strong 52–60, Standard 45–52, with everything analyzed below
+     * 45 still reported (never dropped) in the trailing category.
+     *
+     * Each cut line is configurable (WINDELS_FOOTBALL_TIER_HIGHEST/_STRONG/
+     * _STANDARD); a misconfiguration that inverts the ladder is repaired by
+     * sorting, so the board can never show overlapping tiers.
+     */
     public function confidenceTiers(): array
     {
+        $highest = (float) $this->num('WINDELS_FOOTBALL_TIER_HIGHEST', 60.0);
+        $strong = (float) $this->num('WINDELS_FOOTBALL_TIER_STRONG', 52.0);
+        $standard = (float) $this->num('WINDELS_FOOTBALL_TIER_STANDARD', 45.0);
+        $highest = max(0.0, min(100.0, $highest));
+        $strong = max(0.0, min(100.0, $strong));
+        $standard = max(0.0, min(100.0, $standard));
+        // Repair an inverted ladder instead of publishing overlapping tiers.
+        $cuts = [$highest, $strong, $standard];
+        rsort($cuts);
+        [$highest, $strong, $standard] = $cuts;
         return [
-            ['key' => 'highest', 'label' => 'Highest Confidence', 'min' => 80.0, 'max' => 100.0],
-            ['key' => 'strong', 'label' => 'Strong Predictions', 'min' => 75.0, 'max' => 79.99],
-            ['key' => 'standard', 'label' => 'Standard Predictions', 'min' => 70.0, 'max' => 74.99],
+            ['key' => 'highest', 'label' => 'Highest Confidence', 'min' => $highest, 'max' => 100.0],
+            ['key' => 'strong', 'label' => 'Strong Predictions', 'min' => $strong, 'max' => round($highest - 0.01, 2)],
+            ['key' => 'standard', 'label' => 'Standard Predictions', 'min' => $standard, 'max' => round($strong - 0.01, 2)],
         ];
     }
 

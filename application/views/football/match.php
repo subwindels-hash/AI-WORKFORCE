@@ -9,6 +9,8 @@
  * @var array $analysis
  * @var array $prediction
  * @var int $fixtureId
+ * @var array $caps
+ * @var string $csrfToken
  */
 $analysis = $analysis ?? [];
 $fixture = $analysis['fixture'] ?? [];
@@ -21,6 +23,8 @@ $inMatch = $analysis['inMatch'] ?? [];
 $contract = $prediction['prediction'] ?? null;
 $settlement = $prediction['settlement'] ?? null;
 $liveEstimates = $prediction['liveEstimates'] ?? [];
+$caps = $caps ?? ['sync' => false, 'calibrate' => false, 'approve' => false, 'settle' => false];
+$matchId = (int) ($fixtureId ?? 0);
 
 $dash = static fn(mixed $v, int $dp = 2): string => is_numeric($v) ? number_format((float) $v, $dp) : '—';
 $state = static fn(mixed $v): string => $v === null || $v === '' || $v === [] ? 'DATA_UNAVAILABLE' : (string) $v;
@@ -59,6 +63,17 @@ $windelsModelId = 'Windels Model id: 1520863';
         <?php if ($contract === null): ?>
           <p class="dim"><?= e((string) ($prediction['message'] ?? 'No prediction row is stored for this fixture.')) ?></p>
           <?php if (!empty($prediction['reason'])): ?><p class="dim" style="font-size:12px"><?= e((string) $prediction['reason']) ?></p><?php endif; ?>
+          <p class="dim" style="font-size:12px">Analyzing runs the engine over this match's stored data and produces a usable odds prediction — probabilities, predicted score, confidence and WINDELS fair odds. A match whose stored data falls below the quality floor is refused with its reason instead.</p>
+          <?php if ($matchId > 0): ?>
+            <form method="post" action="/football/match/<?= $matchId ?>/analyze" style="margin-top:8px" onsubmit="return confirm('Analyze this match now? The engine reads its stored data and writes one prediction row.') ">
+              <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+              <?php if (!empty($caps['sync'])): ?>
+                <button class="btn primary">Analyze this match — generate odds prediction</button>
+              <?php else: ?>
+                <button class="btn" disabled title="Requires the sports.manage permission">Analyze this match — generate odds prediction</button>
+              <?php endif; ?>
+            </form>
+          <?php endif; ?>
         <?php else: ?>
           <?php $p = $contract['prediction'] ?? []; $prob = $p['probabilities'] ?? []; ?>
           <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
@@ -146,8 +161,15 @@ $windelsModelId = 'Windels Model id: 1520863';
                   <td class="mono"><b><?= $pct($marketView['probability'] ?? ($contract['prediction']['probabilities']['home'] ?? null)) ?></b>
                     <span class="dim" style="font-size:11px"><?= e((string) ($marketView['selectionLabel'] ?? 'selected outcome')) ?></span></td></tr>
                 <tr><td class="dim">Market odds</td>
-                  <td class="mono"><?= $money($marketView['odds'] ?? null) ?>
-                    <span class="dim" style="font-size:11px">implied <?= $pct($marketView['impliedProbability'] ?? null) ?></span></td></tr>
+                  <?php if (is_numeric($marketView['odds'] ?? null)): ?>
+                    <td class="mono"><?= $money($marketView['odds']) ?>
+                      <span class="dim" style="font-size:11px">implied <?= $pct($marketView['impliedProbability'] ?? null) ?></span></td>
+                  <?php elseif (is_numeric($valueBlock['windelsFairOdds'] ?? null)): ?>
+                    <td class="mono"><?= $money($valueBlock['windelsFairOdds']) ?>
+                      <span class="dim" style="font-size:11px">WINDELS fair odds — no provider price quoted, so the model's own price (1 ÷ probability) is the usable figure</span></td>
+                  <?php else: ?>
+                    <td class="mono">— <span class="dim" style="font-size:11px">no price quoted and no model estimate to price from</span></td>
+                  <?php endif; ?></tr>
                 <tr><td class="dim">WINDELS fair odds</td>
                   <td class="mono"><?= $money($valueBlock['windelsFairOdds'] ?? null) ?>
                     <?php if (is_numeric($valueBlock['fairOdds'] ?? null)): ?><span class="dim" style="font-size:11px">margin-removed <?= $money($valueBlock['fairOdds']) ?></span><?php endif; ?></td></tr>
@@ -183,6 +205,21 @@ $windelsModelId = 'Windels Model id: 1520863';
             <b><?= e((string) ($withheldBlock['headline'] ?? 'Prediction withheld — insufficient verified data')) ?></b>
             <?= e((string) ($withheldBlock['reason'] ?? '')) ?>
             <div class="dim" style="font-size:11px;margin-top:4px">Code: <?= e((string) ($withheldBlock['code'] ?? 'WITHHELD')) ?></div>
+          </div>
+        <?php elseif (!empty($withheldBlock['limitedEvidence'])): ?>
+          <!-- Limited evidence is published, not withheld: the probabilities and
+               fair odds above are usable, with the thinner basis stated here. -->
+          <div class="notice info" style="margin-top:12px">
+            <b><?= e((string) ($withheldBlock['headline'] ?? 'Limited evidence — usable with caution')) ?></b>
+            <?= e((string) ($withheldBlock['reason'] ?? '')) ?>
+            <div class="dim" style="font-size:11px;margin-top:4px">Code: <?= e((string) ($withheldBlock['code'] ?? 'DATA_QUALITY_LIMITED')) ?></div>
+          </div>
+        <?php elseif (!empty($withheldBlock['needsAnalysis']) && $contract === null): ?>
+          <!-- Never analyzed is not withheld: the match simply has no row yet,
+               and the Analyze action above is what creates one. -->
+          <div class="notice info" style="margin-top:12px">
+            <b><?= e((string) ($withheldBlock['headline'] ?? 'Not analyzed yet — no prediction stored')) ?></b>
+            <?= e((string) ($withheldBlock['reason'] ?? '')) ?>
           </div>
         <?php endif; ?>
 

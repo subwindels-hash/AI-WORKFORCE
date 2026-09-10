@@ -21,7 +21,7 @@ class RiskEngine
 
     public function assess(array $value, array $quality, array $config = [], array $context = []): array
     {
-        $minQuality = (int) ($config['min_data_quality'] ?? $config['minDataQuality'] ?? 75);
+        $minQuality = (int) ($config['min_data_quality'] ?? $config['minDataQuality'] ?? 60);
         $minEv = (float) ($config['min_expected_value'] ?? $config['minExpectedValue'] ?? 0.02);
         $minLiquidity = $config['min_liquidity'] ?? $config['minLiquidity'] ?? null;
         $reasons = [];

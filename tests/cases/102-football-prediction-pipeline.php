@@ -11,6 +11,8 @@ require_once TESTSPATH . 'football_support.php';
 
 use AIWorkforce\Football\CalibrationService;
 use AIWorkforce\Football\DataState;
+use AIWorkforce\Football\ExpectedGoalsResolver;
+use AIWorkforce\Football\FootballConfiguration;
 use AIWorkforce\Football\PredictionService;
 use AIWorkforce\Football\QualityBand;
 
@@ -196,6 +198,39 @@ test('football: a thin fixture is refused rather than dressed up (§5)', functio
     assert_equals(1, (int) $result['rejected'] + (int) $result['limited'], 'and it is refused or capped');
     assert_equals(0, (int) $result['qualified'], 'nothing qualifies on nothing');
     assert_equals([], $repo->listPredictions(['date' => $day], 5), 'no prediction row was written');
+});
+
+test('football: teams without their own rates are rated at the measured league norm, not refused (§5)', function () {
+    // The quality gate judged this publishable (LIMITED): refusing it anyway
+    // for missing team stats — while the league's measured scoring environment
+    // sits in storage — is what left analyzed pages half empty. Both sides are
+    // rated at the league norm, explicitly labelled, confidence capped.
+    $resolver = new ExpectedGoalsResolver(new FootballConfiguration([]));
+    $out = $resolver->resolve(['HOME' => [], 'AWAY' => []],
+        ['aggregate' => ['avgHomeGoals' => 1.79, 'avgAwayGoals' => 1.0, 'source' => 'test:standings']]);
+    assert_equals(ExpectedGoalsResolver::METHOD_LEAGUE_NEUTRAL, (string) $out['method'], 'the fallback names itself');
+    assert_equals(1.79, (float) $out['home'], 'at the measured home norm');
+    assert_equals(1.0, (float) $out['away'], 'and the measured away norm');
+    assert_true((bool) $out['neutral'], 'flagged as a neutral estimate');
+    assert_true(str_contains(implode(' ', (array) $out['notes']), 'league'), 'with the basis stated');
+
+    // End to end: unknown teams (no stored stats) in a measured league still
+    // get a usable, capped, LIMITED prediction row.
+    $kickoff = time() + 7200;
+    [$repo, $module, $day] = fx_fb_predict([fx_fb_row('fx-neutral', gmdate('c', $kickoff), 'Arsenal', 'Chelsea', '50', '60')]);
+    $rows = $repo->listPredictions(['date' => $day], 5);
+    assert_equals(1, count($rows), 'a prediction row was written');
+    assert_equals(QualityBand::LIMITED, (string) $rows[0]['data_quality_band'], 'on the LIMITED band');
+    assert_true((float) $rows[0]['confidence'] < 60.0, 'capped below the Highest tier (' . $rows[0]['confidence'] . ')');
+    assert_true((string) $rows[0]['predicted_result'] !== '', 'with a usable result');
+    $snapshot = json_decode((string) ($rows[0]['feature_snapshot'] ?? '{}'), true);
+    assert_equals(ExpectedGoalsResolver::METHOD_LEAGUE_NEUTRAL, (string) ($snapshot['xgMethod'] ?? ''), 'and the method is on the record');
+
+    // ...while nothing measured anywhere still refuses rather than invents.
+    $none = $resolver->resolve(['HOME' => [], 'AWAY' => []], null);
+    assert_equals(ExpectedGoalsResolver::METHOD_NO_RATE, (string) $none['method'], 'no rates, no league, no prediction');
+    assert_null($none['home']);
+    assert_null($none['away']);
 });
 
 test('football: a fixture whose kickoff passed is never re-predicted (§12/§14)', function () {

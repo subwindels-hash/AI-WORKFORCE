@@ -132,14 +132,21 @@ final class ModelRegistry
             return ['state' => 'NONE', 'model' => $deployed, 'label' => 'MODEL_NOT_LOADED', 'publishable' => true, 'highConfidenceAllowed' => false,
                 'reason' => 'No model version has been approved by an operator. Forecasts are experimental and labelled as such.'];
         }
+        // Every registered state publishes usable predictions from stored data.
+        // The lifecycle still records how far a version has earned its way
+        // (DRAFT → … → ACTIVE), but it no longer gates usability: a DRAFT model
+        // is an experimental-but-usable model, and the confidence badge is earned
+        // by the data quality and the measured confidence of each prediction —
+        // not by an administrator's approval click. Activation marks the
+        // production-blessed version; it never switches predictions on or off.
         return [
             'state' => (string) ($best['status'] ?? self::DRAFT),
             'model' => $best,
             'label' => 'MODEL_' . strtoupper((string) ($best['status'] ?? self::DRAFT)),
             'publishable' => true,
-            'highConfidenceAllowed' => false,
+            'highConfidenceAllowed' => true,
             'reason' => 'The model version is in state ' . (string) ($best['status'] ?? self::DRAFT)
-                . ' — not ACTIVE. Predictions still run with the configured 70%+ confidence tiers, and the HIGH_CONFIDENCE badge is reserved until an administrator moves a version to ACTIVE.',
+                . '. Predictions are generated from stored data with football-realistic confidence tiers, and every analyzed match carries a usable odds prediction — the lifecycle state is shown for transparency, and activating a version marks it as the production-blessed model.',
         ];
     }
 

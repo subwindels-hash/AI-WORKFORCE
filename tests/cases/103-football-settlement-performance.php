@@ -89,8 +89,8 @@ test('football: a model version starts as DRAFT and is never pre-approved (§8)'
     $usable = $registry->usable();
     assert_equals(ModelRegistry::DRAFT, $usable['state']);
     assert_equals(true, $usable['publishable'], 'forecasts are still published — the model does not go dark');
-    assert_equals(false, $usable['highConfidenceAllowed'], 'but they may not carry a high-confidence label');
-    assert_contains('ACTIVE', (string) $usable['reason'], 'and the reason says which state is missing');
+    assert_equals(true, $usable['highConfidenceAllowed'], 'and every analyzed match carries a usable prediction — the badge is earned by data quality and measured confidence, not by the registry state');
+    assert_contains('production-blessed', (string) $usable['reason'], 'and the reason says what activation marks');
     $deployed = $registry->deployedVersion();
     foreach (['model_name', 'model_version', 'algorithm', 'feature_version', 'parameters'] as $key) {
         assert_true(isset($deployed[$key]), 'the deployed fingerprint records ' . $key);
@@ -135,7 +135,7 @@ test('football: the lifecycle only advances on evidence, and approval needs an o
     $activated = $registry->activate($id, 'admin@windels');
     assert_equals(ModelRegistry::ACTIVE, (string) $activated['model']['status']);
     assert_not_null($registry->active(), 'the ACTIVE version is discoverable');
-    assert_equals(true, $registry->usable()['highConfidenceAllowed'], 'and only now may confidence be labelled high');
+    assert_equals(true, $registry->usable()['highConfidenceAllowed'], 'and predictions stay usable after activation');
     $history = json_decode((string) ($activated['model']['lifecycle_history'] ?? ''), true);
     assert_true(is_array($history) && count($history) >= 5, 'every transition is recorded');
     foreach ($history as $entry) {
