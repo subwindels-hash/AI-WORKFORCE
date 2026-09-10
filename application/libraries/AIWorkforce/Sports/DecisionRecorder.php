@@ -30,6 +30,15 @@ class DecisionRecorder
      */
     public function recordPrediction(int $matchId, array $prediction, array $value, array $risk, array $quality, array $factors, ?float $confidence = null, ?float $odds = null, ?string $oddsTimestamp = null, ?string $correlation = null): string
     {
+        // An immutable decision record is worthless without an identity: a
+        // prediction that cannot name its real internal match row, or its
+        // market and selection, is refused — never stored under 0 or
+        // UNSPECIFIED placeholders that would poison every later read.
+        if ($matchId <= 0) throw new \InvalidArgumentException('prediction requires a real internal match id, got ' . var_export($matchId, true));
+        $market = $prediction['market'] ?? ($factors['market'] ?? null);
+        $selection = $prediction['selection'] ?? ($factors['selection'] ?? null);
+        if (!is_string($market) || trim($market) === '') throw new \InvalidArgumentException('prediction requires a market from verified odds data');
+        if (!is_string($selection) || trim($selection) === '') throw new \InvalidArgumentException('prediction requires a selection from verified odds data');
         $modelId = $this->repo->ensureModelVersion([
             'modelName' => $prediction['modelName'] ?? PredictionEngine::MODEL_NAME,
             'modelVersion' => $prediction['modelVersion'] ?? PredictionEngine::MODEL_VERSION,
@@ -40,8 +49,8 @@ class DecisionRecorder
         $rejectionReasons = $risk['reasons'] ?? ($prediction['reason'] ?? null);
         $this->repo->savePrediction([
             'id' => $id, 'match_id' => $matchId, 'model_version_id' => $modelId,
-            'market' => $prediction['market'] ?? ($factors['market'] ?? 'UNSPECIFIED'),
-            'selection' => $prediction['selection'] ?? ($factors['selection'] ?? 'UNSPECIFIED'),
+            'market' => $market,
+            'selection' => $selection,
             'raw_probability' => $prediction['rawModelProbability'] ?? null,
             'calibrated_probability' => $prediction['calibratedProbability'] ?? null,
             'implied_probability' => $value['impliedProbability'] ?? null,

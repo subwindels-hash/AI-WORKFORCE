@@ -39,6 +39,25 @@ class Sports extends App_Controller
         $data['tickets'] = $this->platform->model->sports->listTickets([], 100);
         $data['dailyRuns'] = $this->platform->model->sports->listDailyTickets(30);
         $data['performance'] = $this->platform->sports->performanceReport([]);
+        // Today's AI ticket hero: the stored daily run for today plus its
+        // ticket and selections. Viewing never generates anything — when no
+        // run or ticket exists the hero degrades to an honest empty state.
+        $today = gmdate('Y-m-d');
+        $todayRun = null;
+        $todayTicket = null;
+        $todaySelections = [];
+        try {
+            $todayRun = $this->platform->model->sports->findDailyTicket($today);
+            $ticketId = is_array($todayRun) ? (string) ($todayRun['ticket_id'] ?? '') : '';
+            if ($ticketId !== '') {
+                $todayTicket = $this->platform->model->sports->findTicket($ticketId);
+                if ($todayTicket !== null) $todaySelections = $this->platform->model->sports->ticketSelections($ticketId);
+            }
+        } catch (Throwable $e) { /* hero degrades to "not generated" */ }
+        $data['todayIso'] = $today;
+        $data['todayRun'] = $todayRun;
+        $data['todayTicket'] = $todayTicket;
+        $data['todaySelections'] = $todaySelections;
         $this->render('sports/tickets', $data);
     }
 

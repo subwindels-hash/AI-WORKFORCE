@@ -82,7 +82,7 @@ function fx_stale_fixtures(int $n, bool $withForm = true, bool $withApiFootballI
         $row = [
             'externalId' => 'f' . $i,
             'homeTeam' => 'Home' . $i, 'awayTeam' => 'Away' . $i,
-            'competition' => 'Repro League',
+            'competition' => 'Repro League ' . $i,
             'kickoff' => gmdate('Y-m-d\TH:i:00\+00:00', strtotime('+1 day ' . (10 + $i % 12) . ':30:00')),
             'status' => 'SCHEDULED',
             'context' => $withForm ? [
@@ -342,7 +342,8 @@ test('a genuinely empty day stays NO_QUALIFIED_TICKET — no fabricated odds or 
     assert_equals(15, $run['diagnostics']['predictionsGenerated']);
     assert_equals(0, $run['diagnostics']['positiveValueCandidates'], 'no fake edge was manufactured');
     assert_equals(0, count($repo->tickets), 'no ticket forced');
-    assert_contains('NO VALUE TICKET TODAY', $run['message']);
+    assert_contains('NO QUALIFIED TICKET', $run['message']);
+    assert_contains('did not meet the configured prediction requirements', $run['message']);
 });
 
 test('data quality: optional enrichment improves the score but never blocks prediction', function () {

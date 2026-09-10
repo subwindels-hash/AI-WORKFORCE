@@ -61,18 +61,19 @@ class ConfigurationService
             'engine_mode' => 'USER_APPROVAL_REQUIRED',
             'target_odds_min' => 5.0,
             'target_odds_max' => 8.0,
-            'max_selections' => 6,
+            'max_selections' => 5,
             'risk_level' => 'CONSERVATIVE',
-            // Usable-by-default floors, matching the football module's
-            // realistic tiers: most matches are decided at 40–60% model
-            // confidence, so a 70% default left real days with no ticket.
-            // The built-in floor is now 30 — only self-contradictory gates
-            // are ruled out by validation; strict operators can still raise
-            // the floor to 70+ at any time (append-only, audited).
-            'min_confidence' => 30.0,
+            // Qualified-ticket policy: only strong, well-evidenced predictions
+            // may enter a daily ticket — 75%+ WINDELS confidence, data quality
+            // 80+, LOW correlation between legs. Anything weaker is rejected
+            // and the day honestly reports NO QUALIFIED TICKET instead of a
+            // forced combination. Operators can still lower these floors
+            // explicitly (append-only, audited); the validation range below
+            // only rules out self-contradictory gates.
+            'min_confidence' => 75.0,
             'min_expected_value' => 0.02,
-            'max_correlation' => 'MEDIUM',
-            'min_data_quality' => 60,
+            'max_correlation' => 'LOW',
+            'min_data_quality' => 80,
             'min_liquidity' => null,
             'allowed_markets' => ['MATCH_RESULT', 'TOTAL_GOALS', 'BTTS', 'DOUBLE_CHANCE'],
             'allowed_leagues' => [],

@@ -169,7 +169,9 @@ class SportsCronService
             try {
                 $payload = SportsDataNormalizer::document($match['payload'] ?? null);
                 $matchArr = array_merge($match, ['externalId' => $match['external_id'], 'homeTeam' => $match['home_team'], 'awayTeam' => $match['away_team'], 'kickoff' => $match['kickoff_at'], 'context' => $payload['context'] ?? null, 'sourceTimestamp' => $match['source_timestamp']]);
-                $odds = $this->repo->latestOdds((int) $match['id'], 'TOTAL_GOALS', 'OVER_1_5');
+                // Any supported market counts: the recalc judges the newest stored
+                // price, not one hard-coded selection.
+                $odds = $this->repo->latestOdds((int) $match['id']);
                 $provider = $this->providerById($this->repo->listProviders(), (int) $match['provider_id']);
                 $reliability = 0.0;
                 if ($provider !== null) {

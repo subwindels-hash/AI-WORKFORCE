@@ -15,7 +15,7 @@ class ResultVerificationEngine
   if (empty($verified['verified'])) return ['status'=>'PENDING','reason'=>$verified['reason']??'RESULT_UNVERIFIED'];
   if (($verified['terminalStatus'] ?? '') === 'VOID') return ['status'=>'VOID','reason'=>'VERIFIED_VOID'];
   $home=(int)$verified['homeScore']; $away=(int)$verified['awayScore']; $total=$home+$away; $market=strtoupper((string)($selection['market']??'')); $pick=strtoupper((string)($selection['selection']??''));
-  if ($market==='TOTAL_GOALS' && $pick==='OVER_1_5') return ['status'=>$total>1?'WON':'LOST','reason'=>'VERIFIED_RESULT'];
+  if ($market==='TOTAL_GOALS' && ($totalsLine = PredictionEngine::totalsLine($pick)) !== null) { $over = $total > $totalsLine[0]; return ['status'=>(($totalsLine[1]==='OVER') ? $over : !$over)?'WON':'LOST','reason'=>'VERIFIED_RESULT']; }
   if ($market==='BTTS' && $pick==='YES') return ['status'=>($home>0 && $away>0)?'WON':'LOST','reason'=>'VERIFIED_RESULT'];
   if ($market==='MATCH_RESULT') {
    $won=($pick==='HOME' && $home>$away) || ($pick==='DRAW' && $home===$away) || ($pick==='AWAY' && $away>$home);

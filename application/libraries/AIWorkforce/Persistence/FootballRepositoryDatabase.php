@@ -985,7 +985,7 @@ class FootballRepositoryDatabase implements FootballRepository
      * DATA_UNAVAILABLE rather than as a price.
      *
      * @param list<string> $matchIds `providerCode:externalId`
-     * @return array<string,list<array{market:string,selection:string,decimalOdds:float,observedAt:?string}>>
+     * @return array<string,list<array{market:string,selection:string,decimalOdds:float,observedAt:?string,provider:string}>>
      */
     public function listMarketOdds(array $matchIds): array
     {
@@ -1020,11 +1020,19 @@ class FootballRepositoryDatabase implements FootballRepository
             foreach ($rows as $row) {
                 $external = $externalById[(int) $row['match_id']] ?? null;
                 if ($external === null) continue;
+                $market = trim((string) ($row['market'] ?? ''));
+                $selection = trim((string) ($row['selection'] ?? ''));
+                if ($market === '' || $selection === '') continue;
                 $price = is_numeric($row['decimal_odds'] ?? null) ? (float) $row['decimal_odds'] : null;
-                if ($price === null || $price <= 0) continue;
+                // Stored rows are re-validated on the way out: zero, negative
+                // and absurd prices are dropped here — a legacy row must never
+                // be shown as a price. The provider code this read already
+                // matched on travels with the row, so the board can name the
+                // feed behind every quote.
+                if ($price === null || !\AIWorkforce\Sports\OddsBounds::validDecimalOdds($price)) continue;
                 $key = $code === '' ? $external : $code . ':' . $external;
-                $out[$key][] = ['market' => (string) $row['market'], 'selection' => (string) $row['selection'],
-                    'decimalOdds' => $price, 'observedAt' => $row['observed_at'] ?? null];
+                $out[$key][] = ['market' => $market, 'selection' => $selection,
+                    'decimalOdds' => $price, 'observedAt' => $row['observed_at'] ?? null, 'provider' => (string) $code];
             }
         }
         return $out;

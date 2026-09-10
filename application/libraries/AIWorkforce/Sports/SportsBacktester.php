@@ -123,7 +123,11 @@ class SportsBacktester
             $evaluated++;
 
             $totalGoals = (int) $result['home_score'] + (int) $result['away_score'];
-            $outcome = ($candidate['market'] === 'TOTAL_GOALS' && $candidate['selection'] === 'OVER_1_5') ? ($totalGoals > 1 ? 1 : 0) : null;
+            $outcome = null;
+            if ($candidate['market'] === 'TOTAL_GOALS' && ($backtestLine = PredictionEngine::totalsLine((string) ($candidate['selection'] ?? ''))) !== null) {
+                $over = $totalGoals > $backtestLine[0];
+                $outcome = (($backtestLine[1] === 'OVER') ? $over : !$over) ? 1 : 0;
+            }
             if ($outcome === null) continue;
 
             $calRows[] = ['raw_probability' => $candidate['prediction']['rawModelProbability'] ?? null, 'calibrated_probability' => $candidate['prediction']['calibratedProbability'] ?? null, 'outcome' => $outcome];

@@ -33,6 +33,89 @@ $ticketDateShown = gmdate('m/d/Y');
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 
+<?php
+// Today's AI ticket hero — the focused daily view: status, headline numbers,
+// selections, approval. Everything else on this page stays as the
+// history/details layer underneath.
+$heroRun = $todayRun ?? null;
+$heroTicket = $todayTicket ?? null;
+$heroSelections = $todaySelections ?? [];
+$heroDate = isset($todayIso) ? gmdate('m/d/Y', (int) strtotime((string) $todayIso . ' 00:00:00 UTC')) : $ticketDateShown;
+$heroStatus = 'NOT GENERATED';
+$heroBadge = 'b-gray';
+if ($heroTicket !== null) {
+    $heroStatus = ((string) ($heroTicket['approval_status'] ?? '') === 'PENDING_USER_APPROVAL') ? 'READY — AWAITING APPROVAL' : (string) ($heroTicket['approval_status'] ?? 'READY');
+    $heroBadge = 'b-violet';
+} elseif (is_array($heroRun)) {
+    $runStatus = (string) ($heroRun['status'] ?? '');
+    if ($runStatus === 'NO_QUALIFIED_TICKET') { $heroStatus = 'NO QUALIFIED TICKET'; $heroBadge = 'b-red'; }
+    elseif ($runStatus !== '') { $heroStatus = $runStatus; $heroBadge = 'b-gray'; }
+}
+$heroMarketLabel = function (string $market, string $selection): string {
+    static $labels = [
+        'MATCH_RESULT:HOME' => 'Home Win', 'MATCH_RESULT:DRAW' => 'Draw', 'MATCH_RESULT:AWAY' => 'Away Win',
+        'DOUBLE_CHANCE:HOME_OR_DRAW' => 'Double Chance (Home/Draw)', 'DOUBLE_CHANCE:AWAY_OR_DRAW' => 'Double Chance (Away/Draw)', 'DOUBLE_CHANCE:HOME_OR_AWAY' => 'Double Chance (Home/Away)',
+        'TOTAL_GOALS:OVER_1_5' => 'Over 1.5 Goals', 'TOTAL_GOALS:OVER_2_5' => 'Over 2.5 Goals', 'TOTAL_GOALS:OVER_3_5' => 'Over 3.5 Goals',
+        'TOTAL_GOALS:UNDER_2_5' => 'Under 2.5 Goals', 'TOTAL_GOALS:UNDER_3_5' => 'Under 3.5 Goals',
+        'BTTS:YES' => 'Both Teams To Score',
+    ];
+    return $labels[$market . ':' . $selection] ?? ($market . ' / ' . $selection);
+};
+?>
+<div class="panel" style="margin-bottom:16px;border-color:var(--violet,#6d28d9)">
+  <h3>AI Daily Ticket <span class="dim mono" style="font-weight:400;font-size:12px"><?= e((string) $heroDate) ?></span></h3>
+  <div class="body" style="padding-top:12px">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <span style="font-size:12px" class="dim">Status:</span>
+      <span class="badge <?= $heroBadge ?>" style="font-size:13px"><?= e($heroStatus) ?></span>
+      <?php if ($heroTicket !== null): ?>
+        <span class="dim mono" style="font-size:12px">Total Odds: <b><?= e(number_format((float) ($heroTicket['total_odds'] ?? 0), 2)) ?></b></span>
+        <span class="dim mono" style="font-size:12px">Selections: <b><?= (int) ($heroTicket['selection_count'] ?? count($heroSelections)) ?></b></span>
+        <span class="dim mono" style="font-size:12px">Overall Confidence: <b><?= ($heroTicket['confidence'] ?? null) !== null ? e(number_format((float) $heroTicket['confidence'], 0)) . '%' : '—' ?></b></span>
+        <span class="dim mono" style="font-size:12px">Risk: <b><?= e((string) ($heroTicket['risk'] ?? '—')) ?></b></span>
+      <?php endif; ?>
+    </div>
+    <?php if ($heroTicket !== null && !empty($heroSelections)): ?>
+      <div class="table-scroll">
+        <table class="tbl">
+          <thead><tr><th>Match</th><th>Market</th><th class="num">Odds</th><th class="num">Confidence</th></tr></thead>
+          <tbody>
+            <?php foreach ($heroSelections as $sel): ?>
+              <tr>
+                <td style="font-weight:700"><?= e(trim((string) (($sel['home_team'] ?? '') . ' vs ' . ($sel['away_team'] ?? '')))) ?></td>
+                <td><?= e($heroMarketLabel((string) ($sel['market'] ?? ''), (string) ($sel['selection'] ?? ''))) ?></td>
+                <td class="num mono"><?= e(number_format((float) ($sel['odds'] ?? 0), 2)) ?></td>
+                <td class="num"><?= ($sel['confidence'] ?? null) !== null ? e(number_format((float) $sel['confidence'], 0)) . '%' : '—' ?></td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+      <?php if ((string) ($heroTicket['approval_status'] ?? '') === 'PENDING_USER_APPROVAL'): ?>
+        <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+          <?php if (!empty($caps['approve'])): ?>
+            <form method="post" action="/sports/<?= e((string) $heroTicket['id']) ?>/decide" style="display:inline">
+              <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><input type="hidden" name="approve" value="1"><button class="btn small primary">Approve ticket</button>
+            </form>
+            <form method="post" action="/sports/<?= e((string) $heroTicket['id']) ?>/decide" style="display:inline" onsubmit="return confirm('Reject this record?')">
+              <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><input type="hidden" name="approve" value="0"><button class="btn small danger">Reject</button>
+            </form>
+          <?php else: ?>
+            <span class="dim" style="font-size:11px">Approval requires the sports.approve permission. Analysis only — no real-money bets are placed.</span>
+          <?php endif; ?>
+        </div>
+      <?php endif; ?>
+    <?php elseif ($heroStatus === 'NO QUALIFIED TICKET'): ?>
+      <p style="margin:0 0 6px;font-weight:700">Today&apos;s available matches did not meet the configured prediction requirements.</p>
+      <?php if (is_array($heroRun) && trim((string) ($heroRun['message'] ?? '')) !== ''): ?>
+        <p class="dim" style="margin:0;font-size:12px"><?= e((string) $heroRun['message']) ?></p>
+      <?php endif; ?>
+    <?php else: ?>
+      <p class="dim" style="margin:0">No ticket generated for today yet. Select <b>Odds Prediction Ticket</b> above to build one from stored data.</p>
+    <?php endif; ?>
+  </div>
+</div>
+
 <div class="stack">
     <p class="dim" style="margin:0 0 12px;font-size:12px">Ticket P/L is below; prediction accuracy, Brier, ECE and the 30-day settlement window are reported once, on <a href="/football">Football Intelligence</a>.<?php if (!empty($perf['demoBanner'])): ?> <b><?= e((string) $perf['demoBanner']) ?></b><?php endif; ?></p>
   <div class="panel">

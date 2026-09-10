@@ -13,7 +13,9 @@ namespace AIWorkforce\Sports;
  *   expectedValue       model probability × market odds − 1
  *
  * Nothing here is ever estimated: without a real market price (> 1.0) there
- * is no value assessment at all (ODDS_UNAVAILABLE), never a fabricated one.
+ * is no value assessment at all (ODDS_UNAVAILABLE), never a fabricated one —
+ * and a price that fails plausibility (non-finite, or above the market's
+ * ceiling) is rejected as UNREALISTIC_ODDS rather than priced.
  */
 class ValueEngine
 {
@@ -22,6 +24,13 @@ class ValueEngine
         if (($prediction['decision'] ?? '') !== 'PREDICTION_READY') return ['qualified' => false, 'reason' => $prediction['reason'] ?? 'NO_PREDICTION', 'missingFields' => $prediction['missingFields'] ?? []];
         $decimal = (float) ($odds['decimalOdds'] ?? $odds['decimal_odds'] ?? 0);
         if ($decimal <= 1) return ['qualified' => false, 'reason' => 'ODDS_UNAVAILABLE'];
+        // A corrupted price (NaN/INF from bad arithmetic, or an absurd decimal
+        // that slipped past ingestion) would manufacture expected value out of
+        // nothing — p × 9999 − 1 is always "positive". Reject it as what it
+        // is instead of letting it qualify a ticket leg.
+        if (!is_finite($decimal) || $decimal > OddsBounds::maxFor(isset($odds['market']) ? (string) $odds['market'] : null)) {
+            return ['qualified' => false, 'reason' => 'UNREALISTIC_ODDS', 'marketOdds' => $decimal, 'odds' => $decimal];
+        }
         $implied = 1 / $decimal;
         $calibrated = (float) $prediction['calibratedProbability'];
         $fair = $calibrated > 0 ? 1 / $calibrated : null;

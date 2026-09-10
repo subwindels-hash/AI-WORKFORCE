@@ -32,7 +32,7 @@ function fx_daily_provider(array $oddsByExt): SportsDataProvider
         $fixtures[] = [
             'externalId' => 'f' . $i,
             'homeTeam' => 'Home' . $i, 'awayTeam' => 'Away' . $i,
-            'competition' => 'Test League',
+            'competition' => 'Test League ' . $i,
             'kickoff' => gmdate('Y-m-d\TH:i:00\+00:00', strtotime('+1 day ' . (10 + $i) . ':00:00')),
             'status' => 'SCHEDULED',
             'context' => [
@@ -94,7 +94,7 @@ test('daily ticket E2E: qualified ticket awaits user approval', function () {
     assert_equals('PENDING_USER_APPROVAL', $ticket['approval_status']);
     assert_true($ticket['total_odds'] >= 5.0 && $ticket['total_odds'] <= 8.0, 'odds inside configured range');
     assert_true($ticket['selection_count'] >= 1 && $ticket['selection_count'] <= 5);
-    assert_true($ticket['confidence'] >= 30.0, 'min confidence enforced');
+    assert_true($ticket['confidence'] >= 75.0, '75%+ minimum confidence enforced on the ticket');
     assert_equals(10.0, (float) $ticket['stake']);
     $daily = $repo->findDailyTicket($date);
     assert_equals('PENDING_USER_APPROVAL', $daily['status']);
@@ -266,7 +266,7 @@ function fx_daily_round_provider(bool $roundFails): SportsDataProvider
         $fixtures[] = [
             'externalId' => 'f' . $i,
             'homeTeam' => 'Home' . $i, 'awayTeam' => 'Away' . $i,
-            'competition' => 'Test League',
+            'competition' => 'Test League ' . $i,
             'kickoff' => gmdate('Y-m-d\TH:i:00\+00:00', strtotime('+1 day ' . (10 + $i) . ':00:00')),
             'status' => 'SCHEDULED',
             'roundId' => 'r1',
