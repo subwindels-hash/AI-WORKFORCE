@@ -113,6 +113,29 @@ class SportsDataNormalizer
     }
 
     /**
+     * Read the stored document behind a persisted row's `payload` column.
+     *
+     * Whether the caller gets back the decoded document or the raw JSON text
+     * depends on which repository read produced the row (findMatchById /
+     * listMatches decode, a verbatim row read does not) and on the storage
+     * engine — it is the same data in two shapes. `is_array($row['payload'])`
+     * alone therefore silently reads as "nothing stored" for every text row,
+     * which is how a previous run's verified recent form was thrown away and
+     * the daily run went back to INSUFFICIENT_DATA. Both shapes are accepted;
+     * anything that is not a JSON object is NO document, and nothing in it is
+     * invented.
+     */
+    public static function document(mixed $payload): array
+    {
+        if (is_array($payload)) return $payload;
+        if (is_string($payload) && trim($payload) !== '') {
+            $decoded = json_decode($payload, true);
+            if (is_array($decoded)) return $decoded;
+        }
+        return [];
+    }
+
+    /**
      * Validates optional verified match context. Missing or malformed context
      * is dropped (returned as null), never guessed or invented.
      */

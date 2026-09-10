@@ -241,9 +241,10 @@ class SportsSyncService
         $new = is_array($match['live'] ?? null) ? $match['live'] : [];
         if (!isset($new['homeScore'], $new['awayScore'])) return [];    // provider stated no score
         if ($existing === null) return [];                              // first observation — nothing to compare
-        $payload = $existing['payload'] ?? null;
-        if (is_string($payload)) $payload = json_decode($payload, true);
-        $old = is_array($payload) && is_array($payload['live'] ?? null) ? $payload['live'] : [];
+        // Same document, either shape: the repository may hand the stored
+        // payload back decoded or as the raw JSON text of its column.
+        $payload = SportsDataNormalizer::document($existing['payload'] ?? null);
+        $old = is_array($payload['live'] ?? null) ? $payload['live'] : [];
         if (!isset($old['homeScore'], $old['awayScore'])) return [];    // no previous score — cannot call it a goal
         $newTotal = (int) $new['homeScore'] + (int) $new['awayScore'];
         $oldTotal = (int) $old['homeScore'] + (int) $old['awayScore'];

@@ -103,7 +103,7 @@ class SportsBacktester
             if ($odds['decimalOdds'] < $oddsMin || $odds['decimalOdds'] > $oddsMax) { $skipped++; continue; }
 
             // Quality recomputed at the historical point in time.
-            $payload = is_array($match['payload'] ?? null) ? $match['payload'] : [];
+            $payload = SportsDataNormalizer::document($match['payload'] ?? null);
             $matchArr = array_merge($match, ['externalId' => $match['external_id'], 'homeTeam' => $match['home_team'], 'awayTeam' => $match['away_team'], 'kickoff' => $match['kickoff_at'], 'context' => $payload['context'] ?? null, 'sourceTimestamp' => $match['source_timestamp']]);
             $quality = $this->quality->assess($matchArr, [
                 'oddsAvailable' => true, 'recentFormAvailable' => !empty($matchArr['context']['recentForm']),

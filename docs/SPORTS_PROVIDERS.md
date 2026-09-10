@@ -444,7 +444,14 @@ Provider fixture responses never carry form, so the `FormResolver` fetches it:
   and starved the 30-lookup budget after ~15 fixtures (the "14 with-form"
   dead end of the 2026-09-10 run). Per-team statistics are now the
   **fallback** for teams the table does not cover (cup sides, mid-season
-  moves, no games yet).
+  moves, no games yet). A fixture whose provider row stated **no season**
+  (`league.season` is null for cups and friendlies) is asked with the season
+  that provider's own endpoint requires: the current year for api-football
+  (whose `/standings` refuses an empty `season=` — those fixtures were
+  rejected `INSUFFICIENT_DATA` even though their table exists), and **no**
+  season for TheSportsDB and SportMonks, which read it as a `2025-2026` range
+  or an internal id where a bare year would match nothing. A team the answered
+  table does not carry stays unresolved; no number is ever extrapolated.
 * **The lookup budget is spent where a ticket can still be won.** The daily
   ticket engine screens fixture eligibility *before* enrichment, so
   `WINDELS_SPORTS_FORM_LOOKUPS` (default 30) is never burned on matches that
@@ -454,7 +461,13 @@ Provider fixture responses never carry form, so the `FormResolver` fetches it:
   fixture by an earlier run is reused while it is inside
   `WINDELS_SPORTS_FORM_MAX_AGE` (default 7 days), keeping its original
   `source` and `timestamp` on the decision record. Older form is dropped and
-  re-read; form without a timestamp is never reused.
+  re-read; form without a timestamp is never reused. The stored `payload`
+  column is read in **either** shape (decoded document or raw JSON text) —
+  `SportsDataNormalizer::document()` — because a repository that hands back
+  the text of the column while the caller expects an array reads as "no
+  stored form" and re-buys every verified reading until the daily quota is
+  gone (case 137; the sports repository decodes `findMatch` like every other
+  row reader for the same reason).
 * **Observability**: the funnel carries `formEnrichmentCandidates` (eligible
   fixtures offered to the resolver), `fixturesWithRecentForm`,
   `fixturesWithCarriedForwardForm`, and the resolver's own stats (`lookupsUsed`

@@ -475,7 +475,7 @@ class PredictionPipeline
     private function oddsMovement(?array $odds): ?float
     {
         if ($odds === null) return null;
-        $payload = is_array($odds['payload'] ?? null) ? $odds['payload'] : [];
+        $payload = SportsDataNormalizer::document($odds['payload'] ?? null);
         $opening = $payload['openingDecimalOdds'] ?? $odds['openingDecimalOdds'] ?? null;
         $current = (float) ($odds['decimalOdds'] ?? $odds['decimal_odds'] ?? 0);
         if (!is_numeric($opening) || (float) $opening <= 0) return null;

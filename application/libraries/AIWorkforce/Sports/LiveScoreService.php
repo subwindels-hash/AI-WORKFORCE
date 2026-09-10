@@ -182,7 +182,7 @@ class LiveScoreService
             if ($now - $updatedTs > $threshold) {
                 continue;
             }
-            $payload = is_array($row['payload'] ?? null) ? $row['payload'] : [];
+            $payload = SportsDataNormalizer::document($row['payload'] ?? null);
             $live = is_array($payload['live'] ?? null) ? $payload['live'] : [];
             $matches[] = [
                 'id' => (int) ($row['id'] ?? 0),

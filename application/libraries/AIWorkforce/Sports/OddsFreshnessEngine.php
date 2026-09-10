@@ -136,7 +136,7 @@ class OddsFreshnessEngine
         foreach (['oddsSource', 'provider', 'source'] as $key) {
             if (isset($odds[$key]) && is_string($odds[$key]) && trim($odds[$key]) !== '') return trim($odds[$key]);
         }
-        $payload = is_array($odds['payload'] ?? null) ? $odds['payload'] : [];
+        $payload = SportsDataNormalizer::document($odds['payload'] ?? null);
         foreach (['provider', 'source'] as $key) {
             if (isset($payload[$key]) && is_string($payload[$key]) && trim($payload[$key]) !== '') return trim($payload[$key]);
         }
