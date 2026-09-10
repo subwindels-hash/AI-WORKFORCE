@@ -32,7 +32,7 @@ CREATE INDEX IF NOT EXISTS "idx_sports_config_created" ON "sports_configurations
 CREATE TABLE IF NOT EXISTS "sports_calibrations" (
   "id" SERIAL PRIMARY KEY,
   "model_version_id" INTEGER NOT NULL,
-  "method" VARCHAR(16) NOT NULL DEFAULT 'platt',
+  "method" VARCHAR(32) NOT NULL DEFAULT 'platt',
   "intercept" DECIMAL(8,6) NOT NULL,
   "slope" DECIMAL(8,6) NOT NULL,
   "brier" DECIMAL(8,6) NULL,

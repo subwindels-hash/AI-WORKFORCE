@@ -183,9 +183,9 @@ CREATE TABLE IF NOT EXISTS paper_deployments (
 
 CREATE TABLE IF NOT EXISTS audit_logs (
   id      INT AUTO_INCREMENT PRIMARY KEY,
-  type    VARCHAR(32) NOT NULL,
+  type    VARCHAR(64) NOT NULL,
   at      VARCHAR(32) NOT NULL,
-  actor   VARCHAR(8)  NOT NULL DEFAULT 'system',
+  actor   VARCHAR(64) NOT NULL DEFAULT 'system',
   summary VARCHAR(500) NOT NULL,
   detail  LONGTEXT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -393,7 +393,7 @@ CREATE TABLE IF NOT EXISTS sports_configurations (
 CREATE TABLE IF NOT EXISTS sports_calibrations (
   id INT AUTO_INCREMENT PRIMARY KEY,
   model_version_id INT NOT NULL,
-  method VARCHAR(16) NOT NULL DEFAULT 'platt',
+  method VARCHAR(32) NOT NULL DEFAULT 'platt',
   intercept DECIMAL(8,6) NOT NULL,
   slope DECIMAL(8,6) NOT NULL,
   brier DECIMAL(8,6) NULL,

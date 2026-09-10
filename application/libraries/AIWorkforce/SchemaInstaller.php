@@ -74,7 +74,7 @@ final class SchemaInstaller
      * Persistent cache version for the request-time schema guard. Bump whenever
      * idempotent upgrade logic changes without a matching SQL-file mtime change.
      */
-    private const STAMP_VERSION = '2026-09-10-football-perf-v1';
+    private const STAMP_VERSION = '2026-09-10-sports-column-width-v1';
 
     public static function databaseDir(): string
     {
@@ -218,6 +218,36 @@ final class SchemaInstaller
         ];
         foreach ($alters as $sql) {
             try { $exec($sql); } catch (\Throwable $e) { /* column already exists */ }
+        }
+
+        // Column-width contract for the sports calibration + audit paths.
+        // sports_calibrations.method was VARCHAR(16): the 18-character
+        // 'identity-bootstrap' marker was silently truncated (or rejected in
+        // strict mode), so the engine's cold-start bootstrap row could never
+        // be read back and prediction stayed locked out. audit_logs.actor
+        // was VARCHAR(8) and type VARCHAR(32): long actors such as
+        // 'system:daily-ticket' and dynamic transition types such as
+        // 'AUTOMATIC_PROTECTION_AUTOMATIC_PAUSED' (35 chars) failed the
+        // insert, losing the audit trail the engines depend on.
+        // The CREATE statements now ship 32/64/64; these ALTERs repair
+        // existing MySQL/PostgreSQL databases and are harmless on re-runs
+        // (MODIFY to the same definition is a no-op). SQLite stores these as
+        // TEXT and enforces no length, so there is nothing to widen there.
+        if (!$sqlite) {
+            $widthFixes = $pgsql
+                ? [
+                    'ALTER TABLE sports_calibrations ALTER COLUMN "method" TYPE VARCHAR(32)',
+                    'ALTER TABLE audit_logs ALTER COLUMN "actor" TYPE VARCHAR(64)',
+                    'ALTER TABLE audit_logs ALTER COLUMN "type" TYPE VARCHAR(64)',
+                ]
+                : [
+                    "ALTER TABLE sports_calibrations MODIFY method VARCHAR(32) NOT NULL DEFAULT 'platt'",
+                    "ALTER TABLE audit_logs MODIFY actor VARCHAR(64) NOT NULL DEFAULT 'system'",
+                    'ALTER TABLE audit_logs MODIFY type VARCHAR(64) NOT NULL',
+                ];
+            foreach ($widthFixes as $sql) {
+                try { $exec($sql); } catch (\Throwable $e) { /* already wide / table missing on partial installs */ }
+            }
         }
 
         // Lower the built-in sports ticket floors from 70% confidence / 75

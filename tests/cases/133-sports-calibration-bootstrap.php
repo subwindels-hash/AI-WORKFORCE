@@ -206,6 +206,124 @@ test('a veto-blocked day stays retryable without a config bump', function () {
     assert_not_equals('DUPLICATE_SKIPPED', $second['status'], 'a blocked day must stay retryable once the operator fixes it');
 });
 
+// ── The 2026-09-10 deployed lock-out: a narrow sports_calibrations.method
+// column (VARCHAR(16)) truncated the old 18-char 'identity-bootstrap'
+// marker, so the engine never recognized its own bootstrap row and told
+// the operator to run the same broken bootstrap manually. The marker now
+// fits the narrowest deployed column, identity rows are recognised by
+// prefix, and every write is verified against a read-back. ──────────────
+
+test('the identity marker fits the narrowest deployed method column', function () {
+    assert_true(strlen(CalibrationBootstrap::method()) <= 16,
+        'the marker must fit the pre-widening VARCHAR(16) column that live MySQL databases still have');
+    assert_true(CalibrationBootstrap::isIdentityMethod(CalibrationBootstrap::method()), 'the marker recognizes itself');
+    assert_false(CalibrationBootstrap::isIdentityMethod('platt'), 'fitted rows are never mistaken for the bootstrap');
+    // Legacy shapes written by the 18-char marker must be recognized.
+    assert_true(CalibrationBootstrap::isIdentityMethod('identity-bootstrap'), 'the old full marker is recognized');
+    assert_true(CalibrationBootstrap::isIdentityMethod('identity-bootstr'), 'the old truncated (VARCHAR(16)) marker is recognized');
+});
+
+test('a legacy truncated identity row is recognised, reused and approved', function () {
+    [$repo, $audit, $service] = cb_stack();
+    $modelId = $repo->ensureModelVersion(['modelName' => PredictionEngine::MODEL_NAME, 'modelVersion' => PredictionEngine::MODEL_VERSION, 'featureVersion' => FeatureEngineeringEngine::VERSION]);
+    // Exactly what a non-strict MySQL install stored when the engine
+    // bootstrapped with the old 18-char marker into a 16-char column.
+    $legacyId = $repo->saveCalibration([
+        'model_version_id' => $modelId, 'method' => 'identity-bootstr', 'intercept' => 0.0, 'slope' => 1.0,
+        'samples' => 0, 'status' => 'PENDING', 'created_by' => 'system:daily-ticket', 'created_at' => gmdate('c'),
+    ]);
+
+    $run = $service->runDaily(gmdate('Y-m-d'), 'daily-ticket:' . gmdate('Y-m-d') . ':legacy-truncated');
+    assert_equals('IDENTITY_AUTO_APPROVED', $run['diagnostics']['calibrationBootstrap'], 'the truncated row is the bootstrap — reuse and heal it');
+    assert_equals(0, (int) ($run['rejectionSummary']['MODEL_NOT_CALIBRATED'] ?? 0), 'prediction unblocks behind the legacy row');
+    $approved = $repo->listCalibrations(null, 'APPROVED');
+    assert_equals(1, count($approved), 'no duplicate bootstrap row was created next to the legacy one');
+    assert_equals($legacyId, (int) $approved[0]['id'], 'the legacy row is the one approved');
+});
+
+test('a bootstrap that does not survive the round-trip reports an honest failure', function () {
+    $repo = new SportsRepositoryStub();
+    $audit = cb_audit();
+    // Simulate the deployed failure: the insert is swallowed (silently
+    // failing driver / too-narrow column in strict mode) — an id comes back
+    // for a row that does not exist.
+    $broken = new class($repo) extends SportsRepositoryStub {
+        public function __construct(private SportsRepositoryStub $inner) {}
+        public function saveCalibration(array $c): int { return 999999; }
+        public function findCalibration(int $id): ?array { return $this->inner->findCalibration($id); }
+        public function listCalibrations(?int $m = null, ?string $s = null, int $l = 50): array { return $this->inner->listCalibrations($m, $s, $l); }
+        public function activeCalibration(int $m): ?array { return $this->inner->activeCalibration($m); }
+        public function ensureModelVersion(array $m): int { return $this->inner->ensureModelVersion($m); }
+        public function updateCalibrationStatus(int $id, string $status, ?string $actor = null): void { $this->inner->updateCalibrationStatus($id, $status, $actor); }
+    };
+    $result = (new CalibrationBootstrap($broken, $audit))->bootstrapIdentity('admin-1');
+    assert_true(empty($result['ok']), 'a phantom insert id is never reported as success');
+    assert_equals('CALIBRATION_PERSIST_FAILED', $result['reason'] ?? '');
+    $types = array_map(fn($e) => $e['type'], $audit->events);
+    assert_in_array('SPORTS_CALIBRATION_PERSIST_FAIL', $types, 'the failure is audited');
+    assert_false(in_array('SPORTS_CALIBRATION_BOOTSTRAPPED', $types, true), 'no success event for a failed write');
+});
+
+test('the run says the bootstrap failed to persist — not the un-actionable manual hint', function () {
+    $repo = new class extends SportsRepositoryStub {
+        public function saveCalibration(array $c): int { return 999999; } // insert swallowed
+    };
+    $audit = cb_audit();
+    $providers = new SportsProviderManager();
+    $providers->register(cb_provider());
+    $config = new ConfigurationService($repo, $audit);
+    $pipeline = new PredictionPipeline(new MatchIntelligenceEngine(new OddsFreshnessEngine()), new FeatureEngineeringEngine(), new PredictionEngine(), new ValueEngine(), new RiskEngine(), new CorrelationEngine(), new ConfidenceEngine());
+    $service = new DailyTicketService($repo, $audit, $providers, $config, new DataQualityEngine(), $pipeline, new TicketOptimizer(new CorrelationEngine()), new TicketGovernance($repo, $audit, new CorrelationEngine()), new DecisionRecorder($repo, $audit));
+
+    $run = $service->runDaily(gmdate('Y-m-d'), 'daily-ticket:' . gmdate('Y-m-d') . ':persist-fail');
+    assert_equals('NO_QUALIFIED_TICKET', $run['status']);
+    assert_equals('CALIBRATION_PERSIST_FAILED', (string) $run['diagnostics']['calibrationBootstrap']);
+    assert_contains('did not survive the database round-trip', $run['message'], 'the message names the schema/persistence failure');
+    assert_contains('CALIBRATION_PERSIST_FAILED', $run['message'], 'and carries the machine-readable state');
+    assert_false(str_contains($run['message'], 'bootstrap-identity, then approve it'), 'no hint to repeat the call that just failed');
+    assert_equals(3, (int) ($run['rejectionSummary']['MODEL_NOT_CALIBRATED'] ?? 0), 'fixtures are still honestly blocked, never predicted on a phantom calibration');
+});
+
+// ── Configuration rows are append-only and may predate a column; the
+// stored row must never read as two different truths at two call sites
+// (that asymmetry is the hard lock-out variant of the 2026-09-10 alert). ──
+
+test('a legacy configuration row missing require_calibration still runs the cold-start break', function () {
+    [$repo, $audit, $service] = cb_stack();
+    // A v1 row as a pre-require_calibration schema would have stored it:
+    // every column of its time, none of the one added later.
+    $legacy = ConfigurationService::defaults();
+    unset($legacy['require_calibration']);
+    $legacy['version'] = 1;
+    $legacy['updated_by'] = 'admin-1';
+    $legacy['reason'] = 'row authored before the require_calibration column existed';
+    $repo->saveConfiguration($legacy);
+
+    $configService = new ConfigurationService($repo, $audit);
+    $active = $configService->active();
+    assert_equals(1, (int) $active['require_calibration'], 'the absent key arrives as the documented default, never as absent');
+    assert_equals(1, $active['version'], 'the stored row still wins wherever it has a value');
+    $run = $service->runDaily(gmdate('Y-m-d'), 'daily-ticket:' . gmdate('Y-m-d') . ':legacy-config');
+    assert_equals('IDENTITY_AUTO_APPROVED', $run['diagnostics']['calibrationBootstrap'], 'a defaulted-required calibration is bootstrapped like an explicit one');
+    assert_equals(0, (int) ($run['rejectionSummary']['MODEL_NOT_CALIBRATED'] ?? 0), 'nothing is demanded that the engine refused to provide');
+    assert_equals(3, (int) $run['diagnostics']['predictionsGenerated'], 'the day can produce predictions again');
+});
+
+test('a legacy row with require_calibration explicitly off skips the bootstrap and still predicts', function () {
+    [$repo, $audit, $service] = cb_stack();
+    $legacy = ConfigurationService::defaults();
+    $legacy['require_calibration'] = '0'; // how MySQL hands back a tinyint
+    $legacy['version'] = 2;
+    $legacy['updated_by'] = 'admin-1';
+    $repo->saveConfiguration($legacy);
+
+    $run = $service->runDaily(gmdate('Y-m-d'), 'daily-ticket:' . gmdate('Y-m-d') . ':require-off');
+    assert_equals('', (string) ($run['diagnostics']['calibrationBootstrap'] ?? ''), 'an explicit veto by configuration is honoured — no bootstrap, no auto-approval');
+    assert_equals(0, (int) ($run['rejectionSummary']['MODEL_NOT_CALIBRATED'] ?? 0), 'enforcement is off, exactly as configured');
+    assert_equals(3, (int) $run['diagnostics']['predictionsGenerated'], 'predictions run through the raw-model identity mapping');
+    assert_equals(0, count($repo->listCalibrations(null, 'APPROVED')), 'no calibration row was created behind the operator');
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // 3. Form-enrichment observability in the funnel
 // ═══════════════════════════════════════════════════════════════════════════
@@ -253,6 +371,58 @@ test('FormResolver stats expose budget skips and lookup failures', function () {
     assert_true((int) $stats2['lookupFailures'] >= 1, 'lookup failures are counted');
     assert_true(empty($enriched2[0]['context']['recentForm']));
     assert_equals(true, (bool) $stats2['providerCapable']);
+});
+
+test('partial form coverage names the exhausted lookup budget in the message', function () {
+    // The 2026-09-10 alert shape: 95 eligible fixtures, a 30-lookup budget,
+    // 27 with form — and the old message said nothing about form because
+    // SOME fixtures had it. Partial coverage driven by a systematic cause
+    // must be named: it is what turns the day into INSUFFICIENT_DATA.
+    $repo = new SportsRepositoryStub();
+    $audit = cb_audit();
+    $formProvider = new class implements SportsDataProvider {
+        public function id(): string { return 'cb-form'; }
+        public function health(): array { return ['status' => 'ONLINE', 'reliability' => 0.9]; }
+        public function fixtures(array $q): array {
+            $mk = fn(string $x, string $league, string $h, string $a, string $hour) => [
+                'externalId' => $x, 'homeTeam' => 'Home' . $x, 'awayTeam' => 'Away' . $x,
+                'competition' => 'Budget League ' . $league,
+                'kickoff' => gmdate('Y-m-d\\TH:i:00\\+00:00', strtotime('+1 day ' . $hour)),
+                'status' => 'SCHEDULED',
+                'homeTeamId' => $h, 'awayTeamId' => $a, 'leagueId' => $league, 'season' => '2026',
+            ];
+            return [$mk('b0', '39', '33', '34', '12:00'), $mk('b1', '40', '51', '52', '13:00')];
+        }
+        public function odds(string $e): array
+        {
+            return [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.9, 'observedAt' => gmdate('c')]];
+        }
+        public function results(string $e): array { return []; }
+        /** League 39 only — and a ONE-lookup budget means league 40 is never asked. */
+        public function standings(string $leagueId, string $season): array
+        {
+            if ($leagueId !== '39') return [];
+            return [
+                ['teamId' => '33', 'played' => 10, 'goalsFor' => 18, 'goalsAgainst' => 9],
+                ['teamId' => '34', 'played' => 10, 'goalsFor' => 12, 'goalsAgainst' => 11],
+            ];
+        }
+    };
+    $providers = new SportsProviderManager();
+    $providers->register($formProvider);
+    $config = new ConfigurationService($repo, $audit);
+    $pipeline = new PredictionPipeline(new MatchIntelligenceEngine(new OddsFreshnessEngine()), new FeatureEngineeringEngine(), new PredictionEngine(), new ValueEngine(), new RiskEngine(), new CorrelationEngine(), new ConfidenceEngine());
+    $service = new DailyTicketService($repo, $audit, $providers, $config, new DataQualityEngine(), $pipeline, new TicketOptimizer(new CorrelationEngine()), new TicketGovernance($repo, $audit, new CorrelationEngine()), new DecisionRecorder($repo, $audit), new FormResolver(1));
+
+    $run = $service->runDaily(gmdate('Y-m-d'), 'daily-ticket:' . gmdate('Y-m-d') . ':partial-form');
+    $diag = $run['diagnostics'];
+    assert_equals(2, (int) $diag['formEnrichmentCandidates']);
+    assert_equals(1, (int) $diag['fixturesWithRecentForm'], 'only the first league was affordable within the budget');
+    assert_equals(2, (int) $diag['formResolver']['budgetSkips']);
+    assert_equals(1, (int) ($run['rejectionSummary']['INSUFFICIENT_DATA'] ?? 0), 'the unfunded fixture is an honest INSUFFICIENT_DATA rejection');
+    assert_contains('resolved for only 1 of 2 ticket-eligible fixtures', $run['message'], 'the partial coverage is stated with its counts');
+    assert_contains('WINDELS_SPORTS_FORM_LOOKUPS = 1', $run['message'], 'the message names the budget that starved the rest');
+    assert_contains('form lookups skipped at the 1-lookup budget', $run['message'], 'and the compact funnel carries it too');
 });
 
 test('no-form runs explain themselves in the stored message', function () {

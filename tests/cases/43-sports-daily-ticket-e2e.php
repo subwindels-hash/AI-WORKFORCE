@@ -141,7 +141,10 @@ test('daily ticket E2E: a fresh install breaks the calibration cold start itself
     assert_equals(5, (int) $run['diagnostics']['predictionsGenerated'], 'all five fixtures predict');
     $approved = $repo->listCalibrations(null, 'APPROVED');
     assert_equals(1, count($approved), 'exactly one approved calibration (the bootstrap)');
-    assert_equals('identity-bootstrap', (string) $approved[0]['method']);
+    assert_true(
+        \AIWorkforce\Sports\CalibrationBootstrap::isIdentityMethod((string) $approved[0]['method']),
+        'the approved row is the identity bootstrap (recognised by prefix, so legacy long/truncated markers also pass)'
+    );
     assert_equals('system:daily-ticket', (string) $approved[0]['approved_by'], 'the system actor is recorded');
     $types = array_map(fn($e) => $e['type'], $audit->events);
     assert_true(in_array('SPORTS_CALIBRATION_BOOTSTRAPPED', $types, true));

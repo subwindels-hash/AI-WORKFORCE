@@ -492,6 +492,7 @@ class Api_sports extends Api_controller
         if (empty($result['ok'])) {
             $reason = (string) ($result['reason'] ?? 'UNKNOWN');
             if ($reason === 'APPROVED_CALIBRATION_EXISTS') return $this->jsonError('an APPROVED calibration already exists for this model version — nothing to bootstrap', 409);
+            if ($reason === 'CALIBRATION_PERSIST_FAILED') return $this->jsonError('the identity calibration row did not survive the database round-trip — check the sports_calibrations table (the method column must fit the bootstrap marker) and the DB error log', 500);
             // IDENTITY_ALREADY_PENDING — idempotent: report the existing row.
             $this->json(['bootstrapped' => false, 'reason' => $reason, 'calibration' => $this->AIWorkforce_model->sports->findCalibration((int) ($result['calibrationId'] ?? 0))]);
             return;
