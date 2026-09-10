@@ -156,7 +156,7 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
     <h2>TODAY'S FOOTBALL PREDICTIONS</h2>
     <p>
       <?= e((string) ($board['dateLabel'] ?? $date ?? gmdate('Y-m-d'))) ?> · fixtures, probabilities and scores reported from the connected football data provider only.
-      A match is shown as a prediction only when its data quality clears the threshold — otherwise its state is reported instead.
+      Every analyzed match carries a usable odds prediction; thinner evidence is labelled and capped, never silently withheld — only data below the quality floor is refused, with its reason stated.
     </p>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
       <a class="btn small" href="/football?date=<?= e($yesterday ?? gmdate('Y-m-d', time() - 86400)) ?>">← Previous day</a>
@@ -377,7 +377,7 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                       <?php endif; ?>
                       <div class="dim" style="font-size:10px"><?= e((string) ($pick['kickoffLabel'] ?? '')) ?></div>
                     </td>
-                    <td style="padding:4px 6px"><?= e((string) ($pick['selectionLabel'] ?? '—')) ?></td>
+                    <td style="padding:4px 6px"><?= e((string) ($pick['selectionLabel'] ?? '—')) ?><?php if (!empty($pick['limitedEvidence'])): ?> <span class="badge b-amber" style="font-size:10px" title="Published on thinner evidence with capped confidence — usable with caution.">limited</span><?php endif; ?></td>
                     <td style="padding:4px 6px" class="mono"><b><?= (int) ($pick['score'] ?? 0) ?></b>/100</td>
                     <td style="padding:4px 6px" class="mono"><?= is_numeric($pick['probability'] ?? null) ? number_format((float) $pick['probability'] * 100, 1) . '%' : '—' ?></td>
                     <td style="padding:4px 6px" class="mono"><?= is_numeric($pick['odds'] ?? null) ? number_format((float) $pick['odds'], 2) : '—' ?></td>
@@ -466,25 +466,24 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                         <?php if (!empty($rowWithheld['withheld'])): ?>
                           <span class="down" title="<?= e((string) ($rowWithheld['reason'] ?? '')) ?>"><?= e((string) ($rowWithheld['headline'] ?? 'Prediction withheld — insufficient verified data')) ?></span>
                         <?php else: ?>
-                          <span class="dim">Not analyzed</span>
+                          <span class="dim" title="<?= e((string) ($rowWithheld['reason'] ?? 'This match has not been analyzed yet.')) ?>"><?= e((string) ($rowWithheld['headline'] ?? 'Not analyzed yet')) ?></span>
+                          <?php $analyzeId = (int) ($row['fixtureId'] ?? 0); ?>
+                          <?php if ($analyzeId > 0): ?>
+                            <div style="font-size:11px;margin-top:2px"><a href="/football/match/<?= $analyzeId ?>">Analyze →</a></div>
+                          <?php endif; ?>
                         <?php endif; ?>
                       <?php else: ?>
                         <b><?= e((string) ($m['selectionLabel'] ?? '—')) ?></b>
                         <div class="dim" style="font-size:10px"><?= e((string) ($row['resultLabel'] ?? '—')) ?><?= !empty($row['prediction']['predictedScore']['label']) ? ' · ' . e((string) $row['prediction']['predictedScore']['label']) : '' ?></div>
-                      <?php endif; ?>
-                    </td>
-                    <td style="padding:6px" class="mono">
-                      <?php if ($odds === null): ?>
-                        <span class="dim" title="The connected odds provider has quoted no price for this selection.">DATA_UNAVAILABLE</span>
-                      <?php else: ?>
-                        <?= number_format((float) $odds, 2) ?>
-                        <div class="dim" style="font-size:10px">implied <?= $implied === null ? '—' : number_format((float) $implied * 100, 1) . '%' ?></div>
+                        <?php $rowLimited = !empty(((array) ($row['intelligence'] ?? []))['withheld']['limitedEvidence'] ?? false); ?>
+                        <?php if ($rowLimited): ?><div style="font-size:10px;margin-top:2px"><span class="badge b-amber" title="Published on thinner evidence with capped confidence — usable with caution.">limited evidence</span></div><?php endif; ?>
                       <?php endif; ?>
                     </td>
                     <?php $intel = is_array($row['intelligence'] ?? null) ? $row['intelligence'] : []; ?>
                     <?php $scoreBlock = is_array($intel['score'] ?? null) ? $intel['score'] : []; ?>
                     <?php $stabBlock = is_array($intel['stability'] ?? null) ? $intel['stability'] : []; ?>
                     <?php $freshBlock = is_array($intel['freshness'] ?? null) ? $intel['freshness'] : []; ?>
+                    <?php $fairBlockEarly = is_array($intel['fairValue'] ?? null) ? $intel['fairValue'] : []; ?>
                     <td style="padding:6px" class="mono">
                       <?php if (is_numeric($scoreBlock['score'] ?? null)): ?>
                         <b title="<?= e((string) ($scoreBlock['label'] ?? '')) ?>"><?= (int) $scoreBlock['score'] ?><span class="dim">/100</span></b>
@@ -501,6 +500,17 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                       <?php endif; ?>
                       <?php if (!empty($freshBlock['verdict'])): ?>
                         <div class="dim" style="font-size:10px" title="prediction · data · odds, each with its own clock"><?= e((string) $freshBlock['verdict']) ?></div>
+                      <?php endif; ?>
+                    </td>
+                    <td style="padding:6px" class="mono">
+                      <?php if ($odds === null && is_numeric($fairBlockEarly['windelsFairOdds'] ?? null)): ?>
+                        <?= number_format((float) $fairBlockEarly['windelsFairOdds'], 2) ?>
+                        <div class="dim" style="font-size:10px" title="The connected odds provider quoted no price for this selection, so WINDELS' own fair price (1 ÷ model probability) is shown as the usable figure.">WINDELS fair</div>
+                      <?php elseif ($odds === null): ?>
+                        <span class="dim" title="The connected odds provider has quoted no price for this selection.">DATA_UNAVAILABLE</span>
+                      <?php else: ?>
+                        <?= number_format((float) $odds, 2) ?>
+                        <div class="dim" style="font-size:10px">implied <?= $implied === null ? '—' : number_format((float) $implied * 100, 1) . '%' ?></div>
                       <?php endif; ?>
                     </td>
                     <td style="padding:6px" class="mono">
@@ -564,7 +574,13 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                             </div>
                             <div>
                               <div class="dim">Market odds</div>
-                              <div class="mono"><b><?= is_numeric($odds ?? null) ? number_format((float) $odds, 2) : 'no price quoted' ?></b> <span class="dim">the price offered</span></div>
+                              <?php if (is_numeric($odds ?? null)): ?>
+                                <div class="mono"><b><?= number_format((float) $odds, 2) ?></b> <span class="dim">the price offered</span></div>
+                              <?php elseif (is_numeric($fairBlock['windelsFairOdds'] ?? null)): ?>
+                                <div class="mono"><b><?= number_format((float) $fairBlock['windelsFairOdds'], 2) ?></b> <span class="dim">WINDELS fair — no provider price quoted</span></div>
+                              <?php else: ?>
+                                <div class="mono"><b>no price quoted</b> <span class="dim">the price offered</span></div>
+                              <?php endif; ?>
                               <?php if (is_numeric($fairBlock['fairOdds'] ?? null)): ?>
                                 <div class="dim">fair (margin removed) <?= number_format((float) $fairBlock['fairOdds'], 2) ?></div>
                               <?php else: ?>
@@ -629,6 +645,9 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
             <h4 style="margin:0 0 8px"><?= e((string) ($category['label'] ?? '')) ?>
               <span class="dim" style="font-weight:400;font-size:11px">(confidence <?= e((string) ($category['range'] ?? '')) ?> · <?= count($items) ?> fixture<?= count($items) === 1 ? '' : 's' ?>)</span>
             </h4>
+            <?php if (!empty($category['note']) && $items !== []): ?>
+              <p class="dim" style="font-size:11px;margin:0 0 8px"><?= e((string) $category['note']) ?></p>
+            <?php endif; ?>
             <?php if ($items === []): ?>
               <p class="dim" style="font-size:12px;margin:0">No fixtures fall into this category. An empty category is a valid outcome — nothing is promoted into it.</p>
             <?php else: ?>
@@ -754,7 +773,11 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
           </div>
         <?php endforeach; ?>
 
-        <?php if (empty($board['categories']) || (int) ($summary['qualified'] ?? 0) === 0): ?>
+        <?php if (in_array((string) ($board['state'] ?? ''), ['LIMITED_ONLY', 'DEVELOPING_ONLY'], true) && !empty($board['message'])): ?>
+          <div class="notice info" style="margin-top:14px">
+            <?= e((string) $board['message']) ?>
+          </div>
+        <?php elseif (empty($board['categories']) || (string) ($board['state'] ?? '') === 'NONE_QUALIFIED'): ?>
           <div class="notice warnbox" style="margin-top:14px">
             <b>No fixtures currently satisfy the required prediction and data-quality thresholds.</b>
             <?= $board['message'] !== null && (string) ($board['state'] ?? '') === 'NONE_QUALIFIED' ? '' : 'Fixtures below the threshold stay listed as limited data or rejected instead of being promoted into a prediction tier.' ?>

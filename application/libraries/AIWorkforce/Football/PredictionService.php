@@ -506,7 +506,9 @@ final class PredictionService
                 $out['refused']++;
                 $out['matches'][$index] = $identity + ['state' => self::MISSING_REFUSED, 'source' => MatchFeed::SOURCE_REFUSED,
                     'code' => (string) ($payload['code'] ?? 'DATA_QUALITY_' . $band), 'band' => $band,
-                    'reason' => 'The stored data for this match is ' . $band . '; no prediction row was written.'];
+                    // The engine's own reason, which names the missing data —
+                    // more actionable than restating the band.
+                    'reason' => (string) ($payload['reason'] ?? ('The stored data for this match is ' . $band . '; no prediction row was written.'))];
                 continue;
             }
             $out['generated']++;

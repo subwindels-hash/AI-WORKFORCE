@@ -345,7 +345,7 @@ class DailyTicketService
                         }
                     }
                     if ($ticketId === null && $message === '') {
-                        $confidenceFloor = number_format((float) ($config['min_confidence'] ?? 70.0), 0);
+                        $confidenceFloor = number_format((float) ($config['min_confidence'] ?? 55.0), 0);
                         $message = $evaluated === 0
                             ? 'NO VALUE TICKET TODAY — no verified fixtures received for ' . $date
                             : 'NO VALUE TICKET TODAY — no candidate passed the eligibility, odds, ' . $confidenceFloor . '%+ confidence, quality, risk/value and correlation gates';

@@ -18,13 +18,27 @@ namespace AIWorkforce\Football;
  *      league aggregate was not collected. Documented in the prediction's
  *      `xgMethod` so a reader can see which assumption was made.
  *
- * If neither side yields a rate, the resolver returns NO_RATE and the caller
- * must not publish an expected-goals number. Nothing is imputed here.
+ *  LEAGUE_NEUTRAL_RATE (last resort before refusal)
+ *      λ_home = leagueAvgHomeGoals, λ_away = leagueAvgAwayGoals — used when
+ *      neither side has stored scoring rates of its own but the league's scoring
+ *      environment WAS measured from stored standings. Both sides are rated at
+ *      the league norm: a measured figure, not an invented one, and always
+ *      labelled with this method so no reader mistakes it for a team-specific
+ *      estimate. Predictions built on it carry the LIMITED band and its capped
+ *      confidence, because the missing team data keeps the quality score down.
+ *
+ * Only when no team rates AND no measured league environment exist does the
+ * resolver return NO_RATE — and only then must the caller refuse. A match the
+ * quality gate already judged publishable (LIMITED or better) is never refused
+ * for missing team stats while a measured league norm is available: that gap
+ * is what left analyzed pages half empty. Nothing is imputed here — every rate
+ * comes from stored measurements, and hard-coded priors are never used.
  */
 final class ExpectedGoalsResolver
 {
     public const METHOD_LEAGUE_BASELINE = 'LEAGUE_BASELINE_VENUE';
     public const METHOD_TEAM_BASELINE = 'TEAM_BASELINE';
+    public const METHOD_LEAGUE_NEUTRAL = 'LEAGUE_NEUTRAL_RATE';
     public const METHOD_NO_RATE = 'NO_RATE_AVAILABLE';
 
     public function __construct(private FootballConfiguration $config) {}
@@ -89,7 +103,22 @@ final class ExpectedGoalsResolver
             return ['home' => round($lambdaHome, 4), 'away' => round($lambdaAway, 4), 'method' => self::METHOD_TEAM_BASELINE, 'neutral' => false, 'components' => $components, 'notes' => $notes];
         }
 
-        $notes[] = 'Not enough stored rate data to model expected goals for both sides.';
+        // Last resort before refusal: neither side has its own rates, but the
+        // league's scoring environment was measured from stored standings. Both
+        // sides are rated at the league norm — a stored measurement, explicitly
+        // labelled, never a hard-coded prior.
+        if (null !== $leagueHomeAttack && $leagueHomeAttack > 0 && null !== $leagueAwayAttack && $leagueAwayAttack > 0) {
+            $lambdaHome = max(0.05, min($this->config->maxGoals(), $leagueHomeAttack));
+            $lambdaAway = max(0.05, min($this->config->maxGoals(), $leagueAwayAttack));
+            $source = (string) ($aggregate['source'] ?? 'stored standings');
+            $notes[] = 'Neither side has stored scoring rates, so both are rated at the league\'s measured scoring environment '
+                . '(' . round($leagueHomeAttack, 2) . ' home / ' . round($leagueAwayAttack, 2) . ' away goals per match from ' . $source . '). '
+                . 'Team-specific strengths are unknown; this is a league-average estimate and confidence is capped accordingly.';
+            return ['home' => round($lambdaHome, 4), 'away' => round($lambdaAway, 4),
+                'method' => self::METHOD_LEAGUE_NEUTRAL, 'neutral' => true, 'components' => $components, 'notes' => $notes];
+        }
+
+        $notes[] = 'Neither side has stored scoring rates and no league scoring environment was measured; there is nothing to model expected goals from.';
         return ['home' => null, 'away' => null, 'method' => self::METHOD_NO_RATE, 'neutral' => false, 'components' => $components, 'notes' => $notes];
     }
 

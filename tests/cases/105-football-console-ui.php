@@ -58,6 +58,7 @@ test('football: every documented endpoint is routed to a real controller method'
         'football/live' => 'football/live',
         'football/models' => 'football/models',
         'football/match/(:num)' => 'football/match/$1',
+        'football/match/(:num)/analyze' => 'football/analyze/$1',
     ];
     $api = fx_fb_source('application/controllers/Api_football.php');
     $controller = fx_fb_source('application/controllers/Football.php');
@@ -202,11 +203,13 @@ test('football: the football screens own their panels — no duplication, no lef
     $module->predictions()->predictDay($tierDay);
     $board = $module->board()->forDate($tierDay);
     $labels = array_column((array) $board['categories'], 'label');
-    assert_equals(['Highest Confidence', 'Strong Predictions', 'Standard Predictions', 'Limited Data'], $labels,
-        'the four §10 categories exist in order');
-    assert_equals('80–100', (string) $board['categories'][0]['range'], 'with the documented cut line');
-    assert_equals(75.0, (float) $board['categories'][1]['min']);
-    assert_equals(70.0, (float) $board['categories'][2]['min']);
+    assert_equals(['Highest Confidence', 'Strong Predictions', 'Standard Predictions', 'Limited Data — usable with caution', 'Developing'], $labels,
+        'the five §10 categories exist in order');
+    assert_equals('60–100', (string) $board['categories'][0]['range'], 'with the documented cut line');
+    assert_equals(52.0, (float) $board['categories'][1]['min']);
+    assert_equals(45.0, (float) $board['categories'][2]['min']);
+    assert_equals('limitedData', (string) $board['categories'][3]['key'], 'the fourth category is the capped Limited Data bucket');
+    assert_equals('developing', (string) $board['categories'][4]['key'], 'and the trailing one is Developing, not thin data');
     $assigned = [];
     foreach ($board['categories'] as $category) {
         foreach ($category['items'] as $item) $assigned[] = $category['key'];
@@ -227,8 +230,14 @@ test('football: the football screens own their panels — no duplication, no lef
         assert_true(substr_count($console, $markup) >= 1, 'the board reports ' . $markup);
     }
     assert_contains('30-day odds prediction ticket performance (stored settlements only)', $sports, 'the odds prediction ticket screen keeps only ticket figures');
-    // §12: the match screen is read-only — nothing here rewrites a prediction.
-    assert_equals(0, substr_count($match, 'method="post"'), 'the match view contains no form at all');
+    // §12: the match screen never rewrites a prediction. Its one form —
+    // Analyze — only writes the row when the match has none, reuses the stored
+    // row otherwise (the controller refuses to regenerate), and carries the
+    // same CSRF token every other console mutation carries.
+    assert_equals(1, substr_count($match, 'method="post"'), 'the match view contains exactly one form: Analyze');
+    assert_contains('/football/match/', $match, 'posting back at the match it analyzes');
+    assert_contains('/analyze', $match, 'at the analyze endpoint');
+    assert_contains('csrf_token', $match, 'guarded by the CSRF token');
     assert_contains('never rewritten', $match, 'and says plainly that the frozen prediction is not rewritten');
     assert_contains('Stored as separate LIVE rows', $match, 'with the live estimate kept in its own rows');
     assert_contains('separate stored rows', $console, 'and the board says they are separate rows');

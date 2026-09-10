@@ -56,11 +56,15 @@ final class IntelligenceReport
      */
     public static function risk(string $band, ?float $confidence): array
     {
+        // Cut lines mirror the board's football-realistic confidence tiers
+        // (Standard ≥45, Highest ≥60): LOW is well-evidenced and confident,
+        // MEDIUM is an ordinary analyzed match, HIGH is thin evidence or a
+        // confidence below the lowest tier.
         if ($confidence === null) return ['level' => 'UNKNOWN', 'basis' => 'no prediction is stored for this match'];
-        if ($band !== QualityBand::QUALIFIED || $confidence < 55.0) {
+        if ($band !== QualityBand::QUALIFIED || $confidence < 45.0) {
             return ['level' => 'HIGH', 'basis' => 'data quality ' . $band . ' and model confidence ' . number_format($confidence, 1) . '%'];
         }
-        if ($confidence < 70.0) return ['level' => 'MEDIUM', 'basis' => 'model confidence ' . number_format($confidence, 1) . '%'];
+        if ($confidence < 60.0) return ['level' => 'MEDIUM', 'basis' => 'model confidence ' . number_format($confidence, 1) . '%'];
         return ['level' => 'LOW', 'basis' => 'qualified data and model confidence ' . number_format($confidence, 1) . '%'];
     }
 
@@ -120,11 +124,22 @@ final class IntelligenceReport
         ?array $lastSweep = null, array $refusal = []): array
     {
         if ($prediction === null) {
-            // No row means no estimate to score. The absence is the finding: this
-            // is where "Prediction withheld — insufficient verified data" belongs,
-            // and it says whether the match was ever analyzed or was analyzed and
-            // refused by the quality gate.
+            // No row means no estimate to score. "Not analyzed" and "withheld"
+            // are different states and are reported as such: the former has
+            // simply never been run through the engine (generating the page or
+            // opening the match analyzes it), while the latter was analyzed and
+            // refused by the quality gate. Conflating the two is what used to
+            // print "withheld" on matches nobody had asked about yet.
             $refusal = $refusal === [] ? (array) ($market['predictionRefusal'] ?? []) : $refusal;
+            $code = (string) ($refusal['code'] ?? 'NOT_ANALYZED');
+            $wasRefused = $code !== '' && $code !== 'NOT_ANALYZED' && $code !== 'NO_PREDICTION' && $code !== 'BATCH_LIMIT_REACHED';
+            $reason = (string) ($refusal['reason'] ?? '');
+            if ($reason === '') {
+                $reason = 'This match has not been analyzed yet. Generating the '
+                    . 'page analyzes at most ' . MatchFeed::MAX_PAGE_SIZE . ' matches, or open the match and choose '
+                    . 'Analyze — a match whose stored data falls below the ' . QualityBand::LIMITED_MIN
+                    . '-point quality floor is then left without a prediction rather than given a thin one.';
+            }
             return [
                 'state' => self::STATE_NOT_ANALYZED,
                 'score' => $this->scores->compute([]),
@@ -139,12 +154,13 @@ final class IntelligenceReport
                     'reason' => 'No prediction row exists, so there is nothing to have moved.', 'disclaimer' => StabilityMonitor::DISCLAIMER],
                 'freshness' => $this->freshness->stamp([], $fixture, $market, $lastSweep),
                 'withheld' => [
-                    'withheld' => true,
-                    'reason' => (string) ($refusal['reason'] ?? 'This match has not been analyzed yet. Generating the '
-                        . 'page analyzes at most ' . MatchFeed::MAX_PAGE_SIZE . ' matches, and a match whose stored data '
-                        . 'falls below the ' . QualityBand::QUALIFIED_MIN . '-point quality floor is left without a '
-                        . 'prediction rather than given a thin one.'),
-                    'code' => (string) ($refusal['code'] ?? 'NOT_ANALYZED'),
+                    'withheld' => $wasRefused,
+                    'needsAnalysis' => !$wasRefused,
+                    'headline' => $wasRefused
+                        ? 'Prediction withheld — insufficient verified data'
+                        : 'Not analyzed yet — no prediction stored',
+                    'reason' => $reason,
+                    'code' => $code,
                 ],
             ];
         }
@@ -169,24 +185,34 @@ final class IntelligenceReport
         $checklist = self::checklist($quality, $prediction, $market);
         $value = self::valueBlock($market);
         $drivers = $this->drivers->describe($prediction, $market, $fixture);
-        $withheld = $band === QualityBand::REJECTED
-            ? ['withheld' => true, 'code' => 'DATA_QUALITY_REJECTED',
+        // Only REJECTED is withheld: LIMITED evidence is published and usable,
+        // with its capped confidence and thinner basis stated on the face of it.
+        // Withholding every LIMITED match is what left analyzed pages with
+        // nothing a user could act on.
+        if ($band === QualityBand::REJECTED) {
+            $withheld = ['withheld' => true, 'limitedEvidence' => false,
+                'code' => 'DATA_QUALITY_REJECTED',
                 // The sentence the module was specified to print. It is published
                 // as its own field so a surface can show it verbatim instead of
                 // paraphrasing a refusal into something softer.
                 'headline' => 'Prediction withheld — insufficient verified data',
                 'reason' => 'Prediction withheld — the stored data for this match scored ' . $qualityScore
                     . '/100, below the ' . QualityBand::LIMITED_MIN . '-point floor the module will publish on. '
-                    . 'The row is kept for audit, not offered as a pick.']
-            : ['withheld' => $band === QualityBand::LIMITED, 'code' => $band === QualityBand::LIMITED ? 'DATA_QUALITY_LIMITED' : null,
-                'reason' => $band === QualityBand::LIMITED
-                    ? 'Published as limited evidence: the data quality of ' . $qualityScore . '/100 clears the '
-                        . QualityBand::LIMITED_MIN . '-point floor but not the ' . QualityBand::QUALIFIED_MIN
-                        . '-point one, so confidence is capped and this match is not eligible for the pick list.'
-                    : ''];
+                    . 'The row is kept for audit, not offered as a pick.'];
+        } elseif ($band === QualityBand::LIMITED) {
+            $withheld = ['withheld' => false, 'limitedEvidence' => true,
+                'code' => 'DATA_QUALITY_LIMITED',
+                'headline' => 'Limited evidence — usable with caution',
+                'reason' => 'Published with limited evidence: the data quality of ' . $qualityScore . '/100 clears the '
+                    . QualityBand::LIMITED_MIN . '-point floor but not the ' . QualityBand::QUALIFIED_MIN
+                    . '-point one, so confidence is capped below the Highest tier and the pick list ranks this '
+                    . 'match after fully evidenced ones. The probabilities and WINDELS fair odds below are usable.'];
+        } else {
+            $withheld = ['withheld' => false, 'limitedEvidence' => false, 'code' => null, 'reason' => ''];
+        }
 
         $state = $withheld['withheld'] ? self::STATE_WITHHELD
-            : ($score['score'] === null ? self::STATE_PARTIAL
+            : ($score['score'] === null || ($withheld['limitedEvidence'] ?? false) ? self::STATE_PARTIAL
                 : (count($checklist['missing']) > 0 ? self::STATE_PARTIAL : self::STATE_SCORED));
 
         return [
@@ -222,11 +248,13 @@ final class IntelligenceReport
      * The "Top WINDELS Picks" reading of a page.
      *
      * Eligibility comes first and is a stated filter, not a mood: a match enters
-     * the list only when its data is QUALIFIED, the chosen market has an actual
-     * selection to offer, and the prediction is not sitting on an unstable
-     * reading. Ranking is by the intelligence score, then by the edge against the
-     * quoted price, then by confidence — so the list rewards evidence and never
-     * lets a big price gap promote a thin football read.
+     * the list when its data is QUALIFIED or LIMITED, the chosen market has an
+     * actual selection to offer, and the prediction is not sitting on an unstable
+     * reading. Only REJECTED/withheld rows are excluded for quality. Ranking is
+     * by evidence band first (QUALIFIED before LIMITED), then by the intelligence
+     * score, then by the edge against the quoted price, then by confidence — so
+     * the list rewards evidence and never lets a big price gap promote a thin
+     * football read above a well-evidenced one.
      *
      * @param list<array<string,mixed>> $rows board rows, each with `intelligence`
      * @return array{state:string,picks:list<array<string,mixed>>,considered:int,eligible:int,excluded:list<array<string,mixed>>,limit:int,rule:list<string>,disclaimer:string,generatedAt:string}
@@ -248,9 +276,9 @@ final class IntelligenceReport
                 continue;
             }
             $band = (string) ($intelligence['quality']['band'] ?? QualityBand::REJECTED);
-            if ($band !== QualityBand::QUALIFIED) {
-                $excluded[] = $identity + ['reason' => 'Data quality band ' . $band . '; the pick list is limited to '
-                    . QualityBand::QUALIFIED . '.'];
+            if ($band !== QualityBand::QUALIFIED && $band !== QualityBand::LIMITED) {
+                $excluded[] = $identity + ['reason' => 'Data quality band ' . $band . '; the pick list admits '
+                    . QualityBand::QUALIFIED . ' and ' . QualityBand::LIMITED . ' only.'];
                 continue;
             }
             if (($intelligence['withheld']['withheld'] ?? false) === true) {
@@ -271,6 +299,8 @@ final class IntelligenceReport
             $value = (array) ($intelligence['fairValue'] ?? []);
             $risk = (array) ($row['risk'] ?? []);
             $picks[] = array_merge($identity, [
+                'band' => $band,
+                'limitedEvidence' => $band === QualityBand::LIMITED,
                 'market' => (string) ($market['label'] ?? ''),
                 // Both spellings of the pick: the code a machine filters on, and
                 // the label a reader sees. A surface that prints the code has
@@ -305,13 +335,15 @@ final class IntelligenceReport
                 ], static fn(?string $v): bool => $v !== null && $v !== '')),
             ]);
         }
-        // The comparator is a tuple of the three documented sort keys, so the
-        // order is total: two picks with the same score cannot swap between page
-        // loads because `usort` had no reason to prefer one.
+        // The comparator is a tuple of the four documented sort keys — evidence
+        // band first, so a LIMITED pick can never outrank a QUALIFIED one — and
+        // the order is total: two picks with the same score cannot swap between
+        // page loads because `usort` had no reason to prefer one.
+        $bandRank = static fn(array $pick): int => (string) ($pick['band'] ?? QualityBand::REJECTED) === QualityBand::QUALIFIED ? 0 : 1;
         usort($picks, static fn(array $a, array $b): int => [
-            (int) ($b['score'] ?? 0), round((float) ($b['edgePoints'] ?? 0), 6), round((float) ($b['confidence'] ?? 0), 1),
+            $bandRank($a), (int) ($b['score'] ?? 0), round((float) ($b['edgePoints'] ?? 0), 6), round((float) ($b['confidence'] ?? 0), 1),
         ] <=> [
-            (int) ($a['score'] ?? 0), round((float) ($a['edgePoints'] ?? 0), 6), round((float) ($a['confidence'] ?? 0), 1),
+            $bandRank($b), (int) ($a['score'] ?? 0), round((float) ($a['edgePoints'] ?? 0), 6), round((float) ($a['confidence'] ?? 0), 1),
         ]);
         $ranked = [];
         foreach (array_slice($picks, 0, $limit) as $index => $pick) $ranked[] = ['rank' => $index + 1] + $pick;
@@ -328,10 +360,10 @@ final class IntelligenceReport
             'excluded' => $excluded,
             'limit' => $limit,
             'rule' => [
-                'eligibility' => 'Only matches on this page whose data quality is ' . QualityBand::QUALIFIED
-                    . ', whose selected market has an actual selection, which are not withheld and whose prediction is '
-                    . 'not flagged unstable.',
-                'ranking' => 'Intelligence score first, then the edge against the quoted price, then model confidence.',
+                'eligibility' => 'Only matches on this page whose data quality is ' . QualityBand::QUALIFIED . ' or '
+                    . QualityBand::LIMITED . ', whose selected market has an actual selection, which are not withheld '
+                    . 'and whose prediction is not flagged unstable.',
+                'ranking' => 'Evidence band first (QUALIFIED before LIMITED), then the intelligence score, then the edge against the quoted price, then model confidence.',
                 'limit' => 'At most ' . $limit . ' picks are listed, whatever the page holds.',
             ],
             'disclaimer' => self::PICKS_DISCLAIMER,

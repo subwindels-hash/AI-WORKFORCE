@@ -40,7 +40,7 @@ class DataQualityEngine
     /** Optional enrichment: improves the score, never blocks a prediction. */
     public const OPTIONAL_ENRICHMENT_FIELDS = ['injuries', 'lineups', 'historical', 'marketLiquidity', 'restDays'];
 
-    public const DEFAULT_MIN_DATA_QUALITY = 75;
+    public const DEFAULT_MIN_DATA_QUALITY = 60;
 
     /**
      * Mandatory fields for one market (unknown markets fall back to the

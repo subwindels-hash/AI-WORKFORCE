@@ -49,10 +49,15 @@ class ConfigurationService
             'target_odds_max' => 8.0,
             'max_selections' => 6,
             'risk_level' => 'CONSERVATIVE',
-            'min_confidence' => 70.0,
+            // Usable-by-default floors, matching the football module's
+            // realistic tiers: most matches are decided at 40–60% model
+            // confidence, so a 70% default left real days with no ticket.
+            // Strict operators can still raise these to 70+; the validation
+            // floor (50) only rules out self-contradictory gates.
+            'min_confidence' => 55.0,
             'min_expected_value' => 0.02,
             'max_correlation' => 'MEDIUM',
-            'min_data_quality' => 75,
+            'min_data_quality' => 60,
             'min_liquidity' => null,
             'allowed_markets' => ['MATCH_RESULT', 'TOTAL_GOALS', 'BTTS', 'DOUBLE_CHANCE'],
             'allowed_leagues' => [],
@@ -141,10 +146,10 @@ class ConfigurationService
         $maxSel = (int) $c['max_selections'];
         if ($maxSel < 1 || $maxSel > 12) return 'max_selections must be within [1, 12]';
         $conf = (float) $c['min_confidence'];
-        if ($conf < 70 || $conf > 100) return 'min_confidence must be within [70, 100]';
+        if ($conf < 50 || $conf > 100) return 'min_confidence must be within [50, 100]';
         if ((float) $c['min_expected_value'] < 0) return 'min_expected_value must be >= 0';
         $dq = (int) $c['min_data_quality'];
-        if ($dq < 75 || $dq > 100) return 'min_data_quality must be within [75, 100]';
+        if ($dq < 50 || $dq > 100) return 'min_data_quality must be within [50, 100]';
         if ((float) $c['max_exposure'] <= 0) return 'max_exposure must be > 0';
         if ((float) $c['stake_amount'] <= 0) return 'stake_amount must be > 0';
         if ((float) $c['stake_amount'] > (float) $c['max_exposure']) return 'stake_amount cannot exceed max_exposure';

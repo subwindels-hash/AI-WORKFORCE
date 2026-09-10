@@ -58,7 +58,7 @@ final class OutcomePredictor
                 'xgMethod' => $xg['method'],
                 'dataQuality' => ['score' => $score, 'status' => $band, 'band' => $band, 'components' => $quality['components'] ?? []],
                 'reasoning' => array_merge($this->missingDataReasons($quality, $features), $xg['notes']),
-                'reason' => 'No expected-goals rate could be computed from stored team statistics; nothing is imputed.',
+                'reason' => 'No expected-goals rate could be computed: neither side has stored scoring rates and no league scoring environment was measured; nothing is imputed.',
                 'model' => self::modelBlock($model),
                 'generatedAt' => gmdate('c'),
             ];
@@ -101,10 +101,12 @@ final class OutcomePredictor
         $confidence = min($rawConfidence, $ceiling);
         $confidence = round(min(self::MAX_DISPLAY_CONFIDENCE, $confidence), 1);
         $tiers = $this->tiers();
-        $modelIsActive = $model !== null && (string) ($model['status'] ?? '') === ModelRegistry::ACTIVE;
-        $highConfidenceAllowed = $modelIsActive
-            && $band === QualityBand::QUALIFIED
-            && $calibrated['basis'] === 'CALIBRATED'
+        // The badge is earned by the prediction, not by the registry: QUALIFIED
+        // data plus a confidence at/above the Highest tier. It no longer waits
+        // on an administrator's ACTIVE click or on a fitted calibration — an
+        // uncalibrated prediction still carries its explicit "(uncalibrated)"
+        // label, so the badge can never be read as a calibrated guarantee.
+        $highConfidenceAllowed = $band === QualityBand::QUALIFIED
             && $confidence >= $tiers['highest'];
 
         return [
@@ -165,20 +167,27 @@ final class OutcomePredictor
      * 95 % at a perfect score) and only ever applies to RAW confidence — a
      * calibrated figure is already a measured frequency, so capping it again
      * would double-penalise the model.
+     *
+     * LIMITED evidence is additionally capped just below the Highest tier, so
+     * the top tier stays reserved for well-evidenced predictions while a thin
+     * match can still land in Strong/Standard and be usable.
      */
     public function confidenceCeiling(int $dataQuality, string $basis, string $band): float
     {
         if ($basis === 'CALIBRATED') return self::MAX_DISPLAY_CONFIDENCE;
         $ratio = max(0.0, min(1.0, $dataQuality / 100.0));
         $ceiling = 50.0 + 45.0 * $ratio;
-        if ($band === QualityBand::LIMITED) $ceiling = min($ceiling, 69.0);
+        if ($band === QualityBand::LIMITED) {
+            $highest = (float) ($this->tiers()['highest'] ?? 60.0);
+            $ceiling = min($ceiling, max(40.0, round($highest - 0.1, 1)));
+        }
         return round($ceiling, 1);
     }
 
     /** Tier cut lines, read from configuration so the board and the model agree. */
     private function tiers(): array
     {
-        $thresholds = ['highest' => 70.0, 'strong' => 65.0, 'standard' => 60.0];
+        $thresholds = ['highest' => 60.0, 'strong' => 52.0, 'standard' => 45.0];
         foreach ($this->config->confidenceTiers() as $tier) {
             $key = (string) ($tier['key'] ?? '');
             if ($key !== '' && isset($tier['min']) && is_numeric($tier['min'])) $thresholds[$key] = (float) $tier['min'];

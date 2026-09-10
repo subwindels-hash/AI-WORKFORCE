@@ -434,7 +434,8 @@ test('football: picks rank evidence, exclude what is not fit, and never promise'
             'intelligence' => array_replace((array) $row([])['intelligence'],
                 ['score' => ['score' => 99, 'band' => IntelligenceScore::BAND_EXCELLENT, 'available' => true],
                     'stability' => ['state' => StabilityMonitor::UNSTABLE, 'reason' => 'model moved 14 points']])]),
-        // Limited data quality: not eligible for the list.
+        // Limited data quality: listed, flagged, and sorted after every
+        // well-evidenced pick — usable with caution, never silently dropped.
         $row(['fixtureId' => 4, 'homeTeam' => 'G', 'awayTeam' => 'H',
             'intelligence' => array_replace((array) $row([])['intelligence'],
                 ['quality' => ['score' => 60.0, 'band' => QualityBand::LIMITED, 'checklist' => [], 'missing' => []]])]),
@@ -443,19 +444,26 @@ test('football: picks rank evidence, exclude what is not fit, and never promise'
         // With no selection for the chosen market.
         $row(['fixtureId' => 6, 'homeTeam' => 'K', 'awayTeam' => 'L',
             'market' => ['state' => DataState::UNAVAILABLE, 'key' => 'MATCH_WINNER', 'label' => 'Match Winner — 1X2']]),
+        // Rejected evidence: still not eligible for the list.
+        $row(['fixtureId' => 7, 'homeTeam' => 'M', 'awayTeam' => 'N',
+            'intelligence' => array_replace((array) $row([])['intelligence'],
+                ['quality' => ['score' => 20.0, 'band' => QualityBand::REJECTED, 'checklist' => [], 'missing' => []]])]),
     ], 'Match Winner — 1X2');
 
     $listed = (array) $picks['picks'];
-    assert_equals(2, count($listed), 'only the two eligible rows are listed');
+    assert_equals(3, count($listed), 'the two qualified rows plus the limited one are listed');
     assert_equals(2, (int) $listed[0]['fixtureId'], 'ranked by intelligence score, not by price');
-    assert_equals(1, (int) $listed[1]['fixtureId'], 'and the lower score comes second');
-    assert_equals(2, (int) $picks['eligible'], 'eligible counts what qualified');
-    assert_equals(6, (int) $picks['considered'], 'considered counts everything the page held');
+    assert_equals(1, (int) $listed[1]['fixtureId'], 'and the lower qualified score comes second');
+    assert_equals(4, (int) $listed[2]['fixtureId'], 'with the limited pick after every qualified one despite matching the score');
+    assert_true((bool) ($listed[2]['limitedEvidence'] ?? false), 'and it carries the limited-evidence flag');
+    assert_false((bool) ($listed[0]['limitedEvidence'] ?? false), 'which the qualified picks do not');
+    assert_equals(3, (int) $picks['eligible'], 'eligible counts what qualified');
+    assert_equals(7, (int) $picks['considered'], 'considered counts everything the page held');
     $excluded = (array) $picks['excluded'];
     assert_equals(4, count($excluded), 'every excluded match is listed with a reason');
     $reasons = implode(' | ', array_column($excluded, 'reason'));
     assert_true(str_contains($reasons, 'unstable'), 'the unstable one says it was movement');
-    assert_true(str_contains($reasons, 'Data quality band LIMITED'), 'the thin one says it was quality');
+    assert_true(str_contains($reasons, 'Data quality band REJECTED'), 'the rejected one says it was quality');
     assert_true(str_contains($reasons, 'Not analyzed'), 'and the empty slot says it was never analyzed');
     $disclaimer = strtolower((string) $picks['disclaimer']);
     assert_true(str_contains($disclaimer, 'not guarantees') || str_contains($disclaimer, 'not a guarantee'),
@@ -483,9 +491,22 @@ test('football: withheld predictions are withheld on every surface', function ()
     }
     $block = (array) $blocks[0];
     assert_equals(IntelligenceReport::STATE_NOT_ANALYZED, (string) $block['state'], 'an unanalyzed match is not scored');
-    assert_true(str_contains((string) $block['withheld']['reason'], 'Prediction withheld'),
-        'and the reason uses the documented sentence');
+    assert_true((bool) ($block['withheld']['withheld'] ?? false), 'a refused match is flagged withheld');
+    assert_true(str_contains((string) $block['withheld']['headline'], 'Prediction withheld'),
+        'and the headline uses the documented sentence');
+    assert_false((bool) ($block['withheld']['needsAnalysis'] ?? true), 'so it is not offered for analysis');
     assert_null($block['score']['score'] ?? 'x', 'no intelligence score is published without a prediction');
+
+    // The same match without a refusal is not withheld — it is waiting: the
+    // surfaces offer Analyze instead of printing the withheld sentence.
+    $waiting = $report->forPage(array_map(static fn(array $fixture): array => [
+        'fixture' => $fixture, 'prediction' => null, 'market' => [], 'predictionRefusal' => null,
+    ], [(array) $repo->fixtures[0]]));
+    $wait = (array) $waiting[0];
+    assert_false((bool) ($wait['withheld']['withheld'] ?? true), 'a never-attempted match is not withheld');
+    assert_true((bool) ($wait['withheld']['needsAnalysis'] ?? false), 'it is flagged as needing analysis');
+    assert_true(str_contains((string) $wait['withheld']['headline'], 'Not analyzed yet'),
+        'with the waiting headline, not the withheld sentence');
 });
 
 test('football: the intelligence layer reaches the surfaces it was built for', function () {

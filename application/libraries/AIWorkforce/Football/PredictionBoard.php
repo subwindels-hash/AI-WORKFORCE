@@ -173,12 +173,14 @@ final class PredictionBoard
 
         usort($cards, static fn(array $a, array $b) => [$b['confidence'], $b['dataQuality']['score']] <=> [$a['confidence'], $a['dataQuality']['score']]);
         $tiers = $this->config->confidenceTiers();
-        $lowest = 60.0;
-        foreach ($tiers as $tier) $lowest = min($lowest, (float) ($tier['min'] ?? 60));
-        // Every card lands in exactly one category — including a card whose data
-        // quality cleared the threshold while its confidence sits below the
-        // lowest tier. Such a card is reported, not dropped: paging through a
-        // long day must never make an analyzed match disappear from the board.
+        $lowest = 100.0;
+        foreach ($tiers as $tier) $lowest = min($lowest, (float) ($tier['min'] ?? 100));
+        // Every card lands in exactly one category. QUALIFIED cards land in a
+        // confidence tier; LIMITED cards — usable with caution — land in their
+        // own Limited Data category; a QUALIFIED card below the lowest tier
+        // (well-evidenced but genuinely uncertain) lands in Developing. Nothing
+        // analyzed is ever dropped: paging through a long day must never make an
+        // analyzed match disappear from the board.
         $categories = [];
         $placed = [];
         foreach ($tiers as $tier) {
@@ -200,16 +202,28 @@ final class PredictionBoard
                 'items' => $items,
             ];
         }
-        $belowTiers = [];
+        $limitedItems = [];
+        $developingItems = [];
         foreach ($cards as $index => $card) {
-            if (!isset($placed[$index])) $belowTiers[] = $card;
+            if (isset($placed[$index])) continue;
+            if (($card['band'] ?? '') === QualityBand::LIMITED) $limitedItems[] = $card;
+            else $developingItems[] = $card;
         }
         $categories[] = [
             'key' => 'limitedData',
-            'label' => 'Limited Data',
+            'label' => 'Limited Data — usable with caution',
+            'range' => 'evidence capped',
+            'min' => 0.0,
+            'items' => $limitedItems,
+            'note' => 'Published predictions on thinner evidence: confidence is capped below the Highest tier, and the probabilities and WINDELS fair odds are usable.',
+        ];
+        $categories[] = [
+            'key' => 'developing',
+            'label' => 'Developing',
             'range' => 'below ' . number_format($lowest, 0),
             'min' => 0.0,
-            'items' => $belowTiers,
+            'items' => $developingItems,
+            'note' => 'Well-evidenced predictions whose confidence sits below the lowest tier — genuinely uncertain matches, reported rather than dropped.',
         ];
         $qualified = count($categories[0]['items']) + count($categories[1]['items']) + count($categories[2]['items']);
         $emptyReason = null;
@@ -225,6 +239,13 @@ final class PredictionBoard
             $message = $analyzed === 0
                 ? 'Fixtures are stored for ' . $date . ' but no prediction row exists yet. Generating this page creates at most ' . MatchFeed::MAX_PAGE_SIZE . ' new predictions.'
                 : 'No match on page ' . $page . ' has a stored prediction yet. The other pages of this date do — generating this page analyzes only these ' . count($fixtures) . ' matches.';
+        } elseif ($qualified === 0 && $limitedItems !== []) {
+            $emptyReason = 'LIMITED_ONLY';
+            $message = 'No prediction on this page cleared the top confidence tiers, but ' . count($limitedItems)
+                . ' usable prediction(s) on limited evidence are listed below with capped confidence — open any match for its probabilities and WINDELS fair odds.';
+        } elseif ($qualified === 0 && $developingItems !== []) {
+            $emptyReason = 'DEVELOPING_ONLY';
+            $message = 'Every analyzed match on this page sits below the lowest confidence tier — genuinely uncertain fixtures, reported with their probabilities rather than withheld.';
         } elseif ($qualified === 0) {
             $emptyReason = 'NONE_QUALIFIED';
             $message = self::EMPTY_QUALIFIERS;
@@ -394,7 +415,11 @@ final class PredictionBoard
         $confidence = is_numeric($prediction['confidence'] ?? null) ? round((float) $prediction['confidence'], 1) : null;
         $band = (string) ($prediction['data_quality_band'] ?? QualityBand::REJECTED);
         $tiers = $this->config->confidenceTiers();
-        $tierLabel = 'Limited Data';
+        // A LIMITED card is labelled for what it is (usable, thinner basis); a
+        // QUALIFIED card below the lowest tier is Developing (well-evidenced but
+        // genuinely uncertain) — never "Limited Data", which would misstate good
+        // data as thin data.
+        $tierLabel = $band === QualityBand::LIMITED ? 'Limited Data' : 'Developing';
         foreach ($tiers as $tier) {
             if ($band === QualityBand::QUALIFIED && $confidence !== null && $confidence >= (float) ($tier['min'] ?? 0) && $confidence <= (float) ($tier['max'] ?? 100)) {
                 $tierLabel = (string) $tier['label'];
@@ -431,7 +456,11 @@ final class PredictionBoard
             'confidenceLabel' => $confidence === null ? DataState::UNAVAILABLE
                 : ($calibrated ? number_format($confidence, 1) . '%' : number_format($confidence, 1) . '% (uncalibrated)'),
             'tier' => $tierLabel,
-            'highConfidence' => !empty($model['highConfidenceAllowed']) && $band === QualityBand::QUALIFIED && $calibrated && $confidence !== null && $confidence >= (float) ($tiers[0]['min'] ?? 70) ? 'HIGH_CONFIDENCE' : null,
+            // Earned by the prediction — QUALIFIED data at/above the Highest
+            // tier — not by the registry state or a fitted calibration. An
+            // uncalibrated card still shows "(uncalibrated)" next to its
+            // confidence, so the badge is never a calibrated guarantee.
+            'highConfidence' => !empty($model['highConfidenceAllowed']) && $band === QualityBand::QUALIFIED && $confidence !== null && $confidence >= (float) ($tiers[0]['min'] ?? 60) ? 'HIGH_CONFIDENCE' : null,
             'expectedTotalGoals' => $prediction['expected_total_goals'] ?? null,
             'alternativeScores' => is_array($alternatives) ? array_slice($alternatives, 0, 3) : [],
             'matrixRows' => is_array($matrix['rows'] ?? null) ? array_slice($matrix['rows'], 0, 4) : [],
