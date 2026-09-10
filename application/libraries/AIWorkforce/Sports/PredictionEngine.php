@@ -6,10 +6,24 @@ namespace AIWorkforce\Sports;
  * calibration approval. The model only emits probabilities for explicitly
  * supported football ticket markets and only from verified numeric recent-form
  * features produced by FeatureEngineeringEngine.
+ *
+ * The WINDELS prediction is fully separated from bookmaker odds:
+ *   • rawModelProbability / calibratedProbability — the model's own probability;
+ *   • fairOdds — 1 / calibrated probability, the model's own fair price;
+ *   • market odds, implied probability and value/edge live in ValueEngine and
+ *     are never copied back into the prediction.
+ *
+ * Required features are defined per market (see REQUIRED_FEATURES): a Match
+ * Winner prediction needs the four team-form rates the model actually uses —
+ * never "every possible statistic". A market whose required features are
+ * missing is rejected with the exact list of missing fields.
  */
 class PredictionEngine
 {
     public const MODEL_NAME = 'WINDELS Sports Baseline';
+    // Unchanged on purpose: the model math is identical; only its output
+    // shape (fairOdds, missingFields) grew. Bumping this would orphan every
+    // approved calibration, which is keyed by (model, version).
     public const MODEL_VERSION = '1.1.0';
 
     /** @var array<string,list<string>> */
@@ -20,11 +34,30 @@ class PredictionEngine
         'DOUBLE_CHANCE' => ['HOME_OR_DRAW', 'AWAY_OR_DRAW', 'HOME_OR_AWAY'],
     ];
 
+    /**
+     * Mandatory model features per market (the model's actual inputs).
+     * TOTAL_GOALS only needs the goal-expectancy proxy; the head-to-head
+     * markets additionally need both teams' attack/defence rates.
+     * @var array<string,list<string>>
+     */
+    public const REQUIRED_FEATURES = [
+        'TOTAL_GOALS' => ['expectedGoalsProxy'],
+        'MATCH_RESULT' => ['expectedGoalsProxy', 'homeAttack', 'awayAttack', 'homeDefenseConceded', 'awayDefenseConceded'],
+        'BTTS' => ['expectedGoalsProxy', 'homeAttack', 'awayAttack', 'homeDefenseConceded', 'awayDefenseConceded'],
+        'DOUBLE_CHANCE' => ['expectedGoalsProxy', 'homeAttack', 'awayAttack', 'homeDefenseConceded', 'awayDefenseConceded'],
+    ];
+
     public static function isSupportedMarketSelection(?string $market, ?string $selection): bool
     {
         $market = strtoupper(trim((string) $market));
         $selection = strtoupper(trim((string) $selection));
         return isset(self::SUPPORTED_MARKETS[$market]) && in_array($selection, self::SUPPORTED_MARKETS[$market], true);
+    }
+
+    /** Features the model needs for a market (empty list for unknown markets). */
+    public static function requiredFeatures(string $market): array
+    {
+        return self::REQUIRED_FEATURES[strtoupper(trim($market))] ?? [];
     }
 
     public static function supportedMarkets(): array
@@ -42,16 +75,15 @@ class PredictionEngine
         $market = strtoupper(trim($market));
         $selection = strtoupper(trim($selection));
         if (!self::isSupportedMarketSelection($market, $selection)) return $this->reject('UNSUPPORTED_MARKET', $featureSet, $market, $selection);
-        if (empty($featureSet['ok'])) return $this->reject($featureSet['reason'] ?? 'INSUFFICIENT_DATA', $featureSet, $market, $selection);
+        if (empty($featureSet['ok'])) return $this->reject($featureSet['reason'] ?? 'INSUFFICIENT_DATA', $featureSet, $market, $selection, $featureSet['missingFields'] ?? []);
         if (empty($calibration['approved']) || !isset($calibration['intercept'], $calibration['slope'])) return $this->reject('MODEL_NOT_CALIBRATED', $featureSet, $market, $selection);
 
         $features = $featureSet['features'];
-        $required = $market === 'TOTAL_GOALS'
-            ? ['expectedGoalsProxy']
-            : ['expectedGoalsProxy', 'homeAttack', 'awayAttack', 'homeDefenseConceded', 'awayDefenseConceded'];
-        foreach ($required as $key) {
-            if (!isset($features[$key]) || !is_numeric($features[$key])) return $this->reject('INSUFFICIENT_DATA', $featureSet, $market, $selection);
+        $missing = [];
+        foreach (self::requiredFeatures($market) as $key) {
+            if (!isset($features[$key]) || !is_numeric($features[$key])) $missing[] = $key;
         }
+        if ($missing !== []) return $this->reject('INSUFFICIENT_DATA', $featureSet, $market, $selection, $missing);
 
         $raw = $this->rawProbability($market, $selection, $features);
         $calibrated = min(0.99, max(0.01, (float)$calibration['intercept'] + (float)$calibration['slope'] * $raw));
@@ -61,6 +93,9 @@ class PredictionEngine
             'selection' => $selection,
             'rawModelProbability' => round($raw, 6),
             'calibratedProbability' => round($calibrated, 6),
+            // The model's own fair price — 1 / calibrated probability.
+            // This is a WINDELS number, never a copy of bookmaker odds.
+            'fairOdds' => round(1 / max(0.01, $calibrated), 4),
             'modelName' => self::MODEL_NAME,
             'modelVersion' => self::MODEL_VERSION,
             'featureVersion' => $featureSet['version'],
@@ -84,7 +119,7 @@ class PredictionEngine
         }
         if ($market === 'MATCH_RESULT') {
             $home = $this->logistic($homeStrength - $awayStrength + 0.18);
-            $draw = max(0.08, min(0.32, 0.28 - min(0.2, abs($homeStrength - $awayStrength) / 4)));
+            $draw = max(0.08, min(0.32, 0.28 - min(0.2, abs($homeStrength - $awayStrength) / 4)) );
             $away = max(0.01, 1 - $home - $draw);
             $sum = $home + $draw + $away;
             $probs = ['HOME' => $home / $sum, 'DRAW' => $draw / $sum, 'AWAY' => $away / $sum];
@@ -105,9 +140,9 @@ class PredictionEngine
         return 1 / (1 + exp(-$x));
     }
 
-    private function reject(string $reason, array $featureSet, ?string $market = null, ?string $selection = null): array
+    private function reject(string $reason, array $featureSet, ?string $market = null, ?string $selection = null, array $missingFields = []): array
     {
-        return [
+        $out = [
             'decision' => 'NO_PREDICTION',
             'reason' => $reason,
             'market' => $market,
@@ -116,5 +151,7 @@ class PredictionEngine
             'modelVersion' => self::MODEL_VERSION,
             'featureVersion' => $featureSet['version'] ?? FeatureEngineeringEngine::VERSION,
         ];
+        if ($missingFields !== []) $out['missingFields'] = array_values($missingFields);
+        return $out;
     }
 }

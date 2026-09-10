@@ -136,10 +136,15 @@ test('daily ticket E2E: without approved calibration nothing is predicted', func
     assert_equals(0, count($repo->tickets));
     $daily = $repo->findDailyTicket($date);
     assert_equals('NO_QUALIFIED_TICKET', $daily['status']);
+    // Calibration is a shared upstream condition: each fixture is rejected
+    // ONCE with MODEL_NOT_CALIBRATED — the engine does not generate five
+    // per-market predictions just to reject every one of them.
     assert_true(isset($daily['rejection_summary']['MODEL_NOT_CALIBRATED']), 'rejection reasons are stored');
-    $preds = $repo->listPredictions([], 100);
-    assert_equals(5, count($preds), 'decisions are still recorded for rejected candidates');
-    foreach ($preds as $p) assert_equals('NO_PREDICTION', $p['decision']);
+    assert_equals(5, (int) $daily['rejection_summary']['MODEL_NOT_CALIBRATED'], 'one rejection per fixture, not per market');
+    assert_equals(0, (int) $run['predictionsRecorded'], 'no predictions generated without a model stack');
+    assert_equals(5, (int) $run['diagnostics']['fixturesWithoutCalibration'], 'the funnel attributes the failure');
+    assert_equals(5, (int) $run['diagnostics']['fixturesWithFreshOdds'], 'odds stage passed first');
+    assert_true(isset($run['diagnostics']['topRejectionReasons']['MODEL_NOT_CALIBRATED']), 'top rejection reasons exposed');
 });
 
 test('daily ticket E2E: no provider configured → DISABLED_NO_PROVIDER, nothing fabricated', function () {

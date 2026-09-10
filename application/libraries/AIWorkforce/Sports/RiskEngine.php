@@ -4,9 +4,16 @@ namespace AIWorkforce\Sports;
 /**
  * Risk Engine (spec §13). Rejected candidates can never enter a ticket.
  *
- * $context (optional, forward compatible) may carry:
- *   confidence (float), marketSuspended (bool), liquidity (float),
- *   oddsMovement (float, absolute change from opening odds)
+ * The confidence floor is NOT re-checked here: the pipeline gates confidence
+ * on the WINDELS confidence value once, in stage order (Prediction →
+ * Probability → Confidence → Data Quality → Value/Edge → Risk), and a
+ * duplicated gate here produced double LOW_CONFIDENCE rejections for the
+ * same candidate. Odds freshness is likewise gated upstream (before the
+ * prediction is generated), so it is not repeated as a risk reason.
+ *
+ * $context may carry:
+ *   marketSuspended (bool), liquidity (float), oddsMovement (float,
+ *   absolute change from opening odds)
  */
 class RiskEngine
 {
@@ -16,15 +23,12 @@ class RiskEngine
     {
         $minQuality = (int) ($config['min_data_quality'] ?? $config['minDataQuality'] ?? 75);
         $minEv = (float) ($config['min_expected_value'] ?? $config['minExpectedValue'] ?? 0.02);
-        $minConfidence = $config['min_confidence'] ?? $config['minConfidence'] ?? null;
         $minLiquidity = $config['min_liquidity'] ?? $config['minLiquidity'] ?? null;
         $reasons = [];
         if (!empty($context['marketSuspended'])) $reasons[] = 'MARKET_SUSPENDED';
         if (empty($value['qualified'])) $reasons[] = $value['reason'] ?? 'NO_PREDICTION';
         if (($quality['score'] ?? 0) < $minQuality) $reasons[] = 'LOW_DATA_QUALITY';
-        if (empty($quality['eligibleForTicket'])) $reasons[] = 'STALE_OR_INCOMPLETE_DATA';
         if (($value['expectedValue'] ?? -1) < $minEv) $reasons[] = 'LOW_MODEL_EDGE';
-        if ($minConfidence !== null && isset($context['confidence']) && is_numeric($context['confidence']) && (float) $context['confidence'] < (float) $minConfidence) $reasons[] = 'LOW_CONFIDENCE';
         if ($minLiquidity !== null && isset($context['liquidity']) && is_numeric($context['liquidity']) && (float) $context['liquidity'] < (float) $minLiquidity) $reasons[] = 'INSUFFICIENT_LIQUIDITY';
         if ($reasons) return ['classification' => 'REJECTED', 'approved' => false, 'reasons' => array_values(array_unique($reasons))];
         $risk = ($quality['score'] >= 90 && ($value['expectedValue'] ?? 0) >= .08) ? 'LOW' : (($quality['score'] >= 80) ? 'MEDIUM' : 'HIGH');

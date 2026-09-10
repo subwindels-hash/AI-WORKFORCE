@@ -371,6 +371,49 @@ $kickoffStamp = static function (mixed $iso): string {
           <?php endif; ?>
         <?php elseif ($daily === null || $ticket === null): ?>
           <p class="dim"><?= $daily !== null ? e((string) ($daily['message'] ?? 'No odds prediction ticket for ' . $viewDateIso . '.')) : 'No daily run recorded for ' . e($viewDateIso) . ' yet. Select 🎯 Odds Prediction Ticket to build one from stored fixtures & odds.' ?></p>
+          <?php
+            $diag = [];
+            if ($daily !== null && is_array($daily['rejection_summary'] ?? null) && is_array($daily['rejection_summary']['_diagnostics'] ?? null)) {
+                $diag = $daily['rejection_summary']['_diagnostics'];
+            }
+          ?>
+          <?php if (!empty($diag['fixturesEvaluated']) && (int) $diag['fixturesEvaluated'] > 0): ?>
+            <div class="stat-grid" style="margin-top:10px">
+              <div class="stat"><div class="k">Fixtures evaluated</div><div class="v"><?= (int) ($diag['fixturesEvaluated'] ?? 0) ?></div></div>
+              <div class="stat"><div class="k">Eligible</div><div class="v"><?= (int) ($diag['eligibleFixtures'] ?? 0) ?></div></div>
+              <div class="stat"><div class="k">Fresh odds</div><div class="v"><?= (int) ($diag['fixturesWithFreshOdds'] ?? 0) ?></div></div>
+              <div class="stat"><div class="k">Sufficient data</div><div class="v"><?= (int) ($diag['sufficientDataFixtures'] ?? 0) ?></div></div>
+              <div class="stat"><div class="k">Predictions</div><div class="v"><?= (int) ($diag['predictionsGenerated'] ?? 0) ?></div></div>
+              <div class="stat"><div class="k">Confidence ≥ floor</div><div class="v"><?= (int) ($diag['confidenceQualifiedCandidates'] ?? 0) ?></div></div>
+              <div class="stat"><div class="k">Positive value</div><div class="v"><?= (int) ($diag['positiveValueCandidates'] ?? 0) ?></div></div>
+              <div class="stat"><div class="k">Risk qualified</div><div class="v"><?= (int) ($diag['riskQualifiedCandidates'] ?? 0) ?></div></div>
+              <div class="stat"><div class="k">Final qualified</div><div class="v"><?= (int) ($diag['finalQualifiedCandidates'] ?? 0) ?></div></div>
+            </div>
+            <?php $reasons = is_array($diag['topRejectionReasons'] ?? null) ? $diag['topRejectionReasons'] : []; ?>
+            <?php $byProvider = is_array($diag['rejectionReasonsByProvider'] ?? null) ? $diag['rejectionReasonsByProvider'] : []; ?>
+            <?php if ($reasons): ?>
+            <div class="table-scroll" style="margin-top:12px">
+              <table class="tbl">
+                <thead><tr><th>Rejection reason (primary)</th><th class="num">Count</th><th>Caused by</th></tr></thead>
+                <tbody>
+                  <?php foreach ($reasons as $reason => $count): ?>
+                    <tr>
+                      <td class="mono"><?= e((string) $reason) ?></td>
+                      <td class="num mono"><?= (int) $count ?></td>
+                      <td class="mono" style="font-size:11px"><?php
+                        $prov = $byProvider[(string) $reason] ?? [];
+                        $provParts = [];
+                        foreach ((array) $prov as $p => $n) $provParts[] = e((string) $p) . ' ×' . (int) $n;
+                        echo $provParts ? implode(', ', $provParts) : '—';
+                      ?></td>
+                    </tr>
+                  <?php endforeach; ?>
+                </tbody>
+              </table>
+            </div>
+            <p class="dim" style="font-size:11px;margin-top:8px">Odds TTL: <?= (int) ($diag['thresholds']['oddsMaxAgeSeconds'] ?? 0) ?>s · refresh attempts: <?= (int) ($diag['oddsRefreshAttempts'] ?? 0) ?> · refreshed fixtures: <?= (int) ($diag['oddsRefreshedFixtures'] ?? 0) ?><?php if (!empty($diag['oddsProviderFailureStatuses'])): ?> · odds provider failures: <?= e(implode(', ', array_map(fn($p, $s) => $p . ' ' . $s, array_keys($diag['oddsProviderFailureStatuses']), $diag['oddsProviderFailureStatuses']))) ?><?php endif; ?></p>
+            <?php endif; ?>
+          <?php endif; ?>
         <?php else: ?>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
             <span class="badge <?= (string) ($daily['status'] ?? '') === 'PENDING_USER_APPROVAL' ? 'b-violet' : 'b-green' ?>"><?= e((string) ($daily['status'] ?? '')) ?></span>

@@ -176,12 +176,17 @@ class SportsCronService
                     $health = $provider->health();
                     $reliability = (float) ($health['reliability'] ?? 0);
                 }
+                // Odds freshness is judged against the configurable odds TTL
+                // (market/provider aware) — NOT a hard-coded hour, which marked
+                // every once-a-day odds sync stale for the rest of the day.
+                $maxOddsAge = OddsFreshnessEngine::maxAgeFor(null, $provider !== null ? $provider->id() : null);
                 $quality = $this->sports->quality->assess($matchArr, [
                     'oddsAvailable' => $odds !== null,
                     'recentFormAvailable' => !empty($matchArr['context']['recentForm']),
                     'providerReliability' => $reliability,
-                    'dataAgeSeconds' => $odds ? $this->ageOf($odds['observed_at']) : $this->ageOf($match['source_timestamp']),
-                    'maxAgeSeconds' => 3600,
+                    'oddsAgeSeconds' => $odds ? $this->ageOf($odds['observed_at']) : $this->ageOf($match['source_timestamp']),
+                    'maxOddsAgeSeconds' => $maxOddsAge,
+                    'oddsFresh' => $odds !== null && $this->ageOf($odds['observed_at']) <= $maxOddsAge,
                 ]);
                 $this->repo->saveQuality((int) $match['id'], $quality);
                 $updated++;

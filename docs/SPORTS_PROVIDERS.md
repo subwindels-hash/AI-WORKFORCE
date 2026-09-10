@@ -380,6 +380,45 @@ unreachable host, plan restriction) instead of guessing.
 
 Provider data is untrusted input. The existing normalizers, data-quality gates, confidence checks, and ticket governance remain in the pipeline. Missing odds from providers without an odds feed must not be treated as fabricated odds; those predictions should be rejected or supplied by a separately licensed odds source.
 
+## Odds freshness, provider fallback and the diagnostics funnel
+
+The daily ticket engine treats bookmaker odds as fresh inside a configurable
+TTL and only refreshes when the maximum age is actually exceeded:
+
+* **TTL resolution** (first match wins): explicit context override →
+  per-provider override → per-market override →
+  `WINDELS_SPORTS_ODDS_MAX_AGE` (seconds) → built-in default of **6 hours**.
+  A once-a-day odds sync therefore stays usable all day; it is never marked
+  stale merely because the current run did not refresh it. Every prediction
+  record stores the provenance: `oddsUpdatedAt`, `oddsSource`,
+  `oddsAgeSeconds`, `oddsStatus` (`FRESH` / `STALE` / `UNAVAILABLE` /
+  `INVALID_TIMESTAMP`).
+* **Refresh order when odds are missing or stale**: bulk `round()` rows (one
+  request per matchday, when the fixture provider exposes the round endpoint)
+  → the fixture provider's own `odds()` call → any other configured provider
+  that knows the fixture under a **verified id**. A provider answering "no
+  odds for this fixture" (an empty result, not an error) is not a failure —
+  the next provider is tried before the candidate is rejected.
+* **Cross-provider safety**: fixture ids are provider-specific. A provider is
+  only asked for odds with an id in its OWN namespace — the supplying
+  provider's id or a recorded cross-reference (TheSportsDB rows carry
+  `idAPIfootball`, preserved as `crossReferences` on the normalized fixture).
+  A provider without a verified id is skipped without a request, so odds can
+  never be silently attached to another provider's fixture.
+* **No double counting**: every rejected candidate/fixture counts exactly one
+  *primary* blocking reason (the first failed pipeline stage); all reasons
+  remain on the immutable decision record. Shared upstream failures (fixture
+  eligibility, odds availability/freshness, market-mandatory data,
+  calibration, quality floor) reject the **fixture once** instead of
+  generating one rejected prediction per market.
+* **Diagnostics**: the run result (and the stored `rejection_summary` under
+  the reserved `_diagnostics` key) carries a funnel — fixtures evaluated →
+  eligible → fresh odds → sufficient data → predictions → confidence-qualified
+  → positive value → risk-qualified → correlation-qualified → final — plus the
+  top rejection reasons with the provider that caused each failure, refresh
+  attempts, and the active thresholds. The console's no-ticket panel renders
+  it; `POST /api/sports/run_ticket_engine` returns it as `diagnostics`.
+
 ## Odds Prediction Ticket compliance rules
 
 The `🎯 Odds Prediction Ticket` builder is intentionally conservative:
@@ -387,7 +426,7 @@ The `🎯 Odds Prediction Ticket` builder is intentionally conservative:
 * It builds at most one football ticket per configured run from enabled Provider Hub feeds only (API-Football, Sportmonks, TheSportsDB where supported, or another registered `SportsDataProvider`). Missing fixture, form, odds, or provider data is reported as unavailable; it is never filled with synthetic values.
 * Runtime date/time is read when the run starts evaluating fixtures. Eligible fixtures must be football, must be provider-not-started (`NS`, or the provider adapter's explicit scheduled mapping), and must kick off strictly more than two hours after that runtime clock.
 * Current odds are accepted only when the provider returned numeric decimal odds greater than `1.00`, with a valid observation timestamp, for one of these supported markets: `MATCH_RESULT` (1X2), `TOTAL_GOALS / OVER_1_5`, `BTTS / YES`, or `DOUBLE_CHANCE`.
-* Ticket thresholds are hard floors: confidence must be at least `80%`, data quality at least `75/100`, odds must be fresh, and the combined decimal odds window is always `5.00` through `8.00` inclusive. The optimizer multiplies unrounded leg odds and rounds only the stored/displayed total.
+* Ticket thresholds are hard floors: the WINDELS model confidence must be at least the configured `min_confidence` (default `70%`, never below), data quality at least `75/100`, odds must be fresh under the configured TTL, and the combined decimal odds window is always `5.00` through `8.00` inclusive. The optimizer multiplies unrounded leg odds and rounds only the stored/displayed total.
 * The optimizer prefers stronger confidence, quality, expected value, fresh/reliable odds, lower risk, fewer unnecessary selections, and low correlation. It does not add weak selections just to reach the odds band.
 * If no verified combination satisfies those gates, the run records `NO_QUALIFIED_TICKET` with a `NO VALUE TICKET TODAY` message rather than guessing.
 

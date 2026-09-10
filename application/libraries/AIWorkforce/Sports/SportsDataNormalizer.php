@@ -62,6 +62,11 @@ class SportsDataNormalizer
             'simulated' => !empty($raw['simulated']),
             'context' => self::context($raw['context'] ?? null),
             'roundId' => (string) ($raw['roundId'] ?? ''),
+            // Cross-provider fixture references (e.g. TheSportsDB's
+            // idAPIfootball). These let the odds layer ask a SECOND provider
+            // for the same fixture using an id in that provider's own
+            // namespace — never by guessing with a foreign id.
+            'crossReferences' => self::crossReferences($raw),
             // In-play state (minute + current goal score), copied through only
             // when the provider sent it. Absent stays absent: a live match the
             // provider gave no score for is never defaulted to 0-0 — the live
@@ -69,6 +74,25 @@ class SportsDataNormalizer
             'live' => self::liveState($raw),
             'fieldsPresent' => array_keys($raw),
         ];
+    }
+
+    /**
+     * Verified fixture ids in OTHER providers' namespaces, when the supplier
+     * payload carries them. Only explicit cross-references are kept — an id
+     * is never assumed to be portable across providers.
+     *
+     * @return array<string,string> provider id → external fixture id
+     */
+    private static function crossReferences(array $raw): array
+    {
+        $out = [];
+        foreach (['api-football' => 'apiFootballId'] as $provider => $key) {
+            if (isset($raw[$key]) && is_scalar($raw[$key])) {
+                $id = trim((string) $raw[$key]);
+                if ($id !== '') $out[$provider] = $id;
+            }
+        }
+        return $out;
     }
 
     /**

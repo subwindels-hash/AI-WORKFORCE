@@ -149,11 +149,28 @@ class Sports extends App_Controller
         $summary = '';
         if (!empty($result['rejectionSummary']) && is_array($result['rejectionSummary'])) {
             $parts = [];
-            foreach ($result['rejectionSummary'] as $k => $v) $parts[] = $k . ':' . $v;
+            foreach ($result['rejectionSummary'] as $k => $v) if (is_int($v)) $parts[] = $k . ':' . $v;
             if ($parts) $summary = ' Rejections: ' . implode(', ', array_slice($parts, 0, 8)) . '.';
         }
-        $msg = sprintf('No qualified odds prediction ticket for %s — %s (%d evaluated, %d predictions, %d rejections).%s',
-            $date, $status . ($message !== '' ? ': ' . $message : ''), $evaluated, $recorded, $rejections, $summary);
+        // Diagnostic funnel — which pipeline stage eliminated the candidates.
+        $funnel = '';
+        $diag = $result['diagnostics'] ?? [];
+        if (is_array($diag) && !empty($diag['fixturesEvaluated'])) {
+            $funnel = sprintf(
+                ' Funnel: %d evaluated → %d eligible → %d fresh-odds → %d sufficient-data fixtures → %d predictions → %d confidence-qualified → %d positive-value → %d risk-qualified → %d final.',
+                (int) ($diag['fixturesEvaluated'] ?? 0),
+                (int) ($diag['eligibleFixtures'] ?? 0),
+                (int) ($diag['fixturesWithFreshOdds'] ?? 0),
+                (int) ($diag['sufficientDataFixtures'] ?? 0),
+                (int) ($diag['predictionsGenerated'] ?? 0),
+                (int) ($diag['confidenceQualifiedCandidates'] ?? 0),
+                (int) ($diag['positiveValueCandidates'] ?? 0),
+                (int) ($diag['riskQualifiedCandidates'] ?? 0),
+                (int) ($diag['finalQualifiedCandidates'] ?? 0)
+            );
+        }
+        $msg = sprintf('No qualified odds prediction ticket for %s — %s (%d evaluated, %d predictions, %d rejections).%s%s',
+            $date, $status . ($message !== '' ? ': ' . $message : ''), $evaluated, $recorded, $rejections, $summary, $funnel);
         if ($status === 'NO_QUALIFIED_TICKET') {
             $this->flash('notice', $msg);
         } else {

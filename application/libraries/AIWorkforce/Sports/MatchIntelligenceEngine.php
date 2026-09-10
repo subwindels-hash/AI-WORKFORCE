@@ -6,6 +6,18 @@ namespace AIWorkforce\Sports;
  * timestamp; unavailable inputs are explicitly preserved (never fabricated).
  * Context may arrive from the persisted provider payload (match['payload'])
  * or be overridden by $verifiedContext (tests / operator-supplied data).
+ *
+ * Honesty rules (pipeline spec §8):
+ *   • odds availability and freshness are REPORTED (oddsFreshness), not
+ *     gated here — the prediction pipeline gates them, in stage order,
+ *     before any prediction is generated;
+ *   • optional enrichment inputs (injuries, lineups, H2H, rest days…)
+ *     that a provider did not supply are REPORTED as unavailableInputs —
+ *     they lower the Data Quality Score but never invalidate the match.
+ *     Only a field that is mandatory for the selected market can block a
+ *     prediction, and that check is made per market downstream;
+ *   • the only hard rejections left here are match-level facts that make
+ *     ANY prediction impossible (invalid status, explicit zero liquidity).
  */
 class MatchIntelligenceEngine
 {
@@ -16,7 +28,11 @@ class MatchIntelligenceEngine
         $payload = is_array($match['payload'] ?? null) ? $match['payload'] : [];
         $storedContext = is_array($payload['context'] ?? null) ? $payload['context'] : [];
         $context = array_merge($storedContext, $verifiedContext);
-        $odds = $this->freshness->assess($latestOdds, (int) ($context['maxOddsAgeSeconds'] ?? 900), $now);
+        $odds = $this->freshness->assess(
+            $latestOdds,
+            isset($context['maxOddsAgeSeconds']) && (int) $context['maxOddsAgeSeconds'] > 0 ? (int) $context['maxOddsAgeSeconds'] : null,
+            $now
+        );
         $fields = [
             'recentForm' => $context['recentForm'] ?? null,
             'injuries' => $context['injuries'] ?? null,
@@ -29,16 +45,12 @@ class MatchIntelligenceEngine
         $status = strtoupper((string) ($match['status'] ?? 'UNKNOWN'));
         $rejections = [];
         if (!in_array($status, ['SCHEDULED', 'LIVE'], true)) $rejections[] = 'MATCH_STATUS_INVALID';
-        if ($latestOdds === null) $rejections[] = 'ODDS_UNAVAILABLE';
-        elseif (!$odds['available']) $rejections[] = 'ODDS_UNAVAILABLE';
-        elseif (!$odds['fresh']) $rejections[] = ($odds['reason'] ?? 'STALE_ODDS');
-        if (!$fields['recentForm']) $rejections[] = 'INSUFFICIENT_DATA';
         if ($fields['marketLiquidity'] !== null && (float) $fields['marketLiquidity'] < 1) $rejections[] = 'INSUFFICIENT_LIQUIDITY';
         return [
             'match' => ['id' => $match['id'] ?? null, 'fixtureId' => $match['external_id'] ?? $match['externalId'] ?? null, 'homeTeam' => $match['home_team'] ?? $match['homeTeam'] ?? null, 'awayTeam' => $match['away_team'] ?? $match['awayTeam'] ?? null, 'competition' => $match['competition'] ?? null, 'kickoff' => $match['kickoff_at'] ?? $match['kickoff'] ?? null, 'status' => $status, 'simulated' => !empty($payload['simulated'])],
             'odds' => $latestOdds, 'oddsFreshness' => $odds, 'inputs' => $fields,
             'unavailableInputs' => $unavailable, 'rejectionReasons' => array_values(array_unique($rejections)),
-            'decision' => $rejections ? 'NO_QUALIFIED_TICKET' : 'INTELLIGENCE_READY',
+            'decision' => $rejections ? 'MATCH_DATA_INVALID' : 'INTELLIGENCE_READY',
             'generatedAt' => gmdate('c', $now ?? time()),
         ];
     }
