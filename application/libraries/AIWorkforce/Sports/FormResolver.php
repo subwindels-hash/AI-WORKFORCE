@@ -38,6 +38,12 @@ class FormResolver
     /** @var array<string,array> (provider:league:season) → standings rows — one request serves a whole league */
     private array $standingsByLeague = [];
 
+    /** Run observability: why did (or didn't) enrichment happen. */
+    private int $lookupsUsed = 0;
+    private int $lookupFailures = 0;
+    private int $budgetSkips = 0;
+    private bool $providerCapable = true;
+
     /**
      * @param int|null $maxTeamLookups per-enrich() budget of team-statistics
      *        API calls (null = env WINDELS_SPORTS_FORM_LOOKUPS or 30). A
@@ -70,8 +76,12 @@ class FormResolver
      */
     public function enrich(SportsDataProvider $provider, array $fixtures): array
     {
-        // Only native providers have team statistics endpoints
+        // Only native providers have team statistics endpoints. When the active
+        // fixture provider has none, recentForm can never be attached and every
+        // fixture downstream is rejected INSUFFICIENT_DATA — record that so the
+        // diagnostics funnel can say WHY instead of leaving it invisible.
         if (!method_exists($provider, 'teamStatistics') && !method_exists($provider, 'standings')) {
+            $this->providerCapable = false;
             return $fixtures;
         }
 
@@ -108,7 +118,26 @@ class FormResolver
         }
         unset($fixture);
 
+        $this->lookupsUsed = $lookups;
         return $fixtures;
+    }
+
+    /**
+     * Why enrichment did or did not produce recentForm this run: the lookup
+     * budget spent vs configured, provider API failures (quota, errors) that
+     * were swallowed per fixture, budget skips, and whether the active
+     * fixture provider even exposes a team-statistics endpoint. Surfaced in
+     * the daily-ticket diagnostics funnel — never a gate itself.
+     */
+    public function stats(): array
+    {
+        return [
+            'lookupsUsed' => $this->lookupsUsed,
+            'lookupFailures' => $this->lookupFailures,
+            'budgetSkips' => $this->budgetSkips,
+            'budget' => $this->maxTeamLookups,
+            'providerCapable' => $this->providerCapable,
+        ];
     }
 
     /**
@@ -124,7 +153,7 @@ class FormResolver
         if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         // Quota budget: cache hits are free, live lookups stop at the cap so a
         // big fixture pull cannot burn the daily quota before odds/results sync.
-        if ($lookups >= $this->maxTeamLookups) return null;
+        if ($lookups >= $this->maxTeamLookups) { $this->budgetSkips++; return null; }
 
         try {
             if ($provider instanceof ApiFootballProvider && $leagueId && $season) {
@@ -148,7 +177,7 @@ class FormResolver
                 // all of the league's fixtures in this run.
                 $standingsKey = $provider->id() . ':' . $leagueId . ':' . ($season ?? '');
                 if (!isset($this->standingsByLeague[$standingsKey])) {
-                    if ($lookups >= $this->maxTeamLookups) return null;
+                    if ($lookups >= $this->maxTeamLookups) { $this->budgetSkips++; return null; }
                     $lookups++;
                     $this->standingsByLeague[$standingsKey] = $provider->standings($leagueId, $season ?? '');
                 }
@@ -166,7 +195,10 @@ class FormResolver
                 }
             }
         } catch (\Throwable $e) {
-            // Form resolution is best-effort; failures don't break the pipeline
+            // Form resolution is best-effort; failures don't break the pipeline.
+            // Counted so the diagnostics funnel can distinguish "provider could
+            // not supply form" (quota exhausted, 4xx/5xx) from "never asked".
+            $this->lookupFailures++;
         }
 
         return null;

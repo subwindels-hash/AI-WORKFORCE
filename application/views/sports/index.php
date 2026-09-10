@@ -382,6 +382,7 @@ $kickoffStamp = static function (mixed $iso): string {
               <div class="stat"><div class="k">Fixtures evaluated</div><div class="v"><?= (int) ($diag['fixturesEvaluated'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Eligible</div><div class="v"><?= (int) ($diag['eligibleFixtures'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Fresh odds</div><div class="v"><?= (int) ($diag['fixturesWithFreshOdds'] ?? 0) ?></div></div>
+              <div class="stat" title="Fixtures carrying verified recentForm after form enrichment<?= is_array($diag['formResolver'] ?? null) ? ' — lookups ' . (int) ($diag['formResolver']['lookupsUsed'] ?? 0) . '/' . (int) ($diag['formResolver']['budget'] ?? 0) . ', failures ' . (int) ($diag['formResolver']['lookupFailures'] ?? 0) . ', budget skips ' . (int) ($diag['formResolver']['budgetSkips'] ?? 0) . (empty($diag['formResolver']['providerCapable']) ? ', provider has no team-statistics endpoint' : '') : '' ?>"><div class="k">Form resolved</div><div class="v"><?= (int) ($diag['fixturesWithRecentForm'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Sufficient data</div><div class="v"><?= (int) ($diag['sufficientDataFixtures'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Predictions</div><div class="v"><?= (int) ($diag['predictionsGenerated'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Confidence ≥ floor</div><div class="v"><?= (int) ($diag['confidenceQualifiedCandidates'] ?? 0) ?></div></div>

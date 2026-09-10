@@ -139,7 +139,7 @@ final class ModelRegistry
             'publishable' => true,
             'highConfidenceAllowed' => true,
             'reason' => 'The model version is in state ' . (string) ($best['status'] ?? self::DRAFT)
-                . '. Predictions run with the configured 70%+ confidence tiers. The HIGH_CONFIDENCE badge is now available for predictions with calibrated probability >= 70%, regardless of model state. An administrator should move the version to ACTIVE for full governance compliance.',
+                . '. Predictions run with the configured 70%+ confidence tiers. The HIGH_CONFIDENCE badge is now available for predictions with calibrated probability >= 70%, regardless of model state. An administrator should move the version to ACTIVE — activation is the production-blessed mark of full governance compliance.',
         ];
     }
 

@@ -138,6 +138,15 @@ class DailyTicketService
                     $funnel['providersConfigured'] = count($this->providers->all());
                     // Enrich raw fixtures with recentForm from team statistics
                     $enrichedFixtures = $this->formResolver->enrich($this->providers->provider($provider), $attempt['result']);
+                    // Form enrichment is the single most common INSUFFICIENT_DATA
+                    // cause, and it used to be invisible. Count what enrichment
+                    // actually delivered and why, and carry both on the funnel.
+                    $formEnriched = 0;
+                    foreach ($enrichedFixtures as $f) {
+                        if (!empty($f['context']['recentForm'])) $formEnriched++;
+                    }
+                    $funnel['fixturesWithRecentForm'] = $formEnriched;
+                    $funnel['formResolver'] = $this->formResolver->stats();
                     // Bulk-fetch the day's odds in one round() call per
                     // matchday when the fixture provider exposes the round
                     // endpoint (round ids are provider-specific — only the
@@ -350,6 +359,25 @@ class DailyTicketService
                             ? 'NO VALUE TICKET TODAY — no verified fixtures received for ' . $date
                             : 'NO VALUE TICKET TODAY — no candidate passed the eligibility, odds, ' . $confidenceFloor . '%+ confidence, quality, risk/value and correlation gates';
                     }
+                    if ($ticketId === null) {
+                        // Targeted diagnosis of the two most common upstream dead
+                        // ends, so the message says what to FIX, not only what
+                        // failed.
+                        if (($funnel['fixturesWithFreshOdds'] ?? 0) > 0 && ($funnel['fixturesWithRecentForm'] ?? 0) === 0) {
+                            $fr = $funnel['formResolver'] ?? [];
+                            $why = empty($fr['providerCapable']) && $fr !== []
+                                ? 'the fixture provider exposes no team-statistics endpoint'
+                                : ((int) ($fr['lookupFailures'] ?? 0) > 0
+                                    ? (int) $fr['lookupFailures'] . ' team-statistics lookup(s) failed (quota/auth/errors)'
+                                    : ((int) ($fr['budgetSkips'] ?? 0) > 0
+                                        ? 'the form lookup budget (WINDELS_SPORTS_FORM_LOOKUPS) ran out'
+                                        : 'no provider team statistics were available'));
+                            $message .= ' — recent form could not be resolved for ANY fixture (' . $why . '); without verified recentForm the model computes no probabilities';
+                        }
+                        if (($funnel['fixturesWithoutCalibration'] ?? 0) > 0) {
+                            $message .= ' — no APPROVED calibration for the deployed model version (create one via POST /api/sports/calibrations/bootstrap-identity, then approve it)';
+                        }
+                    }
                     if ($ticketId === null) $message .= ' ' . $this->funnelSummary($funnel, $evaluated, $recorded, $rejections);
                     $funnel['topRejectionReasons'] = $this->topRejectionReasons($rejectionSummary);
                     $funnel['rejectionReasonsByProvider'] = $reasonProviders;
@@ -406,6 +434,16 @@ class DailyTicketService
         if ($dataState === 'DATA_UNAVAILABLE' && method_exists($this->repo, 'releaseJobRun')) {
             try { $this->repo->releaseJobRun($run['id']); } catch (\Throwable $e) { /* best effort */ }
         }
+        // Same principle for a day that stored NOTHING: no predictions, no
+        // reused predictions, no ticket. That is a BLOCKED day (missing form
+        // data, missing calibration), not a verdict — the operator fixes the
+        // upstream problem and retries the same date without having to bump
+        // the configuration version just to get a fresh execution key. A run
+        // that stored any prediction or ticket keeps its idempotency slot.
+        $nothingStored = $ticketId === null && $recorded === 0 && (int) ($funnel['predictionsReused'] ?? 0) === 0;
+        if ($dataState === 'OK' && $nothingStored && method_exists($this->repo, 'releaseJobRun')) {
+            try { $this->repo->releaseJobRun($run['id']); } catch (\Throwable $e) { /* best effort */ }
+        }
         $this->audit->emit($dataState === 'DATA_UNAVAILABLE' ? 'SPORTS_DAILY_TICKET_BLOCKED' : 'SPORTS_DAILY_TICKET_RUN', 'Daily ticket run ' . $date . ' → ' . $status, [
             'date' => $date, 'status' => $status, 'dataState' => $dataState, 'ticketId' => $ticketId, 'evaluated' => $evaluated,
             'rejections' => $rejections, 'rejectionSummary' => $rejectionSummary, 'diagnostics' => $diagnostics, 'message' => $message, 'provider' => $provider,
@@ -444,6 +482,8 @@ class DailyTicketService
         return [
             'providersConfigured' => 0,
             'eligibleFixtures' => 0,
+            'fixturesWithRecentForm' => 0,
+            'formResolver' => [],
             'fixturesWithSupportedOdds' => 0,
             'fixturesWithFreshOdds' => 0,
             'fixturesRejectedStaleOdds' => 0,
