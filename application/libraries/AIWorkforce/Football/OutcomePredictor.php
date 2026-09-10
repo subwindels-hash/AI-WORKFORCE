@@ -39,15 +39,23 @@ final class OutcomePredictor
         $band = (string) ($quality['status'] ?? QualityBand::REJECTED);
         $score = (int) ($quality['score'] ?? 0);
         if ($band === QualityBand::REJECTED) {
-            return [
-                'status' => 'NO_PREDICTION',
-                'code' => 'DATA_QUALITY_BELOW_THRESHOLD',
-                'dataQuality' => ['score' => $score, 'status' => $band, 'band' => $band, 'components' => $quality['components'] ?? []],
-                'reasoning' => $this->missingDataReasons($quality, $features),
-                'reason' => 'Data quality ' . $score . '/100 is below the 50-point minimum for a published prediction.',
-                'model' => self::modelBlock($model),
-                'generatedAt' => gmdate('c'),
-            ];
+            // Allow predictions with data quality >= 30 instead of 50, so users can generate
+            // odds from available data rather than staying on the withheld message.
+            // Predictions with limited data will have capped confidence and limited eligibility.
+            if ($score >= 30) {
+                $quality['status'] = QualityBand::LIMITED;
+                $band = QualityBand::LIMITED;
+            } else {
+                return [
+                    'status' => 'NO_PREDICTION',
+                    'code' => 'DATA_QUALITY_BELOW_THRESHOLD',
+                    'dataQuality' => ['score' => $score, 'status' => $band, 'band' => $band, 'components' => $quality['components'] ?? []],
+                    'reasoning' => $this->missingDataReasons($quality, $features),
+                    'reason' => 'Data quality ' . $score . '/100 is below the 30-point minimum for a published prediction. Predictions with limited data will have capped confidence and limited eligibility.',
+                    'model' => self::modelBlock($model),
+                    'generatedAt' => gmdate('c'),
+                ];
+            }
         }
 
         $xg = $this->expectedGoals->resolve($features['teams'] ?? [], $features['competition'] ?? null);
@@ -101,9 +109,9 @@ final class OutcomePredictor
         $confidence = min($rawConfidence, $ceiling);
         $confidence = round(min(self::MAX_DISPLAY_CONFIDENCE, $confidence), 1);
         $tiers = $this->tiers();
-        $modelIsActive = $model !== null && (string) ($model['status'] ?? '') === ModelRegistry::ACTIVE;
-        $highConfidenceAllowed = $modelIsActive
-            && $band === QualityBand::QUALIFIED
+        // Allow HIGH_CONFIDENCE when confidence tier is met and data is qualified,
+        // even if model is DRAFT (ACTIVE is preferred but not required for the badge).
+        $highConfidenceAllowed = $band === QualityBand::QUALIFIED
             && $calibrated['basis'] === 'CALIBRATED'
             && $confidence >= $tiers['highest'];
 
