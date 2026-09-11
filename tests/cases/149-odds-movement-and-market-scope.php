@@ -170,9 +170,11 @@ test('the daily engine rejects a fixture only when every supported market is unu
         (bool) preg_match('/if \(\$usable === \[\]\) \{.*?STALE_ODDS/s', (string) $src),
         'STALE_ODDS is a fixture verdict only when the usable set is empty'
     );
+    // The no-supported-market verdict is now SPLIT by cause (case 153):
+    // ODDS_UNAVAILABLE (feed gap) vs MARKET_UNAVAILABLE (coverage gap).
     assert_true(
-        (bool) preg_match('/if \(\$supported === 0\) \{.*?SUPPORTED_ODDS_UNAVAILABLE/s', (string) $src),
-        'no-odds is a fixture verdict only when no supported market was priced'
+        (bool) preg_match('/if \(\$supported === 0\) \{.*?MARKET_UNAVAILABLE.*?ODDS_UNAVAILABLE/s', (string) $src),
+        'no-supported-market is a fixture verdict only when no supported market was priced, split by cause'
     );
     assert_false(
         (bool) preg_match('/\$staleCount > 0\)\s*\{?\s*return \[\s*.ok. => false/s', (string) $src),

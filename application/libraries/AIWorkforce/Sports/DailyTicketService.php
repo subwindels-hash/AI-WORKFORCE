@@ -1426,7 +1426,14 @@ class DailyTicketService
             'fixturesWithSupportedOdds' => 0,
             'fixturesWithFreshOdds' => 0,
             'fixturesRejectedStaleOdds' => 0,
+            // A feed gap: no price at all was held or fetched for the fixture.
             'fixturesRejectedNoOdds' => 0,
+            // A coverage gap: the book priced this fixture, but not a market
+            // this engine can price. Healthy feed, nothing to chase.
+            'fixturesRejectedMarketUnavailable' => 0,
+            // Which markets those books DID quote, so a persistent coverage
+            // gap is visible as a fact rather than inferred from silence.
+            'unsupportedMarketsQuoted' => [],
             'fixturesMissingMandatoryData' => 0,
             'fixturesWithoutCalibration' => 0,
             'calibrationBootstrap' => null,
@@ -2071,13 +2078,30 @@ class DailyTicketService
             $supported = 0;
             $usable = [];
             $staleCount = 0;
+            // Every market:selection the book DID quote for this fixture,
+            // supported or not. It is what separates "this book does not
+            // offer a market we can price" (coverage) from "we hold no price
+            // for this fixture at all" (feed).
+            $quotedMarkets = [];
+            $unsupportedQuotes = [];
             foreach ($latest as $row) {
                 $assessment = $this->oddsFreshness->assess($row, null, $now);
                 $fresh = !empty($assessment['fresh']);
                 if ($fresh) {
                     $marketPrices[$row['market']][$row['selection']] = ['odds' => $row['decimalOdds'], 'observedAt' => $row['observedAt']];
                 }
-                if (!PredictionEngine::isSupportedMarketSelection($row['market'], $row['selection'])) continue;
+                $quotedMarkets[$row['market']] = true;
+                if (!PredictionEngine::isSupportedMarketSelection($row['market'], $row['selection'])) {
+                    // A companion price (UNDER_1_5, BTTS NO) exists only to
+                    // complete an overround and is never a candidate, so it
+                    // is not evidence that the book offers a market we can
+                    // price. Anything else genuinely is a market we do not
+                    // support.
+                    if (!PredictionEngine::isCompanionSelection($row['market'], $row['selection'])) {
+                        $unsupportedQuotes[$row['market'] . ':' . $row['selection']] = true;
+                    }
+                    continue;
+                }
                 $supported++;
                 $row['oddsStatus'] = $assessment['oddsStatus'];
                 $row['oddsUpdatedAt'] = $assessment['oddsUpdatedAt'];
@@ -2087,10 +2111,10 @@ class DailyTicketService
                 if ($fresh) $usable[] = $row;
                 else $staleCount++;
             }
-            return [$supported, $usable, $staleCount, $marketPrices];
+            return [$supported, $usable, $staleCount, $marketPrices, array_keys($quotedMarkets), array_keys($unsupportedQuotes)];
         };
 
-        [$supported, $usable, $staleCount, $marketPrices] = $select();
+        [$supported, $usable, $staleCount, $marketPrices, $quotedMarkets, $unsupportedQuotes] = $select();
 
         if ($usable === []) {
             // Refresh only when needed. Bulk round rows first (one request per
@@ -2132,13 +2156,33 @@ class DailyTicketService
                     }
                 }
             }
-            [$supported, $usable, $staleCount, $marketPrices] = $select();
+            [$supported, $usable, $staleCount, $marketPrices, $quotedMarkets, $unsupportedQuotes] = $select();
         }
 
         if ($supported > 0) $funnel['fixturesWithSupportedOdds']++;
         if ($supported === 0) {
-            $funnel['fixturesRejectedNoOdds']++;
-            return ['ok' => false, 'reason' => 'SUPPORTED_ODDS_UNAVAILABLE', 'provider' => $fixtureProvider, 'rows' => [], 'staleCount' => 0, 'marketPrices' => []];
+            // Two very different causes, previously reported as one:
+            //
+            //  MARKET_UNAVAILABLE — the book quoted this fixture, just not a
+            //    market this engine can price. A coverage gap: the feed is
+            //    healthy and chasing it would waste provider quota.
+            //  ODDS_UNAVAILABLE  — no price at all was held or fetched. A
+            //    feed gap: worth a retry and worth an operator's attention.
+            $coverageGap = $quotedMarkets !== [];
+            if ($coverageGap) {
+                $funnel['fixturesRejectedMarketUnavailable']++;
+                foreach ($unsupportedQuotes as $quote) {
+                    $funnel['unsupportedMarketsQuoted'][$quote] = ($funnel['unsupportedMarketsQuoted'][$quote] ?? 0) + 1;
+                }
+            } else {
+                $funnel['fixturesRejectedNoOdds']++;
+            }
+            return [
+                'ok' => false,
+                'reason' => $coverageGap ? 'MARKET_UNAVAILABLE' : 'ODDS_UNAVAILABLE',
+                'provider' => $fixtureProvider, 'rows' => [], 'staleCount' => 0, 'marketPrices' => [],
+                'quotedMarkets' => $quotedMarkets, 'unsupportedQuotes' => $unsupportedQuotes,
+            ];
         }
         if ($usable === []) {
             // Real rows exist but every one exceeded the configured TTL and no
