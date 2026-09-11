@@ -126,6 +126,49 @@ RBAC, language/lottery reference data, built-in strategies and the initial
 administrator account. Configuration is read from `.env` by the bundled
 `application/config/env.php` loader.
 
+### Football Intelligence operations (API-Football connection + scheduler)
+
+1. **Connect API-Football (server-side only).** In `.env` set:
+
+   ```env
+   API_FOOTBALL_KEY=<your key from dashboard.api-football.com>
+   # API_FOOTBALL_BASE_URL=https://v3.football.api-sports.io  (default)
+   ```
+
+   `WINDELS_API_FOOTBALL_KEY` is accepted as a legacy alias. The key travels
+   only in the server-side `x-apisports-key` header — it is never sent to the
+   browser. Credentials saved in **Admin → API** work as well.
+
+2. **Schedule the unified worker** so fixtures, odds, live scores, results,
+   predictions, settlement, tickets, calibration and performance actually run
+   in production (the scheduler is never driven by a browser being open):
+
+   ```cron
+   # Native PHP (preferred):
+   * * * * * php /home/<user>/public_html/index.php tools scheduler >> /home/<user>/ai_workforce-cron.log 2>&1
+   ```
+
+   On hosts without CLI cron, hit the secret-keyed HTTP runner every minute
+   (cPanel → Cron Jobs → `curl -s "https://yourdomain.com/cron/run?key=<secret>"`).
+   The secret is shown once in **Admin → Scheduled jobs** (`/admin/cron`) —
+   `CronScheduler::ensure()` generates it on first view. Every job is
+   idempotent, self-gated by its own refresh interval and request budget, and
+   logs its runs to `football_provider_sync_logs` / `sports_job_runs`.
+
+3. **Verify the pipeline**: `/football` (Today's Football Predictions console),
+   `/football/live`, `/sports` (Sports Intelligence), `/sports/tickets`
+   (Odds Prediction Ticket Engine). The diagnostics panel on `/football` names
+   every state honestly: `CONNECTED / DEGRADED / OFFLINE` for the provider,
+   `WAITING_FOR_DATA` for the engine while no fixture sync has succeeded, and
+   the model/calibration states — it never fakes a green light.
+
+4. **Quota**: the daily API-Football request counter (from the provider's
+   `/status`) is surfaced on the provider diagnostics; per-job request budgets
+   (`WINDELS_FOOTBALL_BUDGET_*`) and minimum request spacing
+   (`WINDELS_FOOTBALL_MIN_REQUEST_SPACING_MS`) keep the module inside the
+   plan. A quota-exhausted feed opens a circuit that holds until the vendor's
+   00:00 UTC reset — the rest of the pipeline keeps working from stored data.
+
 ## Offline dev / demo runtime (this repository's live preview)
 
 The development sandbox has **no package mirrors and no MySQL server

@@ -701,6 +701,58 @@ final class ApiProviders
     public const MARKET_DATA_SERVICES = ['crypto_market', 'forex_market', 'stock_market'];
 
     /**
+     * Server-side API-Football credential resolver.
+     *
+     * `API_FOOTBALL_KEY` is the documented primary environment variable;
+     * `WINDELS_API_FOOTBALL_KEY` remains a fully-supported legacy alias so an
+     * existing deployment never breaks. Real server environment variables win
+     * over the .env file because vp_load_env never overrides them. The base
+     * URL resolves the same way (API_FOOTBALL_BASE_URL →
+     * WINDELS_API_FOOTBALL_BASE_URL → the canonical v3 host) — a marketing
+     * host (api-football.com) is canonicalized onto the real API root by the
+     * adapter, so a wrong URL cannot leak the key anywhere else.
+     *
+     * This is the ONLY place the football key variable names are spelled out;
+     * SportsIntelligence::registerProviders() and the admin hints read them
+     * from here so a new alias can never be added in one file and missed in
+     * another.
+     *
+     * @return array{key:string, baseUrl:string}
+     */
+    public static function footballCredential(): array
+    {
+        $key = '';
+        foreach (['API_FOOTBALL_KEY', 'WINDELS_API_FOOTBALL_KEY'] as $name) {
+            $value = getenv($name);
+            if (is_string($value) && trim($value) !== '') {
+                $key = trim($value);
+                break;
+            }
+        }
+        $base = '';
+        foreach (['API_FOOTBALL_BASE_URL', 'WINDELS_API_FOOTBALL_BASE_URL'] as $name) {
+            $value = getenv($name);
+            if (is_string($value) && trim($value) !== '') {
+                $base = trim($value);
+                break;
+            }
+        }
+        return [
+            'key' => $key,
+            // The adapter re-canonicalizes this host-side as well; the default
+            // here just keeps the historical constant in one place.
+            'baseUrl' => $base !== '' ? $base : 'https://v3.football.api-sports.io',
+        ];
+    }
+
+    /** Every environment variable name footballCredential() may read, for admin hints. */
+    public static function footballKeyEnvNames(): array
+    {
+        return ['API_FOOTBALL_KEY', 'WINDELS_API_FOOTBALL_KEY'];
+    }
+
+
+    /**
      * Public, no-API-key market-data drivers. These are safe to switch on
      * programmatically because they need no credential and no license.
      */

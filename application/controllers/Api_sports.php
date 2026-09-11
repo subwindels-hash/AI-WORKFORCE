@@ -773,7 +773,7 @@ class Api_sports extends Api_controller
                 'label' => 'API-Football (api-football.com)',
                 'docs' => 'https://www.api-football.com/documentation-v3',
                 'capabilities' => ['fixtures', 'odds', 'results', 'standings', 'team_statistics', 'top_players', 'leagues'],
-                'envKey' => 'WINDELS_API_FOOTBALL_KEY',
+                'envKey' => \AIWorkforce\ApiProviders::footballKeyEnvNames(),
                 'configured' => $this->platform->sports->providers->provider('api-football') !== null,
             ],
             'thesportsdb' => [

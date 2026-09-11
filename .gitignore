@@ -27,3 +27,6 @@ assets/uploads/avatars/*
 !assets/uploads/avatars/.gitkeep
 !assets/uploads/avatars/index.html
 !assets/uploads/avatars/.htaccess
+
+# Deployment reference file with real credentials — server-side only.
+/env

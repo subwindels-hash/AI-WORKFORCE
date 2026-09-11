@@ -15,6 +15,8 @@ ErrorDocument 504 /error500.html
   RewriteEngine On
   # Hide data dirs. Do not block /tools — that is an application controller.
   RewriteRule ^(?:database|tests|runtime|python-services)/ - [F,L,NC]
+  # Server-side state: the sqlite dev database and the application logs.
+  RewriteRule ^application/(?:data|logs|cache)/ - [F,L,NC]
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
   RewriteRule ^(.*)$ index.php/$1 [L]
@@ -37,7 +39,19 @@ ErrorDocument 504 /error500.html
   </FilesMatch>
 </IfModule>
 
-<FilesMatch "^(\.env|\.env\.example)$">
+<FilesMatch "^(\.?env|\.env\.example)$">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</FilesMatch>
+# The deployment reference file is also shipped under the dotless name `env`
+# (the front controller's fallback). Never serve it, or any other server-side
+# config, as a static file.
+<FilesMatch "^(env|config\.php|database\.php)$">
   <IfModule mod_authz_core.c>
     Require all denied
   </IfModule>

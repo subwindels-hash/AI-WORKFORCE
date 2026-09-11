@@ -177,15 +177,29 @@ class SportsIntelligence
         // First-class vendor adapters. Each is optional and only registered when
         // its server-side key is present; this makes fallback and health status
         // work consistently across all three vendors.
+        // api-football resolves through ApiProviders::footballCredential() so
+        // both API_FOOTBALL_KEY (documented primary) and the legacy
+        // WINDELS_API_FOOTBALL_KEY alias connect — the variable names live in
+        // exactly one place.
+        $football = \AIWorkforce\ApiProviders::footballCredential();
         $vendors = [
-            ['api-football', 'WINDELS_API_FOOTBALL_KEY', 'https://v3.football.api-sports.io', 'api-football'],
+            ['api-football', $football['key'], $football['baseUrl'], 'api-football'],
             ['thesportsdb', 'WINDELS_THESPORTSDB_KEY', 'https://www.thesportsdb.com/api/v1/json', 'thesportsdb'],
             ['sportmonks', 'WINDELS_SPORTMONKS_TOKEN', 'https://api.sportmonks.com/v3/football', 'sportmonks'],
         ];
-        foreach ($vendors as [$id, $keyName, $defaultBase, $kind]) {
-            $key = getenv($keyName);
-            if (is_string($key) && $key !== '') {
-                $base = (string)(getenv('WINDELS_'.strtoupper(str_replace('-', '_', $id)).'_BASE_URL') ?: $defaultBase);
+        foreach ($vendors as [$id, $keyOrName, $defaultBase, $kind]) {
+            // Named-variable vendors resolve through getenv(); api-football's
+            // credential was already resolved above (empty key = not set).
+            $key = $kind === 'api-football'
+                ? $keyOrName
+                : ((($value = getenv($keyOrName)) && is_string($value) && trim($value) !== '') ? trim($value) : '');
+            if ($key !== '') {
+                // api-football: $defaultBase is the resolved API_FOOTBALL_BASE_URL
+                // (or the canonical v3 host); the other vendors keep their
+                // per-vendor WINDELS_*_BASE_URL override.
+                $base = $kind === 'api-football'
+                    ? $defaultBase
+                    : (string)(getenv('WINDELS_'.strtoupper(str_replace('-', '_', $id)).'_BASE_URL') ?: $defaultBase);
                 $timeout = (int)(getenv('WINDELS_SPORTS_HTTP_TIMEOUT') ?: 10);
                 // Register the native adapter directly (not the legacy
                 // FootballApiProvider wrapper): capability checks

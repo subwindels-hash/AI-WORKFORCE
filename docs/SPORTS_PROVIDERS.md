@@ -9,8 +9,13 @@ WINDELS_SPORTS_ENABLED=1
 WINDELS_SPORTS_MODE=PRODUCTION
 WINDELS_SPORTS_HTTP_TIMEOUT=10
 
-WINDELS_API_FOOTBALL_KEY=...
-WINDELS_API_FOOTBALL_BASE_URL=https://v3.football.api-sports.io
+# Primary variable (API_FOOTBALL_KEY); WINDELS_API_FOOTBALL_KEY is an
+# accepted legacy alias — set exactly one.
+API_FOOTBALL_KEY=...
+API_FOOTBALL_BASE_URL=https://v3.football.api-sports.io
+# Legacy alias:
+# WINDELS_API_FOOTBALL_KEY=...
+# WINDELS_API_FOOTBALL_BASE_URL=https://v3.football.api-sports.io
 
 WINDELS_THESPORTSDB_KEY=123
 WINDELS_THESPORTSDB_BASE_URL=https://www.thesportsdb.com/api/v1/json

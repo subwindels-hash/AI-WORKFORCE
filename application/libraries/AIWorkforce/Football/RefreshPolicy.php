@@ -32,6 +32,17 @@ final class RefreshPolicy
         'football-cleanup' => ['cleanup', 'always'],
     ];
 
+    /**
+     * Preconditions whose job actually talks to the data provider. Every other
+     * job (predict, settle, performance, cleanup) reads and writes the local
+     * database only, so a provider outage must never gate them — a failed
+     * health check used to freeze prediction generation from already-stored
+     * fixtures, settlement and the performance snapshot for the whole backoff
+     * window, which is how a transient provider error could leave the day's
+     * board empty even though the fixtures were sitting in the database.
+     */
+    private const PROVIDER_PRECONDITIONS = ['today', 'window', 'live', 'pending-results', 'statistics'];
+
     public function __construct(private FootballRepository $repo, private FootballConfiguration $config, private ProviderGateway $gateway) {}
 
     /** @return list<string> */
@@ -71,21 +82,29 @@ final class RefreshPolicy
         // array_merge, not `+`: the reason and due flag below must override the
         // defaults, and `+` silently keeps left-hand keys.
         $verdict = static fn(array $overrides): array => array_merge($base, ['due' => false, 'reason' => 'DUE', 'detail' => []], $overrides);
-        if (!$this->gateway->configured()) {
+        $callsProvider = in_array($precondition, self::PROVIDER_PRECONDITIONS, true);
+        if ($callsProvider && !$this->gateway->configured()) {
             return $verdict(['due' => false, 'reason' => 'PROVIDER_NOT_CONFIGURED', 'detail' => ['message' => 'No football data provider is registered; no request will be made.']]);
         }
         if ($precondition !== 'always' && !$this->config->enabled()) {
             return $verdict(['due' => false, 'reason' => 'MODULE_DISABLED']);
         }
-        // The gateway reports the stored backoff as `backoffUntil`; the provider
-        // row's own column name is `backoff_until`, so accept either spelling.
-        $backoffUntil = null;
-        foreach ((array) ($this->gateway->status()['providers'] ?? []) as $provider) {
-            $until = $provider['backoffUntil'] ?? ($provider['backoff_until'] ?? null);
-            if (is_string($until) && $until !== '' && strtotime($until) > $now) $backoffUntil = $until;
-        }
-        if ($backoffUntil !== null) {
-            return $verdict(['due' => false, 'reason' => 'PROVIDER_BACKOFF', 'detail' => ['until' => $backoffUntil]]);
+        // Provider outages only gate the jobs that would spend a provider
+        // request. predict/settle/performance are database-only: predictions
+        // must still be generated from stored fixtures, stored results still
+        // settle, and the performance snapshot stays current while the
+        // provider recovers — none of them needs the network.
+        if ($callsProvider) {
+            // The gateway reports the stored backoff as `backoffUntil`; the provider
+            // row's own column name is `backoff_until`, so accept either spelling.
+            $backoffUntil = null;
+            foreach ((array) ($this->gateway->status()['providers'] ?? []) as $provider) {
+                $until = $provider['backoffUntil'] ?? ($provider['backoff_until'] ?? null);
+                if (is_string($until) && $until !== '' && strtotime($until) > $now) $backoffUntil = $until;
+            }
+            if ($backoffUntil !== null) {
+                return $verdict(['due' => false, 'reason' => 'PROVIDER_BACKOFF', 'detail' => ['until' => $backoffUntil]]);
+            }
         }
         $deferral = $lastRun['next_run_at'] ?? null;
         if (is_string($deferral) && $deferral !== '' && strtotime($deferral) > $now) {
@@ -100,7 +119,7 @@ final class RefreshPolicy
             return $verdict(['due' => false, 'reason' => 'NO_WORK', 'detail' => $work]);
         }
         $budget = $this->config->requestBudget($bucket);
-        if ($budget === 0 && in_array($precondition, ['live', 'today', 'window', 'pending-results', 'statistics'], true)) {
+        if ($budget === 0 && in_array($precondition, self::PROVIDER_PRECONDITIONS, true)) {
             return $verdict(['due' => false, 'reason' => 'REQUEST_BUDGET_EXHAUSTED', 'detail' => $work]);
         }
         return $verdict(['due' => true, 'reason' => 'DUE', 'detail' => array_merge($work, ['budget' => $budget])]);

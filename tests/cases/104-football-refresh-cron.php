@@ -309,17 +309,28 @@ test('football: an idle sweep stays quiet and an eventful one is audited', funct
         public function recent(int $limit = 100): array { return $this->events; }
     };
     // Nothing stored, no provider connected: the sweep runs, every job says so,
-    // and the audit log stays clean — the per-minute tick must not become spam.
+    // and the audit log stays quiet — the per-minute tick must not become spam.
+    // Provider-fed jobs (fixtures, upcoming, live, results, statistics) skip on
+    // PROVIDER_NOT_CONFIGURED; the database-only jobs (predict, settle,
+    // performance) skip on NO_WORK because they do not need the provider at all
+    // — a provider outage must never freeze prediction generation from stored
+    // fixtures, settlement or the performance snapshot; cleanup always runs
+    // (it is pure housekeeping) and completes on an empty database.
     $repo = new FootballRepositoryStub();
     $idle = new FootballIntelligence($repo, new \AIWorkforce\Sports\Providers\SportsProviderManager(),
         $audit, new FootballConfiguration());
     $summary = $idle->cron()->runAll();
-    foreach (FootballCronService::JOBS as $job) {
+    foreach (['fixtures', 'upcoming', 'live', 'results', 'statistics'] as $job) {
         assert_equals('SKIPPED', (string) ($summary[$job]['status'] ?? ''), $job . ' reports it had nothing to do');
         assert_equals('PROVIDER_NOT_CONFIGURED', (string) ($summary[$job]['reason'] ?? ''), 'because no provider is connected');
     }
-    assert_equals([], array_values(array_filter($audit->events, static fn(array $e): bool => $e['type'] === 'FOOTBALL_CRON_RUN')),
-        'an idle sweep writes no sweep-level audit event');
+    foreach (['predict', 'settle', 'performance'] as $job) {
+        assert_equals('SKIPPED', (string) ($summary[$job]['status'] ?? ''), $job . ' has no stored work without a provider');
+        assert_equals('NO_WORK', (string) ($summary[$job]['reason'] ?? ''), $job . ' is gated by stored work, not by the provider');
+    }
+    assert_equals('COMPLETED', (string) ($summary['cleanup']['status'] ?? ''), 'cleanup is database housekeeping and runs regardless of the provider');
+    assert_equals(1, count(array_values(array_filter($audit->events, static fn(array $e): bool => $e['type'] === 'FOOTBALL_CRON_RUN'))),
+        'an idle sweep writes at most the daily cleanup completion — no per-minute spam');
 
     // A sweep that actually settles something is reported, with the job listed.
     $day = gmdate('Y-m-d', time() + 7200);

@@ -57,6 +57,7 @@ async function bootstrapDemoOperator() {
       code: `<?php
 chdir('${root}');
 putenv('AI_WORKFORCE_DB_DRIVER=pdo_sqlite');
+putenv('VP_DB_DRIVER=pdo_sqlite'); // dev bridge is sqlite-only: a production env file must not flip this
 putenv('AI_WORKFORCE_SQLITE_PATH=${root}/application/data/ai_workforce.sqlite');
 putenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_EMAIL=${DEMO_ADMIN_EMAIL}');
 putenv('AI_WORKFORCE_BOOTSTRAP_ADMIN_PASSWORD=${DEMO_ADMIN_PASSWORD}');
@@ -82,6 +83,7 @@ async function installSchema() {
     code: `<?php
 chdir('${root}');
 putenv('AI_WORKFORCE_DB_DRIVER=pdo_sqlite');
+putenv('VP_DB_DRIVER=pdo_sqlite'); // dev bridge is sqlite-only: a production env file must not flip this
 putenv('AI_WORKFORCE_SESSION_DRIVER=database'); // per-request instances share the DB, not the FS session files
 putenv('AI_WORKFORCE_SQLITE_PATH=${root}/application/data/ai_workforce.sqlite');
 define('AI_WORKFORCE_NO_EXIT', true);

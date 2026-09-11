@@ -37,7 +37,7 @@ class SportsLiveSmoke
         if ($all === []) {
             return [
                 'configured' => false,
-                'hint' => 'No sports providers configured. Set WINDELS_API_FOOTBALL_KEY (an api-football.com key) or add credentials in Admin → API, then re-run.',
+                'hint' => 'No sports providers configured. Set API_FOOTBALL_KEY (an api-football.com key; WINDELS_API_FOOTBALL_KEY is accepted as a legacy alias) or add credentials in Admin → API, then re-run.',
             ];
         }
 

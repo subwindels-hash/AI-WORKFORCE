@@ -74,10 +74,20 @@
 	}
 
 	// cPanel deployments configure this application by editing a root .env file.
-	// The lightweight loader is bundled so Composer and terminal commands are never required.
-	if (is_file(__DIR__ . '/application/config/env.php')) {
+	// The lightweight loader is bundled so Composer and terminal commands are never
+	// required. Deployments that kept the reference file's original name (`env`,
+	// without the dot) are honoured too — a missing file must not silently leave
+	// the football providers unconfigured. AI_WORKFORCE_SKIP_ENV_FILE=1 disables
+	// both (operators who export every variable through the hosting panel, and
+	// the test runner, which must stay hermetic).
+	if (is_file(__DIR__ . '/application/config/env.php')
+		&& !in_array(strtolower((string) (getenv('AI_WORKFORCE_SKIP_ENV_FILE') ?: '')), ['1', 'true', 'yes'], true)) {
 		require_once __DIR__ . '/application/config/env.php';
-		vp_load_env(__DIR__ . '/.env');
+		if (is_file(__DIR__ . '/.env')) {
+			vp_load_env(__DIR__ . '/.env');
+		} elseif (is_file(__DIR__ . '/env')) {
+			vp_load_env(__DIR__ . '/env');
+		}
 	}
 	$ciEnvironment = getenv('CI_ENV') ?: ($_SERVER['CI_ENV'] ?? 'development');
 	define('ENVIRONMENT', $ciEnvironment);
