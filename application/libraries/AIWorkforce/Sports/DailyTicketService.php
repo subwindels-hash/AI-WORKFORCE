@@ -2224,6 +2224,11 @@ class DailyTicketService
     private function latestOddsRows(array $rows, array $providerCodes = []): array
     {
         $latest = [];
+        // Every VALID observation per market:selection, kept so the movement
+        // engine can reconstruct opening/previous/current from real stored
+        // history instead of depending on a provider 'openingDecimalOdds'
+        // field most feeds never send.
+        $observations = [];
         foreach ($rows as $row) {
             $market = strtoupper(trim((string) ($row['market'] ?? '')));
             $selection = strtoupper(trim((string) ($row['selection'] ?? '')));
@@ -2237,6 +2242,7 @@ class DailyTicketService
             if (!OddsBounds::validDecimalOdds($decimal, $market)) continue;
             if (!$observed) continue;
             $key = $market . ':' . $selection;
+            $observations[$key][] = ['decimalOdds' => (float) $decimal, 'observedAt' => (string) $observed];
             if (!isset($latest[$key]) || strcmp((string) $observed, (string) $latest[$key]['observedAt']) > 0) {
                 $source = (string) ($providerCodes[(int) ($row['provider_id'] ?? 0)] ?? '');
                 // Normalise the document once: the freshness and value stages
@@ -2245,6 +2251,13 @@ class DailyTicketService
                 if ($source === '') $source = (string) ($payload['provider'] ?? '');
                 $latest[$key] = ['market' => $market, 'selection' => $selection, 'decimalOdds' => (float) $decimal, 'observedAt' => (string) $observed, 'payload' => $payload] + ($source !== '' ? ['oddsSource' => $source] : []);
             }
+        }
+        // Movement is computed AFTER the winning row is known, from the whole
+        // observation set of that market:selection.
+        foreach ($latest as $key => $row) {
+            $payload = is_array($row['payload'] ?? null) ? $row['payload'] : [];
+            $providerOpening = $payload['openingDecimalOdds'] ?? $row['openingDecimalOdds'] ?? null;
+            $latest[$key]['movement'] = OddsMovementEngine::assess($observations[$key] ?? [], $providerOpening);
         }
         return array_values($latest);
     }

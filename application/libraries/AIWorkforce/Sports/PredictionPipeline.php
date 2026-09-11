@@ -308,10 +308,14 @@ class PredictionPipeline
 
 
         // ── Stage 8: risk ─────────────────────────────────────────────────
+        $movement = $this->oddsMovementBlock($odds);
+        $factors['movement'] = $movement;
         $riskContext = [
             'liquidity' => $intel['inputs']['marketLiquidity'] ?? null,
             'marketSuspended' => !empty($odds['suspended']) || ($match['status'] ?? '') === 'SUSPENDED',
-            'oddsMovement' => $this->oddsMovement($odds),
+            // null when movement was never measured — RiskEngine must not
+            // read "not measured" as "did not move".
+            'oddsMovement' => OddsMovementEngine::riskSignal($movement),
         ];
         $risk = $this->risk->assess($value, $quality, $config, $riskContext);
         if ($risk['classification'] === 'REJECTED') {
@@ -528,16 +532,37 @@ class PredictionPipeline
         foreach (['ageSeconds', 'oddsStatus', 'oddsUpdatedAt', 'oddsSource', 'oddsAgeSeconds', 'maxAgeSeconds'] as $key) {
             if (isset($freshness[$key])) $out[$key] = $freshness[$key];
         }
+        // Market reaction travels with the price on the decision record.
+        $out['movement'] = $this->oddsMovementBlock($odds);
         return $out;
     }
 
-    private function oddsMovement(?array $odds): ?float
+    /**
+     * The movement block for this odds row.
+     *
+     * Prefers the block the daily engine reconstructed from the STORED
+     * observation history (opening/previous/current/direction/history). When
+     * a caller supplies no history — a stub, a point-in-time replay — the
+     * provider's own opening price is still honoured, and when there is
+     * neither the state is INSUFFICIENT_HISTORY rather than a fabricated
+     * "stable" reading.
+     */
+    private function oddsMovementBlock(?array $odds): array
     {
-        if ($odds === null) return null;
+        if ($odds === null) return OddsMovementEngine::assess([], null);
+        $movement = $odds['movement'] ?? null;
+        if (is_array($movement) && isset($movement['state'])) return $movement;
+
         $payload = SportsDataNormalizer::document($odds['payload'] ?? null);
         $opening = $payload['openingDecimalOdds'] ?? $odds['openingDecimalOdds'] ?? null;
-        $current = (float) ($odds['decimalOdds'] ?? $odds['decimal_odds'] ?? 0);
-        if (!is_numeric($opening) || (float) $opening <= 0) return null;
-        return $current - (float) $opening;
+        $current = $odds['decimalOdds'] ?? $odds['decimal_odds'] ?? null;
+        $observations = [];
+        if (is_numeric($current) && (float) $current > 1.0) {
+            $observations[] = [
+                'decimalOdds' => (float) $current,
+                'observedAt' => (string) ($odds['observedAt'] ?? $odds['observed_at'] ?? ''),
+            ];
+        }
+        return OddsMovementEngine::assess($observations, $opening);
     }
 }
