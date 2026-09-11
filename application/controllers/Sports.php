@@ -61,6 +61,24 @@ class Sports extends App_Controller
                             $selection['home_team'] = $selection['home_team'] ?? $match['home_team'] ?? null;
                             $selection['away_team'] = $selection['away_team'] ?? $match['away_team'] ?? null;
                         }
+                        // Market reaction as it stood WHEN THE PICK WAS MADE.
+                        // Read back from the decision record rather than
+                        // recomputed from today's observations, so the row
+                        // shows the evidence the model actually used and can
+                        // never drift from it after the fact. Absent or
+                        // unreadable factors leave it null — the view then
+                        // says "not measured", never a fabricated STABLE.
+                        $selection['movement'] = null;
+                        $predictionId = (string) ($selection['prediction_id'] ?? '');
+                        if ($predictionId !== '') {
+                            try {
+                                $prediction = $this->platform->model->sports->findPrediction($predictionId);
+                                $factors = is_array($prediction) ? ($prediction['factors'] ?? null) : null;
+                                if (is_array($factors) && is_array($factors['movement'] ?? null)) {
+                                    $selection['movement'] = $factors['movement'];
+                                }
+                            } catch (Throwable $e) { /* the pick still renders without it */ }
+                        }
                     }
                     unset($selection);
                 }

@@ -57,6 +57,60 @@ if ($heroTicket !== null) {
     elseif ($heroGenerationStatus === 'RUNNING' || $heroGenerationStatus === 'RETRYING') { $heroStatus = $heroGenerationStatus; $heroBadge = 'b-gray'; }
     elseif ($runStatus !== '') { $heroStatus = $runStatus; $heroBadge = 'b-gray'; }
 }
+/**
+ * Render one selection's odds movement.
+ *
+ * Movement is market REACTION, not a model output: a price that shortened
+ * means money arrived after our snapshot. It is shown next to the price it
+ * describes so a shortening favourite is visible at a glance.
+ *
+ * Honesty rules mirrored from OddsMovementEngine:
+ *   • fewer than two real observations is "not measured", never STABLE —
+ *     an unmoved price and an unobserved price are different facts;
+ *   • the percentage is always against the OPENING price;
+ *   • the history shown is the stored observations, never a smoothed curve.
+ */
+$heroMovement = function (?array $movement): array {
+    $unknown = ['label' => 'not measured', 'cls' => 'b-gray', 'arrow' => '·', 'pct' => null,
+                'title' => 'No movement measured: fewer than two stored observations of this price. An unmoved price and an unobserved price are different facts, so this is not reported as stable.'];
+    if (!is_array($movement)) return $unknown;
+    $state = (string) ($movement['state'] ?? '');
+    if ($state !== 'MEASURED') {
+        $obs = (int) ($movement['observations'] ?? 0);
+        $unknown['title'] = 'No movement measured: ' . $obs . ' stored observation' . ($obs === 1 ? '' : 's')
+            . ' of this price (two are needed). Not reported as stable — unmoved and unobserved are different facts.';
+        return $unknown;
+    }
+    $dir = (string) ($movement['movement'] ?? 'UNKNOWN');
+    $pct = $movement['movementPercentage'] ?? null;
+    $open = $movement['openingOdds'] ?? null;
+    $prev = $movement['previousOdds'] ?? null;
+    $cur = $movement['currentOdds'] ?? null;
+    $obs = (int) ($movement['observations'] ?? 0);
+    $src = ($movement['openingSource'] ?? '') === 'PROVIDER' ? "the provider's stated opening" : 'our oldest observation';
+    // DOWN = shortening = money coming. Green flags agreement with our pick,
+    // amber a drift away from it; neither is a verdict, only market context.
+    $map = [
+        'DOWN' => ['Shortening', 'b-green', '▼'],
+        'UP' => ['Drifting', 'b-amber', '▲'],
+        'STABLE' => ['Stable', 'b-gray', '='],
+    ];
+    [$label, $cls, $arrow] = $map[$dir] ?? ['Unknown', 'b-gray', '·'];
+    $parts = [];
+    if ($open !== null) $parts[] = 'opened ' . number_format((float) $open, 2) . ' (' . $src . ')';
+    if ($prev !== null) $parts[] = 'previous ' . number_format((float) $prev, 2);
+    if ($cur !== null) $parts[] = 'current ' . number_format((float) $cur, 2);
+    $parts[] = $obs . ' observation' . ($obs === 1 ? '' : 's');
+    $hist = [];
+    foreach ((array) ($movement['oddsHistory'] ?? []) as $point) {
+        if (!is_array($point)) continue;
+        $hist[] = substr((string) ($point['observedAt'] ?? ''), 11, 5) . ' ' . number_format((float) ($point['odds'] ?? 0), 2);
+    }
+    $title = ucfirst($label) . ' — ' . implode(' · ', $parts)
+        . '. Percentage is measured against the opening price.'
+        . ($hist ? "\n\nObserved: " . implode('  →  ', $hist) : '');
+    return ['label' => $label, 'cls' => $cls, 'arrow' => $arrow, 'pct' => $pct, 'title' => $title];
+};
 $heroMarketLabel = function (string $market, string $selection): string {
     static $labels = [
         'MATCH_RESULT:HOME' => 'Home Win', 'MATCH_RESULT:DRAW' => 'Draw', 'MATCH_RESULT:AWAY' => 'Away Win',
@@ -170,7 +224,7 @@ $heroMarketLabel = function (string $market, string $selection): string {
     <?php if ($heroTicket !== null && !empty($heroSelections)): ?>
       <div class="table-scroll">
         <table class="tbl">
-          <thead><tr><th>Match · competition · kickoff</th><th>Market · prediction</th><th class="num" title="Real bookmaker price from the named odds source, with the time it was last updated">Real market odds · source</th><th class="num" title="WINDELS model probability and fair odds — derived by the model, never the bookmaker price">WINDELS probability · fair</th><th class="num">Confidence</th><th class="num">Data quality</th><th class="num">Value / edge</th><th>Risk</th></tr></thead>
+          <thead><tr><th>Match · competition · kickoff</th><th>Market · prediction</th><th class="num" title="Real bookmaker price from the named odds source, with the time it was last updated">Real market odds · source</th><th title="How the market moved since this price opened — shortening (money arriving), drifting, or stable. Market reaction, not a model output; measured against the opening price and only when two or more observations exist.">Movement</th><th class="num" title="WINDELS model probability and fair odds — derived by the model, never the bookmaker price">WINDELS probability · fair</th><th class="num">Confidence</th><th class="num">Data quality</th><th class="num">Value / edge</th><th>Risk</th></tr></thead>
           <tbody>
             <?php foreach ($heroSelections as $sel): ?>
               <tr>
@@ -184,6 +238,15 @@ $heroMarketLabel = function (string $market, string $selection): string {
                   <span class="dim" style="display:block;font-size:10px;font-weight:400" title="Odds source and the provider's last-update timestamp (UTC)">
                     <?= e((string) ($sel['odds_source'] ?? '—')) ?> · <?= e(substr((string) ($sel['odds_timestamp'] ?? ''), 0, 16)) ?>
                   </span>
+                </td>
+                <?php $mv = $heroMovement(is_array($sel['movement'] ?? null) ? $sel['movement'] : null); ?>
+                <td title="<?= e($mv['title']) ?>">
+                  <span class="badge <?= e($mv['cls']) ?>"><?= e($mv['arrow']) ?> <?= e($mv['label']) ?></span>
+                  <?php if ($mv['pct'] !== null): ?>
+                    <span class="dim mono" style="display:block;font-size:10px;font-weight:400">
+                      <?= e(($mv['pct'] > 0 ? '+' : '') . number_format((float) $mv['pct'], 2)) ?>% vs open
+                    </span>
+                  <?php endif; ?>
                 </td>
                 <td class="num mono">
                   <?= ($sel['calibrated_probability'] ?? null) !== null ? e(number_format((float) $sel['calibrated_probability'] * 100, 1)) . '%' : '—' ?>
@@ -203,7 +266,7 @@ $heroMarketLabel = function (string $market, string $selection): string {
           </tbody>
         </table>
       </div>
-      <p class="dim" style="font-size:11px;margin:6px 0 0">Bookmaker odds are the provider's real quoted price with its source and last-update time. WINDELS probability/fair odds are the model's own numbers, kept in separate columns; expected value compares the two.</p>
+      <p class="dim" style="font-size:11px;margin:6px 0 0">Bookmaker odds are the provider's real quoted price with its source and last-update time. Movement is the market's own reaction since that price opened — shortening means money arrived — and reads &ldquo;not measured&rdquo; rather than &ldquo;stable&rdquo; when fewer than two observations exist. WINDELS probability/fair odds are the model's own numbers, kept in separate columns; expected value compares the two.</p>
       <?php if ((string) ($heroTicket['approval_status'] ?? '') === 'PENDING_USER_APPROVAL'): ?>
         <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
           <?php if (!empty($caps['approve'])): ?>
