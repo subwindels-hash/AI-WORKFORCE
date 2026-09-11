@@ -1,6 +1,8 @@
 <?php
 namespace AIWorkforce\Football;
 
+use AIWorkforce\Sports\OddsBounds;
+
 /**
  * The odds-prediction markets the Football Intelligence Engine can answer.
  *
@@ -154,7 +156,7 @@ final class PredictionMarkets
      * priced complete, priced partially, or not priced.
      *
      * @param list<array{market:string,selection:string,decimalOdds:float,observedAt:?string}> $odds
-     * @return array{state:string,family:string,line:?float,expected:list<string>,quotes:array<string,array{odds:float,observedAt:?string,low:float,high:float,quotes:int}>,ignored:int,note:?string}
+     * @return array{state:string,family:string,line:?float,expected:list<string>,quotes:array<string,array{odds:float,observedAt:?string,source:?string,low:float,high:float,quotes:int}>,ignored:int,note:?string}
      */
     public function priceSheet(array $odds, string $marketKey, ?float $line = null): array
     {
@@ -175,14 +177,19 @@ final class PredictionMarkets
             $quotedLine = self::lineOf((string) ($row['selection'] ?? ''));
             if ($lineChecked && ($quotedLine === null || abs($quotedLine - (float) $line) > 1e-9)) { $ignored++; continue; }
             $price = is_numeric($row['decimalOdds'] ?? null) ? (float) $row['decimalOdds'] : null;
-            // Validate odds: >1.0, ≤100, finite — reject unrealistic high odds
-            if ($price === null || $price <= 1.0 || $price > 100.0 || !is_finite($price)) { $ignored++; continue; }
+            // A leg is only evidence when its price is quotable: sub-stake,
+            // non-finite and absurd (above the market's plausibility ceiling)
+            // prices are counted as ignored, never folded into an overround.
+            if ($price === null || !OddsBounds::validDecimalOdds($price, $marketKey)) { $ignored++; continue; }
             $observed = (string) ($row['observedAt'] ?? '');
-            $seen = (array) ($quotes[$selection] ?? null);
+            $seen = $quotes[$selection] ?? null;
             $newest = $seen === null || $observed >= (string) ($seen['observedAt'] ?? '');
+            $rowSource = $row['provider'] ?? $row['oddsSource'] ?? null;
+            $rowSource = is_string($rowSource) && $rowSource !== '' ? $rowSource : null;
             $quotes[$selection] = [
                 'odds' => $newest ? $price : (float) $seen['odds'],
                 'observedAt' => $newest && $observed !== '' ? $observed : ($seen['observedAt'] ?? null),
+                'source' => $newest ? $rowSource : ($seen['source'] ?? null),
                 'low' => $seen === null ? $price : min((float) $seen['low'], $price),
                 'high' => $seen === null ? $price : max((float) $seen['high'], $price),
                 'quotes' => (int) ($seen['quotes'] ?? 0) + 1,
@@ -203,8 +210,8 @@ final class PredictionMarkets
         } elseif ($state === OddsIntelligence::PRICE_NONE) {
             $note = 'No odds row exists for this market, so WINDELS\' probability has no price to be compared with.';
         } elseif ($ignored > 0) {
-            $note = $ignored . ' quoted leg' . ($ignored === 1 ? ' was' : 's were') . ' outside this market'
-                . ($lineChecked ? ' or off the ' . self::lineLabel($line) . ' line' : '') . ' and was not used.';
+            $note = $ignored . ' quoted leg' . ($ignored === 1 ? ' was' : 's were') . ' not usable for this market'
+                . ' (outside the priced set' . ($lineChecked ? ', off the ' . self::lineLabel($line) . ' line' : '') . ' or failed price validation).';
         }
         return ['state' => $state, 'family' => $family, 'line' => $lineChecked ? $line : null,
             'expected' => $expected, 'quotes' => $quotes, 'ignored' => $ignored, 'note' => $note];
@@ -339,6 +346,7 @@ final class PredictionMarkets
                 ? round(1 / $quoted['decimalOdds'], 6) : null;
             $row['edge'] = $row['impliedProbability'] !== null ? round((float) $row['probability'] - $row['impliedProbability'], 6) : null;
             $row['oddsObservedAt'] = $quoted['observedAt'];
+            $row['oddsSource'] = $quoted['provider'];
             $row['oddsState'] = $quoted['decimalOdds'] === null ? self::STATE_UNAVAILABLE : self::STATE_AVAILABLE;
             $value = $this->fairValue()->assess($sheet, (string) $row['selection'],
                 is_numeric($row['probability'] ?? null) ? (float) $row['probability'] : null);
@@ -383,6 +391,7 @@ final class PredictionMarkets
             'selectionLabel' => $best['label'] ?? null,
             'probability' => isset($best['probability']) ? round((float) $best['probability'], 6) : null,
             'odds' => $best['odds'] ?? null,
+            'oddsSource' => $best['oddsSource'] ?? null,
             'impliedProbability' => $best['impliedProbability'] ?? null,
             'edge' => $best['edge'] ?? null,
             'value' => $value,
@@ -392,6 +401,12 @@ final class PredictionMarkets
                 'line' => $sheet['line'],
                 'legsPriced' => count((array) $sheet['quotes']),
                 'legsExpected' => count((array) $sheet['expected']),
+                // The feeds behind the quoted legs — every price names its
+                // source, so a quote can always be traced back to the feed.
+                'sources' => array_values(array_unique(array_filter(array_map(
+                    fn($q) => is_array($q) ? ($q['source'] ?? null) : null,
+                    (array) ($sheet['quotes'] ?? [])
+                )))),
                 'overround' => $sheet['overround'] ?? null,
                 'marginPoints' => $sheet['marginPoints'] ?? null,
                 'marginMethod' => $sheet['marginMethod'] ?? null,
@@ -642,11 +657,11 @@ final class PredictionMarkets
      * The price the odds feed quoted for one selection, if it quoted one.
      *
      * @param list<array{market:string,selection:string,decimalOdds:float,observedAt:?string}> $odds
-     * @return array{decimalOdds:?float,observedAt:?string}
+     * @return array{decimalOdds:?float,observedAt:?string,provider:?string}
      */
     private function quoted(array $odds, string $marketKey, string $selection, ?float $line): array
     {
-        $empty = ['decimalOdds' => null, 'observedAt' => null];
+        $empty = ['decimalOdds' => null, 'observedAt' => null, 'provider' => null];
         if ($odds === []) return $empty;
         $newest = null;
         foreach ($odds as $row) {
@@ -661,10 +676,13 @@ final class PredictionMarkets
                 if ($quotedLine === null || abs($quotedLine - (float) $line) > 1e-9) continue;
             }
             $price = is_numeric($row['decimalOdds'] ?? null) ? (float) $row['decimalOdds'] : null;
-            // Validate odds: >1.0, ≤100, finite — reject unrealistic high odds
-            if ($price === null || $price <= 1.0 || $price > 100.0 || !is_finite($price)) continue;
+            // Same bar as the price sheet: a sub-stake, non-finite or absurd
+            // price is not a quote — it must never be shown as one.
+            if ($price === null || !OddsBounds::validDecimalOdds($price, $marketKey)) continue;
             $observed = (string) ($row['observedAt'] ?? '');
-            if ($newest === null || $observed >= (string) $newest['observedAt']) $newest = ['decimalOdds' => $price, 'observedAt' => $observed];
+            $rowProvider = $row['provider'] ?? $row['oddsSource'] ?? null;
+            $rowProvider = is_string($rowProvider) && $rowProvider !== '' ? $rowProvider : null;
+            if ($newest === null || $observed >= (string) $newest['observedAt']) $newest = ['decimalOdds' => $price, 'observedAt' => $observed, 'provider' => $rowProvider];
         }
         return $newest ?? $empty;
     }

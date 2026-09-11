@@ -130,7 +130,7 @@ class SportsSyncService
         $source = $this->repo->ensureProvider($provider->id(), $provider->id());
         $run = ['id' => Backtester::uuid(), 'providerId' => (int) $source['id'], 'jobType' => 'ROUND', 'executionKey' => $executionKey];
         if ($this->repo->startSync($run) === null) return ['status' => 'DUPLICATE_SKIPPED', 'executionKey' => $executionKey];
-        $processed = 0; $created = 0; $updated = 0; $invalid = 0; $errors = [];
+        $processed = 0; $created = 0; $updated = 0; $invalid = 0; $invalidOdds = 0; $invalidResults = 0; $errors = [];
         try {
             $health = $this->preflight($provider, (int) $source['id']);
             if (!method_exists($provider, 'round')) throw new \RuntimeException('provider does not support round sync (no round endpoint)');
@@ -156,18 +156,25 @@ class SportsSyncService
                     $assessment = $this->quality->assess($match, ['oddsAvailable' => $withOdds && isset($oddsByFixture[$match['externalId']]), 'recentFormAvailable' => !empty($match['context']['recentForm']), 'providerReliability' => (float) ($health['reliability'] ?? 0), 'dataAgeSeconds' => 0]);
                     $this->repo->saveQuality((int) $existing['id'], $assessment);
                     // Odds and result for this fixture come from the same round call.
+                    // One malformed odds row or result rejects ITSELF — counted
+                    // and named — instead of failing the whole fixture whose
+                    // match row is already saved.
                     foreach (($oddsByFixture[$match['externalId']] ?? []) as $rawOdds) {
-                        $this->repo->saveOdds((int) $existing['id'], (int) $source['id'], SportsDataNormalizer::odds($rawOdds, $provider->id()));
+                        try {
+                            $this->repo->saveOdds((int) $existing['id'], (int) $source['id'], SportsDataNormalizer::odds($rawOdds, $provider->id()));
+                        } catch (\Throwable $e) { $invalidOdds++; $errors[] = 'odds rejected for fixture ' . $match['externalId'] . ': ' . mb_substr($e->getMessage(), 0, 160); }
                     }
                     $rawResult = $resultsByFixture[$match['externalId']] ?? null;
                     if (is_array($rawResult) && ($rawResult['homeScore'] !== null || $rawResult['awayScore'] !== null)) {
-                        $this->repo->saveResult((int) $existing['id'], (int) $source['id'], SportsResultNormalizer::normalize($rawResult, $provider->id()));
+                        try {
+                            $this->repo->saveResult((int) $existing['id'], (int) $source['id'], SportsResultNormalizer::normalize($rawResult, $provider->id()));
+                        } catch (\Throwable $e) { $invalidResults++; $errors[] = 'result rejected for fixture ' . $match['externalId'] . ': ' . mb_substr($e->getMessage(), 0, 160); }
                     }
                 } catch (\Throwable $e) { $invalid++; $errors[] = mb_substr($e->getMessage(), 0, 200); }
             }
             if ($processed === 0) $errors[] = 'round returned no fixtures; nothing synchronized';
             $this->settle($provider, null);
-            $result = ['status' => 'COMPLETED', 'processed' => $processed, 'created' => $created, 'updated' => $updated, 'errors' => $errors];
+            $result = ['status' => 'COMPLETED', 'processed' => $processed, 'created' => $created, 'updated' => $updated, 'invalidOdds' => $invalidOdds, 'invalidResults' => $invalidResults, 'errors' => $errors];
         } catch (\Throwable $e) {
             $result = ['status' => 'FAILED', 'processed' => $processed, 'created' => 0, 'updated' => 0, 'errors' => [$this->settle($provider, $e)]];
         }
@@ -209,7 +216,7 @@ class SportsSyncService
                     $stored = $this->repo->saveMatch((int) $source['id'], $match);
                     !empty($stored['created_at']) && $stored['created_at'] === $stored['updated_at'] ? $created++ : $updated++;
                     $assessment = $this->quality->assess($match, [
-                        'oddsAvailable' => $this->repo->latestOdds((int) $stored['id'], 'TOTAL_GOALS', 'OVER_1_5') !== null,
+                        'oddsAvailable' => $this->repo->latestOdds((int) $stored['id']) !== null,
                         'recentFormAvailable' => !empty($match['context']['recentForm']),
                         'providerReliability' => (float) ($health['reliability'] ?? 0),
                         'dataAgeSeconds' => 0,

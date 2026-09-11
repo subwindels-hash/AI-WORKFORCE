@@ -27,7 +27,8 @@ class CorrelationEngine
                 if ($level === 'LOW') $level = 'HIGH';
                 $reasons[] = 'SAME_TEAM_' . implode('+', array_map('strval', array_values($sharedTeams)));
             }
-            if (($candidate['competition'] ?? null) && ($candidate['competition'] ?? null) === ($other['competition'] ?? null)) {
+            $competition = $this->competitionOf($candidate);
+            if ($competition !== null && $competition === $this->competitionOf($other)) {
                 if ($level === 'LOW') $level = 'MEDIUM';
                 $reasons[] = 'SAME_COMPETITION';
             }
@@ -50,13 +51,34 @@ class CorrelationEngine
         return ['classification' => $worst, 'reasons' => array_values(array_unique($reasons))];
     }
 
-    /** @return array<int,string> */
+    /**
+     * Teams both shapes carry: flat candidates state them top-level, pipeline
+     * candidates nest them under `match`. Reading only the top level silently
+     * graded every same-team pair LOW in production — the nested read is what
+     * makes SAME_TEAM fire on real ticket candidates.
+     *
+     * @return array<int,string>
+     */
     private function teams(array $candidate): array
     {
         $t = [];
-        foreach (['homeTeam', 'awayTeam', 'home_team', 'away_team'] as $key) {
-            if (!empty($candidate[$key])) $t[] = (string) $candidate[$key];
+        $pools = [$candidate];
+        if (is_array($candidate['match'] ?? null)) $pools[] = $candidate['match'];
+        foreach ($pools as $pool) {
+            foreach (['homeTeam', 'awayTeam', 'home_team', 'away_team'] as $key) {
+                if (!empty($pool[$key])) $t[] = (string) $pool[$key];
+            }
         }
-        return $t;
+        return array_values(array_unique($t));
+    }
+
+    /** Competition from either candidate shape (flat or pipeline-nested). */
+    private function competitionOf(array $candidate): ?string
+    {
+        $raw = $candidate['competition'] ?? null;
+        if (($raw === null || $raw === '') && is_array($candidate['match'] ?? null)) {
+            $raw = $candidate['match']['competition'] ?? null;
+        }
+        return ($raw === null || $raw === '') ? null : (string) $raw;
     }
 }

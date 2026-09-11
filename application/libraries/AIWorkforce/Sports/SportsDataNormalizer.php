@@ -167,17 +167,32 @@ class SportsDataNormalizer
         }
         return $out === null ? null : (count($out) ? $out : null);
     }
-    /** Maximum realistic decimal odds — anything above is a data error, never a real price. */
-    public const MAX_DECIMAL_ODDS = 100.0;
-
+    /**
+     * Validates a provider odds row into the WINDELS-neutral shape. The price
+     * must be a real quotable decimal (numeric, finite, > 1.0) inside the
+     * market's plausibility ceiling — zero/negative/null/absurd prices are
+     * REJECTED here, at ingestion, so they can never reach an overround, an
+     * expected-value computation or a ticket leg. Provider provenance that
+     * travelled with the row (bookmaker, fixture id, the provider's own
+     * update stamp, opening price, …) is preserved alongside the normalized
+     * fields — it lands in the row's payload instead of being dropped, so a
+     * decision record can still say exactly where its price came from.
+     */
     public static function odds(array $raw, string $provider): array
     {
         foreach (['market', 'selection', 'decimalOdds', 'observedAt'] as $field) if (!isset($raw[$field]) || $raw[$field] === '') throw new \InvalidArgumentException("odds missing {$field}");
-        $odds = (float) $raw['decimalOdds'];
-        if (!is_numeric($raw['decimalOdds']) || $odds <= 1.0 || $odds > self::MAX_DECIMAL_ODDS || !is_finite($odds)) {
-            throw new \InvalidArgumentException('decimal odds are invalid (must be >1.0 and ≤' . self::MAX_DECIMAL_ODDS . ', got ' . $raw['decimalOdds'] . ')');
+        $market = trim((string) $raw['market']);
+        $selection = trim((string) $raw['selection']);
+        if ($market === '' || $selection === '') throw new \InvalidArgumentException('odds market/selection is empty');
+        if (!is_numeric($raw['decimalOdds']) || !is_finite((float) $raw['decimalOdds']) || (float) $raw['decimalOdds'] <= 1.0) throw new \InvalidArgumentException('decimal odds are invalid');
+        $decimal = (float) $raw['decimalOdds'];
+        $cap = OddsBounds::maxFor($market);
+        if ($decimal > $cap) throw new \InvalidArgumentException(sprintf('decimal odds %s for market %s exceed the plausibility cap %s', (string) $decimal, $market, (string) $cap));
+        $out = ['provider' => $provider, 'market' => $market, 'selection' => $selection, 'decimalOdds' => $decimal, 'observedAt' => self::timestamp($raw['observedAt'])];
+        foreach (['bookmaker', 'fixtureId', 'updatedAt', 'impliedProbability', 'winning', 'openingDecimalOdds', 'suspended'] as $key) {
+            if (array_key_exists($key, $raw) && (is_scalar($raw[$key]) || $raw[$key] === null)) $out[$key] = $raw[$key];
         }
-        return ['provider' => $provider, 'market' => trim((string) $raw['market']), 'selection' => trim((string) $raw['selection']), 'decimalOdds' => $odds, 'observedAt' => self::timestamp($raw['observedAt'])];
+        return $out;
     }
 
     private static function timestamp($value): string

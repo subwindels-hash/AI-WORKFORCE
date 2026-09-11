@@ -30,6 +30,13 @@ class TicketGovernance
     {
         if (($optimized['status'] ?? '') !== 'QUALIFIED') return ['status' => 'NO_QUALIFIED_TICKET', 'reason' => $optimized['reason'] ?? 'No compliant combination'];
         $sels = $optimized['selections'];
+        // A ticket is only as honest as its legs. Every selection is validated
+        // BEFORE anything is persisted: a real internal match id (never 0 or
+        // missing), a supported market/selection from verified odds data, a
+        // quotable price, and the observed timestamp that came with it. A leg
+        // that fails validation aborts the whole ticket — a partially invented
+        // ticket must never be stored.
+        foreach ($sels as $index => $selection) $this->assertValidSelection($selection, (int) $index);
 
         $confidences = array_values(array_filter(array_map(fn($s) => is_numeric($s['confidence']['confidence'] ?? null) ? (float) $s['confidence']['confidence'] : null, $sels), fn($v) => $v !== null));
         $qualities = array_map(fn($s) => (int) ($s['quality']['score'] ?? 0), $sels);
@@ -75,8 +82,8 @@ class TicketGovernance
                 'home_team' => $s['match']['homeTeam'] ?? null,
                 'away_team' => $s['match']['awayTeam'] ?? null,
                 'kickoff_time' => $s['match']['kickoff'] ?? null,
-                'market' => $s['market'] ?? 'UNSPECIFIED', 'selection' => $s['selection'] ?? 'UNSPECIFIED',
-                'odds' => $s['value']['odds'], 'odds_timestamp' => $s['oddsTimestamp'] ?? gmdate('c'),
+                'market' => $s['market'], 'selection' => $s['selection'],
+                'odds' => $s['value']['odds'] ?? $s['odds'], 'odds_timestamp' => $s['oddsTimestamp'],
                 'confidence' => $s['confidence']['confidence'] ?? null,
                 'data_quality' => $s['quality']['score'] ?? null,
                 'model_probability' => $s['prediction']['rawModelProbability'] ?? null,
@@ -90,6 +97,41 @@ class TicketGovernance
             'selectionCount' => count($sels), 'risk' => $risk, 'correlation' => $pairwise['classification'], 'automated' => $automated,
         ]);
         return ['status' => $automated ? 'APPROVED_NOT_EXECUTED' : 'PENDING_USER_APPROVAL', 'ticketId' => $id];
+    }
+
+    /**
+     * One ticket leg's identity, market and price — validated, never defaulted.
+     *
+     * @throws \InvalidArgumentException when the leg has no real internal
+     * match id, no supported market/selection, no quotable price, or no
+     * observed odds timestamp. The caller aborts the ticket: storing the leg
+     * with 0/UNSPECIFIED/a fresh timestamp would invent the missing data.
+     */
+    private function assertValidSelection(array $selection, int $index): void
+    {
+        $leg = 'ticket selection ' . ($index + 1);
+        $matchId = $selection['matchId'] ?? null;
+        if ((!is_int($matchId) && !ctype_digit((string) $matchId)) || (int) $matchId <= 0) {
+            throw new \InvalidArgumentException($leg . ' has no valid internal match id');
+        }
+        $market = $selection['market'] ?? null;
+        $pick = $selection['selection'] ?? null;
+        if (!is_string($market) || trim($market) === '' || !is_string($pick) || trim($pick) === '') {
+            throw new \InvalidArgumentException($leg . ' has no market/selection from verified odds data');
+        }
+        if (!PredictionEngine::isSupportedMarketSelection($market, $pick)) {
+            throw new \InvalidArgumentException($leg . ' market ' . $market . '/' . $pick . ' is not a supported ticket market');
+        }
+        $odds = $selection['value']['odds'] ?? $selection['odds'] ?? null;
+        if (!OddsBounds::validDecimalOdds($odds, $market)) {
+            throw new \InvalidArgumentException($leg . ' has no quotable price for ' . $market . '/' . $pick);
+        }
+        $stamp = $selection['oddsTimestamp'] ?? null;
+        if (!is_string($stamp) || trim($stamp) === '') {
+            throw new \InvalidArgumentException($leg . ' carries no observed odds timestamp');
+        }
+        try { new \DateTimeImmutable($stamp); }
+        catch (\Throwable $e) { throw new \InvalidArgumentException($leg . ' carries an invalid odds timestamp'); }
     }
 
     /** Human (or authorized-automated) decision. Always audited with the actor. */

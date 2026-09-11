@@ -189,6 +189,35 @@ class SportsProviderManager
         return ['ok' => false, 'failures' => $failures, 'failureStatuses' => $statuses, 'skipped' => $skipped, 'summary' => self::summarize($operation, $statuses !== [] ? $statuses : array_fill_keys(array_keys($skipped), 'SKIPPED_NO_VERIFIED_ID'))];
     }
 
+    /**
+     * Run `$fn(provider)` on EVERY registered provider and collect each
+     * success — the "all providers" read behind merged fixture pulls and
+     * best-source selection. Every attempt keeps the exact
+     * circuit → health-probe → call → breaker/observer semantics of
+     * withFallback(); a failed provider is recorded and skipped, never fatal
+     * to the providers that answered.
+     *
+     * @param string $operation fixtures|odds|results|round|...
+     * @param callable(SportsDataProvider): array $fn
+     * @return array{results:array<string,array>, failures:array<string,string>, failureStatuses:array<string,string>, summary:string}
+     */
+    public function collectAll(string $operation, callable $fn): array
+    {
+        $results = [];
+        $failures = [];
+        $statuses = [];
+        foreach ($this->orderedIds(null) as $id) {
+            $result = $this->attemptProvider($operation, $this->providers[$id], $fn, $failures, $statuses);
+            if ($result !== null) $results[$id] = $result;
+        }
+        return [
+            'results' => $results,
+            'failures' => $failures,
+            'failureStatuses' => $statuses,
+            'summary' => $results === [] ? self::summarize($operation, $statuses) : '',
+        ];
+    }
+
     /** Registration order with the preferred provider first (if registered). */
     private function orderedIds(?string $preferredId): array
     {
