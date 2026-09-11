@@ -1401,7 +1401,12 @@ class TheSportsDbProvider implements SportsDataProvider
             // Match-state detail from the same response — TheSportsDB carries
             // scores and card counts on events; missing ones stay null.
             'statusShort' => self::blankToNull($r['strStatus'] ?? null),
-            'minute' => self::intOrNull($r['intElapsed'] ?? null),
+            // eventsday.php/lookupevent.php rows carry `intElapsed`; the
+            // livescore.php feed instead sends `strProgress` (e.g. "57",
+            // "90+4"). Prefer the explicit elapsed field, fall back to
+            // parsing progress so a live sync does not lose the minute.
+            'minute' => self::intOrNull($r['intElapsed'] ?? null) ?? self::minuteFromProgress($r['strProgress'] ?? null),
+            'extraMinute' => self::extraMinuteFromProgress($r['strProgress'] ?? null),
             'homeScore' => self::intOrNull($r['intHomeScore'] ?? null),
             'awayScore' => self::intOrNull($r['intAwayScore'] ?? null),
             'homeRedCards' => self::intOrNull($r['intHomeRedCards'] ?? null),
@@ -1427,12 +1432,39 @@ class TheSportsDbProvider implements SportsDataProvider
         return (int) $value;
     }
 
-    /** Live matches (GET /livescore.php) — score + minute as the provider gives them. */
+    /**
+     * `strProgress` on livescore.php rows is a plain minute ("57") or a
+     * stoppage-time pair ("90+4"). Only the base minute belongs in `minute`;
+     * the `+N` remainder is surfaced separately by extraMinuteFromProgress().
+     */
+    private static function minuteFromProgress(mixed $value): ?int
+    {
+        if (!is_string($value) || trim($value) === '') return null;
+        if (preg_match('/^(\\d+)(?:\\+(\\d+))?$/', trim($value), $m) !== 1) return null;
+        return (int) $m[1];
+    }
+
+    private static function extraMinuteFromProgress(mixed $value): ?int
+    {
+        if (!is_string($value) || trim($value) === '') return null;
+        if (preg_match('/^\\d+\\+(\\d+)$/', trim($value), $m) !== 1) return null;
+        return (int) $m[1];
+    }
+
+    /**
+     * Live matches (GET /livescore.php) — score + minute as the provider gives them.
+     *
+     * The vendor nests rows under the `livescore` key (verified live, 2026-09) —
+     * NOT `events` like the day/season/league endpoints. Reading the wrong key
+     * silently returned an empty list on every call: the sync reported
+     * COMPLETED with `processed: 0` instead of surfacing that nothing was
+     * actually parsed.
+     */
     public function liveFixtures(): array
     {
         $resp = $this->doRequest('/livescore.php?d=' . gmdate('Y-m-d') . '&s=Soccer');
-        $events = $this->decodeJson($resp)['events'] ?? [];
-        return $this->mapFixtures(is_array($events) ? $events : []);
+        $rows = $this->decodeJson($resp)['livescore'] ?? [];
+        return $this->mapFixtures(is_array($rows) ? $rows : []);
     }
 
     /** One fixture by id (GET /lookupevent.php) — status, score, cards. */
@@ -1463,18 +1495,28 @@ class TheSportsDbProvider implements SportsDataProvider
         return $out;
     }
 
+    /**
+     * TheSportsDB's own short codes — verified live against livescore.php and
+     * eventsday.php (2026-09): "1H"/"2H" for the two halves, "NS" for not
+     * started, "FT"/"AET"/"PEN" for finished, "INT"/"ABD" for
+     * suspended/abandoned. The previous version only recognised the literal
+     * words "LIVE"/"IN PROGRESS" — neither of which the vendor ever actually
+     * sends — so every in-play match fell through to the SCHEDULED default
+     * and never reached the live board.
+     */
     private function mapStatus(string $raw): string
     {
         $s = strtoupper(trim($raw));
         return match (true) {
-            $s === 'FINISHED' || $s === 'COMPLETE' || $s === 'MATCH FINISHED' || $s === 'ENDED' || $s === 'AET' || $s === 'FT' || $s === 'PEN' => 'FINISHED',
+            $s === 'FINISHED' || $s === 'COMPLETE' || $s === 'MATCH FINISHED' || $s === 'ENDED' || $s === 'AET' || $s === 'FT' || $s === 'PEN' || $s === 'FT_PEN' || $s === 'AWARDED' || $s === 'WO' => 'FINISHED',
             $s === 'HT' || $s === 'HALFTIME' || str_contains($s, 'HALF TIME') => 'HALFTIME',
             $s === 'ET' || $s === 'EXTRA TIME' || str_contains($s, 'EXTRA') => 'EXTRA_TIME',
             $s === 'PENALTIES' || str_contains($s, 'PENALTIES') || $s === 'P' => 'PENALTIES',
-            str_contains($s, 'LIVE') || str_contains($s, 'IN PROGRESS') => 'LIVE',
-            $s === 'POSTPONED' => 'POSTPONED',
-            $s === 'CANCELLED' || $s === 'CANCELED' => 'CANCELLED',
-            $s === 'SUSPENDED' => 'SUSPENDED',
+            $s === '1H' || $s === '2H' || str_contains($s, 'LIVE') || str_contains($s, 'IN PROGRESS') => 'LIVE',
+            $s === 'NS' || $s === 'NOT STARTED' || $s === 'TBD' || $s === '' => 'SCHEDULED',
+            $s === 'PST' || $s === 'POSTPONED' => 'POSTPONED',
+            $s === 'CANC' || $s === 'CANCELLED' || $s === 'CANCELED' => 'CANCELLED',
+            $s === 'SUSP' || $s === 'SUSPENDED' || $s === 'INT' || $s === 'INTERRUPTED' || $s === 'ABD' || $s === 'ABANDONED' => 'SUSPENDED',
             default => 'SCHEDULED',
         };
     }

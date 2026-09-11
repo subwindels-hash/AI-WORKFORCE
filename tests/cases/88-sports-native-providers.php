@@ -218,6 +218,55 @@ test('thesportsdb maps fixtures correctly', function () {
     assert_equals('2026-2027', $f['season']);
 });
 
+test('thesportsdb liveFixtures() reads the vendor\'s "livescore" key, not "events"', function () {
+    // Verified live against thesportsdb.com (2026-09): GET /livescore.php
+    // nests rows under "livescore", unlike every other v1 endpoint used by
+    // this adapter (eventsday.php, lookupevent.php, ... all use "events").
+    // Reading the wrong key silently produced an empty list every sweep —
+    // the cron reported PARTIAL/FAILED for a request that actually succeeded.
+    $body = json_encode(['livescore' => [
+        [
+            'idEvent' => '700555',
+            'strHomeTeam' => 'Newell\'s Old Boys',
+            'strAwayTeam' => 'Velez Sarsfield',
+            'strLeague' => 'Argentinian Primera Division',
+            'idLeague' => '4406',
+            'dateEvent' => '2026-09-11',
+            'strTime' => '20:00:00',
+            'strStatus' => '2H',
+            'strProgress' => '90+4',
+            'idHomeTeam' => '135166',
+            'idAwayTeam' => '135179',
+            'intHomeScore' => '0',
+            'intAwayScore' => '1',
+        ],
+    ]]);
+    $p = new TheSportsDbProvider('123', 'https://www.thesportsdb.com/api/v1/json', 10, makeTransport(200, $body));
+    $fixtures = $p->liveFixtures();
+    assert_equals(1, count($fixtures));
+    $f = $fixtures[0];
+    assert_equals('700555', $f['externalId']);
+    assert_equals('LIVE', $f['status']);
+    assert_equals('2H', $f['statusShort']);
+    assert_equals(0, $f['homeScore']);
+    assert_equals(1, $f['awayScore']);
+    // strProgress "90+4" — base minute in `minute`, stoppage remainder in
+    // `extraMinute`; there is no intElapsed field on livescore.php rows.
+    assert_equals(90, $f['minute']);
+    assert_equals(4, $f['extraMinute']);
+
+    $normalized = SportsDataNormalizer::fixture($f, 'thesportsdb');
+    assert_equals(90, $normalized['live']['minute']);
+    assert_equals(4, $normalized['live']['extraMinute']);
+    assert_equals(0, $normalized['live']['homeScore']);
+    assert_equals(1, $normalized['live']['awayScore']);
+});
+
+test('thesportsdb liveFixtures() returns empty (not an error) when nothing is live', function () {
+    $p = new TheSportsDbProvider('123', 'https://www.thesportsdb.com/api/v1/json', 10, makeTransport(200, json_encode(['livescore' => null])));
+    assert_equals([], $p->liveFixtures());
+});
+
 test('thesportsdb maps finished results correctly', function () {
     $body = json_encode(['event' => [
         'idEvent' => '600123',
