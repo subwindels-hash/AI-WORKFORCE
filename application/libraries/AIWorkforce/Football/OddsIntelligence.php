@@ -89,13 +89,11 @@ final class OddsIntelligence
         $thresholds = $this->config->valueThresholds();
         $quote = $market['quotes'][$selection] ?? null;
         $odds = $quote['odds'] ?? null;
-        // A price at or below 1.00 cannot be a decimal price (it would pay less
-        // than the stake back). It is dropped, and the drop is stated — the
-        // alternative is a probability above 100% and a verdict nobody can read.
-        if ($odds !== null && (float) $odds <= 1.0) {
-            $odds = null;
+        // Validate odds: must be >1.0 and ≤100 — anything else is not a real decimal price
+        if ($odds !== null && ((float) $odds <= 1.0 || (float) $odds > 100.0 || !is_finite((float) $odds))) {
             $market['note'] = trim((string) ($market['note'] ?? '') . ' The quoted price for ' . $selection
-                . ' was 1.00 or below, which is not a decimal price; it was ignored.');
+                . ' was ' . $odds . ', which is not a valid decimal price (>1.0 and ≤100.0); it was ignored.');
+            $odds = null;
         }
 
         // The fair block is computed once for the whole market by
@@ -276,7 +274,8 @@ final class OddsIntelligence
         $sum = 0.0;
         foreach ($quotes as $quote) {
             $odds = (float) ($quote['odds'] ?? 0);
-            if ($odds <= 1.0) return $empty;    // an incomplete or absurd leg voids the overround
+            // Validate: >1.0, ≤100, finite — unrealistic odds void the overround
+            if ($odds <= 1.0 || $odds > 100.0 || !is_finite($odds)) return $empty;
             $sum += 1.0 / $odds;
         }
         if ($sum <= 0.0) return $empty;

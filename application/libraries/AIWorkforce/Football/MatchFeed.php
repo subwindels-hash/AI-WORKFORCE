@@ -332,6 +332,10 @@ final class MatchFeed
         // batched reads — the score grids and the quoted prices — so choosing a
         // market costs two queries for the page, not one query per match.
         $markets = $this->attachMarkets($entries, $market['market'], $line);
+        // Multiple markets per fixture where verified provider odds exist
+        // (1X2, Over 1.5, BTTS, Double Chance) — each candidate must have
+        // real provider odds, never invented.
+        $multiMarkets = $this->attachMultipleMarkets($entries, self::MULTI_MARKET_CANDIDATES);
         // Provenance is a third batched read: which provider (or providers)
         // this match came from is part of the prediction result, and it is
         // answered for the whole page in one query.
@@ -339,6 +343,13 @@ final class MatchFeed
         foreach ($matches as $index => $match) {
             $matches[$index]['market'] = $this->predictionResult($markets[$index], $match, $fixtures[$index] ?? [],
                 $sources[(string) ($match['matchId'] ?? '')] ?? []);
+            // Attach multiple market candidates per fixture (only those with verified odds)
+            $candidates = [];
+            foreach (($multiMarkets[$index] ?? []) as $mm) {
+                $candidates[] = $this->predictionResult($mm, $match, $fixtures[$index] ?? [],
+                    $sources[(string) ($match['matchId'] ?? '')] ?? []);
+            }
+            $matches[$index]['marketCandidates'] = $candidates;
         }
         // The intelligence block rides on the same rows the page is already
         // holding: the score, the quality checklist, the drivers, the fair-value
@@ -573,6 +584,13 @@ final class MatchFeed
     }
 
     /**
+     * Markets that should be evaluated as multiple candidates per fixture
+     * when provider odds exist. These are the core markets the ticket engine
+     * and the board must surface together, not one at a time.
+     */
+    public const MULTI_MARKET_CANDIDATES = ['MATCH_WINNER', 'OVER_1_5', 'BTTS', 'DOUBLE_CHANCE'];
+
+    /**
      * Evaluate the selected market for a whole set of entries in two batched
      * reads. This is what makes market selection free: the probabilities are
      * summed from grids that are already stored, and the prices come from rows
@@ -609,6 +627,68 @@ final class MatchFeed
             }
             $out[] = $this->markets->evaluate($prediction, $grids[(string) ($prediction['id'] ?? '')] ?? [],
                 $odds[(string) ($entry['matchId'] ?? '')] ?? [], $market, $line);
+        }
+        return $out;
+    }
+
+    /**
+     * Evaluate MULTIPLE markets per fixture where verified provider odds exist.
+     * Returns per-fixture candidates: each candidate is a market evaluation
+     * that came from real provider odds (never invented), with full transparency.
+     *
+     * @param list<array{prediction:array<string,mixed>|null,matchId:string}> $entries
+     * @param list<string>|null $marketKeys which markets to evaluate (default: MULTI_MARKET_CANDIDATES)
+     * @return list<list<array<string,mixed>>> per-fixture list of market evaluations (only those with provider odds)
+     */
+    public function attachMultipleMarkets(array $entries, ?array $marketKeys = null): array
+    {
+        $marketKeys = $marketKeys ?? self::MULTI_MARKET_CANDIDATES;
+        $ids = [];
+        $matchIds = [];
+        foreach ($entries as $entry) {
+            $prediction = $entry['prediction'] ?? null;
+            if (is_array($prediction)) $ids[] = (string) ($prediction['id'] ?? '');
+            if ((string) ($entry['matchId'] ?? '') !== '') $matchIds[] = (string) $entry['matchId'];
+        }
+        $grids = $this->repo->listScoreProbabilitiesFor($ids);
+        $odds = $this->repo->listMarketOdds($matchIds);
+
+        $out = [];
+        foreach ($entries as $entry) {
+            $prediction = $entry['prediction'] ?? null;
+            if (!is_array($prediction)) {
+                $out[] = [];
+                continue;
+            }
+            $fixtureOdds = $odds[(string) ($entry['matchId'] ?? '')] ?? [];
+            $grid = $grids[(string) ($prediction['id'] ?? '')] ?? [];
+            $candidates = [];
+
+            foreach ($marketKeys as $key) {
+                $catalogEntry = $this->markets->market($key);
+                if ($catalogEntry === null) continue;
+
+                // Only evaluate markets where verified provider odds exist
+                $hasOdds = false;
+                foreach ($fixtureOdds as $oddsRow) {
+                    $normalized = PredictionMarkets::normalizeProviderMarket((string) ($oddsRow['market'] ?? ''));
+                    if (PredictionMarkets::providerMarketMatches($normalized, $key)) {
+                        $hasOdds = true;
+                        break;
+                    }
+                }
+                if (!$hasOdds) continue;
+
+                $evaluated = $this->markets->evaluate($prediction, $grid, $fixtureOdds, $catalogEntry, $catalogEntry['line'] ?? null);
+
+                // Only keep candidates where odds are from verified provider and market is valid
+                if (($evaluated['state'] ?? '') === DataState::UNAVAILABLE) continue;
+                if (empty($evaluated['odds'])) continue;
+                if (empty($evaluated['key']) || empty($evaluated['selection'])) continue;
+
+                $candidates[] = $evaluated;
+            }
+            $out[] = $candidates;
         }
         return $out;
     }
