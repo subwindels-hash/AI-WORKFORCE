@@ -110,11 +110,20 @@ test('football outage: backoff gates only the provider jobs, never the database-
 });
 
 test('football outage: predictions are still generated from stored fixtures while the provider is in backoff', function () {
-    $day = gmdate('Y-m-d', time() + 3600);
+    // Both fixtures must land on the SAME analysed day. Fixed +3600s/+5400s
+    // offsets straddle midnight when the suite runs late in the UTC day
+    // (e.g. 22:33 → 09-11 and 09-12), leaving one fixture off the board and
+    // failing this assertion for a reason that has nothing to do with the
+    // provider outage it is testing. Anchor both to one day's midday.
+    // Use tomorrow's midday so both kickoffs are unambiguously UPCOMING at
+    // any hour the suite runs — the analysed day must contain fixtures that
+    // have not started yet.
+    $day = gmdate('Y-m-d', time() + 86400);
+    $noon = strtotime($day . 'T12:00:00+00:00');
     [$repo, $provider, $intel] = fx_fb_harness(
         [
-            fx_fb_row('fx-out-1', gmdate('c', time() + 3600), 'Arsenal', 'Brighton', '10', '20'),
-            fx_fb_row('fx-out-2', gmdate('c', time() + 5400), 'Liverpool', 'Everton', '30', '40'),
+            fx_fb_row('fx-out-1', gmdate('c', $noon), 'Arsenal', 'Brighton', '10', '20'),
+            fx_fb_row('fx-out-2', gmdate('c', $noon + 1800), 'Liverpool', 'Everton', '30', '40'),
         ],
         ['skipHistory' => true]
     );

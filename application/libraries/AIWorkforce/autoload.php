@@ -259,6 +259,7 @@ spl_autoload_register(static function (string $class) use ($ai_workforceDir): vo
     'AIWorkforce\\Sports\\Providers\\SportsProviderManager' => 'Sports/Providers/SportsDataProvider.php',
     'AIWorkforce\\Sports\\Providers\\TheSportsDbProvider' => 'Sports/Providers/FootballApiProviders.php',
     'AIWorkforce\\Sports\\ResultVerificationEngine' => 'Sports/ResultVerificationEngine.php',
+    'AIWorkforce\\Sports\\ScoreGridPricer' => 'Sports/ScoreGridPricer.php',
     'AIWorkforce\\Sports\\RiskEngine' => 'Sports/RiskEngine.php',
     'AIWorkforce\\Sports\\SportsBacktester' => 'Sports/SportsBacktester.php',
     'AIWorkforce\\Sports\\SportsCronService' => 'Sports/SportsCronService.php',

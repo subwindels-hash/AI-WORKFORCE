@@ -22,6 +22,22 @@ class ResultVerificationEngine
    if ($home===$away) return ['status'=>'VOID','reason'=>'DRAW_NO_BET_PUSH'];
    return ['status'=>(($pick==='HOME')?$home>$away:$away>$home)?'WON':'LOST','reason'=>'VERIFIED_RESULT'];
   }
+  // Handicap: the line is applied to the SELECTED side's margin. A whole
+  // line can land exactly on zero — that is a push and the stake is
+  // returned (VOID), never scored as a loss.
+  if ($market==='ASIAN_HANDICAP') {
+   $parsed = ScoreGridPricer::handicapSelection($pick);
+   if ($parsed !== null && ScoreGridPricer::isSettleableHandicapLine($parsed['line'])) {
+    $margin = $parsed['side']==='HOME' ? $home-$away : $away-$home;
+    $adjusted = $margin + $parsed['line'];
+    if (abs($adjusted) < 1e-9) return ['status'=>'VOID','reason'=>'HANDICAP_PUSH'];
+    return ['status'=>$adjusted>0?'WON':'LOST','reason'=>'VERIFIED_RESULT'];
+   }
+  }
+  if ($market==='CORRECT_SCORE') {
+   $score = ScoreGridPricer::correctScoreSelection($pick);
+   if ($score !== null) return ['status'=>($home===$score[0] && $away===$score[1])?'WON':'LOST','reason'=>'VERIFIED_RESULT'];
+  }
   if ($market==='MATCH_RESULT') {
    $won=($pick==='HOME' && $home>$away) || ($pick==='DRAW' && $home===$away) || ($pick==='AWAY' && $away>$home);
    if (in_array($pick,['HOME','DRAW','AWAY'],true)) return ['status'=>$won?'WON':'LOST','reason'=>'VERIFIED_RESULT'];
