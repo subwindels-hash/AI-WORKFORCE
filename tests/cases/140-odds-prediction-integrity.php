@@ -395,3 +395,42 @@ test('qualified policy: the model prices Over 2.5 / Under 3.5 and settlement hon
     assert_equals('WON', $verify->settleSelection(['market' => 'TOTAL_GOALS', 'selection' => 'UNDER_3_5'], $finished(1, 1))['status']);
     assert_equals('LOST', $verify->settleSelection(['market' => 'TOTAL_GOALS', 'selection' => 'UNDER_3_5'], $finished(3, 2))['status']);
 });
+
+test('odds freshness uses the bookmaker update clock when the feed provides one', function () {
+    $now = time();
+    $ttl = 3600;
+    $fresh = new OddsFreshnessEngine();
+
+    // Observed (fetched) five minutes ago — inside the TTL either way.
+    $observed5mAgo = gmdate('c', $now - 300);
+    // Bookmaker last moved the price a day ago: a re-fetch of an unchanged
+    // price must not make a day-old quote look five minutes fresh.
+    $bookUpdatedDayAgo = gmdate('c', $now - 86400);
+
+    $row = [
+        'market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.9,
+        'observedAt' => $observed5mAgo, 'oddsSource' => 'api-football',
+        'payload' => ['updatedAt' => $bookUpdatedDayAgo],
+    ];
+    $a = $fresh->assess($row, $ttl, $now);
+    assert_equals('STALE', $a['oddsStatus'], 'a price the bookmaker last updated beyond the TTL is stale even though it was re-fetched minutes ago');
+    assert_equals($bookUpdatedDayAgo, $a['oddsUpdatedAt'], 'the bookmaker update time is reported');
+    assert_equals('api-football', $a['oddsSource']);
+
+    // No bookmaker clock: observation time stays the honest proxy, and a price
+    // synced hours ago but inside the TTL stays FRESH (not stale merely because
+    // it was not refreshed on this run).
+    $observed3hAgo = gmdate('c', $now - 3 * 3600);
+    $b = $fresh->assess(['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.9, 'observedAt' => $observed3hAgo, 'oddsSource' => 'sportmonks'], 21600, $now);
+    assert_equals('FRESH', $b['oddsStatus'], '3h-old observed odds inside the 6h TTL stay fresh');
+    assert_equals($observed3hAgo, $b['oddsUpdatedAt']);
+
+    // A malformed bookmaker stamp never breaks assessment — observation wins.
+    $c = $fresh->assess(['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.9, 'observedAt' => $observed5mAgo, 'payload' => ['updatedAt' => 'not-a-date']], $ttl, $now);
+    assert_equals('FRESH', $c['oddsStatus'], 'unparseable provider update time falls back to observation time');
+
+    // A future bookmaker stamp (clock skew) never makes anything stale early.
+    $future = gmdate('c', $now + 99999);
+    $d = $fresh->assess(['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.9, 'observedAt' => $observed5mAgo, 'payload' => ['updatedAt' => $future]], $ttl, $now);
+    assert_equals('FRESH', $d['oddsStatus'], 'future provider timestamps are ignored');
+});

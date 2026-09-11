@@ -113,9 +113,21 @@ class OddsFreshnessEngine
         if ($rawAt === '') {
             return $this->row(true, false, self::STATUS_INVALID_TIMESTAMP, null, $rawAt, $source, $this->maxAge($odds['market'] ?? null, $source), 0, 'ODDS_TIMESTAMP_INVALID');
         }
-        try { $at = (new \DateTimeImmutable($rawAt))->getTimestamp(); }
+        try { $observed = (new \DateTimeImmutable($rawAt))->getTimestamp(); }
         catch (\Throwable $e) {
             return $this->row(true, false, self::STATUS_INVALID_TIMESTAMP, null, $rawAt, $source, $this->maxAge($odds['market'] ?? null, $source), 0, 'ODDS_TIMESTAMP_INVALID');
+        }
+        // Prefer the BOOKMAKER's own odds-update timestamp when the feed
+        // supplies one (that is the honest "when did this price last move"
+        // clock the TTL is meant to measure). When the feed gives no update
+        // time — or one in the future/unparseable — the observation time
+        // remains the best honest proxy. A re-fetch of an unchanged price
+        // never REJUVENATES the bookmaker clock, and a price not refreshed
+        // this run is not stale merely because it was not re-requested.
+        $at = $observed;
+        $providerUpdated = $this->providerUpdatedAt($odds);
+        if ($providerUpdated !== null && $providerUpdated <= (int) ($now ?? time())) {
+            $at = min($observed, $providerUpdated);
         }
         $maxAge = self::maxAgeFor(
             isset($odds['market']) ? (string) $odds['market'] : null,
@@ -128,6 +140,23 @@ class OddsFreshnessEngine
         $fresh = $age <= $maxAge;
         $score = $fresh ? max(1, (int) round(100 * (1 - $age / max(1, $maxAge)))) : 0;
         return $this->row(true, $fresh, $fresh ? self::STATUS_FRESH : self::STATUS_STALE, $age, gmdate('c', $at), $source, $maxAge, $score, $fresh ? null : 'STALE_ODDS');
+    }
+
+    /**
+     * The bookmaker/provider's own "odds last updated" timestamp, or null
+     * when the feed supplied none. Read from the decoded payload or a
+     * top-level passthrough; never synthesized from the local clock.
+     */
+    private function providerUpdatedAt(array $odds): ?int
+    {
+        $payload = SportsDataNormalizer::document($odds['payload'] ?? null);
+        foreach (['updatedAt', 'oddsUpdatedAt', 'latest_bookmaker_update'] as $key) {
+            $value = $odds[$key] ?? $payload[$key] ?? null;
+            if (!is_string($value) || trim($value) === '') continue;
+            try { return (new \DateTimeImmutable($value))->getTimestamp(); }
+            catch (\Throwable $e) { /* ignore one malformed stamp, try the next */ }
+        }
+        return null;
     }
 
     /** Provider attribution of an odds row (explicit key beats payload). */
