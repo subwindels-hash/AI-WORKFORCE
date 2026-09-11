@@ -1084,6 +1084,23 @@ function afPageBody(array $rows, int $current, int $total): string
     return json_encode(['errors' => [], 'results' => count($rows), 'paging' => ['current' => $current, 'total' => $total], 'response' => $rows]);
 }
 
+test('api-football ticket discovery can inspect a bounded buffer beyond the public 50-row page', function () {
+    $urls = [];
+    $rows = [];
+    for ($i = 1; $i <= 60; $i++) $rows[] = afFixtureRow($i, 'Home ' . $i, 'Away ' . $i);
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, function (string $url, array $headers) use (&$urls, $rows): array {
+        $urls[] = $url;
+        return ['status' => 200, 'body' => afPageBody($rows, 1, 1)];
+    });
+
+    $discovery = $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15', 'status' => 'NS', 'candidateLimit' => 200]);
+    assert_equals(60, count($discovery), 'the ticket can inspect later scheduled fixtures before applying its 50-fixture generation cap');
+    assert_contains('status=NS', $urls[0], 'the provider receives the not-started server-side filter');
+
+    $public = $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15', 'limit' => 200]);
+    assert_equals(50, count($public), 'the normal public fixture endpoint retains its 50-row hard limit');
+});
+
 /**
  * api-football's answer to a query parameter the endpoint does not accept —
  * HTTP 200 with the offending field named in `errors`. Verbatim message from
@@ -1108,6 +1125,22 @@ function afOddsRow(string $bookmaker, float $odd): array
         'bookmakers' => [['name' => $bookmaker, 'bets' => [['name' => 'Match Result', 'values' => [['value' => 'Home', 'odd' => $odd]]]]]],
     ];
 }
+
+test('api-football fixture retries that start on page two continue to later pages', function () {
+    $urls = [];
+    $transport = function (string $url, array $headers) use (&$urls): array {
+        $urls[] = $url;
+        preg_match('/page=(\d+)/', $url, $m);
+        $page = isset($m[1]) ? (int) $m[1] : 1;
+        return ['status' => 200, 'body' => afPageBody([afFixtureRow($page, 'Home ' . $page, 'Away ' . $page)], $page, 3)];
+    };
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, $transport);
+    $fixtures = $p->fixtures(['from' => '2026-09-15', 'to' => '2026-09-15', 'page' => 2]);
+
+    assert_equals(2, count($fixtures), 'the requested second page and its remaining page are read exactly once');
+    assert_contains('page=2', $urls[0], 'retry begins on its requested page');
+    assert_contains('page=3', $urls[1], 'the following request advances instead of repeating page 2');
+});
 
 test('api-football fixtures follow paging.total to the last page', function () {
     $urls = [];

@@ -39,10 +39,19 @@ function fx143_provider(array $oddsByExt, array $fixtures = []): SportsDataProvi
 {
     return new class($oddsByExt, $fixtures) implements SportsDataProvider {
         public int $fixtureCalls = 0;
+        public array $lastFixtureQuery = [];
         public function __construct(private array $odds, private array $liveFixtures) {}
         public function id(): string { return 'intake-test'; }
         public function health(): array { return ['status' => 'ONLINE', 'reliability' => 0.9]; }
-        public function fixtures(array $q): array { $this->fixtureCalls++; return $this->liveFixtures; }
+        public function fixtures(array $q): array {
+            $this->fixtureCalls++;
+            $this->lastFixtureQuery = $q;
+            // Model a provider that honours the normal 50-row page cap. The
+            // ticket-only candidateLimit must let later fixtures be discovered
+            // without changing the 50-fixture prediction-generation cap.
+            $limit = isset($q['candidateLimit']) ? (int) $q['candidateLimit'] : (int) ($q['limit'] ?? 50);
+            return array_slice($this->liveFixtures, 0, max(0, $limit));
+        }
         public function odds(string $e): array { return $this->odds[$e] ?? []; }
         public function results(string $e): array { return []; }
     };
@@ -54,7 +63,9 @@ function fx143_raw(string $externalId, int $kickoffTs): array
     return [
         'externalId' => $externalId,
         'sport' => 'football',
-        'competition' => 'Intake League',
+        // Distinct competitions mirror a genuinely diversified ticket slate;
+        // this test is about intake, not a same-league correlation rejection.
+        'competition' => 'Intake League ' . $externalId,
         'homeTeam' => 'Home ' . $externalId, 'awayTeam' => 'Away ' . $externalId,
         'kickoff' => gmdate('Y-m-d\TH:i:00\+00:00', $kickoffTs),
         'status' => 'SCHEDULED', 'sourceStatus' => 'NS',
@@ -100,9 +111,10 @@ function fx143_approve_calibration(SportsRepositoryStub $repo): void
     $repo->saveCalibration(['model_version_id' => $modelId, 'method' => 'platt', 'intercept' => 0.2, 'slope' => 1.5, 'samples' => 40, 'ece' => 0.02, 'status' => 'APPROVED', 'created_by' => 'admin', 'created_at' => gmdate('c')]);
 }
 
-test('intake window: the eligibility lead is one shared constant', function () {
+test('intake window: the eligibility lead and bounded discovery buffer are explicit', function () {
     assert_equals(2 * 3600, DailyTicketService::ELIGIBILITY_LEAD_SECONDS, 'two-hour lead');
     assert_equals(50, DailyTicketService::MAX_GENERATION_CEILING, '50-fixture generation batch');
+    assert_equals(200, DailyTicketService::FIXTURE_DISCOVERY_CEILING, 'bounded 200-fixture eligibility discovery');
 });
 
 test('intake window: a full page of started/too-soon fixtures no longer hides the eligible ones', function () {
@@ -166,13 +178,43 @@ test('intake window: a live provider page orders ticket-eligible fixtures into t
         $oddsByExt['live' . $i] = [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => $prices[$i], 'observedAt' => gmdate('c')]];
     }
 
-    $providers = new SportsProviderManager();
-    $providers->register(fx143_provider($oddsByExt, $fixtures));
-    // refreshFixtures forces the live provider path rather than stored intake.
-    $run = fx143_service($repo, $audit, $providers)->runDaily(gmdate('Y-m-d'), null, ['refreshFixtures' => true]);
+    // Reproduce the failed daily slot reported by the operator. Its former
+    // full 50-row timing page must be replayed through the wider discovery
+    // query once, rather than advancing to page 2 before it sees the fix.
+    $date = gmdate('Y-m-d');
+    $repo->saveDailyTicket([
+        'date' => $date, 'ticket_type' => DailyTicketService::TICKET_TYPE,
+        'ticket_id' => null, 'status' => 'NO_QUALIFIED_TICKET',
+        'generation_status' => 'PENDING', 'configuration_version' => 0,
+        'candidates_evaluated' => 50, 'predictions_recorded' => 0, 'rejections' => 50,
+        'rejection_summary' => ['FIXTURE_NOT_NS_OR_TOO_SOON' => 50, '_diagnostics' => [
+            'fixturePageFull' => true, 'batchOffset' => 0, 'eligibleFixtures' => 0,
+        ]],
+        'message' => 'legacy first page had no eligible fixtures', 'provider' => 'intake-test',
+        'run_id' => 'legacy-timing-page', 'attempt_count' => 1,
+        'next_retry_at' => null, 'last_error_code' => 'NO_QUALIFIED_TICKET',
+        'generated_at' => null, 'created_at' => gmdate('c'), 'updated_at' => gmdate('c'),
+    ]);
 
+    $providers = new SportsProviderManager();
+    $provider = fx143_provider($oddsByExt, $fixtures);
+    $providers->register($provider);
+    // refreshFixtures forces the live provider path rather than stored intake.
+    $run = fx143_service($repo, $audit, $providers)->runDaily($date, null, ['refreshFixtures' => true]);
+
+    assert_equals(1, (int) ($provider->lastFixtureQuery['page'] ?? 0),
+        'an all-too-soon legacy page is replayed instead of skipping to page 2');
+    assert_equals(DailyTicketService::FIXTURE_DISCOVERY_CEILING, (int) ($provider->lastFixtureQuery['candidateLimit'] ?? 0),
+        'the live provider receives the bounded discovery request, not only a 50-row generation page');
+    assert_equals('NS', (string) ($provider->lastFixtureQuery['status'] ?? ''),
+        'a provider with not-started filtering is asked to exclude already-started rows');
     assert_true((int) ($run['diagnostics']['eligibleFixtures'] ?? 0) >= 5,
         'all five eligible fixtures made the batch despite 50 expired rows arriving first');
+    assert_equals('PENDING_USER_APPROVAL', $run['status'],
+        'later, fully-qualified fixtures produce a ticket instead of an all-too-soon verdict');
+    assert_not_null($run['ticketId'], 'a qualified ticket is persisted');
+    assert_equals(5, (int) ($run['diagnostics']['predictionsGenerated'] ?? 0),
+        'the discovery buffer does not relax the 50-fixture generation cap or fabricate predictions');
 });
 
 test('intake window: an all-expired day is diagnosed as timing, not as a failed model gate', function () {
