@@ -1791,8 +1791,11 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
         $stored = array_merge(['id' => $this->id(), 'status' => 'RUNNING', 'records_processed' => 0, 'records_created' => 0, 'records_updated' => 0,
             'requests_made' => 0, 'errors' => [], 'started_at' => gmdate('c'), 'ended_at' => null, 'attempts' => 1,
             'execution_key' => $key, 'job_type' => $run['jobType'] ?? null, 'window_start' => $run['windowStart'] ?? null,
-            'window_end' => $run['windowEnd'] ?? null, 'provider_code' => $run['providerCode'] ?? null, 'next_run_at' => null], $run);
-        unset($stored['executionKey'], $stored['jobType'], $stored['windowStart'], $stored['windowEnd']);
+            'window_end' => $run['windowEnd'] ?? null, 'provider_code' => $run['providerCode'] ?? null, 'next_run_at' => null], $run,
+            // The caller may backdate a run (cadence tests); the snake_case
+            // column must carry that, exactly like the database repository.
+            ['started_at' => $run['startedAt'] ?? gmdate('c')]);
+        unset($stored['executionKey'], $stored['jobType'], $stored['windowStart'], $stored['windowEnd'], $stored['startedAt'], $stored['providerId']);
         $this->syncRuns[] = $stored;
         return $stored;
     }

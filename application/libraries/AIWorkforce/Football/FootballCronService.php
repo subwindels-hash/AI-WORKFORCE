@@ -80,11 +80,19 @@ final class FootballCronService
                     'nextRunAt' => $evaluation['nextRunAt'], 'interval' => $evaluation['interval'], 'detail' => $evaluation['detail']];
             }
         }
-        // An automatic run reuses the same execution key inside its hour, so a
-        // duplicated tick is a no-op; an operator-forced run gets a unique key and
-        // really re-reads the provider (the data writes stay idempotent either
-        // way — fixtures upsert by provider+external id, settlements insert once).
-        $suffix = $force ? ':' . gmdate('Ymd\THis') : ':' . gmdate('Ymd\TH');
+        // An automatic run reuses the same execution key inside the job's own
+        // refresh window, so an overlapping tick is a no-op and the next window
+        // gets a fresh key — this is what lets the 90-second live cadence
+        // actually tick while slower jobs dedupe per hour/day. (The key used to
+        // be hour-bucketed for every job, which silently froze live scores,
+        // results and settlement at one run per hour.) An operator-forced run
+        // gets a unique key and really re-reads the provider (the data writes
+        // stay idempotent either way — fixtures upsert by provider+external id,
+        // settlements insert once).
+        $jobInterval = $this->football->refresh()->interval('football-' . $job);
+        $suffix = $force
+            ? ':' . gmdate('Ymd\THis')
+            : ':' . intdiv(time(), max(30, $jobInterval));
         $result = match ($job) {
             'fixtures' => $this->track('FIXTURES', fn() => $this->football->fixtures()->syncDay($date, 'fixtures:' . $date . $suffix), $suffix),
             'upcoming' => $this->track('UPCOMING', fn() => $this->jobUpcoming($date, $suffix), $suffix),
@@ -116,8 +124,13 @@ final class FootballCronService
             throw $e;
         }
         $interval = $this->football->config()->refreshInterval(strtolower($jobType));
+        // A failed run is retried soon (≤15 min), not on the full bucket
+        // cadence — see RefreshPolicy::evaluate() for the matching gate. The
+        // provider's backoff circuit still throttles repeated upstream errors.
+        $status = (string) ($result['status'] ?? 'COMPLETED');
+        if ($status === 'FAILED') $interval = min($interval, RefreshPolicy::FAILED_RETRY_SECONDS);
         $this->repo->finishSyncRun($key, [
-            'status' => (string) ($result['status'] ?? 'COMPLETED'),
+            'status' => $status,
             'processed' => (int) ($result['processed'] ?? $result['fixtures'] ?? $result['scanned'] ?? 0),
             'created' => (int) ($result['created'] ?? 0),
             'updated' => (int) ($result['updated'] ?? 0),

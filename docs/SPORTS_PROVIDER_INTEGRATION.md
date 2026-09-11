@@ -114,8 +114,9 @@ The `SportsBettingEnrichmentProvider` extracts these signals from sports data:
 Add to your `.env` file or server environment:
 
 ```bash
-# api-football.com
-WINDELS_API_FOOTBALL_KEY=your_api_football_key_here
+# api-football.com — API_FOOTBALL_KEY is the primary variable;
+# WINDELS_API_FOOTBALL_KEY is accepted as a legacy alias.
+API_FOOTBALL_KEY=your_api_football_key_here
 
 # thesportsdb.com
 WINDELS_THESPORTSDB_KEY=your_thesportsdb_key_here
@@ -405,8 +406,8 @@ Enriched: 2.55x
 **Check:**
 1. Are provider credentials configured?
    ```bash
-   # Check environment variables
-   echo $WINDELS_API_FOOTBALL_KEY
+   # Check environment variables (API_FOOTBALL_KEY or its legacy alias)
+   echo $API_FOOTBALL_KEY
    echo $WINDELS_THESPORTSDB_KEY
    echo $WINDELS_SPORTMONKS_TOKEN
    ```

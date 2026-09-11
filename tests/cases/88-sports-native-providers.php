@@ -35,6 +35,37 @@ test('api-football provider reports online health on valid status response', fun
     assert_equals(100, $health['limitDaily']);
 });
 
+test('api-football health reads the quota counters from the list-wrapped /status response', function () {
+    // Regression: the vendor wraps /status in a single-element list —
+    // "response":[{account…,requests:{current,limit_day}}] — and the adapter
+    // used to read the object fields off the list itself, so requestsToday /
+    // limitDaily silently became null and the quota pre-check never fired.
+    $body = json_encode(['response' => [[
+        'account' => ['firstname' => 'T', 'lastname' => 'V'],
+        'subscription' => ['plan' => 'Free', 'end' => '2027-01-01', 'active' => true],
+        'requests' => ['server' => 1, 'current' => 87, 'limit_day' => 100],
+    ]]]);
+    $p = new ApiFootballProvider('test-key', 'https://v3.football.api-sports.io', 10, makeTransport(200, $body));
+    $health = $p->health();
+    assert_equals('ONLINE', $health['status']);
+    assert_equals(87, $health['requestsToday'], 'counter read from response[0].requests.current');
+    assert_equals(100, $health['limitDaily'], 'limit read from response[0].requests.limit_day');
+    assert_equals(13, $health['rateLimitRemaining'], 'remaining head-room is derived');
+});
+
+test('api-football base URL: vendor hosts are pinned to https, an explicit http:// custom host is kept', function () {
+    // Regression: every custom base was force-upgraded to https, which made a
+    // deliberate plain-HTTP endpoint (internal proxy, the offline test mock)
+    // unreachable — the client spoke TLS to an HTTP server.
+    $n = \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl('http://127.0.0.1:9377');
+    assert_equals('http://127.0.0.1:9377', $n, 'explicit http:// on a custom host is preserved');
+    assert_equals('https://127.0.0.1:9377', \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl('127.0.0.1:9377'),
+        'a paste without a scheme defaults to https');
+    assert_equals('https://v3.football.api-sports.io', \AIWorkforce\ApiProviders::normalizeApiFootballBaseUrl('http://api-football.com'),
+        'vendor marketing hosts are canonicalized onto the real API root regardless of scheme');
+});
+
+
 test('api-football provider classifies auth failure', function () {
     $p = new ApiFootballProvider('bad-key', 'https://v3.football.api-sports.io', 10, makeTransport(401));
     $health = $p->health();

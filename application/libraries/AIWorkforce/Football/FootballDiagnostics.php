@@ -93,7 +93,11 @@ final class FootballDiagnostics
         $canPredict = $blockers === [];
         $checks = [
             ['key' => 'Provider', 'value' => $providerState, 'state' => $providerState === 'CONNECTED' ? self::READY : ($providerState === self::NOT_CONFIGURED ? self::NOT_CONFIGURED : self::DEGRADED),
-                'detail' => (string) ($providerStatus['detail'] ?? 'no provider registered'), 'action' => $providerState === self::NOT_CONFIGURED ? 'Configure a verified football data source (WINDELS_APIFOOTBALL_KEY or WINDELS_SPORTMONKS_KEY).' : null],
+                'detail' => (string) ($providerStatus['detail'] ?? 'no provider registered'),
+                'action' => $providerState === self::NOT_CONFIGURED
+                    ? 'Configure a verified football data source (' . implode(' or ', \AIWorkforce\ApiProviders::footballKeyEnvNames())
+                        . ' — the sports providers in Admin → API work too).'
+                    : ($providerState === 'DEGRADED' ? 'Check the provider detail below and the quota counters; the sweep retries automatically.' : null)],
             ['key' => 'Fixtures', 'value' => $fixtureState === 'AVAILABLE' ? 'AVAILABLE' : self::UNAVAILABLE, 'state' => $fixtureState === 'AVAILABLE' ? self::READY : self::WAITING_FOR_DATA,
                 'detail' => $fixturesTodayCount . ' stored for ' . $today, 'action' => $fixtureState === self::UNAVAILABLE ? 'Run a fixture sync for ' . $today . '.' : null],
             ['key' => 'Statistics', 'value' => $statisticsState === 'AVAILABLE' ? 'AVAILABLE' : self::UNAVAILABLE, 'state' => $statisticsState === 'AVAILABLE' ? self::READY : self::WAITING_FOR_DATA,
@@ -118,10 +122,16 @@ final class FootballDiagnostics
         $schedule = $this->refresh->schedule();
         $result = [
             'state' => $canPredict ? ($warnings === [] ? self::READY : self::DEGRADED) : self::WAITING_FOR_DATA,
-            'headline' => $canPredict
-                ? ($warnings === [] ? 'Football intelligence is reading live provider data.' : 'Football intelligence is running with reduced data quality.')
-                : self::NO_PROVIDER_MESSAGE,
-            'message' => $canPredict ? null : self::NO_PROVIDER_MESSAGE,
+            'headline' => match (true) {
+                $canPredict && $warnings === [] => 'Football intelligence is reading live provider data.',
+                $canPredict => 'Football intelligence is running with reduced data quality.',
+                in_array('FOOTBALL_PROVIDER_NOT_CONFIGURED', $blockers, true) => self::NO_PROVIDER_MESSAGE,
+                in_array('FOOTBALL_FIXTURES_' . self::UNAVAILABLE, $blockers, true) => 'No fixtures are stored for today yet. The football engine reads stored fixtures only — it will analyze the day as soon as a fixture sync succeeds.',
+                default => 'The football pipeline is waiting for data: see the checks below for the exact blocker.',
+            },
+            'message' => $canPredict ? null : (in_array('FOOTBALL_PROVIDER_NOT_CONFIGURED', $blockers, true)
+                ? self::NO_PROVIDER_MESSAGE
+                : 'Football predictions are waiting for data. ' . (string) ($checks[0]['detail'] ?? '')),
             'checks' => $checks,
             'blockers' => $blockers,
             'warnings' => $warnings,

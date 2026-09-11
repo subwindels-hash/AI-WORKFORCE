@@ -800,6 +800,17 @@ class FootballRepositoryDatabase implements FootballRepository
             'probabilities_matrix', 'alternative_scores', 'reason', 'evidence', 'outcome', 'eligibility',
             'rejection_reasons', 'settlement_state',
         ]);
+        // Accept decoded rows as well as pre-encoded ones: settlement reads a
+        // prediction back through decode() (JSON columns become arrays) and
+        // writes it forward again with the settlement patch. Without this
+        // re-encoding the UPDATE carried raw arrays, failed silently, and the
+        // prediction stayed OPEN forever even though the settlement row and
+        // the fixture stamp were written.
+        foreach (self::JSON_COLUMNS as $column) {
+            if (array_key_exists($column, $data) && is_array($data[$column])) {
+                $data[$column] = json_encode($data[$column]);
+            }
+        }
         $now = gmdate('c');
         $data['updated_at'] = $now;
         $existing = $this->db->get_where('football_match_predictions', ['id' => $id], 1)->row_array();

@@ -375,6 +375,13 @@ class ApiFootballProvider implements SportsDataProvider
             $resp = $this->doRequest('/status');
             $json = $this->decodeJson($resp);
             $rateInfo = $json['response'] ?? [];
+            // The vendor wraps the counters in a single-element list:
+            // "response":[{"account":…,"requests":{…}}]. Read element [0] when
+            // a list arrives, otherwise requestsToday/limitDaily silently
+            // become null and the quota pre-check below never fires.
+            if (is_array($rateInfo) && isset($rateInfo[0]) && is_array($rateInfo[0])) {
+                $rateInfo = $rateInfo[0];
+            }
             $requests = $rateInfo['requests'] ?? null;
             $used = is_array($requests)
                 ? ($requests['current'] ?? $requests['used'] ?? null)

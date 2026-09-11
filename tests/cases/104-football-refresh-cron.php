@@ -139,6 +139,66 @@ test('football: a deferred or recent run defers the next tick', function () {
     assert_true((int) $cadence['detail']['elapsed'] < $cadence['interval'], 'elapsed time is measured, not assumed');
 });
 
+test('football: a FAILED run retries after a short window, not the full bucket cadence', function () {
+    // Regression: a failed fixtures sweep used to consume the whole 6-hour
+    // bucket, so one transient outage delayed the next attempt by hours even
+    // after the provider recovered. A failed run is eligible again after
+    // RefreshPolicy::FAILED_RETRY_SECONDS (15 min); successful runs keep the
+    // full bucket cadence.
+    [$repo, , $module] = fx_fb_harness([fx_fb_row('fx-failed-retry', gmdate('c', time() + 3600), 'Arsenal', 'Leeds', '10', '20')], ['skipHistory' => true]);
+    $run = $repo->startSyncRun(['executionKey' => 'FIXTURES:test-failed', 'jobType' => 'FIXTURES', 'windowStart' => gmdate('Y-m-d'), 'startedAt' => gmdate('c', time() - 1200)]);
+    $repo->finishSyncRun('FIXTURES:test-failed', ['status' => 'FAILED', 'requests' => 0, 'nextRunAt' => null]);
+    $policy = $module->refresh();
+    assert_equals(900, RefreshPolicy::FAILED_RETRY_SECONDS, 'the retry window is 15 minutes');
+    $afterFailure = $policy->evaluate('football-fixtures');
+    assert_equals(true, $afterFailure['due'], '20 minutes after a FAILED run the fixtures job is due again');
+    assert_equals('DUE', (string) $afterFailure['reason'], 'a failed sweep is retried promptly');
+
+    // A COMPLETED run keeps the full bucket: 20 minutes into a 6-hour bucket is not due.
+    $run2 = $repo->startSyncRun(['executionKey' => 'FIXTURES:test-done', 'jobType' => 'FIXTURES', 'windowStart' => gmdate('Y-m-d'), 'startedAt' => gmdate('c', time() - 600)]);
+    $repo->finishSyncRun('FIXTURES:test-done', ['status' => 'COMPLETED', 'requests' => 4, 'nextRunAt' => null]);
+    $afterSuccess = $policy->evaluate('football-fixtures');
+    assert_equals(false, $afterSuccess['due'], 'a successful run holds the full bucket cadence');
+    assert_equals('CADENCE', (string) $afterSuccess['reason']);
+});
+
+test('football: the statistics job owns its own request budget', function () {
+    // Regression: collectStatisticsForDay never began a sweep, so it silently
+    // scavenged whatever the fixtures job had left of the process — and when it
+    // ran first (or alone, e.g. forced from the console) that leftover was 0:
+    // every standings / team / head-to-head call died with
+    // REQUEST_BUDGET_EXHAUSTED and a healthy provider was reported as
+    // DATA_UNAVAILABLE. It must open the sweep with its own configured budget.
+    [$repo, $provider, $module] = fx_fb_harness(
+        [fx_fb_row('fx-stats-budget', gmdate('c', time() + 3600), 'Manchester City', 'Everton', '10', '20')],
+        ['skipHistory' => true]
+    );
+    $sync = $module->fixtures()->syncDay(gmdate('Y-m-d'), 'test:stats-budget', null, 2);
+    assert_equals('COMPLETED', (string) $sync['status'], 'the fixtures pass stored the day');
+    $callsBefore = $provider->calls;
+
+    $stats = $module->collectStatisticsForDay(gmdate('Y-m-d'), 12);
+    assert_equals('COMPLETED', (string) $stats['status'], 'statistics runs on its own budget, not leftovers');
+    assert_true($provider->calls > $callsBefore, 'the provider was actually asked for the league table');
+    assert_equals(4, (int) $stats['teamRows'], 'the standings were ingested');
+    assert_equals(1, (int) $stats['headToHead'], 'and the head-to-head snapshot was stored');
+
+    // Budget 0 means "this job must not call the provider" — the configuration
+    // contract the fix has to keep honouring in the other direction.
+    [$repo2, $provider2, $muted] = fx_fb_harness(
+        [fx_fb_row('fx-stats-zero', gmdate('c', time() + 3600), 'Manchester City', 'Everton', '10', '20')],
+        ['skipHistory' => true],
+        ['WINDELS_FOOTBALL_BUDGET_STATISTICS' => '0']
+    );
+    $muted->fixtures()->syncDay(gmdate('Y-m-d'), 'test:stats-zero', null, 2);
+    $callsBeforeZero = $provider2->calls;
+    $mutedStats = $muted->collectStatisticsForDay(gmdate('Y-m-d'), 12);
+    assert_equals($callsBeforeZero, $provider2->calls, 'a zero-budget statistics job spends no provider requests');
+    assert_equals(0, (int) $mutedStats['teamRows'], 'so nothing is ingested');
+    assert_equals(0, (int) $mutedStats['headToHead'], 'and the shortage is visible in the counts, not hidden');
+    assert_contains('REQUEST_BUDGET_EXHAUSTED', json_encode($mutedStats['leagueResults']), 'with the budget named as the reason');
+});
+
 test('football: a rate-limited provider is put in backoff and then costs nothing', function () {
     [$repo, $provider, $module] = fx_fb_harness([fx_fb_row('fx-rl', gmdate('c', time() + 7200), 'Manchester City', 'Everton', '10', '20')],
         ['skipHistory' => true], ['WINDELS_FOOTBALL_MIN_REQUEST_SPACING_MS' => '0']);
@@ -309,17 +369,28 @@ test('football: an idle sweep stays quiet and an eventful one is audited', funct
         public function recent(int $limit = 100): array { return $this->events; }
     };
     // Nothing stored, no provider connected: the sweep runs, every job says so,
-    // and the audit log stays clean — the per-minute tick must not become spam.
+    // and the audit log stays quiet — the per-minute tick must not become spam.
+    // Provider-fed jobs (fixtures, upcoming, live, results, statistics) skip on
+    // PROVIDER_NOT_CONFIGURED; the database-only jobs (predict, settle,
+    // performance) skip on NO_WORK because they do not need the provider at all
+    // — a provider outage must never freeze prediction generation from stored
+    // fixtures, settlement or the performance snapshot; cleanup always runs
+    // (it is pure housekeeping) and completes on an empty database.
     $repo = new FootballRepositoryStub();
     $idle = new FootballIntelligence($repo, new \AIWorkforce\Sports\Providers\SportsProviderManager(),
         $audit, new FootballConfiguration());
     $summary = $idle->cron()->runAll();
-    foreach (FootballCronService::JOBS as $job) {
+    foreach (['fixtures', 'upcoming', 'live', 'results', 'statistics'] as $job) {
         assert_equals('SKIPPED', (string) ($summary[$job]['status'] ?? ''), $job . ' reports it had nothing to do');
         assert_equals('PROVIDER_NOT_CONFIGURED', (string) ($summary[$job]['reason'] ?? ''), 'because no provider is connected');
     }
-    assert_equals([], array_values(array_filter($audit->events, static fn(array $e): bool => $e['type'] === 'FOOTBALL_CRON_RUN')),
-        'an idle sweep writes no sweep-level audit event');
+    foreach (['predict', 'settle', 'performance'] as $job) {
+        assert_equals('SKIPPED', (string) ($summary[$job]['status'] ?? ''), $job . ' has no stored work without a provider');
+        assert_equals('NO_WORK', (string) ($summary[$job]['reason'] ?? ''), $job . ' is gated by stored work, not by the provider');
+    }
+    assert_equals('COMPLETED', (string) ($summary['cleanup']['status'] ?? ''), 'cleanup is database housekeeping and runs regardless of the provider');
+    assert_equals(1, count(array_values(array_filter($audit->events, static fn(array $e): bool => $e['type'] === 'FOOTBALL_CRON_RUN'))),
+        'an idle sweep writes at most the daily cleanup completion — no per-minute spam');
 
     // A sweep that actually settles something is reported, with the job listed.
     $day = gmdate('Y-m-d', time() + 7200);

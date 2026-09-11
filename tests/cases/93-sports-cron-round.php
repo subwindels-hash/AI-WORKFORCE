@@ -66,7 +66,10 @@ test('cron odds job: round-addressable matches sync in one round() call, legacy 
     $source = $repo->ensureProvider('cron-round-test', 'Cron Round Test');
     $sourceId = (int) $source['id'];
 
-    $date = gmdate('Y-m-d');
+    // Tomorrow, not today: the odds job skips kickoffs inside the next two
+    // hours, so a 14:00 "today" fixture silently drops out of eligibility any
+    // time the suite runs after noon UTC. A tomorrow matchday is always eligible.
+    $date = gmdate('Y-m-d', time() + 86400);
     $mk = fn(string $ext, string $roundId, int $hour) => SportsDataNormalizer::fixture([
         'externalId' => $ext, 'homeTeam' => 'H' . $ext, 'awayTeam' => 'A' . $ext, 'competition' => 'Test League',
         'kickoff' => gmdate('Y-m-d\TH:i:00\+00:00', strtotime($date . ' ' . $hour . ':00:00')), 'status' => 'SCHEDULED', 'roundId' => $roundId,

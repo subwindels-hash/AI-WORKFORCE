@@ -8,6 +8,10 @@ import { PHP, ProcessIdAllocator } from '@php-wasm/universal';
 
 const APP_ROOT = path.resolve(new URL('..', import.meta.url).pathname);
 process.env.AI_WORKFORCE_DB_DRIVER = 'pdo_sqlite';
+// The dev runtime is sqlite-only. Pin BOTH driver variables so a deployment
+// reference file named `env` (loaded by index.php's fallback) cannot flip the
+// suite onto mysqli — inside php-wasm that connection cannot exist.
+process.env.VP_DB_DRIVER = 'pdo_sqlite';
 // Tests use a THROWAWAY database so they never pollute the demo data.
 import fs from 'node:fs';
 const TEST_DB = path.join(APP_ROOT, 'application', 'data', 'ai_workforce-test.sqlite');
@@ -26,9 +30,24 @@ useHostFilesystem(php);
 const root = APP_ROOT.replaceAll("'", "\\'");
 const code = `<?php
 chdir('${root}');
+// Hermetic suite, in strict order: (1) drop every ambient config variable the
+// host may carry — deployment provider keys, production-mode switches and
+// credentials belong to the deployment, never to assertions written against a
+// clean environment; (2) pin the runner's own settings AFTER the strip.
+foreach (array_keys(getenv()) as $ambientKey) {
+    if (preg_match('/^(AI_WORKFORCE_|VP_|WINDELS_|APOLLO|AI_CHAT|LLM_|LANGUAGE_AI|RESEND_|POSTMARK_|GOOGLE_PLACES|ALPACA|OANDA|IBKR_|BYBIT|OKX_|COINBASE|KRAKEN|BINANCE|MULTIPLIER_|NEXT_PUBLIC|DATABASE_URL|REDIS_URL|CORS_ORIGINS|LEAD_|OUTREACH_|DEMO_MODE|TTS_|STT_|PRONUNCIATION_|AGENTS_ENABLED|MCP_TOOLS_ENABLED|WORKFLOWS_ENABLED|OBSERVABILITY_|AUDIT_LOG_)/', $ambientKey)) {
+        putenv($ambientKey);
+        unset($_ENV[$ambientKey], $_SERVER[$ambientKey]);
+    }
+}
+// index.php honours AI_WORKFORCE_SKIP_ENV_FILE, so a deployment reference file
+// named "env" is never loaded here; and because vp_load_env cannot override an
+// already-set variable, these pins also win over any future .env in the repo.
 putenv('AI_WORKFORCE_DB_DRIVER=pdo_sqlite');
-putenv('AI_WORKFORCE_SQLITE_PATH=${process.env.AI_WORKFORCE_SQLITE_PATH.replaceAll("'", "\\'")}');
-putenv('AI_WORKFORCE_TEST_FILTER=${(process.env.AI_WORKFORCE_TEST_FILTER || '').replaceAll("'", "\\'")}');
+putenv('VP_DB_DRIVER=pdo_sqlite');
+putenv('AI_WORKFORCE_SQLITE_PATH=${process.env.AI_WORKFORCE_SQLITE_PATH.replaceAll("'", "\'")}');
+putenv('AI_WORKFORCE_TEST_FILTER=${(process.env.AI_WORKFORCE_TEST_FILTER || '').replaceAll("'", "\'")}');
+putenv('AI_WORKFORCE_SKIP_ENV_FILE=1');
 // The suite must not depend on the public internet. Real market-data providers
 // (exchanges, Yahoo…) are not registered here, so a sandbox without network —
 // or an outage — cannot engage the market-data kill switch and fail cases that
