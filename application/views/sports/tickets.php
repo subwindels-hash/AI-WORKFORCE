@@ -226,6 +226,44 @@ $heroMarketLabel = function (string $market, string $selection): string {
     <?php else: ?>
       <p class="dim" style="margin:0">Automatic daily generation is pending. When Odds Prediction is enabled, the scheduler syncs eligible fixtures, refreshes stale odds in controlled batches, evaluates the safety gates and persists today&apos;s result. The button above is an optional manual retry.</p>
     <?php endif; ?>
+    <?php
+    // Requirement #13: every rejection auditable — the reason, what was
+    // missing, what WAS available, the data quality and the minimum it was
+    // judged against. Shown whatever the outcome, because a rejected market
+    // on a day that still produced a ticket is exactly as worth diagnosing.
+    $heroRejections = is_array($heroDiag['rejectionAudit']['rows'] ?? null) ? $heroDiag['rejectionAudit']['rows'] : [];
+    ?>
+    <?php if ($heroRejections !== []): ?>
+      <details style="margin-top:12px">
+        <summary class="dim" style="cursor:pointer;font-size:12px">Why <?= count($heroRejections) ?> candidate<?= count($heroRejections) === 1 ? ' was' : 's were' ?> rejected</summary>
+        <div class="table-scroll" style="margin-top:10px">
+          <table class="tbl" style="font-size:11px">
+            <thead><tr><th>Match · market</th><th>Reason</th><th>Missing</th><th>Available</th><th class="num">Data quality</th><th class="num">Minimum allowed</th></tr></thead>
+            <tbody>
+              <?php foreach ($heroRejections as $rej): ?>
+                <tr>
+                  <td>
+                    <?= e((string) ($rej['fixture'] ?? '?')) ?>
+                    <span class="dim" style="display:block;font-size:10px"><?= e(trim((string) ($rej['market'] ?? '') . ' / ' . (string) ($rej['selection'] ?? ''), ' /')) ?></span>
+                  </td>
+                  <td><span class="badge b-red"><?= e((string) ($rej['reason'] ?? '—')) ?></span></td>
+                  <td class="dim"><?= ($rej['missing'] ?? []) === [] ? '<span class="dim">Nothing required was missing</span>' : e(implode(', ', (array) $rej['missing'])) ?></td>
+                  <td class="dim"><?= ($rej['available'] ?? []) === [] ? 'Unavailable' : e(implode(', ', (array) $rej['available'])) ?></td>
+                  <td class="num mono"><?= ($rej['dataQuality'] ?? null) === null ? 'Unavailable' : (int) $rej['dataQuality'] ?></td>
+                  <td class="num mono">
+                    <?= ($rej['minDataQuality'] ?? null) === null ? 'Unavailable' : (int) $rej['minDataQuality'] ?>
+                    <?php if (!empty($rej['dataTier'])): ?><span class="dim" style="display:block;font-size:10px"><?= e((string) $rej['dataTier']) ?> tier<?= ($rej['minConfidence'] ?? null) !== null ? ' · ' . e(number_format((float) $rej['minConfidence'], 0)) . '% conf' : '' ?></span><?php endif; ?>
+                  </td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
+        <?php if (!empty($heroDiag['rejectionAudit']['truncated'])): ?>
+          <p class="dim" style="margin:6px 0 0;font-size:11px">More rejections occurred than this ledger keeps; the counts in the funnel above are complete.</p>
+        <?php endif; ?>
+      </details>
+    <?php endif; ?>
   </div>
 </div>
 

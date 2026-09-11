@@ -366,11 +366,26 @@ class PredictionPipeline
         // single primary blocking reason (no double counting).
         $candidate['rejectionReasons'] = array_values(array_unique($rejectionReasons));
         $candidate['primaryReason'] = $candidate['rejectionReasons'][0] ?? null;
+        // Requirement #13 — a rejection must be auditable on its own terms:
+        // the reason, what was MISSING, what was AVAILABLE, the data quality
+        // and the minimum that quality was judged against. The adaptive tier
+        // is carried too, because "below the minimum" means a different
+        // number for a fixture with thin evidence than for a complete one.
+        $policyVerdict = is_array($candidate['confidencePolicy'] ?? null) ? $candidate['confidencePolicy'] : [];
         $candidate['rejectionDetail'] = [
             'primary' => $candidate['primaryReason'],
             'allReasons' => $candidate['rejectionReasons'],
-            'missingFields' => array_values(array_unique($missingFields)),
+            'missingFields' => array_values(array_unique(array_merge($missingFields, (array) ($quality['missing'] ?? [])))),
+            'availableFields' => array_values((array) ($quality['available'] ?? [])),
+            'missingMandatory' => array_values((array) ($quality['missingMandatory'] ?? [])),
+            'missingOptional' => array_values((array) ($quality['missingOptional'] ?? [])),
             'staleFields' => array_values(array_unique($staleFields)),
+            'dataQuality' => is_numeric($quality['score'] ?? null) ? (int) $quality['score'] : null,
+            'minDataQuality' => $policyVerdict['minDataQuality'] ?? (is_numeric($quality['minDataQuality'] ?? null) ? (int) $quality['minDataQuality'] : null),
+            'dataTier' => $policyVerdict['tier'] ?? null,
+            'confidence' => is_numeric($candidate['confidence']['confidence'] ?? null) ? (float) $candidate['confidence']['confidence'] : null,
+            'minConfidence' => $policyVerdict['requiredConfidence'] ?? null,
+            'policyExplanation' => $policyVerdict['explanation'] ?? null,
             'oddsStatus' => $candidate['oddsStatus'] ?? null,
             'oddsUpdatedAt' => $candidate['oddsUpdatedAt'] ?? null,
             'oddsAgeSeconds' => $candidate['oddsAgeSeconds'] ?? null,

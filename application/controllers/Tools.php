@@ -324,6 +324,32 @@ class Tools extends MY_Controller
         foreach ($reasons as $reason => $count) printf("  %-34s %s\n", (string) $reason, (string) $count);
         echo "\n";
 
+        // Requirement #13: every rejection auditable — Reason, Missing,
+        // Available, Data Quality and the minimum it was judged against.
+        $audit = (array) ($funnel['rejectionAudit'] ?? []);
+        $auditRows = (array) ($audit['rows'] ?? []);
+        if ($auditRows !== []) {
+            echo "REJECTION AUDIT (reason - missing - available - data quality vs minimum)\n";
+            foreach ($auditRows as $row) {
+                printf("  %-28s %-14s %-14s %s\n",
+                    mb_substr((string) ($row['fixture'] ?? '?'), 0, 28),
+                    (string) ($row['market'] ?? '-'), (string) ($row['selection'] ?? '-'),
+                    (string) ($row['reason'] ?? '-'));
+                $missing = (array) ($row['missing'] ?? []);
+                $available = (array) ($row['available'] ?? []);
+                printf("      Missing:   %s\n", $missing === [] ? '(nothing — every required field was present)' : implode(', ', $missing));
+                printf("      Available: %s\n", $available === [] ? 'Unavailable' : implode(', ', $available));
+                printf("      Data quality %s (minimum allowed %s, tier %s)   confidence %s (required %s)\n",
+                    $row['dataQuality'] === null ? 'Unavailable' : (string) (int) $row['dataQuality'],
+                    $row['minDataQuality'] === null ? 'Unavailable' : (string) (int) $row['minDataQuality'],
+                    (string) ($row['dataTier'] ?? 'Unavailable'),
+                    $row['confidence'] === null ? 'Unavailable' : number_format((float) $row['confidence'], 2),
+                    $row['minConfidence'] === null ? 'Unavailable' : number_format((float) $row['minConfidence'], 2));
+            }
+            if (!empty($audit['truncated'])) printf("  … more rejections occurred; the ledger keeps the first %d rows (the counts above are complete)\n", (int) ($audit['limit'] ?? 100));
+            echo "\n";
+        }
+
         echo "SELECTION TIERS TRIED\n";
         $attempts = (array) ($funnel['selectionAttempts'] ?? []);
         if ($attempts === []) echo "  (the final selection stage was never reached)\n";

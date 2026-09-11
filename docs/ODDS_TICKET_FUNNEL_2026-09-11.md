@@ -85,8 +85,16 @@ REJECTIONS (one primary reason per rejected fixture/candidate)
   LOW_MODEL_EDGE                     46
   FIXTURE_NOT_NS_OR_TOO_SOON         6
 
-SELECTION TIERS TRIED
-  PREFERRED              pool=4   cap=LOW     found=YES 
+REJECTION AUDIT (reason - missing - available - data quality vs minimum)
+  Glacier Town vs Horizon FC   BTTS           NO             LOW_MODEL_EDGE
+      Missing:   (nothing — every required field was present)
+      Available: externalId, homeTeam, awayTeam, competition, kickoff, recentForm, odds, oddsFreshness, providerReliability, marketLiquidity, restDays
+      Data quality 96 (minimum allowed 65, tier EXCELLENT)   confidence 67.69 (required 75.00)
+  Glacier Town vs Horizon FC   DOUBLE_CHANCE  AWAY_OR_DRAW   LOW_MODEL_EDGE
+      Missing:   (nothing — every required field was present)
+      Available: externalId, homeTeam, awayTeam, competition, kickoff, recentForm, odds, oddsFreshness, providerReliability, marketLiquidity, restDays
+      Data quality 96 (minimum allowed 65, tier EXCELLENT)   confidence 61.77 (required 75.00)
+  … (the ledger keeps one row per hard-rejected candidate)
 
 CANDIDATE DECISIONS — fixture -> market -> model probability -> confidence -> data quality -> odds -> value -> risk -> correlation -> decision
   Delta Athletic vs Ember Rove MATCH_RESULT   DRAW           p=0.2415   conf=79.58   dq=96   odds=4.23    ev=0.0215    risk=MEDIUM  corr=LOW     => NOT_SELECTED             NOT_IN_BEST_COMBINATION
@@ -96,10 +104,6 @@ CANDIDATE DECISIONS — fixture -> market -> model probability -> confidence -> 
   Horizon FC vs Apex FC        TOTAL_GOALS    UNDER_3_5      p=0.7575   conf=75.29   dq=96   odds=1.4     ev=0.0605    risk=MEDIUM  corr=LOW     => SELECTED                 
       adaptive requirement     tier=EXCELLENT  required conf=75.00  required dq=65  
   Apex FC vs Bronze Valley     TOTAL_GOALS    UNDER_3_5      p=0.7352   conf=75.09   dq=96   odds=1.42    ev=0.0439    risk=MEDIUM  corr=LOW     => NOT_SELECTED             NOT_IN_BEST_COMBINATION
-      adaptive requirement     tier=EXCELLENT  required conf=75.00  required dq=65  
-  Comet Rangers vs Delta Athle TOTAL_GOALS    UNDER_3_5      p=0.7262   conf=74.64   dq=96   odds=1.45    ev=0.053     risk=MEDIUM  corr=LOW     => BELOW_PREFERRED_CRITERIA LOW_CONFIDENCE
-      adaptive requirement     tier=EXCELLENT  required conf=75.00  required dq=65  
-  Bolt City vs Comet Rangers   TOTAL_GOALS    UNDER_3_5      p=0.7425   conf=74.54   dq=96   odds=1.42    ev=0.0543    risk=MEDIUM  corr=LOW     => BELOW_PREFERRED_CRITERIA LOW_CONFIDENCE
       adaptive requirement     tier=EXCELLENT  required conf=75.00  required dq=65  
   … (96 candidates in total; the full table is printed by the command above)
 
@@ -132,4 +136,9 @@ TICKET-FUNNEL-RESULT: TICKET
   5.00-8.00 odds range. Nothing was forced.
 * **Every rejection is auditable.** Each decision row carries the tier it was
   judged in and the exact confidence and data quality required of it, next to
-  what it actually measured.
+  what it actually measured. The `REJECTION AUDIT` block goes further, giving
+  each rejected candidate its Reason, a `Missing:` list, an `Available:` list,
+  its Data Quality and the minimum that quality was judged against. On this
+  run the missing lists are empty and the available lists are full — the
+  rejections are genuine price judgements (`LOW_MODEL_EDGE`), not hidden data
+  gaps, which is precisely the distinction the old aggregate counts hid.

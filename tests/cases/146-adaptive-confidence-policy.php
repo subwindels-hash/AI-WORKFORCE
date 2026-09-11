@@ -349,3 +349,78 @@ test('funnel end-to-end: the adaptive requirement travels with every candidate d
         }
     }
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// 6. AUDITABLE REJECTIONS (requirement #13)
+// ─────────────────────────────────────────────────────────────────────────
+
+test('rejection audit: the quality assessment reports what was AVAILABLE, not only what was missing', function () {
+    $engine = new \AIWorkforce\Sports\DataQualityEngine();
+    $fixture = ['externalId' => 'f1', 'homeTeam' => 'Home', 'awayTeam' => 'Away', 'competition' => 'League', 'kickoff' => gmdate('c')];
+    $assessment = $engine->assess($fixture, [
+        'mandatoryFields' => \AIWorkforce\Sports\DataQualityEngine::mandatoryFieldsForMarket('MATCH_RESULT'),
+        'availableFields' => ['recentForm', 'injuries'],
+        'oddsAvailable' => true, 'oddsFresh' => true, 'oddsAgeSeconds' => 600, 'maxOddsAgeSeconds' => 21600,
+        'providerReliability' => 0.9, 'minDataQuality' => 75,
+    ]);
+
+    // Both lists, so "Missing: H2H" can be read next to what the model DID see.
+    assert_true(in_array('recentForm', $assessment['available'], true), 'the mandatory form it had is listed as available');
+    assert_true(in_array('injuries', $assessment['available'], true), 'the optional enrichment it had is listed too');
+    assert_equals(['recentForm'], $assessment['availableMandatory']);
+    assert_true(in_array('injuries', $assessment['availableOptional'], true));
+    // A field is never on both sides of the ledger.
+    assert_equals([], array_intersect($assessment['available'], $assessment['missing']),
+        'no field is reported as both available and missing');
+    // Absent optional enrichment is still only a score effect, never a block.
+    assert_true($assessment['eligibleForPrediction']);
+});
+
+test('rejection audit: every hard-rejected candidate carries Reason, Missing, Available and the minimum allowed', function () {
+    $repo = new SportsRepositoryStub();
+    $audit = fx145_audit();
+    fx145_approve_calibration($repo);
+    $fixtures = fx145_three_fixtures();
+    // Price the markets so far above the model's probability that the value
+    // gate rejects them: real candidates, hard-rejected, fully auditable.
+    fx145_seed($repo, 'audit-test', $fixtures, 600, [
+        ['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.01],
+        ['market' => 'TOTAL_GOALS', 'selection' => 'UNDER_1_5', 'decimalOdds' => 1.01],
+    ]);
+    $providers = new SportsProviderManager();
+    $providers->register(fx145_provider('audit-test', $fixtures, []));
+
+    $diag = fx145_service($repo, $audit, $providers)->runDaily(fx145_date())['diagnostics'];
+    $rows = (array) ($diag['rejectionAudit']['rows'] ?? []);
+    assert_true($rows !== [], 'hard rejections are itemised, not only counted');
+
+    foreach ($rows as $row) {
+        foreach (['fixture', 'market', 'selection', 'reason', 'missing', 'available', 'dataQuality', 'minDataQuality'] as $key) {
+            assert_true(array_key_exists($key, $row), 'the audit row carries ' . $key);
+        }
+        assert_true(is_string($row['reason']) && $row['reason'] !== '', 'every rejection names its reason');
+        assert_true(is_array($row['missing']) && is_array($row['available']), 'both ledgers are lists');
+        assert_true(is_numeric($row['dataQuality']), 'the data quality behind the rejection is stated');
+        assert_true(is_numeric($row['minDataQuality']), 'and the minimum it was judged against');
+        // Requirement #13 is about auditability, not blame: a fixture with
+        // good data that failed on price must still show its evidence.
+        assert_true($row['available'] !== [], 'the data the fixture DID have is listed');
+    }
+
+    // The itemised ledger and the aggregate counts must agree.
+    $counted = array_sum(array_map('intval', (array) ($diag['topRejectionReasons'] ?? [])));
+    assert_true($counted >= count($rows), 'the ledger never claims more rejections than were counted');
+});
+
+test('rejection audit: the ledger is capped but the counts never are', function () {
+    $repo = new SportsRepositoryStub();
+    $audit = fx145_audit();
+    fx145_approve_calibration($repo);
+    $service = fx145_service($repo, $audit, new SportsProviderManager());
+    // The cap is a stored-diagnostics guard, declared on the funnel itself so
+    // a reader knows the rows are a sample while the counts are complete.
+    $diag = $service->runDaily(fx145_date())['diagnostics'];
+    assert_true(isset($diag['rejectionAudit']['limit']), 'the ledger declares its cap');
+    assert_true(array_key_exists('truncated', $diag['rejectionAudit']), 'and whether it was reached');
+    assert_true((int) $diag['rejectionAudit']['limit'] > 0);
+});

@@ -758,7 +758,7 @@ class DailyTicketService
                             $allCandidates[] = $candidate;
                             $funnel['marketsEvaluated']++;
 
-                            $this->collectCandidate($candidate, $candidates, $rejections, $rejectionSummary, $reasonProviders, (string) ($odds['oddsSource'] ?? $item['provider']));
+                            $this->collectCandidate($candidate, $candidates, $rejections, $rejectionSummary, $reasonProviders, (string) ($odds['oddsSource'] ?? $item['provider']), $funnel);
                         }
                     }
 
@@ -784,7 +784,7 @@ class DailyTicketService
                             $this->trackCandidateFunnel($candidate, $funnel, $minConfidence, $minEv);
                             $allCandidates[] = $candidate;
                             $funnel['marketsEvaluated']++;
-                            $this->collectCandidate($candidate, $candidates, $rejections, $rejectionSummary, $reasonProviders, (string) ($odds['oddsSource'] ?? $item['provider']));
+                            $this->collectCandidate($candidate, $candidates, $rejections, $rejectionSummary, $reasonProviders, (string) ($odds['oddsSource'] ?? $item['provider']), $funnel);
                             $evaluatedMarkets++;
                         }
                         if ($evaluatedMarkets === 0) {
@@ -1259,7 +1259,7 @@ class DailyTicketService
      */
     private const SOFT_REJECTION_REASONS = ['LOW_CONFIDENCE', 'CONFIDENCE_UNMEASURED', 'LOW_DATA_QUALITY'];
 
-    private function collectCandidate(array $candidate, array &$candidates, int &$rejections, array &$rejectionSummary, array &$reasonProviders, string $provider): void
+    private function collectCandidate(array $candidate, array &$candidates, int &$rejections, array &$rejectionSummary, array &$reasonProviders, string $provider, ?array &$funnel = null): void
     {
         if (($candidate['decision'] ?? '') !== 'REJECTED') {
             $candidates[] = $candidate;
@@ -1280,6 +1280,42 @@ class DailyTicketService
             ? (string) $candidate['primaryReason']
             : $hard[0];
         $this->countRejection($rejectionSummary, $primary, $reasonProviders, $provider);
+        if ($funnel !== null) $this->recordRejectionAudit($funnel, $candidate, $primary, $provider);
+    }
+
+    /**
+     * One auditable row per hard-rejected candidate (requirement #13):
+     * Reason, Missing, Available, Data Quality and the minimum allowed.
+     * Rows are capped so a 200-fixture day cannot bloat the stored
+     * diagnostics; the COUNT in topRejectionReasons is never capped.
+     */
+    private function recordRejectionAudit(array &$funnel, array $candidate, string $primary, string $provider): void
+    {
+        $ledger = &$funnel['rejectionAudit'];
+        if (count($ledger['rows']) >= (int) $ledger['limit']) { $ledger['truncated'] = true; unset($ledger); return; }
+        $detail = is_array($candidate['rejectionDetail'] ?? null) ? $candidate['rejectionDetail'] : [];
+        $ledger['rows'][] = [
+            'fixture' => trim((string) ($candidate['match']['homeTeam'] ?? '?') . ' vs ' . (string) ($candidate['match']['awayTeam'] ?? '?')),
+            'matchId' => $candidate['matchId'] ?? null,
+            'competition' => $candidate['match']['competition'] ?? null,
+            'kickoff' => $candidate['match']['kickoff'] ?? null,
+            'market' => $candidate['market'] ?? null,
+            'selection' => $candidate['selection'] ?? null,
+            'provider' => $provider,
+            'reason' => $primary,
+            'allReasons' => array_values((array) ($detail['allReasons'] ?? [])),
+            // The two lists an operator needs side by side to tell "thin data"
+            // from "no data" — capped per row, never summarised away.
+            'missing' => array_slice(array_values((array) ($detail['missingFields'] ?? [])), 0, 20),
+            'available' => array_slice(array_values((array) ($detail['availableFields'] ?? [])), 0, 20),
+            'dataQuality' => $detail['dataQuality'] ?? null,
+            'minDataQuality' => $detail['minDataQuality'] ?? null,
+            'confidence' => $detail['confidence'] ?? null,
+            'minConfidence' => $detail['minConfidence'] ?? null,
+            'dataTier' => $detail['dataTier'] ?? null,
+            'explanation' => $detail['policyExplanation'] ?? null,
+        ];
+        unset($ledger);
     }
 
     /**
@@ -1454,6 +1490,10 @@ class DailyTicketService
             'oddsProvidersNoCoverage' => [],
             'topRejectionReasons' => [],
             'rejectionReasonsByProvider' => [],
+            // Requirement #13: one auditable row per hard-rejected candidate —
+            // Reason, Missing, Available, Data Quality and the minimum allowed.
+            // Rows are capped; the counts above never are.
+            'rejectionAudit' => ['limit' => 100, 'truncated' => false, 'rows' => []],
             'topPicks' => [],
             'topPicksDisclaimer' => self::TOP_PICKS_DISCLAIMER,
             'thresholds' => [],
