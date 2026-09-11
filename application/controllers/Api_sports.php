@@ -437,7 +437,12 @@ class Api_sports extends Api_controller
         if (!$user) return;
         $body = $this->jsonBody();
         $date = isset($body['date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $body['date']) ? (string) $body['date'] : gmdate('Y-m-d');
-        $result = $this->platform->sports->dailyTickets->runDaily($date);
+        // force: invalidate the day's ACTIVE candidate state (old pass odds,
+        // stale pending ticket/daily slot) before regenerating from fresh
+        // provider data. Settled/historical records are preserved.
+        $options = !empty($body['force']) ? ['force' => true] : [];
+        $result = $this->platform->sports->dailyTickets->runDaily($date, null, $options);
+        if (($result['status'] ?? '') === 'RESET_FAILED') { $this->jsonError($result['message'], 500); return; }
         // DATA_UNAVAILABLE (every provider failed) is a dependency outage:
         // 503 tells a caller "retry later", while NO_QUALIFIED_TICKET stays a
         // normal 200 outcome. The body carries the per-provider status codes.
@@ -447,6 +452,26 @@ class Api_sports extends Api_controller
             return;
         }
         $this->json($result, 200);
+    }
+
+    /**
+     * POST /api/sports/ticket-engine/invalidate — clears the active (not
+     * settled/historical) candidate state for a UTC date so a later run
+     * starts from an empty pool. Body: {"date":"YYYY-MM-DD"} (default today).
+     */
+    public function invalidate_candidates()
+    {
+        $user = $this->requirePermission('sports.manage');
+        if (!$user) return;
+        $body = $this->jsonBody();
+        $date = isset($body['date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $body['date']) ? (string) $body['date'] : gmdate('Y-m-d');
+        $to = isset($body['to']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $body['to']) ? (string) $body['to'] : gmdate('Y-m-d', strtotime($date . ' +1 day'));
+        try {
+            $counts = $this->AIWorkforce_model->sports->invalidateActiveCandidates($date, $to, true);
+        } catch (\Throwable $e) {
+            return $this->jsonError('Candidate reset failed: ' . mb_substr($e->getMessage(), 0, 300), 500);
+        }
+        $this->json(['from' => $date, 'to' => $to, 'invalidated' => $counts], 200);
     }
 
     /** Fits a new calibration version from stored settled predictions. */

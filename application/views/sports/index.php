@@ -99,9 +99,17 @@ $kickoffStamp = static function (mixed $iso): string {
           <button class="btn small" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700;letter-spacing:0.02em">
             🎯 Odds Prediction Ticket
           </button>
+          <label class="dim" style="font-size:11px;display:flex;gap:4px;align-items:center;white-space:nowrap" title="First delete this day's active candidates (old pass predictions, the pending ticket, daily slot, unquotable odds), then generate from the current stored pool. Settled/historical records are kept.">
+            <input type="checkbox" name="force" value="1"> Force fresh run (clear active candidates first)
+          </label>
+        </form>
+        <form method="post" action="/sports/reset-candidates" onsubmit="return confirm('Clear the ACTIVE candidate state for <?= e($viewDateIso) ?>? Un-settled predictions of upcoming fixtures will be deleted, the pending ticket superseded, and unquotable odds purged. Settled/historical records are preserved.')">
+          <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+          <input type="hidden" name="date" value="<?= e($ticketDateIso) ?>">
+          <button class="btn small" style="font-weight:700" title="Delete active (not historical) candidates for the selected date">♻️ Clear active candidates</button>
         </form>
       </div>
-      <p class="dim" style="font-size:11px;margin-top:6px">Sync pulls fixtures/odds from providers. <b>🎯 Odds Prediction Ticket</b> turns stored odds into a reviewable ticket — market, selection, offered odds, fair probability, expected value and risk — no external call, idempotent per day/config version.</p>
+      <p class="dim" style="font-size:11px;margin-top:6px">Sync pulls fixtures/odds from providers. <b>🎯 Odds Prediction Ticket</b> turns stored odds into a reviewable ticket — market, selection, offered odds, fair probability, expected value and risk — no external call, idempotent per day/config version. <b>Force fresh run</b> invalidates the day's active candidates (an old pass can never be carried into the new ticket); settled/history is untouched.</p>
     <?php else: ?>
       <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="btn small" disabled title="Requires the sports.manage permission">Sync now</button>
@@ -340,6 +348,14 @@ $kickoffStamp = static function (mixed $iso): string {
               <button class="btn small" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700">
                 🎯 Odds Prediction Ticket
               </button>
+              <label class="dim" style="font-size:11px;display:flex;gap:4px;align-items:center;white-space:nowrap" title="First delete this day's active candidates (old pass predictions, the pending ticket, daily slot, unquotable odds), then generate from the current stored pool. Settled/historical records are kept.">
+                <input type="checkbox" name="force" value="1"> Force fresh run
+              </label>
+            </form>
+            <form method="post" action="/sports/reset-candidates" onsubmit="return confirm('Clear the ACTIVE candidate state for <?= e($viewDateIso) ?>? Settled/historical records are preserved.')">
+              <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+              <input type="hidden" name="date" value="<?= e($ticketDateIso) ?>">
+              <button class="btn small" title="Delete active (not historical) candidates for the selected date">♻️ Clear</button>
             </form>
             <span class="mono" style="font-size:12px;font-weight:700" title="Ticket date (UTC) <?= e($ticketDateIso) ?>"><?= e($ticketDateShown) ?></span>
             <span class="dim" style="font-size:11px">from stored fixtures &amp; odds — no external call</span>
@@ -387,12 +403,63 @@ $kickoffStamp = static function (mixed $iso): string {
                 <div class="stat" title="Fixtures reusing recentForm a previous run already verified (inside the form TTL, original source and timestamp kept) — no provider request was spent on them"><div class="k">Form carried forward</div><div class="v"><?= (int) $diag['fixturesWithCarriedForwardForm'] ?></div></div>
               <?php endif; ?>
               <div class="stat"><div class="k">Sufficient data</div><div class="v"><?= (int) ($diag['sufficientDataFixtures'] ?? 0) ?></div></div>
+              <div class="stat" title="Distinct market:selection candidates scored across the full stored pool (one real odds row each)"><div class="k">Markets evaluated</div><div class="v"><?= (int) ($diag['marketsEvaluated'] ?? 0) ?></div></div>
+              <div class="stat" title="Fixtures rejected once because no supported market had real odds"><div class="k">No real odds</div><div class="v"><?= (int) ($diag['fixturesRejectedNoOdds'] ?? 0) ?></div></div>
+              <div class="stat" title="Fixtures with real odds older than the configured TTL that no provider could refresh"><div class="k">Stale odds</div><div class="v"><?= (int) ($diag['fixturesRejectedStaleOdds'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Predictions</div><div class="v"><?= (int) ($diag['predictionsGenerated'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Confidence ≥ floor</div><div class="v"><?= (int) ($diag['confidenceQualifiedCandidates'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Positive value</div><div class="v"><?= (int) ($diag['positiveValueCandidates'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Risk qualified</div><div class="v"><?= (int) ($diag['riskQualifiedCandidates'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Final qualified</div><div class="v"><?= (int) ($diag['finalQualifiedCandidates'] ?? 0) ?></div></div>
+              <?php if ((int) ($diag['fixturesDeferred'] ?? 0) > 0): ?>
+                <div class="stat" title="Fixtures past the <?= (int) ($diag['generationCap'] ?? 50) ?>-per-generation cap with no reusable stored prediction; named below, never silently dropped"><div class="k">Deferred (cap <?= (int) ($diag['generationCap'] ?? 50) ?>)</div><div class="v"><?= (int) $diag['fixturesDeferred'] ?></div></div>
+              <?php endif; ?>
             </div>
+            <?php
+              // Fixtures that failed the sufficient-data gate: the concrete
+              // requirement, the missing/stale field and the provider — one
+              // primary blocker per fixture, named instead of a bare zero.
+              $gateFixtures = is_array($diag['sufficientDataGate']['fixtures'] ?? null) ? $diag['sufficientDataGate']['fixtures'] : [];
+              $gateFailures = array_values(array_filter($gateFixtures, fn($g) => empty($g['passed'])));
+            ?>
+            <?php if ($gateFailures !== []): ?>
+            <div class="table-scroll" style="margin-top:12px">
+              <table class="tbl">
+                <thead><tr><th>Fixture</th><th>Provider</th><th>Primary blocker</th><th>Missing / failed field</th></tr></thead>
+                <tbody>
+                  <?php foreach (array_slice($gateFailures, 0, 25) as $g):
+                    $reqs = is_array($g['requirements'] ?? null) ? $g['requirements'] : [];
+                    $detail = '—';
+                    $failedKey = (string) ($g['failedRequirement'] ?? '');
+                    if (isset($reqs[$failedKey])) {
+                        $rq = $reqs[$failedKey];
+                        if ($failedKey === 'MANDATORY_MODEL_DATA') $detail = implode(', ', array_map('e', (array) ($rq['missingMandatory'] ?? []))) ?: 'recentForm';
+                        elseif ($failedKey === 'DATA_QUALITY_FLOOR') $detail = 'quality ' . (int) ($rq['score'] ?? 0) . ' / floor ' . (int) ($rq['minScore'] ?? 0) . ' (' . e((string) ($rq['band'] ?? '?')) . ')';
+                        elseif ($failedKey === 'APPROVED_CALIBRATION') $detail = 'no APPROVED model calibration';
+                    }
+                  ?>
+                    <tr>
+                      <td style="font-weight:700"><?= e((string) ($g['homeTeam'] ?? '?')) ?> vs <?= e((string) ($g['awayTeam'] ?? '?')) ?><div class="dim" style="font-size:10px"><?= e((string) ($g['competition'] ?? '')) ?></div></td>
+                      <td class="mono"><?= e((string) ($g['provider'] ?? '—')) ?></td>
+                      <td class="mono"><?= e((string) ($g['primaryReason'] ?? $failedKey)) ?></td>
+                      <td class="mono" style="font-size:11px"><?= $detail /* pre-escaped above / integers */ ?></td>
+                    </tr>
+                  <?php endforeach; ?>
+                </tbody>
+              </table>
+              <?php if ((int) ($diag['sufficientDataGate']['limit'] ?? 0) > 0 && count($gateFailures) > 25): ?><p class="dim" style="font-size:11px;margin:6px 0 0">Showing 25 of <?= count($gateFailures) ?> blocked fixtures; the funnel counts above cover the full pool.</p><?php endif; ?>
+            </div>
+            <?php endif; ?>
+            <?php $deferredRows = is_array($diag['deferredFixtures']['rows'] ?? null) ? $diag['deferredFixtures']['rows'] : []; if ($deferredRows !== []): ?>
+            <p class="dim" style="font-size:11px;margin:8px 0 0">Deferred past the generation cap (evaluated in later runs; not rejected):
+              <?php
+                $parts = [];
+                foreach (array_slice($deferredRows, 0, 15) as $d) $parts[] = e((string) ($d['provider'] ?? '?')) . ' ' . e((string) ($d['externalId'] ?? '?'));
+                echo implode('; ', $parts);
+                if (!empty($diag['deferredFixtures']['truncated'])) echo '; …';
+              ?>
+            </p>
+            <?php endif; ?>
             <?php $reasons = is_array($diag['topRejectionReasons'] ?? null) ? $diag['topRejectionReasons'] : []; ?>
             <?php $byProvider = is_array($diag['rejectionReasonsByProvider'] ?? null) ? $diag['rejectionReasonsByProvider'] : []; ?>
             <?php if ($reasons): ?>
@@ -432,7 +499,7 @@ $kickoffStamp = static function (mixed $iso): string {
           <?php if (!empty($engine['ticketSelections'])): ?>
             <div class="table-scroll">
               <table class="tbl" style="margin-top:12px">
-                <thead><tr><th>Selection</th><th class="num">Odds</th><th class="num">P(cal)</th><th class="num">EV</th><th>Status</th></tr></thead>
+                <thead><tr><th>Selection</th><th class="num" title="Real bookmaker price — source and provider last-update time shown beneath">Bookmaker odds</th><th class="num" title="WINDELS model probability and fair odds — the model's own numbers, never the bookmaker price">P(cal) / fair</th><th class="num">EV</th><th>Status</th></tr></thead>
                 <tbody>
                   <?php foreach ($engine['ticketSelections'] as $s): ?>
                     <tr>
@@ -440,8 +507,14 @@ $kickoffStamp = static function (mixed $iso): string {
                         <?php if (isset($selByName[(int) $s['match_id']])): ?><span class="dim" style="font-size:10px;display:block"><?= e($selByName[(int) $s['match_id']]) ?></span><?php endif; ?>
                         <b><?= e((string) ($s['selection'] ?? '?')) ?></b> <span class="dim"><?= e((string) ($s['market'] ?? '')) ?></span>
                       </td>
-                      <td class="num mono"><?= e(number_format((float) ($s['odds'] ?? 0), 2)) ?></td>
-                      <td class="num mono"><?= ($s['calibrated_probability'] ?? null) !== null ? e(number_format((float) $s['calibrated_probability'], 3)) : '—' ?></td>
+                      <td class="num mono">
+                        <?= e(number_format((float) ($s['odds'] ?? 0), 2)) ?>
+                        <span class="dim" style="display:block;font-size:10px;font-weight:400" title="Odds source and provider last-update timestamp (UTC)"><?= e((string) ($s['odds_source'] ?? '—')) ?> · <?= e(substr((string) ($s['odds_timestamp'] ?? ''), 0, 16)) ?></span>
+                      </td>
+                      <td class="num mono">
+                        <?= ($s['calibrated_probability'] ?? null) !== null ? e(number_format((float) $s['calibrated_probability'], 3)) : '—' ?>
+                        <span class="dim" style="display:block;font-size:10px;font-weight:400" title="WINDELS fair odds (model)">fair <?= ($s['fair_odds'] ?? null) !== null ? e(number_format((float) $s['fair_odds'], 2)) : '—' ?></span>
+                      </td>
                       <td class="num mono <?= ($s['expected_value'] ?? 0) >= 0 ? 'up' : 'down' ?>"><?= ($s['expected_value'] ?? null) !== null ? e(number_format((float) $s['expected_value'], 3)) : '—' ?></td>
                       <td><span class="badge b-gray"><?= e((string) ($s['status'] ?? 'PENDING')) ?></span></td>
                     </tr>

@@ -78,19 +78,33 @@ $heroMarketLabel = function (string $market, string $selection): string {
     <?php if ($heroTicket !== null && !empty($heroSelections)): ?>
       <div class="table-scroll">
         <table class="tbl">
-          <thead><tr><th>Match</th><th>Market</th><th class="num">Odds</th><th class="num">Confidence</th></tr></thead>
+          <thead><tr><th>Match</th><th>Market · Selection</th><th class="num" title="Real bookmaker price from the named odds source, with the time it was last updated">Bookmaker odds</th><th class="num" title="WINDELS model probability and fair odds — derived by the model, never the bookmaker price">WINDELS prob / fair</th><th class="num">Conf.</th><th class="num">Quality</th><th>Risk</th></tr></thead>
           <tbody>
             <?php foreach ($heroSelections as $sel): ?>
               <tr>
                 <td style="font-weight:700"><?= e(trim((string) (($sel['home_team'] ?? '') . ' vs ' . ($sel['away_team'] ?? '')))) ?></td>
                 <td><?= e($heroMarketLabel((string) ($sel['market'] ?? ''), (string) ($sel['selection'] ?? ''))) ?></td>
-                <td class="num mono"><?= e(number_format((float) ($sel['odds'] ?? 0), 2)) ?></td>
+                <td class="num mono">
+                  <?= e(number_format((float) ($sel['odds'] ?? 0), 2)) ?>
+                  <span class="dim" style="display:block;font-size:10px;font-weight:400" title="Odds source and the provider's last-update timestamp (UTC)">
+                    <?= e((string) ($sel['odds_source'] ?? '—')) ?> · <?= e(substr((string) ($sel['odds_timestamp'] ?? ''), 0, 16)) ?>
+                  </span>
+                </td>
+                <td class="num mono">
+                  <?= ($sel['calibrated_probability'] ?? null) !== null ? e(number_format((float) $sel['calibrated_probability'] * 100, 1)) . '%' : '—' ?>
+                  <span class="dim" style="display:block;font-size:10px;font-weight:400" title="WINDELS fair odds (1 ÷ model probability), not the bookmaker price">
+                    fair <?= ($sel['fair_odds'] ?? null) !== null ? e(number_format((float) $sel['fair_odds'], 2)) : '—' ?>
+                  </span>
+                </td>
                 <td class="num"><?= ($sel['confidence'] ?? null) !== null ? e(number_format((float) $sel['confidence'], 0)) . '%' : '—' ?></td>
+                <td class="num"><?= ($sel['data_quality'] ?? null) !== null ? e(number_format((float) $sel['data_quality'], 0)) : '—' ?></td>
+                <td><span class="badge <?= (string) ($sel['risk'] ?? '') === 'LOW' ? 'b-green' : ((string) ($sel['risk'] ?? '') === 'HIGH' ? 'b-red' : 'b-violet') ?>"><?= e((string) ($sel['risk'] ?? '—')) ?></span></td>
               </tr>
             <?php endforeach; ?>
           </tbody>
         </table>
       </div>
+      <p class="dim" style="font-size:11px;margin:6px 0 0">Bookmaker odds are the provider's real quoted price with its source and last-update time. WINDELS probability/fair odds are the model's own numbers, kept in separate columns; expected value compares the two.</p>
       <?php if ((string) ($heroTicket['approval_status'] ?? '') === 'PENDING_USER_APPROVAL'): ?>
         <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
           <?php if (!empty($caps['approve'])): ?>

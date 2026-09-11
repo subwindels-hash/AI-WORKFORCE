@@ -124,19 +124,26 @@ class Tools extends MY_Controller
     {
         $job = trim((string) ($_SERVER['argv'][3] ?? ''));
         $date = trim((string) ($_SERVER['argv'][4] ?? ''));
+        // --force on the ticket job invalidates the day's ACTIVE candidate
+        // state (old pass predictions/ticket/daily slot/unquotable odds)
+        // before regenerating; settled/historical records are preserved.
+        $options = in_array('--force', (array) ($_SERVER['argv'] ?? []), true) ? ['force' => true] : [];
         if ($date !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
-            fwrite(STDERR, 'invalid date (expected YYYY-MM-DD): ' . $date . "\n");
-            exit(1);
+            // tolerate the flag appearing in the date slot
+            if ($date === '--force') { $date = ''; } else {
+                fwrite(STDERR, 'invalid date (expected YYYY-MM-DD): ' . $date . "\n");
+                exit(1);
+            }
         }
         $service = new \AIWorkforce\Sports\SportsCronService($this->AIWorkforce_model->sports, $this->AIWorkforce_model->audit, $this->platform->sports);
-        if ($job !== '') {
+        if ($job !== '' && $job !== '--force') {
             if (!in_array($job, \AIWorkforce\Sports\SportsCronService::JOBS, true)) {
                 fwrite(STDERR, 'unknown job. Valid: ' . implode(', ', \AIWorkforce\Sports\SportsCronService::JOBS) . "\n");
                 exit(1);
             }
-            $summary = $service->run($job, $date !== '' ? $date : null);
+            $summary = $service->run($job, $date !== '' ? $date : null, $options);
         } else {
-            $summary = $service->runAll($date !== '' ? $date : null);
+            $summary = $service->runAll($date !== '' ? $date : null, $options);
         }
         echo json_encode($summary, JSON_UNESCAPED_SLASHES), "\n";
     }

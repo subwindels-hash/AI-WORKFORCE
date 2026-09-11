@@ -41,15 +41,37 @@ class TicketOptimizer
             if (count($allowedLeagues) > 0 && !in_array($c['match']['competition'] ?? $c['competition'] ?? null, $allowedLeagues, true)) continue;
             $pool[] = $c;
         }
-        usort($pool, function (array $a, array $b): int {
+        $riskRank = ['LOW' => 0, 'MEDIUM' => 1, 'HIGH' => 2, 'REJECTED' => 3];
+        usort($pool, function (array $a, array $b) use ($riskRank): int {
             $score = function (array $c): float {
                 $riskWeight = ['LOW' => 20.0, 'MEDIUM' => 10.0, 'HIGH' => -100.0, 'REJECTED' => -1000.0];
+                // Ranking (requirement #10): confidence, quality, low risk,
+                // positive edge; correlation and freshness are hard gates
+                // upstream, and tie-break here in the same order.
                 return 0.45 * (float) ($c['confidence']['confidence'] ?? 0)
                     + 0.25 * (float) ($c['quality']['score'] ?? 0)
                     + 100.0 * (float) ($c['value']['expectedValue'] ?? 0)
                     + ($riskWeight[$c['risk']['classification'] ?? 'HIGH'] ?? 0.0);
             };
-            return $score($b) <=> $score($a);
+            $scoreCompare = $score($b) <=> $score($a);
+            if ($scoreCompare !== 0) return $scoreCompare;
+            // Deterministic tie-breaks in the spec's order: lower risk class,
+            // then fresher odds (lower age), then higher confidence/quality.
+            $riskCompare = ($riskRank[$a['risk']['classification'] ?? 'HIGH'] ?? 2) <=> ($riskRank[$b['risk']['classification'] ?? 'HIGH'] ?? 2);
+            if ($riskCompare !== 0) return $riskCompare;
+            $age = fn(array $c): float => is_numeric($c['oddsAgeSeconds'] ?? null) ? (float) $c['oddsAgeSeconds'] : PHP_INT_MAX;
+            $ageCompare = $age($a) <=> $age($b);
+            if ($ageCompare !== 0) return $ageCompare;
+            $confCompare = (float) ($b['confidence']['confidence'] ?? 0) <=> (float) ($a['confidence']['confidence'] ?? 0);
+            if ($confCompare !== 0) return $confCompare;
+            $qualityCompare = (int) ($b['quality']['score'] ?? 0) <=> (int) ($a['quality']['score'] ?? 0);
+            if ($qualityCompare !== 0) return $qualityCompare;
+            // Final stable key so two indistinguishable candidates never swap
+            // between runs (fixture id, market, selection).
+            return strcmp(
+                (string) ($a['matchId'] ?? 0) . ':' . (string) ($a['market'] ?? '') . ':' . (string) ($a['selection'] ?? ''),
+                (string) ($b['matchId'] ?? 0) . ':' . (string) ($b['market'] ?? '') . ':' . (string) ($b['selection'] ?? '')
+            );
         });
 
         $best = null;

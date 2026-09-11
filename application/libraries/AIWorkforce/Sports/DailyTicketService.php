@@ -85,7 +85,7 @@ class DailyTicketService
         $this->oddsFreshness = $oddsFreshness ?? new OddsFreshnessEngine();
     }
 
-    public function runDaily(?string $date = null, ?string $executionKey = null): array
+    public function runDaily(?string $date = null, ?string $executionKey = null, array $options = []): array
     {
         $date = $date ?? gmdate('Y-m-d');
         $config = $this->config->active();
@@ -96,7 +96,30 @@ class DailyTicketService
         // cold-start bootstrap" — that combination is a hard lock-out.
         $requireCalibration = (int) (bool) ($config['require_calibration'] ?? 1);
         $config['require_calibration'] = $requireCalibration; // pipeline sees the same resolved truth
-        $key = $executionKey ?? 'daily-ticket:' . $date . ':v' . $config['version'];
+
+        // Force / reset: invalidate the ACTIVE candidate state for the day
+        // BEFORE any fixture is read, so a previous pass (predictions, the
+        // pending ticket, the daily slot, unquotable odds) can never be
+        // carried into the new run. Historical/settled records and verified
+        // results are preserved by the repository (audit trail).
+        $invalidated = null;
+        // Same horizon the sweep syncs and the engine evaluates: the run
+        // date and the following UTC day (early kickoffs), so a candidate
+        // prepared for any fixture the run is about to score is in scope.
+        $windowTo = gmdate('Y-m-d', strtotime($date . ' +1 day'));
+        if (!empty($options['force'])) {
+            try {
+                $invalidated = $this->repo->invalidateActiveCandidates($date, $windowTo, true);
+                $this->audit->emit('SPORTS_CANDIDATES_INVALIDATED',
+                    'Active odds-prediction candidates for ' . $date . '..' . $windowTo . ' invalidated before a forced fresh generation (settled/historical records preserved)',
+                    ['from' => $date, 'to' => $windowTo, 'invalidated' => $invalidated]);
+            } catch (\Throwable $e) {
+                // Never silently half-reset: surface the failure and stop.
+                return ['status' => 'RESET_FAILED', 'date' => $date, 'message' => 'candidate reset failed: ' . mb_substr($e->getMessage(), 0, 300), 'invalidated' => null];
+            }
+        }
+
+        $key = $executionKey ?? ('daily-ticket:' . $date . ':v' . $config['version'] . (!empty($options['force']) ? ':force:' . gmdate('YmdHis') . ':' . substr(uniqid(), -4) : ''));
         $run = $this->repo->startJobRun(['id' => Backtester::uuid(), 'jobType' => 'DAILY_TICKET', 'executionKey' => $key]);
         if ($run === null) return ['status' => 'DUPLICATE_SKIPPED', 'executionKey' => $key];
         // Prediction ids written by THIS run — the only rows the intelligent
@@ -536,6 +559,7 @@ class DailyTicketService
                             }
                             $this->trackCandidateFunnel($candidate, $funnel, $minConfidence, $minEv);
                             $allCandidates[] = $candidate;
+                            $funnel['marketsEvaluated']++;
 
                             if ($candidate['decision'] === 'REJECTED') {
                                 $rejections++;
@@ -568,6 +592,7 @@ class DailyTicketService
                             $funnel['predictionsReused']++;
                             $this->trackCandidateFunnel($candidate, $funnel, $minConfidence, $minEv);
                             $allCandidates[] = $candidate;
+                            $funnel['marketsEvaluated']++;
                             if ($candidate['decision'] === 'REJECTED') {
                                 $rejections++;
                                 $primary = $candidate['primaryReason'] ?? ($candidate['rejectionReasons'][0] ?? 'NO_PREDICTION');
@@ -608,6 +633,26 @@ class DailyTicketService
                                 $ticketId = $rec['ticketId'];
                                 $funnel['finalQualifiedCandidates'] = (int) ($optimized['selectionCount'] ?? 0);
                                 $message = $status === 'APPROVED' ? 'ticket generated and auto-approved (AUTOMATED_EXECUTION); no external execution' : 'odds prediction ticket generated; awaiting user approval';
+                                // A new live ticket replaces any UNDECIDED
+                                // ticket a previous pass left pending for the
+                                // same fixture window — the old pass can never
+                                // remain the live candidate (requirement #1).
+                                // Decided/settled tickets and prediction
+                                // history are preserved; the superseded ticket
+                                // keeps its legs as an audit record.
+                                try {
+                                    $superseded = $this->repo->supersedePendingTicketsForWindow($date, $windowTo, (string) $ticketId);
+                                    $funnel['ticketsSuperseded'] = (int) ($superseded['ticketsSuperseded'] ?? 0);
+                                    if ($funnel['ticketsSuperseded'] > 0) {
+                                        $this->audit->emit('SPORTS_TICKET_SUPERSEDED', 'A fresh generation superseded ' . $funnel['ticketsSuperseded'] . ' pending ticket(s) for ' . $date . '..' . $windowTo, ['date' => $date, 'to' => $windowTo, 'newTicketId' => $ticketId, 'superseded' => $superseded]);
+                                    }
+                                } catch (\Throwable $e) {
+                                    // A failed supersede must not strand an
+                                    // operator with two live pending tickets
+                                    // silently: record it but keep the new
+                                    // ticket valid.
+                                    $errors[] = 'pending ticket supersede failed: ' . mb_substr($e->getMessage(), 0, 200);
+                                }
                             }
                         } else {
                             // No compliant combination: an honest no-ticket day,
@@ -693,6 +738,23 @@ class DailyTicketService
             $errors[] = $message;
         }
 
+        // A complete evaluation that produced NO ticket is the fresh verdict
+        // for the window: the previous pass's undecided ticket must not remain
+        // an actionable stale candidate (the daily slot is about to point at
+        // no ticket). Disabled/no-provider/outage runs are NOT verdicts and
+        // leave the existing pending ticket untouched for the retry.
+        if ($ticketId === null && $dataState === 'OK') {
+            try {
+                $superseded = $this->repo->supersedePendingTicketsForWindow($date, $windowTo);
+                $funnel['ticketsSuperseded'] = (int) ($funnel['ticketsSuperseded'] ?? 0) + (int) ($superseded['ticketsSuperseded'] ?? 0);
+                if (($superseded['ticketsSuperseded'] ?? 0) > 0) {
+                    $this->audit->emit('SPORTS_TICKET_SUPERSEDED', 'A fresh ' . $status . ' generation for ' . $date . '..' . $windowTo . ' superseded ' . (int) $superseded['ticketsSuperseded'] . ' pending ticket(s) from an earlier pass', ['date' => $date, 'to' => $windowTo, 'newStatus' => $status, 'superseded' => $superseded]);
+                }
+            } catch (\Throwable $e) {
+                $errors[] = 'pending ticket supersede failed: ' . mb_substr($e->getMessage(), 0, 200);
+            }
+        }
+
         $diagnostics = $this->buildDiagnostics($funnel, $date, $evaluated, $recorded, $rejections);
 
         // The rejection summary doubles as the provider-failure ledger on a
@@ -738,7 +800,7 @@ class DailyTicketService
         return [
             'status' => $status, 'dataState' => $dataState, 'ticketId' => $ticketId, 'date' => $date, 'message' => $message,
             'evaluated' => $evaluated, 'predictionsRecorded' => $recorded, 'rejections' => $rejections, 'rejectionSummary' => $rejectionSummary,
-            'diagnostics' => $diagnostics,
+            'diagnostics' => $diagnostics, 'invalidated' => $invalidated,
             'provider' => $provider, 'providerFailures' => $providerFailures, 'providerStatuses' => $providerStatuses,
             'runId' => $run['id'], 'errors' => $errors,
         ];
@@ -835,6 +897,8 @@ class DailyTicketService
             'deferredFixtures' => ['truncated' => false, 'rows' => []],
             'predictionsGenerated' => 0,
             'predictionsReused' => 0,
+            // market:selection candidates scored across the full stored pool.
+            'marketsEvaluated' => 0,
             'sufficientDataCandidates' => 0,
             'confidenceQualifiedCandidates' => 0,
             'positiveValueCandidates' => 0,
@@ -842,6 +906,9 @@ class DailyTicketService
             'riskQualifiedCandidates' => 0,
             'correlationQualifiedCandidates' => 0,
             'finalQualifiedCandidates' => 0,
+            // Undecided tickets from earlier passes that this generation
+            // superseded for the same fixture window (never decided/settled).
+            'ticketsSuperseded' => 0,
             'oddsRefreshAttempts' => 0,
             'oddsRefreshedFixtures' => 0,
             'oddsProvidersUsed' => [],

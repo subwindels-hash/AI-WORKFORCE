@@ -188,6 +188,33 @@ interface SportsRepository
     /** @return array<int,array<string,mixed>> */
     public function listTickets(array $filter = [], int $limit = 500): array;
     public function updateTicket(string $id, array $patch): void;
+
+    /**
+     * Invalidate the ACTIVE (not historical/settled) candidate state for a
+     * UTC date window so a fresh generation cannot reuse a previous pass:
+     * un-settled predictions of upcoming fixtures, PENDING tickets and their
+     * selections for those fixtures, and the stored daily-ticket slots.
+     * Verified results, settled tickets and predictions of finished matches
+     * (the calibration audit trail) are never touched. Optionally purges
+     * odds rows that fail the ingestion contract (price <= 1.0) for upcoming
+     * fixtures — stale-but-valid odds stay, their TTL governs their use.
+     *
+     * @return array{predictionsDeleted:int,ticketsSuperseded:int,selectionsDeleted:int,dailySlotsCleared:int,invalidOddsDeleted:int}
+     */
+    public function invalidateActiveCandidates(string $fromDate, string $toDate, bool $purgeInvalidOdds = true): array;
+
+    /**
+     * Mark earlier PENDING (undecided, unsettled) tickets whose legs touch
+     * upcoming fixtures kicking off inside the UTC date window as
+     * SUPERSEDED — called when a fresh generation records a new ticket for
+     * the same window so the previous pass can never remain the live pending
+     * ticket. Operator-approved and settled tickets are never touched (they
+     * are decisions/history, not a cached pass). Legs are RETAINED as the
+     * superseded pass's audit trail (their predictions are append-only).
+     *
+     * @return array{ticketsSuperseded:int,selectionsDeleted:int}
+     */
+    public function supersedePendingTicketsForWindow(string $fromDate, string $toDate, ?string $exceptTicketId = null): array;
 }
 
 interface IdentityRepository

@@ -84,6 +84,10 @@ class TicketGovernance
                 'kickoff_time' => $s['match']['kickoff'] ?? null,
                 'market' => $s['market'], 'selection' => $s['selection'],
                 'odds' => $s['value']['odds'] ?? $s['odds'], 'odds_timestamp' => $s['oddsTimestamp'],
+                // Which feed supplied the real bookmaker price (provenance),
+                // beside WINDELS' own fair odds — never the same column.
+                'odds_source' => $s['oddsSource'] ?? null,
+                'fair_odds' => $s['value']['fairOdds'] ?? null,
                 'confidence' => $s['confidence']['confidence'] ?? null,
                 'data_quality' => $s['quality']['score'] ?? null,
                 'model_probability' => $s['prediction']['rawModelProbability'] ?? null,

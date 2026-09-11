@@ -9,6 +9,25 @@ test('ticket optimizer selects qualifying low-correlation combination', function
     $out = (new TicketOptimizer())->optimize([fx_candidate(1, 2, .05, 'L1'), fx_candidate(2, 3, .08, 'L2'), fx_candidate(3, 1.5, .02, 'L3')], ['targetOddsMin' => 5, 'targetOddsMax' => 7, 'maxSelections' => 3]);
     assert_equals('QUALIFIED', $out['status']); assert_close(6, $out['totalOdds'], .001); assert_equals(2, $out['selectionCount']);
 });
+test('ticket optimizer tie-breaks equal-score candidates on lower risk then fresher odds', function () {
+    // Identical ranking score/risk/EV; the fresher quote (smaller
+    // oddsAgeSeconds) must sort ahead and be taken as the single leg.
+    $fresher = array_merge(fx_candidate(1, 5.0, .50, 'L1'), ['oddsAgeSeconds' => 120]);
+    $older   = array_merge(fx_candidate(2, 6.0, .50, 'L2'), ['oddsAgeSeconds' => 18000]);
+    $out = (new TicketOptimizer())->optimize([$older, $fresher], ['targetOddsMin' => 5, 'targetOddsMax' => 8, 'maxSelections' => 1]);
+    assert_equals('QUALIFIED', $out['status']);
+    assert_equals(1, $out['selectionCount']);
+    assert_close(5.0, (float) $out['selections'][0]['value']['odds'], 0.001, 'the fresher candidate wins the tie-break');
+    assert_equals(1, (int) $out['selections'][0]['matchId']);
+
+    // A MEDIUM-risk candidate loses to an otherwise identical LOW-risk one.
+    $medium = array_merge(fx_candidate(3, 5.1, .50, 'L3'), ['oddsAgeSeconds' => 1, 'risk' => ['approved' => true, 'classification' => 'MEDIUM']]);
+    $low    = array_merge(fx_candidate(4, 5.1, .50, 'L4'), ['oddsAgeSeconds' => 99999, 'risk' => ['approved' => true, 'classification' => 'LOW']]);
+    $out2 = (new TicketOptimizer())->optimize([$medium, $low], ['targetOddsMin' => 5, 'targetOddsMax' => 8, 'maxSelections' => 1]);
+    assert_equals('QUALIFIED', $out2['status']);
+    assert_equals(4, (int) $out2['selections'][0]['matchId'], 'lower risk outranks freshness');
+});
+
 test('ticket optimizer never combines same-match selections', function () {
     $out = (new TicketOptimizer())->optimize([fx_candidate(1, 2.5, .1), fx_candidate(1, 2.5, .1)], ['targetOddsMin' => 5, 'targetOddsMax' => 7]);
     assert_equals('NO_QUALIFIED_TICKET', $out['status']);

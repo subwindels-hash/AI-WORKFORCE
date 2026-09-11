@@ -406,7 +406,7 @@ class AIWorkforce_model extends CI_Model
             }
             public function saveMatch(int $providerId, array $m): array {
                 $row = $this->db->get_where('sports_matches', ['provider_id' => $providerId, 'external_id' => $m['externalId']], 1)->row_array();
-                $data = ['sport' => $m['sport'], 'competition' => $m['competition'], 'home_team' => $m['homeTeam'], 'away_team' => $m['awayTeam'], 'kickoff_at' => $m['kickoff'], 'status' => $m['status'], 'source_timestamp' => $m['sourceTimestamp'], 'round_id' => (string) ($m['roundId'] ?? '') !== '' ? (string) $m['roundId'] : null, 'payload' => json_encode($m), 'updated_at' => gmdate('c')];
+                $data = ['sport' => $m['sport'], 'competition' => $m['competition'], 'home_team' => $m['homeTeam'], 'away_team' => $m['awayTeam'], 'kickoff_at' => $m['kickoff'], 'status' => $m['status'], 'source_timestamp' => !empty($m['sourceTimestamp']) ? (string) $m['sourceTimestamp'] : gmdate('c'), 'round_id' => (string) ($m['roundId'] ?? '') !== '' ? (string) $m['roundId'] : null, 'payload' => json_encode($m), 'updated_at' => gmdate('c')];
                 // The returned row is the row a caller could re-read, so its
                 // `payload` is the DECODED document (the array), never the
                 // column text: a caller that trusts the read shape must not
@@ -456,6 +456,92 @@ class AIWorkforce_model extends CI_Model
             public function findTicket(string $id): ?array { return $this->db->get_where('sports_tickets', ['id' => $id], 1)->row_array() ?: null; }
             public function listTickets(array $filter = [], int $limit = 500): array { if(!empty($filter['from']))$this->db->where('created_at >=',$filter['from']); if(!empty($filter['to']))$this->db->where('created_at <=',$filter['to']); if(!empty($filter['status']))$this->db->where('settlement_status',$filter['status']); if(!empty($filter['modelVersionId']))$this->db->where('model_version_id',(int)$filter['modelVersionId']); return $this->db->order_by('created_at','DESC')->limit(min(500,max(1,$limit)))->get('sports_tickets')->result_array(); }
             public function updateTicket(string $id, array $patch): void { $this->db->where('id', $id)->update('sports_tickets', $patch); }
+            public function invalidateActiveCandidates(string $fromDate, string $toDate, bool $purgeInvalidOdds = true): array {
+                // Upcoming, non-terminal matches in the UTC date window.
+                $matchRows = $this->db->select('id')
+                    ->where('SUBSTR(kickoff_at,1,10) >=', $fromDate)
+                    ->where('SUBSTR(kickoff_at,1,10) <=', $toDate)
+                    ->where_not_in('status', ['FINISHED', 'POSTPONED', 'CANCELLED'])
+                    ->get('sports_matches')->result_array();
+                $upcomingIds = array_map(static fn($r) => (int) $r['id'], $matchRows);
+                $counts = ['predictionsDeleted' => 0, 'ticketsSuperseded' => 0, 'selectionsDeleted' => 0, 'dailySlotsCleared' => 0, 'invalidOddsDeleted' => 0];
+                if ($upcomingIds !== []) {
+                    // 1. Un-settled predictions of upcoming matches (never
+                    //    predictions of finished matches — calibration/audit data).
+                    $this->db->where_in('match_id', $upcomingIds)->delete('sports_predictions');
+                    $counts['predictionsDeleted'] = (int) $this->db->affected_rows();
+                    // 2. PENDING (undecided, unsettled) tickets carrying any
+                    //    upcoming leg are superseded, not deleted; their legs
+                    //    are removed. APPROVED/settled tickets stay as history.
+                    $pending = $this->db->distinct()->select('ts.ticket_id')
+                        ->from('sports_ticket_selections ts')
+                        ->join('sports_tickets t', 't.id = ts.ticket_id', 'inner')
+                        ->where_in('ts.match_id', $upcomingIds)
+                        ->where('t.approval_status', 'PENDING_USER_APPROVAL')
+                        ->where('t.settlement_status', 'PENDING')
+                        ->get()->result_array();
+                    $ticketIds = array_values(array_filter(array_map(static fn($r) => (string) ($r['ticket_id'] ?? ''), $pending)));
+                    if ($ticketIds !== []) {
+                        $this->db->where_in('ticket_id', $ticketIds)->delete('sports_ticket_selections');
+                        $counts['selectionsDeleted'] = $this->db->affected_rows();
+                        $this->db->where_in('id', $ticketIds)->update('sports_tickets', [
+                            'status' => 'CANCELLED', 'approval_status' => 'SUPERSEDED',
+                            'settlement_status' => 'SUPERSEDED', 'reason' => 'Superseded by a fresh daily-ticket generation (active candidate reset)',
+                        ]);
+                        $counts['ticketsSuperseded'] = $this->db->affected_rows();
+                    }
+                    // 3. Odds rows that can never be prices are purged for the
+                    //    upcoming window. Per-market plausibility ceilings are
+                    //    applied in PHP; the read layer re-validates anyway.
+                    if ($purgeInvalidOdds) {
+                        $this->db->where_in('match_id', $upcomingIds)->where('decimal_odds <=', 1.0)->delete('sports_odds');
+                        $counts['invalidOddsDeleted'] = (int) $this->db->affected_rows();
+                        $bounds = '\\AIWorkforce\\Sports\\OddsBounds';
+                        if (class_exists($bounds)) {
+                            $rows = $this->db->where_in('match_id', $upcomingIds)->get('sports_odds')->result_array();
+                            $absurd = [];
+                            foreach ($rows as $o) {
+                                if (!($bounds::validDecimalOdds($o['decimal_odds'] ?? null, (string) ($o['market'] ?? '')))) $absurd[] = (int) $o['id'];
+                            }
+                            if ($absurd !== []) {
+                                $this->db->where_in('id', $absurd)->delete('sports_odds');
+                                $counts['invalidOddsDeleted'] += (int) $this->db->affected_rows();
+                            }
+                        }
+                    }
+                }
+                // 4. The daily-ticket slots for the window (any status) — the
+                //    new run writes the current result into a clean slot.
+                $this->db->where('date >=', $fromDate)->where('date <=', $toDate)->delete('sports_daily_tickets');
+                $counts['dailySlotsCleared'] = (int) $this->db->affected_rows();
+                return $counts;
+            }
+            public function supersedePendingTicketsForWindow(string $fromDate, string $toDate, ?string $exceptTicketId = null): array {
+                // PENDING (undecided, unsettled) tickets carrying at least one
+                // leg on an upcoming fixture kicking off inside the window.
+                // Legs are RETAINED as the superseded pass's audit trail; only
+                // the ticket state is flipped. APPROVED/settled tickets are
+                // operator decisions or history and are never touched.
+                $q = $this->db->distinct()->select('ts.ticket_id')
+                    ->from('sports_ticket_selections ts')
+                    ->join('sports_tickets t', 't.id = ts.ticket_id', 'inner')
+                    ->join('sports_matches m', 'm.id = ts.match_id', 'inner')
+                    ->where('SUBSTR(m.kickoff_at,1,10) >=', $fromDate)
+                    ->where('SUBSTR(m.kickoff_at,1,10) <=', $toDate)
+                    ->where_not_in('m.status', ['FINISHED', 'POSTPONED', 'CANCELLED'])
+                    ->where('t.approval_status', 'PENDING_USER_APPROVAL')
+                    ->where('t.settlement_status', 'PENDING');
+                if ($exceptTicketId !== null && $exceptTicketId !== '') $q = $q->where('t.id !=', $exceptTicketId);
+                $ticketIds = array_values(array_filter(array_map(
+                    static fn($r) => (string) ($r['ticket_id'] ?? ''), $q->get()->result_array())));
+                if ($ticketIds === []) return ['ticketsSuperseded' => 0, 'selectionsDeleted' => 0];
+                $this->db->where_in('id', $ticketIds)->update('sports_tickets', [
+                    'status' => 'CANCELLED', 'approval_status' => 'SUPERSEDED',
+                    'settlement_status' => 'SUPERSEDED',
+                    'reason' => 'Superseded by a newer daily-ticket generation for the same fixture window (active candidate reset)',
+                ]);
+                return ['ticketsSuperseded' => (int) $this->db->affected_rows(), 'selectionsDeleted' => 0];
+            }
         };
 
         // Football Intelligence: a dedicated repository class (the module's

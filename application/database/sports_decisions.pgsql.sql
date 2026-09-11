@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS "sports_ticket_selections" (
   "selection" VARCHAR(160) NOT NULL,
   "odds" DECIMAL(14,6) NOT NULL,
   "odds_timestamp" VARCHAR(32) NOT NULL,
+  "odds_source" VARCHAR(32) NULL,
+  "fair_odds" DECIMAL(14,6) NULL,
   "model_probability" DECIMAL(10,8) NULL,
   "calibrated_probability" DECIMAL(10,8) NULL,
   "expected_value" DECIMAL(12,8) NULL,

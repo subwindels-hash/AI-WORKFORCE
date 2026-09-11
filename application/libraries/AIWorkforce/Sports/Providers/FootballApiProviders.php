@@ -980,11 +980,16 @@ class ApiFootballProvider implements SportsDataProvider
         foreach ($rows as $r) {
             foreach (($r['bookmakers'] ?? []) as $bookmaker) {
                 foreach (($bookmaker['bets'] ?? []) as $bet) {
-                    foreach (($bet['values'] ?? []) as $v) {
+                    // The feed's own "odds last updated" clock — carried
+                    // through so freshness measures the bookmaker update,
+                    // not merely when this platform fetched the price.
+                    $updatedAt = isset($bet['update']) && is_string($bet['update']) && trim($bet['update']) !== ''
+                        ? trim($bet['update']) : null;
+                    foreach ($bet['values'] ?? [] as $v) {
                         if (!isset($v['odd'])) continue;
                         $market = self::normalizeMarket((string) ($bet['name'] ?? 'UNKNOWN'));
                         $selection = self::normalizeSelection($market, (string) ($v['value'] ?? ''));
-                        $out[] = [
+                        $row = [
                             'market' => $market,
                             'selection' => $selection,
                             'decimalOdds' => (float) $v['odd'],
@@ -992,6 +997,8 @@ class ApiFootballProvider implements SportsDataProvider
                             'bookmaker' => (string) ($bookmaker['name'] ?? ''),
                             'fixtureId' => (string) ($r['fixture']['id'] ?? ''),
                         ];
+                        if ($updatedAt !== null) $row['updatedAt'] = $updatedAt;
+                        $out[] = $row;
                     }
                 }
             }
