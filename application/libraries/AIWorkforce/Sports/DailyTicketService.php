@@ -1407,7 +1407,12 @@ class DailyTicketService
             // fixtures sat unread behind the page. The intake floor is now the
             // earliest kickoff that can still pass the eligibility gate.
             $eligibleFrom = time() + self::ELIGIBILITY_LEAD_SECONDS;
-            $from = $eligibleFrom > $window['startTimestamp']
+            // Clamp: when the whole window is already in the past (a historical
+            // or expired date), the floor would exclude every row and send the
+            // run to a pointless live provider cycle. Keep reading the stored
+            // day so the engine still produces its honest "nothing eligible"
+            // verdict from data it already has.
+            $from = ($eligibleFrom > $window['startTimestamp'] && $eligibleFrom < $horizon['startTimestamp'])
                 ? gmdate('Y-m-d\TH:i:sP', $eligibleFrom)
                 : $window['start'];
             $stored = $this->repo->listMatches([
