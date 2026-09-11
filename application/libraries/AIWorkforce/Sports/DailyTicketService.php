@@ -1125,7 +1125,10 @@ class DailyTicketService
             'status' => (string) ($ticket['approval_status'] ?? $ticket['status'] ?? 'GENERATED'),
             'generation_status' => 'GENERATED', 'configuration_version' => (int) ($config['version'] ?? 0),
             'candidates_evaluated' => 0, 'predictions_recorded' => 0, 'rejections' => 0,
-            'rejection_summary' => ['_diagnostics' => ['recoveredAfterInterruptedLink' => true]],
+            // MUST be an encoded scalar: the column is TEXT and an array here
+            // stringifies to the literal 'Array' in the generated SQL (MySQL
+            // 1054 "Unknown column 'Array'").
+            'rejection_summary' => json_encode(['_diagnostics' => ['recoveredAfterInterruptedLink' => true]]),
             'message' => 'Recovered persisted daily ticket after interrupted finalization',
             'provider' => null, 'run_id' => null, 'attempt_count' => 0,
             'next_retry_at' => null, 'last_error_code' => null, 'generated_at' => $generatedAt,
