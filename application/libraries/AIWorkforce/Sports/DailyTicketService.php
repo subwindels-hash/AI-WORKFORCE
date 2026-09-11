@@ -564,8 +564,26 @@ class DailyTicketService
                         // per fixture so "0 sufficient-data fixtures" is never a
                         // black box — the gate diagnostic names the blocker.
                         $calibration = $this->calibrationFor($matchRow);
-                        $missingMandatory = array_values((array) ($qualityAssessment['missingMandatory'] ?? []));
-                        $mandatoryOk = $missingMandatory === [];
+                        // Requirement #3/#7: the gate is PER MARKET, not per
+                        // fixture. A fixture is only rejected INSUFFICIENT_DATA
+                        // when NO supported market it has odds for can be
+                        // computed from the data that actually exists. If even
+                        // one market has all of its own mandatory inputs, that
+                        // market is evaluated and the fixture survives — a
+                        // missing OPTIONAL feed never rejects anything, it
+                        // only lowers the data-quality score.
+                        $marketFeasibility = $this->marketFeasibility($matchRow, $contextFields, $markets);
+                        $usableMarkets = array_keys(array_filter($marketFeasibility, fn(array $m): bool => $m['ok']));
+                        $missingMandatory = $usableMarkets === []
+                            ? array_values(array_unique(array_merge(...array_values(array_map(fn(array $m): array => $m['missing'], $marketFeasibility)) ?: [[]])))
+                            : [];
+                        $mandatoryOk = $usableMarkets !== [];
+                        // Only the odds of markets the model can actually
+                        // compute stay in play (requirement #4: one market's
+                        // missing inputs never eliminates the others).
+                        if ($mandatoryOk) {
+                            $usableOdds = array_values(array_filter($usableOdds, fn(array $r): bool => in_array(strtoupper((string) $r['market']), $usableMarkets, true)));
+                        }
                         $calibrationOk = !$requireCalibration || $calibration !== null;
                         $qualityOk = ((int) ($qualityAssessment['score'] ?? 0) >= $minQuality && !empty($qualityAssessment['eligibleForTicket']));
                         if ($mandatoryOk && $calibrationOk && $qualityOk) {
@@ -594,7 +612,7 @@ class DailyTicketService
                             'failedRequirement' => $failedRequirement,
                             'primaryReason' => $primaryReason,
                             'requirements' => [
-                                'MANDATORY_MODEL_DATA' => ['ok' => $mandatoryOk, 'missingMandatory' => $missingMandatory, 'mandatoryFields' => array_values((array) ($qualityAssessment['mandatoryFields'] ?? ['recentForm']))],
+                                'MANDATORY_MODEL_DATA' => ['ok' => $mandatoryOk, 'missingMandatory' => $missingMandatory, 'mandatoryFields' => array_values((array) ($qualityAssessment['mandatoryFields'] ?? ['recentForm'])), 'marketFeasibility' => $marketFeasibility, 'usableMarkets' => $usableMarkets],
                                 'APPROVED_CALIBRATION' => ['ok' => $calibrationOk, 'required' => (bool) $requireCalibration, 'calibrationId' => $calibration['id'] ?? null, 'method' => $calibration['method'] ?? null, 'bootstrapState' => $funnel['calibrationBootstrap'] ?? null],
                                 'DATA_QUALITY_FLOOR' => ['ok' => $qualityOk, 'score' => (int) ($qualityAssessment['score'] ?? 0), 'minScore' => (int) $minQuality, 'band' => (string) ($qualityAssessment['band'] ?? 'UNKNOWN'), 'eligibleForTicket' => (bool) ($qualityAssessment['eligibleForTicket'] ?? false)],
                             ],
@@ -726,13 +744,7 @@ class DailyTicketService
                             $allCandidates[] = $candidate;
                             $funnel['marketsEvaluated']++;
 
-                            if ($candidate['decision'] === 'REJECTED') {
-                                $rejections++;
-                                $primary = $candidate['primaryReason'] ?? ($candidate['rejectionReasons'][0] ?? 'NO_PREDICTION');
-                                $this->countRejection($rejectionSummary, $primary, $reasonProviders, $odds['oddsSource'] ?? $item['provider']);
-                            } else {
-                                $candidates[] = $candidate;
-                            }
+                            $this->collectCandidate($candidate, $candidates, $rejections, $rejectionSummary, $reasonProviders, (string) ($odds['oddsSource'] ?? $item['provider']));
                         }
                     }
 
@@ -758,13 +770,7 @@ class DailyTicketService
                             $this->trackCandidateFunnel($candidate, $funnel, $minConfidence, $minEv);
                             $allCandidates[] = $candidate;
                             $funnel['marketsEvaluated']++;
-                            if ($candidate['decision'] === 'REJECTED') {
-                                $rejections++;
-                                $primary = $candidate['primaryReason'] ?? ($candidate['rejectionReasons'][0] ?? 'NO_PREDICTION');
-                                $this->countRejection($rejectionSummary, $primary, $reasonProviders, $odds['oddsSource'] ?? $item['provider']);
-                            } else {
-                                $candidates[] = $candidate;
-                            }
+                            $this->collectCandidate($candidate, $candidates, $rejections, $rejectionSummary, $reasonProviders, (string) ($odds['oddsSource'] ?? $item['provider']));
                             $evaluatedMarkets++;
                         }
                         if ($evaluatedMarkets === 0) {
@@ -789,8 +795,26 @@ class DailyTicketService
                             'maxCorrelation' => $config['max_correlation'],
                             'allowedMarkets' => $config['allowed_markets'],
                             'allowedLeagues' => $config['allowed_leagues'],
+                            // Requirement #1/#10: one missed threshold must
+                            // never cost the whole day. When nothing clears
+                            // every preferred criterion the optimizer ranks
+                            // the real candidates and takes the strongest
+                            // non-correlated combination inside the configured
+                            // odds range — declared as fallback, never faked.
+                            'allowFallback' => true,
                         ]);
                         $funnel['correlationQualifiedCandidates'] = (int) ($optimized['poolSize'] ?? 0);
+                        // Requirement #14: the per-candidate decision trace
+                        // (fixture → market → model probability → confidence →
+                        // data quality → odds → value → risk → correlation →
+                        // final decision) and the tier the engine settled on.
+                        $funnel['candidateDecisions'] = array_slice((array) ($optimized['candidateDecisions'] ?? []), 0, 100);
+                        $funnel['selectionAttempts'] = (array) ($optimized['attempts'] ?? []);
+                        $funnel['selectionTier'] = $optimized['selectionTier'] ?? null;
+                        $funnel['fallbackUsed'] = (bool) ($optimized['fallbackUsed'] ?? false);
+                        $funnel['fallbackReason'] = $optimized['fallbackReason'] ?? null;
+                        $funnel['eligiblePoolSize'] = (int) ($optimized['eligiblePoolSize'] ?? 0);
+                        $funnel['preferredPoolSize'] = (int) ($optimized['preferredPoolSize'] ?? 0);
                         if ($optimized['status'] === 'QUALIFIED') {
                             // A deterministic daily ID makes a crash after the
                             // ticket/legs write but before linking the daily row
@@ -804,6 +828,12 @@ class DailyTicketService
                                 $ticketId = $rec['ticketId'];
                                 $funnel['finalQualifiedCandidates'] = (int) ($optimized['selectionCount'] ?? 0);
                                 $message = $status === 'APPROVED' ? 'ticket generated and auto-approved (AUTOMATED_EXECUTION); no external execution' : 'odds prediction ticket generated; awaiting user approval';
+                                // Fallback mode is always declared: a ticket
+                                // that did not clear every preferred criterion
+                                // must never read like one that did.
+                                if (!empty($optimized['fallbackUsed'])) {
+                                    $message .= ' — ' . (string) $optimized['fallbackReason'];
+                                }
                                 // A new live ticket replaces any UNDECIDED
                                 // ticket a previous pass left pending for the
                                 // same fixture window — the old pass can never
@@ -827,9 +857,19 @@ class DailyTicketService
                             }
                         } else {
                             // No compliant combination: an honest no-ticket day,
-                            // with the optimizer's reason kept as the diagnosis.
+                            // with the optimizer's reason kept as the diagnosis
+                            // AND the exact per-tier failure, so "0 final" after
+                            // "4 risk-qualified" can never be a black box again.
                             $message = 'NO QUALIFIED TICKET — ' . "Today's available matches did not meet the configured prediction requirements"
                                 . ' (' . ($optimized['reason'] ?? 'no compliant combination') . ')';
+                            $tierNotes = [];
+                            foreach ((array) ($optimized['attempts'] ?? []) as $attempt) {
+                                if (!is_array($attempt) || !empty($attempt['found'])) continue;
+                                $tierNotes[] = sprintf('%s [%d candidate(s), correlation cap %s]: %s',
+                                    (string) ($attempt['tier'] ?? '?'), (int) ($attempt['poolSize'] ?? 0),
+                                    (string) ($attempt['correlationCap'] ?? '?'), (string) ($attempt['reason'] ?? 'no combination'));
+                            }
+                            if ($tierNotes) $message .= ' — selection tiers tried: ' . implode('; ', $tierNotes);
                         }
                     }
                     if ($ticketId === null && $message === '') {
@@ -1163,6 +1203,57 @@ class DailyTicketService
         }
     }
 
+    /**
+     * Route one evaluated candidate into the ticket pool or the rejection
+     * ledger (requirements #1, #6 and #9).
+     *
+     * THE BUG THIS FIXES. The pool used to take only candidates whose every
+     * pipeline stage PASSED, which meant a leg that missed the confidence
+     * floor by a fraction was thrown away here — before the optimizer ever
+     * saw it. That is precisely how a day could report
+     *
+     *     7 predictions -> 0 confidence-qualified -> 4 positive-value
+     *                   -> 4 risk-qualified -> 0 final
+     *
+     * The four value- and risk-qualified candidates were REAL, but they had
+     * already been discarded at this line for a soft reason, so the final
+     * selection stage had an empty pool and could only answer
+     * NO_QUALIFIED_TICKET.
+     *
+     * A SOFT reason (confidence or data quality below a configured floor) is
+     * a RANKING signal — it belongs to the optimizer, which applies the
+     * preferred criteria first and only then falls back, declaring it. A HARD
+     * reason (no prediction, no usable odds, no positive value, rejected
+     * risk, unsupported/disallowed market) means the candidate can never be a
+     * ticket leg and is counted as a rejection here, exactly as before.
+     *
+     * Every candidate is still counted exactly once, under one primary reason.
+     */
+    private const SOFT_REJECTION_REASONS = ['LOW_CONFIDENCE', 'CONFIDENCE_UNMEASURED', 'LOW_DATA_QUALITY'];
+
+    private function collectCandidate(array $candidate, array &$candidates, int &$rejections, array &$rejectionSummary, array &$reasonProviders, string $provider): void
+    {
+        if (($candidate['decision'] ?? '') !== 'REJECTED') {
+            $candidates[] = $candidate;
+            return;
+        }
+        $reasons = array_values((array) ($candidate['rejectionReasons'] ?? []));
+        $hard = array_values(array_diff($reasons, self::SOFT_REJECTION_REASONS));
+        if ($hard === []) {
+            // Soft-only: a real prediction with a real price that simply did
+            // not clear a preferred floor. It stays a ranked candidate — the
+            // optimizer decides, and says so when it uses the fallback.
+            $candidate['softRejectionReasons'] = $reasons;
+            $candidates[] = $candidate;
+            return;
+        }
+        $rejections++;
+        $primary = in_array((string) ($candidate['primaryReason'] ?? ''), $hard, true)
+            ? (string) $candidate['primaryReason']
+            : $hard[0];
+        $this->countRejection($rejectionSummary, $primary, $reasonProviders, $provider);
+    }
+
     /** Funnel counters for one evaluated candidate (per market:selection). */
     private function trackCandidateFunnel(array $candidate, array &$funnel, float $minConfidence, float $minEv): void
     {
@@ -1235,6 +1326,14 @@ class DailyTicketService
             'riskQualifiedCandidates' => 0,
             'correlationQualifiedCandidates' => 0,
             'finalQualifiedCandidates' => 0,
+            // Final-selection transparency (requirements #10 and #14).
+            'eligiblePoolSize' => 0,
+            'preferredPoolSize' => 0,
+            'selectionTier' => null,
+            'fallbackUsed' => false,
+            'fallbackReason' => null,
+            'selectionAttempts' => [],
+            'candidateDecisions' => [],
             // Undecided tickets from earlier passes that this generation
             // superseded for the same fixture window (never decided/settled).
             'ticketsSuperseded' => 0,
@@ -2019,6 +2118,54 @@ class DailyTicketService
             foreach ((is_array($attempt['result'] ?? null) ? $attempt['result']['odds'] : []) ?? [] as $row) {
                 if (is_array($row) && !empty($row['fixtureId'])) $out[(string) $row['fixtureId']][] = $row;
             }
+        }
+        return $out;
+    }
+
+    /**
+     * Per-market data feasibility (requirements #3, #4 and #7).
+     *
+     * The old gate asked one fixture-wide question — "is every mandatory
+     * field present?" — and rejected the whole fixture as INSUFFICIENT_DATA
+     * when the answer was no, even though a market whose OWN inputs were all
+     * present could have been priced honestly. That is what produced
+     * "INSUFFICIENT_DATA: 30" on a day with usable data.
+     *
+     * This asks the question once PER MARKET the fixture has real odds for,
+     * against that market's own mandatory inputs (DataQualityEngine) and the
+     * model features it actually consumes (PredictionEngine). A market is
+     * feasible when all of ITS inputs exist. Optional enrichment is never
+     * consulted here — it only moves the data-quality score.
+     *
+     * @param array $markets markets the fixture has fresh, supported odds for
+     * @return array<string,array{ok:bool,missing:list<string>,mandatory:list<string>}>
+     */
+    private function marketFeasibility(array $matchRow, array $contextFields, array $markets): array
+    {
+        $intel = (new MatchIntelligenceEngine($this->oddsFreshness))->analyze($matchRow, null, [], null);
+        $features = (new FeatureEngineeringEngine())->build(['decision' => 'INTELLIGENCE_READY'] + $intel);
+        $built = is_array($features['features'] ?? null) ? $features['features'] : [];
+
+        $out = [];
+        foreach ($markets as $rawMarket) {
+            $market = strtoupper(trim((string) $rawMarket));
+            if ($market === '') continue;
+            $missing = [];
+            // 1. The market's own mandatory DATA fields.
+            foreach (DataQualityEngine::mandatoryFieldsForMarket($market) as $field) {
+                if (!in_array($field, $contextFields, true)) $missing[] = $field;
+            }
+            // 2. The model FEATURES this specific market consumes. TOTAL_GOALS
+            //    needs only the goal-expectancy proxy; the head-to-head markets
+            //    need both sides' attack/defence rates.
+            foreach (PredictionEngine::requiredFeatures($market) as $feature) {
+                if (!isset($built[$feature]) || !is_numeric($built[$feature])) $missing[] = 'feature.' . $feature;
+            }
+            $out[$market] = [
+                'ok' => $missing === [],
+                'missing' => array_values(array_unique($missing)),
+                'mandatory' => DataQualityEngine::mandatoryFieldsForMarket($market),
+            ];
         }
         return $out;
     }

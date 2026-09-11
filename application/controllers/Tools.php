@@ -214,6 +214,130 @@ class Tools extends MY_Controller
      *     DB-side error ledger),
      *   • the durable calibration/ticket audit trail.
      */
+    /**
+     * Odds Prediction Ticket Engine — the full diagnostic view of one day's
+     * generation (requirement #14).
+     *
+     * Prints the complete funnel, the selection tiers that were tried and why
+     * each failed, the per-candidate decision table
+     *
+     *   Fixture -> Market -> Model Probability -> Confidence -> Data Quality
+     *           -> Odds -> Value -> Risk -> Correlation -> Final Decision
+     *
+     * and the generated ticket with its legs, when the data supports one.
+     *
+     *   php index.php tools ticket_funnel [YYYY-MM-DD] [--force]
+     *
+     * Read-only apart from the generation itself: it calls exactly the same
+     * entry point the cron uses, so what it prints IS what the engine did.
+     */
+    public function ticket_funnel()
+    {
+        $date = trim((string) ($_SERVER['argv'][3] ?? ''));
+        if ($date === '--force' || $date === '') $date = gmdate('Y-m-d');
+        if (!preg_match('/^\\d{4}-\\d{2}-\\d{2}$/', $date)) {
+            fwrite(STDERR, 'invalid date (expected YYYY-MM-DD): ' . $date . "\n");
+            return;
+        }
+        $options = in_array('--force', (array) ($_SERVER['argv'] ?? []), true) ? ['force' => true] : [];
+
+        $sports = $this->platform->sports;
+        $run = $sports->dailyTickets->runDaily($date, null, $options);
+        $funnel = is_array($run['diagnostics'] ?? null) ? $run['diagnostics'] : [];
+        $config = $sports->configuration->active();
+
+        $line = str_repeat('=', 100);
+        echo $line, "\n", 'ODDS PREDICTION TICKET ENGINE — ', $date, "\n", $line, "\n";
+        echo 'status            : ', (string) ($run['status'] ?? '?'), "\n";
+        echo 'ticket            : ', (string) ($run['ticketId'] ?? '(none)'), "\n";
+        echo 'message           : ', (string) ($run['message'] ?? ''), "\n\n";
+
+        echo "CONFIGURED THRESHOLDS\n";
+        printf("  min confidence %.0f%%   min data quality %d   min EV %.3f   odds %.2f-%.2f   max selections %d   max correlation %s\n\n",
+            (float) $config['min_confidence'], (int) $config['min_data_quality'], (float) $config['min_expected_value'],
+            (float) $config['target_odds_min'], (float) $config['target_odds_max'], (int) $config['max_selections'], (string) $config['max_correlation']);
+
+        echo "FUNNEL\n";
+        $stages = [
+            'fixtures evaluated' => $run['evaluated'] ?? 0,
+            'eligible' => $funnel['eligibleFixtures'] ?? 0,
+            'with-form' => $funnel['fixturesWithRecentForm'] ?? 0,
+            'fresh-odds' => $funnel['fixturesWithFreshOdds'] ?? 0,
+            'sufficient-data fixtures' => $funnel['sufficientDataFixtures'] ?? 0,
+            'markets evaluated' => $funnel['marketsEvaluated'] ?? 0,
+            'predictions generated' => $funnel['predictionsGenerated'] ?? 0,
+            'predictions reused' => $funnel['predictionsReused'] ?? 0,
+            'confidence-qualified' => $funnel['confidenceQualifiedCandidates'] ?? 0,
+            'positive-value' => $funnel['positiveValueCandidates'] ?? 0,
+            'risk-qualified' => $funnel['riskQualifiedCandidates'] ?? 0,
+            'eligible ticket pool' => $funnel['eligiblePoolSize'] ?? 0,
+            'preferred pool' => $funnel['preferredPoolSize'] ?? 0,
+            'correlation-qualified' => $funnel['correlationQualifiedCandidates'] ?? 0,
+            'FINAL (ticket legs)' => $funnel['finalQualifiedCandidates'] ?? 0,
+        ];
+        foreach ($stages as $label => $value) printf("  %-26s %s\n", $label, (string) (int) $value);
+        echo '  selection tier             ', (string) ($funnel['selectionTier'] ?? '(none)'),
+            '   fallback used: ', !empty($funnel['fallbackUsed']) ? 'YES' : 'no', "\n";
+        if (!empty($funnel['fallbackReason'])) echo '  fallback reason            ', (string) $funnel['fallbackReason'], "\n";
+        echo "\n";
+
+        echo "REJECTIONS (one primary reason per rejected fixture/candidate)\n";
+        $reasons = (array) ($funnel['topRejectionReasons'] ?? $run['rejectionSummary'] ?? []);
+        if ($reasons === []) echo "  (none)\n";
+        foreach ($reasons as $reason => $count) printf("  %-34s %s\n", (string) $reason, (string) $count);
+        echo "\n";
+
+        echo "SELECTION TIERS TRIED\n";
+        $attempts = (array) ($funnel['selectionAttempts'] ?? []);
+        if ($attempts === []) echo "  (the final selection stage was never reached)\n";
+        foreach ($attempts as $attempt) {
+            printf("  %-22s pool=%-3d cap=%-7s found=%-3s %s\n",
+                (string) ($attempt['tier'] ?? '?'), (int) ($attempt['poolSize'] ?? 0),
+                (string) ($attempt['correlationCap'] ?? '?'), !empty($attempt['found']) ? 'YES' : 'no',
+                (string) ($attempt['reason'] ?? ''));
+        }
+        echo "\n";
+
+        echo "CANDIDATE DECISIONS — fixture -> market -> model probability -> confidence -> data quality -> odds -> value -> risk -> correlation -> decision\n";
+        $rows = (array) ($funnel['candidateDecisions'] ?? []);
+        if ($rows === []) echo "  (no candidate reached the final selection stage)\n";
+        foreach ($rows as $row) {
+            printf("  %-28s %-14s %-14s p=%-8s conf=%-7s dq=%-4s odds=%-7s ev=%-9s risk=%-7s corr=%-7s => %-24s %s\n",
+                mb_substr((string) ($row['fixture'] ?? '?'), 0, 28),
+                (string) ($row['market'] ?? '-'), (string) ($row['selection'] ?? '-'),
+                $row['modelProbability'] === null ? '-' : (string) round((float) $row['modelProbability'], 4),
+                $row['confidence'] === null ? 'n/a' : (string) round((float) $row['confidence'], 2),
+                (string) (int) ($row['dataQuality'] ?? 0),
+                (string) round((float) ($row['odds'] ?? 0), 2),
+                (string) round((float) ($row['expectedValue'] ?? 0), 4),
+                (string) ($row['risk'] ?? '-'), (string) ($row['correlation'] ?? '-'),
+                (string) ($row['decision'] ?? '-'), implode(',', (array) ($row['reasons'] ?? [])));
+        }
+        echo "\n";
+
+        if (!empty($run['ticketId'])) {
+            $ticket = $this->AIWorkforce_model->sports->findTicket((string) $run['ticketId']);
+            echo $line, "\nGENERATED TICKET ", (string) $run['ticketId'], "\n", $line, "\n";
+            if (is_array($ticket)) {
+                printf("  combined odds %.4f   legs %d   confidence(min) %s   avg confidence %s   data quality(min) %s   risk %s   correlation %s   status %s\n\n",
+                    (float) $ticket['total_odds'], (int) $ticket['selection_count'],
+                    (string) ($ticket['confidence'] ?? '-'), (string) ($ticket['average_confidence'] ?? '-'),
+                    (string) ($ticket['data_quality_score'] ?? '-'), (string) ($ticket['risk'] ?? '-'),
+                    (string) ($ticket['correlation'] ?? '-'), (string) ($ticket['approval_status'] ?? $ticket['status'] ?? '-'));
+            }
+            foreach ($this->AIWorkforce_model->sports->ticketSelections((string) $run['ticketId']) as $i => $leg) {
+                printf("  %d. %-22s vs %-22s  %-14s %-14s @ %-6s  model p=%-8s conf=%-7s dq=%-4s EV=%-8s risk=%s\n",
+                    $i + 1, (string) ($leg['home_team'] ?? '?'), (string) ($leg['away_team'] ?? '?'),
+                    (string) $leg['market'], (string) $leg['selection'], (string) round((float) $leg['odds'], 2),
+                    (string) ($leg['calibrated_probability'] ?? '-'), (string) ($leg['confidence'] ?? '-'),
+                    (string) ($leg['data_quality'] ?? '-'), (string) ($leg['expected_value'] ?? '-'),
+                    (string) ($leg['risk'] ?? '-'));
+            }
+            echo "\n";
+        }
+        echo 'TICKET-FUNNEL-RESULT: ', empty($run['ticketId']) ? 'NO_TICKET' : 'TICKET', "\n";
+    }
+
     public function sports_calibration_check()
     {
         $date = trim((string) ($_SERVER['argv'][3] ?? ''));

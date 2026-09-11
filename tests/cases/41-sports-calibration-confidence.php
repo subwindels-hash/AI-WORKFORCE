@@ -44,17 +44,57 @@ test('calibration version is deterministic for identical samples', function () {
     assert_equals(CalibrationEngine::version($a['fit']), CalibrationEngine::version($b['fit']));
 });
 
-test('confidence is a transparent capped blend and zero without calibration', function () {
+test('confidence is a transparent renormalised blend, and an absent input is excluded not zeroed', function () {
     $eng = new ConfidenceEngine();
-    $prediction = ['decision' => 'PREDICTION_READY', 'calibratedProbability' => 0.85];
-    $noCal = $eng->assess($prediction, ['score' => 100], null);
-    assert_close(0.5 * 100 + 0.2 * 100, $noCal['confidence'], 0.01); // no calibration quality
-    $withCal = $eng->assess($prediction, ['score' => 100], ['ece' => 0.0, 'samples' => 50]);
-    assert_true($withCal['confidence'] > $noCal['confidence']);
-    $tiny = $eng->assess($prediction, ['score' => 60], ['ece' => 0.9, 'samples' => 30]);
-    // transparent blend: 0.5*60 + 0.3*(100*(1-0.9)) + 0.2*100 = 53 — far below the 95 cap
-    assert_close(53.0, $tiny['confidence'], 0.01, 'bad calibration + weak data follows the documented blend');
-    assert_true($withCal['confidence'] <= ConfidenceEngine::CAP);
-    $noPred = $eng->assess(['decision' => 'NO_PREDICTION'], ['score' => 100], ['ece' => 0.0, 'samples' => 50]);
-    assert_true($noPred['confidence'] === null);
+    $prediction = ['decision' => 'PREDICTION_READY', 'calibratedProbability' => 0.85, 'market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5'];
+    // The evidence a real candidate carries: verified venue form rates (which
+    // is what teamForm / homeAway / goals are measured from).
+    $evidence = [
+        'features' => ['expectedGoalsProxy' => 2.6, 'homeAttack' => 1.6, 'awayAttack' => 1.4, 'homeDefenseConceded' => 1.0, 'awayDefenseConceded' => 0.9],
+        'inputs' => ['recentForm' => ['homeGoalsPerMatch' => 1.6, 'awayGoalsPerMatch' => 1.4, 'homeConcededPerMatch' => 1.0, 'awayConcededPerMatch' => 0.9, 'source' => 'test']],
+        'market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5',
+    ];
+
+    $noPred = $eng->assess(['decision' => 'NO_PREDICTION'], ['score' => 100], ['ece' => 0.0, 'samples' => 50], $evidence);
+    assert_true($noPred['confidence'] === null, 'no prediction means no confidence figure at all');
+
+    // THE REGRESSION THIS ENGINE WAS REWRITTEN FOR: an approved calibration
+    // with no settled history yet (the identity bootstrap) must NOT cost the
+    // full calibration weight. Under the old blend it scored 0 and capped a
+    // PERFECT fixture at 70% — below the configured 75% floor — which is how
+    // a day reported "7 predictions -> 0 confidence-qualified".
+    $bootstrap = $eng->assess($prediction, ['score' => 100], ['ece' => null, 'samples' => 0], $evidence);
+    assert_true($bootstrap['confidence'] >= 75.0,
+        'a perfect fixture on the identity bootstrap calibration must be able to clear the 75% floor, got ' . var_export($bootstrap['confidence'], true));
+    assert_close(ConfidenceEngine::BOOTSTRAP_CALIBRATION_VALUE, (float) $bootstrap['components']['calibration']['value'], 0.01,
+        'an un-evidenced calibration is scored as LIMITED, never as zero');
+
+    // A calibration measured against settled history outranks the bootstrap.
+    $withCal = $eng->assess($prediction, ['score' => 100], ['ece' => 0.0, 'samples' => 50], $evidence);
+    assert_true($withCal['confidence'] > $bootstrap['confidence'], 'a measured ECE beats an unmeasured mapping');
+    assert_true($withCal['confidence'] <= ConfidenceEngine::CAP, 'the cap still applies — the system never claims certainty');
+
+    // A component that cannot be measured is EXCLUDED and its weight
+    // renormalised away, never scored as zero.
+    $noCal = $eng->assess($prediction, ['score' => 100], null, $evidence);
+    $excluded = array_column($noCal['excluded'], 'component');
+    assert_true(in_array('calibration', $excluded, true), 'an absent calibration is listed as excluded');
+    assert_true(!isset($noCal['components']['calibration']), 'an excluded component contributes no value');
+    assert_true(in_array('headToHead', $excluded, true), 'an absent optional feed is excluded, not penalised');
+
+    // The published arithmetic really is the score.
+    $weighted = 0.0; $weight = 0.0;
+    foreach ($noCal['components'] as $component) { $weighted += $component['value'] * $component['weight']; $weight += $component['weight']; }
+    assert_close(min(ConfidenceEngine::CAP, $weighted / $weight), (float) $noCal['confidence'], 0.01,
+        'score is exactly the sum of (value x weight) over the sum of the used weights');
+
+    // Weak data genuinely lowers the number — the blend is not cosmetic.
+    $weak = $eng->assess($prediction, ['score' => 55], ['ece' => 0.9, 'samples' => 30], $evidence);
+    assert_true($weak['confidence'] < $withCal['confidence'], 'bad calibration and weak data score lower');
+
+    // Too little independent evidence reports itself instead of publishing a
+    // number resting on one input.
+    $bare = $eng->assess($prediction, ['score' => 100], null, []);
+    assert_true($bare['confidence'] === null, 'a read with almost no evidence has no confidence figure');
+    assert_equals('INSUFFICIENT_CONFIDENCE_EVIDENCE', $bare['reason']);
 });
