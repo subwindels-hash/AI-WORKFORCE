@@ -180,6 +180,8 @@ class SportsDataNormalizer
      */
     public static function odds(array $raw, string $provider): array
     {
+        $provider = trim($provider);
+        if ($provider === '') throw new \InvalidArgumentException('odds provider is required');
         foreach (['market', 'selection', 'decimalOdds', 'observedAt'] as $field) if (!isset($raw[$field]) || $raw[$field] === '') throw new \InvalidArgumentException("odds missing {$field}");
         $market = trim((string) $raw['market']);
         $selection = trim((string) $raw['selection']);
@@ -197,7 +199,9 @@ class SportsDataNormalizer
 
     private static function timestamp($value): string
     {
-        if ($value === null || $value === '') return gmdate('c');
+        // Never substitute the local clock: an untimestamped provider quote
+        // cannot be proven fresh and must not enter a prediction.
+        if ($value === null || $value === '') throw new \InvalidArgumentException('sourceTimestamp is required');
         try { return (new \DateTimeImmutable((string) $value))->setTimezone(new \DateTimeZone('UTC'))->format('c'); }
         catch (\Throwable $e) { throw new \InvalidArgumentException('sourceTimestamp is invalid'); }
     }

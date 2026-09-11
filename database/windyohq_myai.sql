@@ -1194,7 +1194,7 @@ CREATE TABLE `sports_backtests` (
 CREATE TABLE `sports_calibrations` (
   `id` int(11) NOT NULL,
   `model_version_id` int(11) NOT NULL,
-  `method` varchar(16) NOT NULL DEFAULT 'platt',
+  `method` varchar(32) NOT NULL DEFAULT 'platt',
   `intercept` decimal(8,6) NOT NULL,
   `slope` decimal(8,6) NOT NULL,
   `brier` decimal(8,6) DEFAULT NULL,
