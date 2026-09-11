@@ -14,7 +14,7 @@ test('configuration returns safe defaults before any admin change', function () 
     // Qualified-ticket policy defaults: 75%+ confidence, 80+ quality.
     assert_equals(75.0, (float) $c['min_confidence']);
     assert_equals(80, (int) $c['min_data_quality']);
-    assert_equals(['MATCH_RESULT', 'TOTAL_GOALS', 'BTTS', 'DOUBLE_CHANCE'], $c['allowed_markets']);
+    assert_equals(['MATCH_RESULT', 'TOTAL_GOALS', 'BTTS', 'DOUBLE_CHANCE', 'DRAW_NO_BET'], $c['allowed_markets'], 'every market the model can price and settle is allowed by default');
     assert_equals('RESTITUTE_ODDS', $c['void_policy']);
 });
 

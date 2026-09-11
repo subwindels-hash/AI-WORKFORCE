@@ -218,18 +218,40 @@ class PredictionPipeline
         $factors['confidence'] = $conf['breakdown'] ?? null;
         $factors['confidenceComponents'] = $conf['components'] ?? [];
         $factors['confidenceExcluded'] = $conf['excluded'] ?? [];
-        $minConfidence = (float) ($config['min_confidence'] ?? 0);
+
+        // ADAPTIVE CONFIDENCE (requirements #1/#8): the bar a candidate must
+        // clear depends on the data quality behind it, resolved from
+        // configuration — not one hard-coded 75% for every fixture. The
+        // measured confidence itself is reported unchanged, whatever it is.
+        $policy = ConfidencePolicy::fromConfiguration($config);
+        $qualityScore = (int) round((float) ($quality['score'] ?? 0));
+        $measuredConfidence = is_numeric($conf['confidence'] ?? null) ? (float) $conf['confidence'] : null;
+        $verdict = $policy->evaluate($qualityScore, $measuredConfidence, (string) $candidate['market'], (string) $candidate['selection']);
+        $minConfidence = $verdict['requiredConfidence'] ?? $policy->highestConfidenceRequirement();
+
+        // The whole adaptive decision is recorded on the candidate so the UI,
+        // the decision trace and the rejection audit can all show WHAT was
+        // required, WHY, and what was actually measured (requirement #13).
+        $factors['confidencePolicy'] = $verdict;
+        $candidate['confidencePolicy'] = $verdict;
+
         if (!$predictionReady) {
             $stage('confidence', 'SKIPPED', null);
-        } elseif (is_numeric($conf['confidence'] ?? null)) {
-            $stage('confidence', (float) $conf['confidence'] >= $minConfidence ? 'PASSED' : 'FAILED', 'LOW_CONFIDENCE');
-        } else {
+        } elseif ($measuredConfidence === null) {
             $stage('confidence', 'FAILED', 'CONFIDENCE_UNMEASURED');
+        } elseif (!$verdict['marketAllowed']) {
+            // The evidence is too thin for THIS market, though it may still
+            // support a safer one on the same fixture.
+            $stage('confidence', 'FAILED', 'MARKET_RESTRICTED_AT_DATA_TIER');
+        } else {
+            $stage('confidence', $measuredConfidence + 1e-9 >= $minConfidence ? 'PASSED' : 'FAILED', 'LOW_CONFIDENCE');
         }
 
         // ── Stage 6: data quality (configurable floor) ────────────────────
-        $minQuality = (int) ($config['min_data_quality'] ?? $config['minDataQuality'] ?? DataQualityEngine::DEFAULT_MIN_DATA_QUALITY);
-        $stage('dataQuality', ($quality['score'] ?? 0) >= $minQuality ? 'PASSED' : 'FAILED', 'LOW_DATA_QUALITY');
+        // The floor is the lowest band the adaptive policy still accepts;
+        // below it nothing is predictable at any confidence.
+        $minQuality = $policy->minimumDataQuality();
+        $stage('dataQuality', $qualityScore >= $minQuality ? 'PASSED' : 'FAILED', 'LOW_DATA_QUALITY');
 
         // ── Stage 7: value / edge (model probability vs real market odds) ─
         $value = $this->value->assess($prediction ?? ['decision' => 'NO_PREDICTION'], $odds !== null ? ['decimalOdds' => (float) ($odds['decimalOdds'] ?? $odds['decimal_odds'] ?? 0), 'market' => (string) $candidate['market']] : ['decimalOdds' => 0]);
@@ -344,11 +366,26 @@ class PredictionPipeline
         // single primary blocking reason (no double counting).
         $candidate['rejectionReasons'] = array_values(array_unique($rejectionReasons));
         $candidate['primaryReason'] = $candidate['rejectionReasons'][0] ?? null;
+        // Requirement #13 — a rejection must be auditable on its own terms:
+        // the reason, what was MISSING, what was AVAILABLE, the data quality
+        // and the minimum that quality was judged against. The adaptive tier
+        // is carried too, because "below the minimum" means a different
+        // number for a fixture with thin evidence than for a complete one.
+        $policyVerdict = is_array($candidate['confidencePolicy'] ?? null) ? $candidate['confidencePolicy'] : [];
         $candidate['rejectionDetail'] = [
             'primary' => $candidate['primaryReason'],
             'allReasons' => $candidate['rejectionReasons'],
-            'missingFields' => array_values(array_unique($missingFields)),
+            'missingFields' => array_values(array_unique(array_merge($missingFields, (array) ($quality['missing'] ?? [])))),
+            'availableFields' => array_values((array) ($quality['available'] ?? [])),
+            'missingMandatory' => array_values((array) ($quality['missingMandatory'] ?? [])),
+            'missingOptional' => array_values((array) ($quality['missingOptional'] ?? [])),
             'staleFields' => array_values(array_unique($staleFields)),
+            'dataQuality' => is_numeric($quality['score'] ?? null) ? (int) $quality['score'] : null,
+            'minDataQuality' => $policyVerdict['minDataQuality'] ?? (is_numeric($quality['minDataQuality'] ?? null) ? (int) $quality['minDataQuality'] : null),
+            'dataTier' => $policyVerdict['tier'] ?? null,
+            'confidence' => is_numeric($candidate['confidence']['confidence'] ?? null) ? (float) $candidate['confidence']['confidence'] : null,
+            'minConfidence' => $policyVerdict['requiredConfidence'] ?? null,
+            'policyExplanation' => $policyVerdict['explanation'] ?? null,
             'oddsStatus' => $candidate['oddsStatus'] ?? null,
             'oddsUpdatedAt' => $candidate['oddsUpdatedAt'] ?? null,
             'oddsAgeSeconds' => $candidate['oddsAgeSeconds'] ?? null,

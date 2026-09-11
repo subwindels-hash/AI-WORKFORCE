@@ -61,9 +61,12 @@ $heroMarketLabel = function (string $market, string $selection): string {
     static $labels = [
         'MATCH_RESULT:HOME' => 'Home Win', 'MATCH_RESULT:DRAW' => 'Draw', 'MATCH_RESULT:AWAY' => 'Away Win',
         'DOUBLE_CHANCE:HOME_OR_DRAW' => 'Double Chance (Home/Draw)', 'DOUBLE_CHANCE:AWAY_OR_DRAW' => 'Double Chance (Away/Draw)', 'DOUBLE_CHANCE:HOME_OR_AWAY' => 'Double Chance (Home/Away)',
-        'TOTAL_GOALS:OVER_1_5' => 'Over 1.5 Goals', 'TOTAL_GOALS:OVER_2_5' => 'Over 2.5 Goals', 'TOTAL_GOALS:OVER_3_5' => 'Over 3.5 Goals',
+        'TOTAL_GOALS:OVER_0_5' => 'Over 0.5 Goals', 'TOTAL_GOALS:OVER_1_5' => 'Over 1.5 Goals',
+        'TOTAL_GOALS:OVER_2_5' => 'Over 2.5 Goals', 'TOTAL_GOALS:OVER_3_5' => 'Over 3.5 Goals',
         'TOTAL_GOALS:UNDER_2_5' => 'Under 2.5 Goals', 'TOTAL_GOALS:UNDER_3_5' => 'Under 3.5 Goals',
-        'BTTS:YES' => 'Both Teams To Score',
+        'TOTAL_GOALS:UNDER_4_5' => 'Under 4.5 Goals',
+        'BTTS:YES' => 'Both Teams To Score', 'BTTS:NO' => 'Both Teams To Score — No',
+        'DRAW_NO_BET:HOME' => 'Draw No Bet (Home)', 'DRAW_NO_BET:AWAY' => 'Draw No Bet (Away)',
     ];
     return $labels[$market . ':' . $selection] ?? ($market . ' / ' . $selection);
 };
@@ -94,7 +97,72 @@ $heroMarketLabel = function (string $market, string $selection): string {
         <div class="stat"><div class="k">Stale odds</div><div class="v"><?= (int) ($heroDiag['fixturesRejectedStaleOdds'] ?? 0) ?></div></div>
         <div class="stat"><div class="k">Qualified candidates</div><div class="v"><?= (int) ($heroDiag['correlationQualifiedCandidates'] ?? 0) ?></div></div>
         <div class="stat"><div class="k">Selected picks</div><div class="v"><?= (int) ($heroDiag['finalQualifiedCandidates'] ?? count($heroSelections)) ?></div></div>
+        <div class="stat" title="The mean of the confidences actually measured today. Unavailable when nothing could be scored — never shown as zero."><div class="k">Average confidence</div><div class="v"><?= ($heroDiag['averageConfidence'] ?? null) !== null ? e(number_format((float) $heroDiag['averageConfidence'], 1)) . '%' : '<span class="dim" style="font-size:13px">Unavailable</span>' ?></div></div>
       </div>
+      <?php
+      // Requirement #14: the day's real spread of confidence and data quality,
+      // plus the ADAPTIVE requirement each band had to clear. An average alone
+      // can hide a bimodal day, so both distributions are shown as measured.
+      $heroConfidenceBands = is_array($heroDiag['confidenceDistribution'] ?? null) ? $heroDiag['confidenceDistribution'] : [];
+      $heroQualityBands = is_array($heroDiag['dataQualityDistribution'] ?? null) ? $heroDiag['dataQualityDistribution'] : [];
+      $heroPolicyTiers = is_array($heroDiag['confidencePolicy']['tiers'] ?? null) ? $heroDiag['confidencePolicy']['tiers'] : [];
+      $heroBandBar = function (array $bands): string {
+          $total = 0;
+          foreach ($bands as $count) $total += (int) $count;
+          if ($total <= 0) return '<span class="dim" style="font-size:12px">No candidate was scored.</span>';
+          $out = '';
+          foreach ($bands as $label => $count) {
+              $count = (int) $count;
+              if ($label === 'unmeasured' && $count === 0) continue;
+              $pct = (int) round(100 * $count / $total);
+              $out .= '<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">'
+                  . '<span class="mono dim" style="min-width:132px;font-size:11px">' . e((string) $label) . '</span>'
+                  . '<span style="flex:1;background:rgba(127,127,127,.15);border-radius:3px;height:12px;overflow:hidden">'
+                  . '<span style="display:block;height:12px;width:' . $pct . '%;background:var(--violet,#6d28d9)"></span></span>'
+                  . '<span class="mono" style="min-width:34px;text-align:right;font-size:11px">' . $count . '</span></div>';
+          }
+          return $out;
+      };
+      ?>
+      <?php if ($heroConfidenceBands !== [] || $heroQualityBands !== []): ?>
+        <details style="margin-bottom:12px">
+          <summary class="dim" style="cursor:pointer;font-size:12px">Confidence &amp; data-quality distribution<?= $heroPolicyTiers !== [] ? ' · adaptive thresholds' : '' ?></summary>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:10px">
+            <div>
+              <div style="font-size:11px;font-weight:700;margin-bottom:6px">Confidence (evaluated candidates)</div>
+              <?= $heroBandBar($heroConfidenceBands) ?>
+            </div>
+            <div>
+              <div style="font-size:11px;font-weight:700;margin-bottom:6px">Data quality (evaluated candidates)</div>
+              <?= $heroBandBar($heroQualityBands) ?>
+            </div>
+          </div>
+          <?php if ($heroPolicyTiers !== []): ?>
+            <div style="margin-top:10px">
+              <div style="font-size:11px;font-weight:700;margin-bottom:4px">Adaptive confidence policy in force</div>
+              <p class="dim" style="margin:0 0 6px;font-size:11px">The confidence a prediction must reach depends on the verified data behind it. Displayed confidence is always the measured value — it is never adjusted to clear a threshold.</p>
+              <table class="tbl" style="font-size:11px">
+                <thead><tr><th>Tier</th><th class="num">Data quality</th><th class="num">Confidence required</th><th>Markets</th></tr></thead>
+                <tbody>
+                  <?php foreach ($heroPolicyTiers as $tier): ?>
+                    <tr>
+                      <td><?= e((string) ($tier['tier'] ?? '—')) ?></td>
+                      <td class="num mono">&ge; <?= (int) ($tier['minDataQuality'] ?? 0) ?></td>
+                      <td class="num mono"><?= e(number_format((float) ($tier['minConfidence'] ?? 0), 0)) ?>%</td>
+                      <td class="dim"><?= e(is_string($tier['markets'] ?? null) ? ($tier['markets'] === 'SAFE' ? 'safer markets only' : 'all supported markets') : 'configured list') ?></td>
+                    </tr>
+                  <?php endforeach; ?>
+                  <tr>
+                    <td>REJECT</td>
+                    <td class="num mono">&lt; <?= (int) ($heroDiag['confidencePolicy']['minDataQuality'] ?? 65) ?></td>
+                    <td class="num dim" colspan="2">not predictable at any confidence</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          <?php endif; ?>
+        </details>
+      <?php endif; ?>
       <?php if ($heroTicket === null && in_array($heroGenerationStatus, ['FAILED', 'RETRYING'], true)): ?>
         <div class="notice err" style="margin-bottom:12px"><b>Reason:</b> <?= e((string) ($heroRun['last_error_code'] ?? $heroRun['status'] ?? 'GENERATION_FAILED')) ?><br><b>Retry:</b> <?= !empty($heroRun['next_retry_at']) ? 'SCHEDULED — ' . e((string) $heroRun['next_retry_at']) : 'AVAILABLE' ?></div>
       <?php endif; ?>
@@ -157,6 +225,44 @@ $heroMarketLabel = function (string $market, string $selection): string {
       <?php endif; ?>
     <?php else: ?>
       <p class="dim" style="margin:0">Automatic daily generation is pending. When Odds Prediction is enabled, the scheduler syncs eligible fixtures, refreshes stale odds in controlled batches, evaluates the safety gates and persists today&apos;s result. The button above is an optional manual retry.</p>
+    <?php endif; ?>
+    <?php
+    // Requirement #13: every rejection auditable — the reason, what was
+    // missing, what WAS available, the data quality and the minimum it was
+    // judged against. Shown whatever the outcome, because a rejected market
+    // on a day that still produced a ticket is exactly as worth diagnosing.
+    $heroRejections = is_array($heroDiag['rejectionAudit']['rows'] ?? null) ? $heroDiag['rejectionAudit']['rows'] : [];
+    ?>
+    <?php if ($heroRejections !== []): ?>
+      <details style="margin-top:12px">
+        <summary class="dim" style="cursor:pointer;font-size:12px">Why <?= count($heroRejections) ?> candidate<?= count($heroRejections) === 1 ? ' was' : 's were' ?> rejected</summary>
+        <div class="table-scroll" style="margin-top:10px">
+          <table class="tbl" style="font-size:11px">
+            <thead><tr><th>Match · market</th><th>Reason</th><th>Missing</th><th>Available</th><th class="num">Data quality</th><th class="num">Minimum allowed</th></tr></thead>
+            <tbody>
+              <?php foreach ($heroRejections as $rej): ?>
+                <tr>
+                  <td>
+                    <?= e((string) ($rej['fixture'] ?? '?')) ?>
+                    <span class="dim" style="display:block;font-size:10px"><?= e(trim((string) ($rej['market'] ?? '') . ' / ' . (string) ($rej['selection'] ?? ''), ' /')) ?></span>
+                  </td>
+                  <td><span class="badge b-red"><?= e((string) ($rej['reason'] ?? '—')) ?></span></td>
+                  <td class="dim"><?= ($rej['missing'] ?? []) === [] ? '<span class="dim">Nothing required was missing</span>' : e(implode(', ', (array) $rej['missing'])) ?></td>
+                  <td class="dim"><?= ($rej['available'] ?? []) === [] ? 'Unavailable' : e(implode(', ', (array) $rej['available'])) ?></td>
+                  <td class="num mono"><?= ($rej['dataQuality'] ?? null) === null ? 'Unavailable' : (int) $rej['dataQuality'] ?></td>
+                  <td class="num mono">
+                    <?= ($rej['minDataQuality'] ?? null) === null ? 'Unavailable' : (int) $rej['minDataQuality'] ?>
+                    <?php if (!empty($rej['dataTier'])): ?><span class="dim" style="display:block;font-size:10px"><?= e((string) $rej['dataTier']) ?> tier<?= ($rej['minConfidence'] ?? null) !== null ? ' · ' . e(number_format((float) $rej['minConfidence'], 0)) . '% conf' : '' ?></span><?php endif; ?>
+                  </td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
+        <?php if (!empty($heroDiag['rejectionAudit']['truncated'])): ?>
+          <p class="dim" style="margin:6px 0 0;font-size:11px">More rejections occurred than this ledger keeps; the counts in the funnel above are complete.</p>
+        <?php endif; ?>
+      </details>
     <?php endif; ?>
   </div>
 </div>

@@ -373,10 +373,12 @@ test('ticket engine: generation is bounded — deferred fixtures are reported, n
         assert_equals(3, $diag['generationCap']);
         assert_equals(47, $diag['fixturesDeferred'], 'the remaining fixtures in the bounded 50-match page are explicitly deferred');
         assert_equals(0, $run['rejections'], 'deferral is not a rejection');
-        // 3 fixtures × 5 candidate selections (HOME/DRAW/AWAY/OVER_1_5/BTTS
-        // YES) = 15 predictions — the companion prices (UNDER_1_5, BTTS NO)
-        // fed the overround but were never predicted.
-        assert_equals(15, $diag['predictionsGenerated']);
+        // 3 fixtures × 6 candidate selections (HOME/DRAW/AWAY/OVER_1_5/
+        // BTTS YES/BTTS NO) = 18 predictions. BTTS NO is a supported market
+        // in its own right (requirement #5), so a real price for it is
+        // evaluated; UNDER_1_5 stays a companion that only feeds the
+        // overround and is never predicted.
+        assert_equals(18, $diag['predictionsGenerated']);
         $predictedMatches = [];
         foreach ($repo->listPredictions([], 1000) as $p) $predictedMatches[(int) $p['match_id']] = true;
         assert_equals(3, count($predictedMatches), 'only capped fixtures generated predictions');
@@ -425,20 +427,20 @@ test('ticket engine: intelligent refresh reuses stored predictions unless the od
     fx_iv_seed_odds($repo, 'iv-reuse', $fixtures, 3 * 3600);
     $date = gmdate('Y-m-d', strtotime('+1 day'));
 
-    // Run 1: 4 fixtures × 5 candidates = 20 stored predictions.
+    // Run 1: 4 fixtures × 6 candidates = 24 stored predictions.
     $run1 = $service->runDaily($date, 'iv-reuse-r1');
-    assert_equals(20, $run1['predictionsRecorded']);
+    assert_equals(24, $run1['predictionsRecorded']);
     assert_equals(0, $run1['diagnostics']['predictionsReused']);
 
     // Run 2 — a different execution key (a later cron sweep, or paging):
     // same model, same odds, same timestamps → everything is REUSED.
     $run2 = $service->runDaily($date, 'iv-reuse-r2');
     assert_equals(0, $run2['predictionsRecorded'], 'paging/re-runs never duplicate a stored prediction');
-    assert_equals(20, $run2['diagnostics']['predictionsReused']);
-    assert_equals(20, count($repo->listPredictions([], 1000)), 'still exactly 20 rows');
+    assert_equals(24, $run2['diagnostics']['predictionsReused']);
+    assert_equals(24, count($repo->listPredictions([], 1000)), 'still exactly 24 rows');
 
     // Run 3 — one OVER_1_5 price genuinely moved: only that selection is
-    // regenerated; the other 19 keep their stored readings.
+    // regenerated; the other 23 keep their stored readings.
     $matchRow = null;
     foreach ($repo->matches as $m) if ($m['external_id'] === 'f0') $matchRow = $m;
     assert_not_null($matchRow);
@@ -446,8 +448,8 @@ test('ticket engine: intelligent refresh reuses stored predictions unless the od
     $repo->saveOdds((int) $matchRow['id'], (int) $providerRow['id'], ['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.85, 'observedAt' => gmdate('c')]);
     $run3 = $service->runDaily($date, 'iv-reuse-r3');
     assert_equals(1, $run3['predictionsRecorded'], 'changed odds force exactly one regeneration');
-    assert_equals(19, $run3['diagnostics']['predictionsReused']);
-    assert_equals(21, count($repo->listPredictions([], 1000)));
+    assert_equals(23, $run3['diagnostics']['predictionsReused']);
+    assert_equals(25, count($repo->listPredictions([], 1000)));
     $overs = array_values(array_filter($repo->listPredictions([], 1000), fn($p) => $p['market'] === 'TOTAL_GOALS' && $p['selection'] === 'OVER_1_5' && (int) $p['match_id'] === (int) $matchRow['id']));
     assert_equals(2, count($overs), 'the old reading is kept as history, the new one appended');
     // created_at has second granularity and both runs may share a second, so
@@ -486,8 +488,11 @@ test('ticket engine: top picks are ranked model-based readings with the disclaim
         $previousScore = $s; $previousQualified = $q;
         // Companions are prices, never picks; unknown selections never appear.
         assert_true(\AIWorkforce\Sports\PredictionEngine::isSupportedMarketSelection($pick['market'], $pick['selection']), 'only supported market:selection pairs are picked');
+        // A companion price (one that exists only to complete an overround)
+        // is never itself a pick. BTTS NO is NOT a companion — it is a
+        // supported market the model prices and settles in its own right.
+        assert_false(\AIWorkforce\Sports\PredictionEngine::isCompanionSelection($pick['market'], $pick['selection']), 'companion prices are never picked');
         assert_not_equals('UNDER_1_5', $pick['selection']);
-        assert_not_equals('NO', $pick['selection']);
         // Both fair prices present and distinct: model vs de-vigged market.
         assert_not_null($pick['windelsFairOdds']);
         assert_not_null($pick['marketFairOdds']);

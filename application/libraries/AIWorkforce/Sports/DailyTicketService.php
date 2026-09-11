@@ -498,6 +498,11 @@ class DailyTicketService
                     $minConfidence = (float) $config['min_confidence'];
                     $minQuality = (int) $config['min_data_quality'];
                     $minEv = (float) ($config['min_expected_value'] ?? 0.02);
+                    // The adaptive confidence ladder for this run, resolved
+                    // once from configuration and used by every gate below so
+                    // the same policy governs screening, the pipeline, the
+                    // optimizer and the reported funnel.
+                    $confidencePolicy = ConfidencePolicy::fromConfiguration($config);
                     $reasonProviders = [];  // primary reason → provider → count
                     $predictable = [];      // fixtures that passed every shared upstream gate
 
@@ -552,7 +557,13 @@ class DailyTicketService
                         // ── Stage 4: data quality (market-aware, transparent) ─
                         $markets = array_values(array_unique(array_map(fn($r) => $r['market'], $usableOdds)));
                         $reliability = (float) ($this->providerHealth($itemProvider)['reliability'] ?? 0);
-                        $qualityAssessment = $this->quality->assess($match, $this->qualityContext($contextFields, $oddsStage, $reliability, $markets, $minQuality));
+                        // The fixture-level floor is the lowest band the
+                        // ADAPTIVE policy still accepts, not the top tier's
+                        // requirement: a fixture with quality 78 is a GOOD-tier
+                        // candidate, and screening it out here would be exactly
+                        // the fixed-threshold bug requirement #1 removes.
+                        $adaptiveFloor = $confidencePolicy->minimumDataQuality();
+                        $qualityAssessment = $this->quality->assess($match, $this->qualityContext($contextFields, $oddsStage, $reliability, $markets, $adaptiveFloor));
                         $this->repo->saveQuality((int) $saved['id'], $qualityAssessment);
 
                         // ── Stage 5: prediction feasibility (shared upstream) ─
@@ -585,7 +596,7 @@ class DailyTicketService
                             $usableOdds = array_values(array_filter($usableOdds, fn(array $r): bool => in_array(strtoupper((string) $r['market']), $usableMarkets, true)));
                         }
                         $calibrationOk = !$requireCalibration || $calibration !== null;
-                        $qualityOk = ((int) ($qualityAssessment['score'] ?? 0) >= $minQuality && !empty($qualityAssessment['eligibleForTicket']));
+                        $qualityOk = ((int) ($qualityAssessment['score'] ?? 0) >= $adaptiveFloor && !empty($qualityAssessment['eligibleForTicket']));
                         if ($mandatoryOk && $calibrationOk && $qualityOk) {
                             $failedRequirement = null;
                             $primaryReason = null;
@@ -614,7 +625,10 @@ class DailyTicketService
                             'requirements' => [
                                 'MANDATORY_MODEL_DATA' => ['ok' => $mandatoryOk, 'missingMandatory' => $missingMandatory, 'mandatoryFields' => array_values((array) ($qualityAssessment['mandatoryFields'] ?? ['recentForm'])), 'marketFeasibility' => $marketFeasibility, 'usableMarkets' => $usableMarkets],
                                 'APPROVED_CALIBRATION' => ['ok' => $calibrationOk, 'required' => (bool) $requireCalibration, 'calibrationId' => $calibration['id'] ?? null, 'method' => $calibration['method'] ?? null, 'bootstrapState' => $funnel['calibrationBootstrap'] ?? null],
-                                'DATA_QUALITY_FLOOR' => ['ok' => $qualityOk, 'score' => (int) ($qualityAssessment['score'] ?? 0), 'minScore' => (int) $minQuality, 'band' => (string) ($qualityAssessment['band'] ?? 'UNKNOWN'), 'eligibleForTicket' => (bool) ($qualityAssessment['eligibleForTicket'] ?? false)],
+                                // Requirement #13: the score AND the minimum it
+                                // was judged against, plus the adaptive tier
+                                // that minimum came from.
+                                'DATA_QUALITY_FLOOR' => ['ok' => $qualityOk, 'score' => (int) ($qualityAssessment['score'] ?? 0), 'minScore' => (int) $adaptiveFloor, 'configuredMinScore' => (int) $minQuality, 'tier' => (string) ($confidencePolicy->tierFor((int) ($qualityAssessment['score'] ?? 0))['tier'] ?? ConfidencePolicy::TIER_REJECT), 'requiredConfidence' => $confidencePolicy->requiredConfidence((int) ($qualityAssessment['score'] ?? 0)), 'band' => (string) ($qualityAssessment['band'] ?? 'UNKNOWN'), 'eligibleForTicket' => (bool) ($qualityAssessment['eligibleForTicket'] ?? false)],
                             ],
                         ]);
                         if ($failedRequirement !== null) {
@@ -744,7 +758,7 @@ class DailyTicketService
                             $allCandidates[] = $candidate;
                             $funnel['marketsEvaluated']++;
 
-                            $this->collectCandidate($candidate, $candidates, $rejections, $rejectionSummary, $reasonProviders, (string) ($odds['oddsSource'] ?? $item['provider']));
+                            $this->collectCandidate($candidate, $candidates, $rejections, $rejectionSummary, $reasonProviders, (string) ($odds['oddsSource'] ?? $item['provider']), $funnel);
                         }
                     }
 
@@ -770,7 +784,7 @@ class DailyTicketService
                             $this->trackCandidateFunnel($candidate, $funnel, $minConfidence, $minEv);
                             $allCandidates[] = $candidate;
                             $funnel['marketsEvaluated']++;
-                            $this->collectCandidate($candidate, $candidates, $rejections, $rejectionSummary, $reasonProviders, (string) ($odds['oddsSource'] ?? $item['provider']));
+                            $this->collectCandidate($candidate, $candidates, $rejections, $rejectionSummary, $reasonProviders, (string) ($odds['oddsSource'] ?? $item['provider']), $funnel);
                             $evaluatedMarkets++;
                         }
                         if ($evaluatedMarkets === 0) {
@@ -790,8 +804,14 @@ class DailyTicketService
                             'targetOddsMin' => (float) $config['target_odds_min'],
                             'targetOddsMax' => (float) $config['target_odds_max'],
                             'maxSelections' => (int) $config['max_selections'],
-                            'minConfidence' => (float) $config['min_confidence'],
-                            'minDataQuality' => (int) $config['min_data_quality'],
+                            // ADAPTIVE, not fixed: each candidate is judged
+                            // against the requirement its own data quality
+                            // earned (the policy travels with the pool), so a
+                            // legitimate 71% on good data is a preferred leg
+                            // instead of a fallback-only one.
+                            'confidencePolicy' => $confidencePolicy,
+                            'minConfidence' => $confidencePolicy->highestConfidenceRequirement(),
+                            'minDataQuality' => $confidencePolicy->minimumDataQuality(),
                             'maxCorrelation' => $config['max_correlation'],
                             'allowedMarkets' => $config['allowed_markets'],
                             'allowedLeagues' => $config['allowed_leagues'],
@@ -942,9 +962,17 @@ class DailyTicketService
                     $funnel['topPicks'] = $this->topPicks($allCandidates);
                     $funnel['topPicksDisclaimer'] = self::TOP_PICKS_DISCLAIMER;
                     $fairConfig = $this->fairValueConfiguration();
+                    $funnel['confidencePolicy'] = $confidencePolicy->toArray();
                     $funnel['thresholds'] = [
-                        'minConfidence' => $minConfidence,
-                        'minDataQuality' => $minQuality,
+                        // The top tier's requirement — the bar at EXCELLENT
+                        // evidence. Candidates on thinner data are held to the
+                        // tier their quality earned (confidencePolicy above),
+                        // never to one fixed figure.
+                        'minConfidence' => $confidencePolicy->highestConfidenceRequirement(),
+                        'confidencePolicy' => $confidencePolicy->toArray(),
+                        'configuredMinConfidence' => $minConfidence,
+                        'minDataQuality' => $confidencePolicy->minimumDataQuality(),
+                        'configuredMinDataQuality' => $minQuality,
                         'minExpectedValue' => $minEv,
                         'oddsMaxAgeSeconds' => $this->oddsFreshness->maxAge(),
                         'targetOdds' => [(float) $config['target_odds_min'], (float) $config['target_odds_max']],
@@ -1231,7 +1259,7 @@ class DailyTicketService
      */
     private const SOFT_REJECTION_REASONS = ['LOW_CONFIDENCE', 'CONFIDENCE_UNMEASURED', 'LOW_DATA_QUALITY'];
 
-    private function collectCandidate(array $candidate, array &$candidates, int &$rejections, array &$rejectionSummary, array &$reasonProviders, string $provider): void
+    private function collectCandidate(array $candidate, array &$candidates, int &$rejections, array &$rejectionSummary, array &$reasonProviders, string $provider, ?array &$funnel = null): void
     {
         if (($candidate['decision'] ?? '') !== 'REJECTED') {
             $candidates[] = $candidate;
@@ -1252,6 +1280,86 @@ class DailyTicketService
             ? (string) $candidate['primaryReason']
             : $hard[0];
         $this->countRejection($rejectionSummary, $primary, $reasonProviders, $provider);
+        if ($funnel !== null) $this->recordRejectionAudit($funnel, $candidate, $primary, $provider);
+    }
+
+    /**
+     * One auditable row per hard-rejected candidate (requirement #13):
+     * Reason, Missing, Available, Data Quality and the minimum allowed.
+     * Rows are capped so a 200-fixture day cannot bloat the stored
+     * diagnostics; the COUNT in topRejectionReasons is never capped.
+     */
+    private function recordRejectionAudit(array &$funnel, array $candidate, string $primary, string $provider): void
+    {
+        $ledger = &$funnel['rejectionAudit'];
+        if (count($ledger['rows']) >= (int) $ledger['limit']) { $ledger['truncated'] = true; unset($ledger); return; }
+        $detail = is_array($candidate['rejectionDetail'] ?? null) ? $candidate['rejectionDetail'] : [];
+        $ledger['rows'][] = [
+            'fixture' => trim((string) ($candidate['match']['homeTeam'] ?? '?') . ' vs ' . (string) ($candidate['match']['awayTeam'] ?? '?')),
+            'matchId' => $candidate['matchId'] ?? null,
+            'competition' => $candidate['match']['competition'] ?? null,
+            'kickoff' => $candidate['match']['kickoff'] ?? null,
+            'market' => $candidate['market'] ?? null,
+            'selection' => $candidate['selection'] ?? null,
+            'provider' => $provider,
+            'reason' => $primary,
+            'allReasons' => array_values((array) ($detail['allReasons'] ?? [])),
+            // The two lists an operator needs side by side to tell "thin data"
+            // from "no data" — capped per row, never summarised away.
+            'missing' => array_slice(array_values((array) ($detail['missingFields'] ?? [])), 0, 20),
+            'available' => array_slice(array_values((array) ($detail['availableFields'] ?? [])), 0, 20),
+            'dataQuality' => $detail['dataQuality'] ?? null,
+            'minDataQuality' => $detail['minDataQuality'] ?? null,
+            'confidence' => $detail['confidence'] ?? null,
+            'minConfidence' => $detail['minConfidence'] ?? null,
+            'dataTier' => $detail['dataTier'] ?? null,
+            'explanation' => $detail['policyExplanation'] ?? null,
+        ];
+        unset($ledger);
+    }
+
+    /**
+     * Confidence distribution buckets (requirement #14). Fixed, readable
+     * bands so "average 71%" can never hide a bimodal day.
+     */
+    public const CONFIDENCE_BUCKETS = [
+        ['label' => '>=85', 'min' => 85.0, 'max' => 100.01],
+        ['label' => '75-84', 'min' => 75.0, 'max' => 85.0],
+        ['label' => '70-74', 'min' => 70.0, 'max' => 75.0],
+        ['label' => '65-69', 'min' => 65.0, 'max' => 70.0],
+        ['label' => '60-64', 'min' => 60.0, 'max' => 65.0],
+        ['label' => '<60', 'min' => -0.01, 'max' => 60.0],
+    ];
+
+    /** Data-quality distribution buckets, aligned to the adaptive tiers. */
+    public const DATA_QUALITY_BUCKETS = [
+        ['label' => '>=85 (EXCELLENT)', 'min' => 85.0, 'max' => 100.01],
+        ['label' => '75-84 (GOOD)', 'min' => 75.0, 'max' => 85.0],
+        ['label' => '65-74 (LIMITED)', 'min' => 65.0, 'max' => 75.0],
+        ['label' => '<65 (REJECT)', 'min' => -0.01, 'max' => 65.0],
+    ];
+
+    /** Empty bucket map, so a zero band is reported as 0 rather than absent. */
+    private static function emptyBuckets(array $buckets): array
+    {
+        $out = [];
+        foreach ($buckets as $bucket) $out[$bucket['label']] = 0;
+        $out['unmeasured'] = 0;
+        return $out;
+    }
+
+    /** Increment the band a score falls into (null → 'unmeasured'). */
+    private static function bucket(array &$counts, array $buckets, $score): void
+    {
+        if (!is_numeric($score)) { $counts['unmeasured'] = ($counts['unmeasured'] ?? 0) + 1; return; }
+        $value = (float) $score;
+        foreach ($buckets as $bucket) {
+            if ($value >= $bucket['min'] && $value < $bucket['max']) {
+                $counts[$bucket['label']] = ($counts[$bucket['label']] ?? 0) + 1;
+                return;
+            }
+        }
+        $counts['unmeasured'] = ($counts['unmeasured'] ?? 0) + 1;
     }
 
     /** Funnel counters for one evaluated candidate (per market:selection). */
@@ -1259,7 +1367,32 @@ class DailyTicketService
     {
         $ready = ($candidate['prediction']['decision'] ?? '') === 'PREDICTION_READY';
         if ($ready) $funnel['sufficientDataCandidates']++;
-        if (is_numeric($candidate['confidence']['confidence'] ?? null) && (float) $candidate['confidence']['confidence'] >= $minConfidence) $funnel['confidenceQualifiedCandidates']++;
+
+        // Requirement #14: the real spread of confidence and data quality
+        // behind the day, and the average of the confidences actually
+        // measured (never of substituted zeros).
+        $measured = is_numeric($candidate['confidence']['confidence'] ?? null) ? (float) $candidate['confidence']['confidence'] : null;
+        self::bucket($funnel['confidenceDistribution'], self::CONFIDENCE_BUCKETS, $measured);
+        self::bucket($funnel['dataQualityDistribution'], self::DATA_QUALITY_BUCKETS, $candidate['dataQuality']['score'] ?? ($candidate['quality']['score'] ?? null));
+        if ($measured !== null) {
+            $funnel['confidenceSum'] = round(((float) ($funnel['confidenceSum'] ?? 0)) + $measured, 4);
+            $funnel['confidenceMeasuredCount'] = (int) ($funnel['confidenceMeasuredCount'] ?? 0) + 1;
+        }
+        // The adaptive requirement this candidate actually faced, tallied by
+        // tier so the funnel shows WHICH bar each leg had to clear.
+        $tier = (string) ($candidate['confidencePolicy']['tier'] ?? 'UNKNOWN');
+        $funnel['candidatesByDataTier'][$tier] = ($funnel['candidatesByDataTier'][$tier] ?? 0) + 1;
+        if (!empty($candidate['confidencePolicy']) && empty($candidate['confidencePolicy']['marketAllowed'])) {
+            $funnel['marketsRestrictedByDataTier']++;
+        }
+
+        // Confidence qualification is judged against the candidate's OWN
+        // adaptive requirement when one was resolved, falling back to the
+        // configured floor for candidates that never reached the stage.
+        $required = is_numeric($candidate['confidencePolicy']['requiredConfidence'] ?? null)
+            ? (float) $candidate['confidencePolicy']['requiredConfidence']
+            : $minConfidence;
+        if ($measured !== null && $measured + 1e-9 >= $required && !empty($candidate['confidencePolicy']['marketAllowed'] ?? true)) $funnel['confidenceQualifiedCandidates']++;
         if (!empty($candidate['value']['qualified']) && (float) ($candidate['value']['expectedValue'] ?? -1) > 0) $funnel['positiveValueCandidates']++;
         if (!empty($candidate['value']['qualified']) && (float) ($candidate['value']['expectedValue'] ?? -1) >= $minEv) $funnel['minEdgeMetCandidates']++;
         $riskClass = (string) ($candidate['risk']['classification'] ?? 'REJECTED');
@@ -1320,6 +1453,18 @@ class DailyTicketService
             // market:selection candidates scored across the full stored pool.
             'marketsEvaluated' => 0,
             'sufficientDataCandidates' => 0,
+            // Requirement #14: the day's real spread, not just its averages.
+            'confidenceDistribution' => self::emptyBuckets(self::CONFIDENCE_BUCKETS),
+            'dataQualityDistribution' => self::emptyBuckets(self::DATA_QUALITY_BUCKETS),
+            'confidenceSum' => 0.0,
+            'confidenceMeasuredCount' => 0,
+            'averageConfidence' => null,
+            // How many candidates faced each adaptive tier's requirement, and
+            // how many were held back because their market is not permitted
+            // at the tier their evidence earned.
+            'candidatesByDataTier' => [],
+            'marketsRestrictedByDataTier' => 0,
+            'confidencePolicy' => null,
             'confidenceQualifiedCandidates' => 0,
             'positiveValueCandidates' => 0,
             'minEdgeMetCandidates' => 0,
@@ -1345,6 +1490,10 @@ class DailyTicketService
             'oddsProvidersNoCoverage' => [],
             'topRejectionReasons' => [],
             'rejectionReasonsByProvider' => [],
+            // Requirement #13: one auditable row per hard-rejected candidate —
+            // Reason, Missing, Available, Data Quality and the minimum allowed.
+            // Rows are capped; the counts above never are.
+            'rejectionAudit' => ['limit' => 100, 'truncated' => false, 'rows' => []],
             'topPicks' => [],
             'topPicksDisclaimer' => self::TOP_PICKS_DISCLAIMER,
             'thresholds' => [],
@@ -1358,6 +1507,12 @@ class DailyTicketService
         $funnel['fixturesEvaluated'] = $evaluated;
         $funnel['predictionsRecorded'] = $recorded;
         $funnel['totalRejections'] = $rejections;
+        // The average of the confidences that were actually MEASURED. With no
+        // measured candidate it stays null — an average of nothing is not 0.
+        $measuredCount = (int) ($funnel['confidenceMeasuredCount'] ?? 0);
+        $funnel['averageConfidence'] = $measuredCount > 0
+            ? round(((float) $funnel['confidenceSum']) / $measuredCount, 2)
+            : null;
         return $funnel;
     }
 

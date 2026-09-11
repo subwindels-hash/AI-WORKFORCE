@@ -151,6 +151,13 @@ class DataQualityEngine
             'missingMandatory' => $missingMandatory,
             'missingOptional' => $missingOptional,
             'missing' => array_values(array_unique(array_merge($fixtureMissing, $missingMandatory, $missing))),
+            // Requirement #13: a rejection must show what WAS there as well as
+            // what was not. Without this an operator reading "Missing: H2H,
+            // injuries" cannot tell whether the fixture had solid form data or
+            // nothing at all — the two demand completely different fixes.
+            'available' => array_values(array_map(fn($c) => $c['field'], array_filter($checks, fn($c) => !empty($c['ok'])))),
+            'availableMandatory' => array_values(array_map(fn($c) => $c['field'], array_filter($checks, fn($c) => !empty($c['ok']) && $c['kind'] === 'mandatory'))),
+            'availableOptional' => array_values(array_map(fn($c) => $c['field'], array_filter($checks, fn($c) => !empty($c['ok']) && $c['kind'] === 'optional'))),
             'freshnessScore' => $freshnessScore,
             'providerReliabilityScore' => (int) round(100 * $reliability),
             'minDataQuality' => $minQuality,
