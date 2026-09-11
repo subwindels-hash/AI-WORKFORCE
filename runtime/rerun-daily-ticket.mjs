@@ -16,6 +16,9 @@
  *
  *   node runtime/rerun-daily-ticket.mjs                 — today (UTC)
  *   node runtime/rerun-daily-ticket.mjs 2026-09-10      — a specific date
+ *   node runtime/rerun-daily-ticket.mjs 2026-09-10 --force
+ *        — invalidate the day's ACTIVE candidates (old pass predictions,
+ *          pending ticket, daily slot, unquotable odds) before regenerating
  */
 import path from 'node:path';
 import fs from 'node:fs';
@@ -24,6 +27,7 @@ import { PHP, ProcessIdAllocator } from '@php-wasm/universal';
 
 const APP_ROOT = path.resolve(new URL('..', import.meta.url).pathname);
 const DATE = /^\d{4}-\d{2}-\d{2}$/.test(process.argv[2] ?? '') ? process.argv[2] : new Date().toISOString().slice(0, 10);
+const FORCE = process.argv.includes('--force') ? ', \'--force\'' : '';
 const DB_PATH = path.join(APP_ROOT, 'application', 'data', 'ai_workforce.sqlite');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
@@ -75,8 +79,8 @@ define('STDIN', fopen('php://stdin', 'r'));
 define('STDOUT', fopen('php://stdout', 'w'));
 define('STDERR', fopen('php://stderr', 'w'));
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE & ~E_WARNING);
-$_SERVER['argv'] = ['index.php', 'tools', 'sports_cron', 'ticket', '${DATE}'];
-$_SERVER['argc'] = 5;
+$_SERVER['argv'] = ['index.php', 'tools', 'sports_cron', 'ticket', '${DATE}'${FORCE}];
+$_SERVER['argc'] = count($_SERVER['argv']);
 $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
 require '${root}/index.php';
 `);

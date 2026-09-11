@@ -11,6 +11,15 @@ namespace AIWorkforce\Sports;
  * same candidate. Odds freshness is likewise gated upstream (before the
  * prediction is generated), so it is not repeated as a risk reason.
  *
+ * A leg that passed every configured gate (quality floor, minimum edge,
+ * liquidity, suspension) is at most MEDIUM risk and remains APPROVED: the
+ * ticket optimizer simply ranks LOW-risk legs ahead of MEDIUM. HIGH risk is
+ * never approved (only the explicit AGGRESSIVE level may take it), so a
+ * missing optional enrichment — which lowers the quality score a few points
+ * from 90 to 89 without failing the 80 floor — can no longer kill an
+ * otherwise qualified day. Explicit risk signals (suspension, insufficient
+ * liquidity, volatile price movement) still reject.
+ *
  * $context may carry:
  *   marketSuspended (bool), liquidity (float), oddsMovement (float,
  *   absolute change from opening odds)
@@ -32,21 +41,18 @@ class RiskEngine
         if ($minLiquidity !== null && isset($context['liquidity']) && is_numeric($context['liquidity']) && (float) $context['liquidity'] < (float) $minLiquidity) $reasons[] = 'INSUFFICIENT_LIQUIDITY';
         if ($reasons) return ['classification' => 'REJECTED', 'approved' => false, 'reasons' => array_values(array_unique($reasons))];
         $risk = ($quality['score'] >= 90 && ($value['expectedValue'] ?? 0) >= .08) ? 'LOW' : (($quality['score'] >= 80) ? 'MEDIUM' : 'HIGH');
-        // A CONSERVATIVE risk level only approves LOW risk: a MEDIUM leg is
-        // upgraded to HIGH, so the pipeline and the optimizer reject it like
-        // any other high-risk candidate. Callers without a risk_level keep
-        // the legacy behaviour (MEDIUM approved).
-        $riskLevel = strtoupper((string) ($config['risk_level'] ?? $config['riskLevel'] ?? ''));
-        if ($riskLevel === 'CONSERVATIVE' && $risk === 'MEDIUM') {
-            $risk = 'HIGH';
-            $reasons[] = 'MEDIUM_RISK_REJECTED_CONSERVATIVE';
-        }
-        // Volatile market movement upgrades MEDIUM to HIGH (never downgrades).
+        // Volatile market movement upgrades any class to HIGH (never downgrades).
         $order = ['LOW' => 0, 'MEDIUM' => 1, 'HIGH' => 2];
         if (isset($context['oddsMovement']) && is_numeric($context['oddsMovement']) && abs((float) $context['oddsMovement']) > self::MAX_ODDS_MOVEMENT) {
             if ($order[$risk] < $order['HIGH']) $risk = 'HIGH';
             $reasons[] = 'ODDS_VOLATILE';
         }
-        return ['classification' => $risk, 'approved' => $risk !== 'HIGH', 'reasons' => array_values(array_unique($reasons))];
+        // LOW and MEDIUM legs passed every gate and are approved (the
+        // optimizer ranks LOW first). HIGH risk is blocked under the default
+        // CONSERVATIVE and MODERATE levels; only an explicit AGGRESSIVE
+        // operator level may take a high-risk leg, never silently.
+        $riskLevel = strtoupper((string) ($config['risk_level'] ?? $config['riskLevel'] ?? ''));
+        $approved = $risk !== 'HIGH' || $riskLevel === 'AGGRESSIVE';
+        return ['classification' => $risk, 'approved' => $approved, 'reasons' => array_values(array_unique($reasons))];
     }
 }

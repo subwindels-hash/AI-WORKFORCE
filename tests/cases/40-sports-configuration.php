@@ -11,8 +11,9 @@ test('configuration returns safe defaults before any admin change', function () 
     [, , $svc] = fx_config_audit();
     $c = $svc->active();
     assert_equals('USER_APPROVAL_REQUIRED', $c['engine_mode']);
-    assert_equals(30.0, (float) $c['min_confidence']);
-    assert_equals(60, (int) $c['min_data_quality']);
+    // Qualified-ticket policy defaults: 75%+ confidence, 80+ quality.
+    assert_equals(75.0, (float) $c['min_confidence']);
+    assert_equals(80, (int) $c['min_data_quality']);
     assert_equals(['MATCH_RESULT', 'TOTAL_GOALS', 'BTTS', 'DOUBLE_CHANCE'], $c['allowed_markets']);
     assert_equals('RESTITUTE_ODDS', $c['void_policy']);
 });

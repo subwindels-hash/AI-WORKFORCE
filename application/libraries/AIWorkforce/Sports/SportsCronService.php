@@ -26,13 +26,13 @@ class SportsCronService
         private SportsIntelligence $sports
     ) {}
 
-    public function runAll(?string $date = null): array
+    public function runAll(?string $date = null, array $options = []): array
     {
         $date = $date ?? gmdate('Y-m-d');
         $summary = [];
         foreach (self::JOBS as $job) {
             try {
-                $summary[$job] = $this->run($job, $date);
+                $summary[$job] = $this->run($job, $date, $options);
             } catch (\Throwable $e) {
                 $summary[$job] = ['status' => 'FAILED', 'error' => mb_substr($e->getMessage(), 0, 300)];
                 $this->audit->emit('SPORTS_JOB_FAILED', "Sports job {$job} failed: " . $e->getMessage(), ['job' => $job]);
@@ -42,7 +42,7 @@ class SportsCronService
         return $summary;
     }
 
-    public function run(string $job, ?string $date = null): array
+    public function run(string $job, ?string $date = null, array $options = []): array
     {
         $date = $date ?? gmdate('Y-m-d');
         return match ($job) {
@@ -51,7 +51,7 @@ class SportsCronService
             'live' => $this->jobLive($date),
             'results' => $this->jobResults($date),
             'quality' => $this->jobQuality($date),
-            'ticket' => $this->jobTicket($date),
+            'ticket' => $this->jobTicket($date, $options),
             'settlement' => $this->jobSettlement($date),
             'performance' => $this->jobPerformance($date),
             'monitoring' => $this->jobMonitoring($date),
@@ -201,7 +201,7 @@ class SportsCronService
         return ['status' => 'COMPLETED', 'matches' => count($matches), 'updated' => $updated, 'errors' => $errors];
     }
 
-    private function jobTicket(string $date): array
+    private function jobTicket(string $date, array $options = []): array
     {
         // Skip the run outright when 0/N providers are operational: it would
         // only re-prove the outage (and, for a quota-dead feed, spend nothing
@@ -213,8 +213,8 @@ class SportsCronService
             $this->audit->emit('SPORTS_DAILY_TICKET_BLOCKED', 'Daily ticket run ' . $date . ' skipped: 0/' . $readiness['total'] . ' providers operational', ['date' => $date, 'providerStatuses' => $ledger]);
             return ['status' => 'DATA_UNAVAILABLE', 'ticketId' => null, 'message' => 'prediction engine BLOCKED — 0/' . $readiness['total'] . ' sports data providers operational', 'providerStatuses' => $ledger, 'errors' => [SportsProviderManager::summarize('fixtures', $ledger)]];
         }
-        $result = $this->sports->dailyTickets->runDaily($date);
-        return ['status' => $result['status'], 'ticketId' => $result['ticketId'], 'message' => $result['message'], 'providerStatuses' => $result['providerStatuses'] ?? [], 'errors' => $result['errors']];
+        $result = $this->sports->dailyTickets->runDaily($date, null, !empty($options['force']) ? ['force' => true] : []);
+        return ['status' => $result['status'], 'ticketId' => $result['ticketId'], 'message' => $result['message'], 'invalidated' => $result['invalidated'] ?? null, 'providerStatuses' => $result['providerStatuses'] ?? [], 'errors' => $result['errors']];
     }
 
     private function jobSettlement(string $date): array

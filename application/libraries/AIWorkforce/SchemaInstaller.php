@@ -191,6 +191,11 @@ final class SchemaInstaller
             $pick('ALTER TABLE sports_ticket_selections ADD COLUMN kickoff_time TEXT', 'ALTER TABLE sports_ticket_selections ADD COLUMN kickoff_time VARCHAR(32) NULL', 'ALTER TABLE sports_ticket_selections ADD COLUMN IF NOT EXISTS kickoff_time VARCHAR(32)'),
             $pick('ALTER TABLE sports_ticket_selections ADD COLUMN confidence REAL', 'ALTER TABLE sports_ticket_selections ADD COLUMN confidence DECIMAL(10,4) NULL', 'ALTER TABLE sports_ticket_selections ADD COLUMN IF NOT EXISTS confidence DECIMAL(10,4)'),
             $pick('ALTER TABLE sports_ticket_selections ADD COLUMN data_quality REAL', 'ALTER TABLE sports_ticket_selections ADD COLUMN data_quality DECIMAL(10,4) NULL', 'ALTER TABLE sports_ticket_selections ADD COLUMN IF NOT EXISTS data_quality DECIMAL(10,4)'),
+            // Odds provenance on the leg itself: which feed supplied the real
+            // bookmaker price, and the model's own fair odds kept beside it so
+            // a reader can never mistake one number for the other.
+            $pick('ALTER TABLE sports_ticket_selections ADD COLUMN odds_source TEXT', 'ALTER TABLE sports_ticket_selections ADD COLUMN odds_source VARCHAR(32) NULL', 'ALTER TABLE sports_ticket_selections ADD COLUMN IF NOT EXISTS odds_source VARCHAR(32)'),
+            $pick('ALTER TABLE sports_ticket_selections ADD COLUMN fair_odds REAL', 'ALTER TABLE sports_ticket_selections ADD COLUMN fair_odds DECIMAL(14,6) NULL', 'ALTER TABLE sports_ticket_selections ADD COLUMN IF NOT EXISTS fair_odds DECIMAL(14,6)'),
             $pick('ALTER TABLE sports_predictions ADD COLUMN odds REAL', 'ALTER TABLE sports_predictions ADD COLUMN odds DECIMAL(14,6) NULL', 'ALTER TABLE sports_predictions ADD COLUMN IF NOT EXISTS odds DECIMAL(14,6)'),
             $pick('ALTER TABLE sports_predictions ADD COLUMN odds_timestamp TEXT', 'ALTER TABLE sports_predictions ADD COLUMN odds_timestamp VARCHAR(32) NULL', 'ALTER TABLE sports_predictions ADD COLUMN IF NOT EXISTS odds_timestamp VARCHAR(32)'),
             $pick('ALTER TABLE lottery_sync_runs ADD COLUMN payload TEXT', 'ALTER TABLE lottery_sync_runs ADD COLUMN payload MEDIUMTEXT NULL', 'ALTER TABLE lottery_sync_runs ADD COLUMN IF NOT EXISTS payload TEXT'),

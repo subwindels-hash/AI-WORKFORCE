@@ -57,7 +57,11 @@ class SportsDataNormalizer
             'leagueId' => isset($raw['leagueId']) ? trim((string) $raw['leagueId']) : '',
             'kickoff' => $kickoff, 'status' => $status,
             'timezone' => isset($raw['timezone']) && trim((string) $raw['timezone']) !== '' ? trim((string) $raw['timezone']) : null,
-            'sourceTimestamp' => self::timestamp($raw['sourceTimestamp'] ?? null),
+            // A fixture row without a provider stamp is still a real fixture —
+            // the persistence layer stamps receipt time. ODDS stamps are
+            // different: a price must prove its own age, so odds() keeps
+            // observedAt mandatory.
+            'sourceTimestamp' => self::optionalTimestamp($raw['sourceTimestamp'] ?? null),
             'sourceStatus' => $sourceStatus !== '' ? $sourceStatus : $status,
             'simulated' => !empty($raw['simulated']),
             'context' => self::context($raw['context'] ?? null),
@@ -202,6 +206,19 @@ class SportsDataNormalizer
         // Never substitute the local clock: an untimestamped provider quote
         // cannot be proven fresh and must not enter a prediction.
         if ($value === null || $value === '') throw new \InvalidArgumentException('sourceTimestamp is required');
+        try { return (new \DateTimeImmutable((string) $value))->setTimezone(new \DateTimeZone('UTC'))->format('c'); }
+        catch (\Throwable $e) { throw new \InvalidArgumentException('sourceTimestamp is invalid'); }
+    }
+
+    /**
+     * Fixture/source stamps are optional: a provider that sends a fixture
+     * list without per-row update times still supplied real fixtures, and the
+     * repository stamps receipt time. A present-but-unparseable stamp is
+     * invalid data and rejected (never silently replaced with the clock).
+     */
+    private static function optionalTimestamp($value): ?string
+    {
+        if ($value === null || $value === '') return null;
         try { return (new \DateTimeImmutable((string) $value))->setTimezone(new \DateTimeZone('UTC'))->format('c'); }
         catch (\Throwable $e) { throw new \InvalidArgumentException('sourceTimestamp is invalid'); }
     }

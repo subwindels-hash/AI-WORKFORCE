@@ -355,10 +355,10 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                   <th style="padding:4px 6px">#</th>
                   <th style="padding:4px 6px">Match</th>
                   <th style="padding:4px 6px">Pick</th>
-                  <th style="padding:4px 6px" class="mono">Score</th>
-                  <th style="padding:4px 6px" class="mono">WINDELS</th>
-                  <th style="padding:4px 6px" class="mono">Odds</th>
-                  <th style="padding:4px 6px" class="mono">Fair</th>
+                  <th style="padding:4px 6px" class="mono" title="The WINDELS Intelligence Score — evidence quality, never the market price">Intelligence</th>
+                  <th style="padding:4px 6px" class="mono" title="The WINDELS model probability — never the bookmaker odds">WINDELS probability</th>
+                  <th style="padding:4px 6px" class="mono" title="The real bookmaker price, never a WINDELS figure">Market odds</th>
+                  <th style="padding:4px 6px" class="mono" title="WINDELS fair odds = 1 / model probability">WINDELS fair odds</th>
                   <th style="padding:4px 6px" class="mono">Value</th>
                   <th style="padding:4px 6px" class="mono">DQ</th>
                   <th style="padding:4px 6px">Movement</th>
@@ -391,7 +391,7 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                     <td style="padding:4px 6px">
                       <?php $movement = (string) ($pick['stabilityState'] ?? ''); $movementWhy = (string) ($pick['stabilityReason'] ?? ''); ?>
                       <?php if ($movement === \AIWorkforce\Football\StabilityMonitor::UNSTABLE): ?>
-                        <span class="down" title="Excluded from the list when the movement crosses the unstable threshold; shown here only if the row was ranked before that check.">unstable</span>
+                        <span class="down" style="font-size:10px" title="Excluded from the list when the movement crosses the unstable threshold; shown here only if the row was ranked before that check.">Prediction unstable — significant model movement</span>
                       <?php elseif ($movement === \AIWorkforce\Football\StabilityMonitor::MOVED): ?>
                         <span class="dim">moved</span>
                       <?php elseif ($movement === \AIWorkforce\Football\StabilityMonitor::STABLE): ?>
@@ -462,7 +462,7 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                   if ($rowPageId <= 0) continue; // Contract: fixtureDatabaseId never 0 — never produce /football/match/0
                   ?>
                   <tr style="border-bottom:1px solid var(--line);background:rgba(109,40,217,.04)">
-                    <td style="padding:5px" class="mono"><a href="/football/match/<?= $rowPageId ?>" style="font-weight:700"><?= $rowPageId ?></a><div class="dim" style="font-size:9px"><?= e((string)($row['matchId']??'')) ?></div></td>
+                    <td style="padding:5px" class="mono"><div class="dim" style="font-size:9px">Match ID: <?= $rowPageId > 0 ? $rowPageId : '—' ?></div><a href="/football/match/<?= $rowPageId ?>" style="font-weight:700"><?= $rowPageId ?></a><div class="dim" style="font-size:9px"><?= e((string)($row['matchId']??'')) ?></div></td>
                     <td style="padding:5px"><?= e($rowLeague) ?></td>
                     <td style="padding:5px"><b><?= e((string)($row['homeTeam']??'—')) ?></b> vs <b><?= e((string)($row['awayTeam']??'—')) ?></b></td>
                     <td style="padding:5px" class="mono"><?= e((string)($row['kickoffLabel']??$row['kickoff']??'—')) ?><div class="dim" style="font-size:9px"><?= e((string)($row['kickoffAt']??$row['kickoff']??'')) ?></div></td>

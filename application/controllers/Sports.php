@@ -123,6 +123,9 @@ class Sports extends App_Controller
         @set_time_limit(180);
         $date = trim((string) $this->input->post('date'));
         if ($date === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) $date = gmdate('Y-m-d');
+        // force=1 clears the day's ACTIVE candidate state (no old pass odds can
+        // be carried forward) before a clean regeneration runs.
+        $force = (bool) $this->input->post('force');
         $sports = $this->platform->sports;
         if (!$sports->providers->configured()) {
             $this->flash('error', 'No sports provider is registered. Add a provider key (API-Football, TheSportsDB or SportMonks) via Admin → API or the WINDELS_*_KEY variables in .env, then sync data first.');
@@ -130,7 +133,12 @@ class Sports extends App_Controller
             return;
         }
         try {
-            $result = $sports->dailyTickets->runDaily($date);
+            $result = $sports->dailyTickets->runDaily($date, null, $force ? ['force' => true] : []);
+            if (($result['status'] ?? '') === 'RESET_FAILED') {
+                $this->flash('error', $result['message'] ?? 'Candidate reset failed');
+                redirect('/sports?date=' . urlencode($date));
+                return;
+            }
         } catch (Throwable $e) {
             $this->flash('error', 'Odds prediction ticket generation failed: ' . mb_substr($e->getMessage(), 0, 300));
             redirect('/sports');
@@ -197,6 +205,32 @@ class Sports extends App_Controller
         }
         // Land back on the day that was generated for, not on today.
         redirect('/sports?date=' . $date);
+    }
+
+    /**
+     * Invalidate the day's ACTIVE odds-prediction candidate state without
+     * regenerating (sports.manage): deletes un-settled predictions of upcoming
+     * fixtures, supersedes the PENDING ticket and clears the daily slot, and
+     * purges unquotable odds rows. Settled/historical records and verified
+     * results are preserved. The next generation then starts from a clean
+     * pool — an old pass can never leak through via cached candidates.
+     */
+    public function reset_candidates()
+    {
+        if ($this->input->method(true) !== 'POST') { redirect('/sports'); return; }
+        if (!$this->requireSportsPermission('sports.manage', 'reset active candidates')) return;
+        $date = trim((string) $this->input->post('date'));
+        if ($date === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) $date = gmdate('Y-m-d');
+        $to = gmdate('Y-m-d', strtotime($date . ' +1 day'));
+        try {
+            $counts = $this->platform->model->sports->invalidateActiveCandidates($date, $to, true);
+            $this->flash('notice', sprintf(
+                'Active candidate state cleared for %s..%s: %d predictions removed, %d pending ticket(s) superseded (%d legs), %d daily slot(s) cleared, %d unquotable odds row(s) purged. Settled/historical records preserved.',
+                $date, $to, $counts['predictionsDeleted'], $counts['ticketsSuperseded'], $counts['selectionsDeleted'], $counts['dailySlotsCleared'], $counts['invalidOddsDeleted']));
+        } catch (Throwable $e) {
+            $this->flash('error', 'Active candidate reset failed: ' . mb_substr($e->getMessage(), 0, 300));
+        }
+        redirect('/sports?date=' . urlencode($date));
     }
 
     /**

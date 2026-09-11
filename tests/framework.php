@@ -411,6 +411,68 @@ class SportsRepositoryStub implements \AIWorkforce\Persistence\SportsRepository
         return array_slice($rows, 0, $limit);
     }
     public function updateTicket(string $id, array $patch): void { foreach ($this->tickets as &$t) if ($t['id'] === $id) $t = array_merge($t, $patch); }
+    public function invalidateActiveCandidates(string $fromDate, string $toDate, bool $purgeInvalidOdds = true): array
+    {
+        $upcoming = [];
+        foreach ($this->matches as $m) {
+            $day = substr((string) ($m['kickoff_at'] ?? ''), 0, 10);
+            if ($day >= $fromDate && $day <= $toDate && !in_array((string) ($m['status'] ?? ''), ['FINISHED', 'POSTPONED', 'CANCELLED'], true)) $upcoming[(int) $m['id']] = true;
+        }
+        $before = count($this->predictions);
+        $this->predictions = array_values(array_filter($this->predictions, fn($p) => !isset($upcoming[(int) $p['match_id']])));
+        $predictionsDeleted = $before - count($this->predictions);
+        $ticketsSuperseded = 0; $selectionsDeleted = 0;
+        foreach ($this->tickets as &$t) {
+            if (($t['approval_status'] ?? '') !== 'PENDING_USER_APPROVAL' || ($t['settlement_status'] ?? '') !== 'PENDING') continue;
+            $touches = false;
+            foreach ($this->ticketSelections as $s) if ($s['ticket_id'] === $t['id'] && isset($upcoming[(int) $s['match_id']])) $touches = true;
+            if (!$touches) continue;
+            $beforeSel = count($this->ticketSelections);
+            $this->ticketSelections = array_values(array_filter($this->ticketSelections, fn($s) => $s['ticket_id'] !== $t['id']));
+            $selectionsDeleted += $beforeSel - count($this->ticketSelections);
+            $t = array_merge($t, ['status' => 'CANCELLED', 'approval_status' => 'SUPERSEDED', 'settlement_status' => 'SUPERSEDED', 'reason' => 'Superseded by a fresh daily-ticket generation (active candidate reset)']);
+            $ticketsSuperseded++;
+        }
+        unset($t);
+        $invalidOddsDeleted = 0;
+        if ($purgeInvalidOdds) {
+            $beforeOdds = count($this->odds);
+            $this->odds = array_values(array_filter($this->odds, function ($o) use ($upcoming, &$invalidOddsDeleted) {
+                if (!isset($upcoming[(int) $o['match_id']])) return true;
+                if (\AIWorkforce\Sports\OddsBounds::validDecimalOdds($o['decimal_odds'] ?? null, (string) ($o['market'] ?? ''))) return true;
+                $invalidOddsDeleted++;
+                return false;
+            }));
+        }
+        $beforeDaily = count($this->dailyTickets);
+        $this->dailyTickets = array_values(array_filter($this->dailyTickets, fn($d) => (string) ($d['date'] ?? '') < $fromDate || (string) ($d['date'] ?? '') > $toDate));
+        $dailySlotsCleared = $beforeDaily - count($this->dailyTickets);
+        return ['predictionsDeleted' => $predictionsDeleted, 'ticketsSuperseded' => $ticketsSuperseded, 'selectionsDeleted' => $selectionsDeleted, 'dailySlotsCleared' => $dailySlotsCleared, 'invalidOddsDeleted' => $invalidOddsDeleted];
+    }
+    public function supersedePendingTicketsForWindow(string $fromDate, string $toDate, ?string $exceptTicketId = null): array
+    {
+        // Authoritative kickoff/status per internal match id.
+        $byId = [];
+        foreach ($this->matches as $m) $byId[(int) $m['id']] = $m;
+        $superseded = 0;
+        foreach ($this->tickets as &$t) {
+            if (($t['approval_status'] ?? '') !== 'PENDING_USER_APPROVAL' || ($t['settlement_status'] ?? '') !== 'PENDING') continue;
+            if ($exceptTicketId !== null && (string) ($t['id'] ?? '') === (string) $exceptTicketId) continue;
+            $touches = false;
+            foreach ($this->ticketSelections as $s) {
+                if ($s['ticket_id'] !== $t['id']) continue;
+                $m = $byId[(int) ($s['match_id'] ?? 0)] ?? null;
+                if ($m === null) continue;
+                $day = substr((string) ($m['kickoff_at'] ?? ''), 0, 10);
+                if ($day >= $fromDate && $day <= $toDate && !in_array((string) ($m['status'] ?? ''), ['FINISHED', 'POSTPONED', 'CANCELLED'], true)) $touches = true;
+            }
+            if (!$touches) continue;
+            $t = array_merge($t, ['status' => 'CANCELLED', 'approval_status' => 'SUPERSEDED', 'settlement_status' => 'SUPERSEDED', 'reason' => 'Superseded by a newer daily-ticket generation for the same fixture window (active candidate reset)']);
+            $superseded++;
+        }
+        unset($t);
+        return ['ticketsSuperseded' => $superseded, 'selectionsDeleted' => 0];
+    }
     public function saveTicketSelection(array $s): void { $this->ticketSelections[] = array_merge(['id' => count($this->ticketSelections) + 1], $s); }
     public function ticketSelections(string $ticketId): array { return array_values(array_filter($this->ticketSelections, fn($s) => $s['ticket_id'] === $ticketId)); }
     public function updateTicketSelection(int $id, array $patch): void { foreach ($this->ticketSelections as &$s) if ((int) $s['id'] === $id) $s = array_merge($s, $patch); }

@@ -168,6 +168,7 @@ $route['sports/odds-prediction-ticket'] = 'sports/tickets';
 $route['sports/sync'] = 'sports/sync';
 $route['sports/generate-ticket'] = 'sports/generate_ticket';
 $route['sports/generate'] = 'sports/generate_ticket';
+$route['sports/reset-candidates'] = 'sports/reset_candidates';
 $route['sports/(:any)/decide'] = 'sports/decide/$1';
 $route['sports/(:any)/settle'] = 'sports/settle/$1';
 $route['lottery'] = 'lottery';
@@ -257,6 +258,7 @@ $route['api/sports/jobs/(:any)/run'] = 'api_sports/run_job/$1';
 $route['api/sports/configuration'] = 'api_sports/configuration';
 $route['api/sports/configuration/update'] = 'api_sports/update_configuration';
 $route['api/sports/ticket-engine/run'] = 'api_sports/run_ticket_engine';
+$route['api/sports/ticket-engine/invalidate'] = 'api_sports/invalidate_candidates';
 $route['api/sports/risk'] = 'api_sports/risk_monitor';
 $route['api/sports/correlation'] = 'api_sports/correlation_monitor';
 
