@@ -370,24 +370,20 @@ class SportsIntelligence
     }
 
     /**
-     * The UTC day a dashboard call reports. A day that is not a real calendar
-     * date is never rolled over into a neighbouring one (2026-02-30 must not
-     * silently become a March day): it falls back to today, and the console /
-     * API layers say so instead of answering a different day quietly.
+     * The configured-local day a dashboard call reports. A day that is not a
+     * real calendar date is never rolled into a neighbour (2026-02-30 must not
+     * become a March day): it falls back to today in the configured timezone.
      */
-    private static function resolveDay(?string $date): string
+    private static function resolveDay(?string $date, string $timezone = 'UTC'): string
     {
-        if ($date !== null && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) === 1) {
-            $parsed = \DateTimeImmutable::createFromFormat('Y-m-d', $date);
-            if ($parsed !== false && $parsed->format('Y-m-d') === $date) return $date;
-        }
-        return gmdate('Y-m-d');
+        try { return DailyTicketDate::normalize($date, $timezone); }
+        catch (\Throwable $e) { return DailyTicketDate::today($timezone); }
     }
 
     /**
      * Dashboard aggregation (spec §37) — everything from stored data.
      *
-     * @param string|null $date UTC day (YYYY-MM-DD) the console is viewing.
+     * @param string|null $date Configured-local day (YYYY-MM-DD) the console is viewing.
      *        Null (or anything that is not a real calendar date) reports today,
      *        so existing callers keep working unchanged. The payload keeps its
      *        historic `todayIntelligence` / `today` key names for backward
@@ -397,9 +393,11 @@ class SportsIntelligence
     {
         $status = $this->status();
         $config = $status['configuration'];
-        $day = self::resolveDay($date);
-        $dayEnd = $day . 'T23:59:59+00:00';
-        $dayStart = $day . 'T00:00:00+00:00';
+        $timezone = DailyTicketDate::configuredTimezone((string) ($config['system_timezone'] ?? 'UTC'));
+        $day = self::resolveDay($date, $timezone);
+        $window = DailyTicketDate::utcWindow($day, $timezone);
+        $dayStart = $window['start'];
+        $dayEnd = gmdate('Y-m-d\TH:i:sP', $window['endTimestamp'] - 1);
         $upcoming = $this->repository->listMatches(['status' => 'SCHEDULED', 'from' => $dayStart, 'to' => $dayEnd], 50);
         // Live board: only matches with a canonical in-progress status
         // (LIVE, HALFTIME, EXTRA_TIME, PENALTIES) that were confirmed recently.
@@ -423,7 +421,18 @@ class SportsIntelligence
         $qualified = array_values(array_filter($todayPredictions, fn($p) => ($p['decision'] ?? '') === 'PREDICTION_READY'));
         $rejected = array_values(array_filter($todayPredictions, fn($p) => ($p['decision'] ?? '') !== 'PREDICTION_READY'));
         $daily = $this->repository->findDailyTicket($day);
-        $ticket = $daily['ticket_id'] ? $this->repository->findTicket((string) $daily['ticket_id']) : null;
+        $ticket = is_array($daily) && !empty($daily['ticket_id']) ? $this->repository->findTicket((string) $daily['ticket_id']) : null;
+        $ticketSelections = $ticket ? $this->repository->ticketSelections((string) $ticket['id']) : [];
+        foreach ($ticketSelections as &$selection) {
+            $match = $this->repository->findMatchById((int) ($selection['match_id'] ?? 0));
+            if ($match !== null) {
+                $selection['home_team'] = $match['home_team'] ?? null;
+                $selection['away_team'] = $match['away_team'] ?? null;
+                $selection['competition'] = $match['competition'] ?? null;
+                $selection['kickoff_time'] = $selection['kickoff_time'] ?? $match['kickoff_at'] ?? null;
+            }
+        }
+        unset($selection);
         $confidenceValues = array_values(array_filter(array_map(fn($p) => is_numeric($p['confidence']) ? (float) $p['confidence'] : null, $todayPredictions)));
         $riskDist = ['LOW' => 0, 'MEDIUM' => 0, 'HIGH' => 0, 'REJECTED' => 0];
         foreach ($todayPredictions as $p) {
@@ -462,7 +471,7 @@ class SportsIntelligence
                 'configuration' => $config,
                 'today' => $daily,
                 'ticket' => $ticket,
-                'ticketSelections' => $ticket ? $this->repository->ticketSelections((string) $ticket['id']) : [],
+                'ticketSelections' => $ticketSelections,
             ],
             'performance' => $perf,
             'models' => ['versions' => $models, 'approvedCalibrations' => $calibrations],

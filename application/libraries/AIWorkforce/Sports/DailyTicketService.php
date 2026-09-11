@@ -30,9 +30,9 @@ use AIWorkforce\Sports\Providers\SportsProviderManager;
  * risk-qualified, correlation-qualified, final) plus the top rejection
  * reasons with the provider that caused each failure.
  *
- * Idempotent per (date, configuration version). When nothing qualifies the
- * engine stores NO_QUALIFIED_TICKET with the exact rejection summary — an
- * expected, first-class outcome (spec §3).
+ * Idempotent per (ticket type, configured-local date). Only a complete
+ * persisted ticket is terminal; attempts and honest no-ticket outcomes remain
+ * retryable with diagnostics and controlled backoff.
  *
  * A provider outage is NOT that outcome. When every configured data provider
  * fails (quota exhausted, 400/404 misconfiguration, offline) the run stores
@@ -45,10 +45,14 @@ class DailyTicketService
     /** Never generate more than this many fixtures' predictions in one run (design §9: MAXIMUM GENERATION = 50). */
     public const DEFAULT_MAX_GENERATION = 50;
 
-    /** Hard ceiling for the operator-tunable generation cap — still bounded, never 500/1000/5000. */
-    public const MAX_GENERATION_CEILING = 500;
+    /** Hard ceiling per prediction-generation batch (50-match product contract). */
+    public const MAX_GENERATION_CEILING = 50;
 
     public const ENV_MAX_GENERATION = 'WINDELS_SPORTS_MAX_GENERATION';
+    public const TICKET_TYPE = 'ODDS_PREDICTION';
+    public const RUN_STALE_AFTER_SECONDS = 900;
+    public const RETRY_BASE_SECONDS = 300;
+    public const RETRY_MAX_SECONDS = 3600;
 
     /** Verified recentForm stays usable for this long before it must be re-read. */
     public const DEFAULT_FORM_MAX_AGE_SECONDS = 7 * 86400;
@@ -87,27 +91,54 @@ class DailyTicketService
 
     public function runDaily(?string $date = null, ?string $executionKey = null, array $options = []): array
     {
-        $date = $date ?? gmdate('Y-m-d');
         $config = $this->config->active();
-        // Resolved ONCE with the same default the per-fixture gate applies
-        // (see the MODEL_NOT_CALIBRATED check in the screening loop): an
-        // older stored configuration row that predates the require_calibration
-        // column must not mean "enforce calibration but never run the
-        // cold-start bootstrap" — that combination is a hard lock-out.
-        $requireCalibration = (int) (bool) ($config['require_calibration'] ?? 1);
-        $config['require_calibration'] = $requireCalibration; // pipeline sees the same resolved truth
+        $timezone = DailyTicketDate::configuredTimezone((string) ($config['system_timezone'] ?? ''));
+        $date = DailyTicketDate::normalize($date, $timezone);
+        $window = DailyTicketDate::utcWindow($date, $timezone);
+        $windowTo = (new \DateTimeImmutable($date . ' 00:00:00', new \DateTimeZone($timezone)))->modify('+1 day')->format('Y-m-d');
 
-        // Force / reset: invalidate the ACTIVE candidate state for the day
-        // BEFORE any fixture is read, so a previous pass (predictions, the
-        // pending ticket, the daily slot, unquotable odds) can never be
-        // carried into the new run. Historical/settled records and verified
-        // results are preserved by the repository (audit trail).
+        // Idempotency is ticket-state based, never attempt based. This check is
+        // deliberately first: even if somebody deletes/marks the job attempt
+        // FAILED, the persisted ticket remains today's authoritative result.
+        $existing = $this->existingTicketResult($date);
+        if ($existing !== null) return $existing;
+        $recovered = $this->recoverUnlinkedDailyTicket($date, $config, $timezone, $window);
+        if ($recovered !== null) return $recovered;
+
+        $dailyBeforeClaim = $this->repo->findDailyTicket($date);
+        // Heal an impossible/legacy state: GENERATED without a readable ticket
+        // (or without persisted legs) must be retried, never skipped forever.
+        if (is_array($dailyBeforeClaim)
+            && strtoupper((string) ($dailyBeforeClaim['generation_status'] ?? '')) === 'GENERATED') {
+            $this->repo->updateDailyTicket($date, [
+                'ticket_id' => null, 'generation_status' => 'FAILED',
+                'last_error_code' => 'GENERATED_TICKET_MISSING',
+                'message' => 'Generated state had no valid persisted ticket; generation will retry',
+            ]);
+            $dailyBeforeClaim = $this->repo->findDailyTicket($date);
+        }
+
+        // Scheduled workers obey controlled backoff. Manual/API requests are
+        // an explicit retry and may proceed immediately after a failed attempt.
+        if (!empty($options['scheduled']) && is_array($dailyBeforeClaim) && !empty($dailyBeforeClaim['next_retry_at'])) {
+            $retryAt = strtotime((string) $dailyBeforeClaim['next_retry_at']);
+            if ($retryAt !== false && $retryAt > time()) {
+                return [
+                    'status' => 'RETRY_SCHEDULED', 'generationStatus' => (string) ($dailyBeforeClaim['generation_status'] ?? 'RETRYING'),
+                    'ticketId' => null, 'date' => $date, 'nextRetryAt' => gmdate('c', $retryAt),
+                    'message' => 'Daily ticket retry is scheduled for ' . gmdate('c', $retryAt), 'errors' => [],
+                ];
+            }
+        }
+
+        // Force/reset applies only when no valid ticket exists. A valid daily
+        // ticket is always returned above: force is not a loophole for creating
+        // a duplicate date/type ticket.
         $invalidated = null;
-        // Same horizon the sweep syncs and the engine evaluates: the run
-        // date and the following UTC day (early kickoffs), so a candidate
-        // prepared for any fixture the run is about to score is in scope.
-        $windowTo = gmdate('Y-m-d', strtotime($date . ' +1 day'));
         if (!empty($options['force'])) {
+            // A force request is explicitly a fresh provider cycle, not merely
+            // a reset followed by reusing the very rows it just invalidated.
+            $options['refreshFixtures'] = true;
             try {
                 $invalidated = $this->repo->invalidateActiveCandidates($date, $windowTo, true);
                 $this->audit->emit('SPORTS_CANDIDATES_INVALIDATED',
@@ -115,13 +146,57 @@ class DailyTicketService
                     ['from' => $date, 'to' => $windowTo, 'invalidated' => $invalidated]);
             } catch (\Throwable $e) {
                 // Never silently half-reset: surface the failure and stop.
-                return ['status' => 'RESET_FAILED', 'date' => $date, 'message' => 'candidate reset failed: ' . mb_substr($e->getMessage(), 0, 300), 'invalidated' => null];
+                return ['status' => 'RESET_FAILED', 'generationStatus' => 'FAILED', 'date' => $date, 'message' => 'candidate reset failed: ' . mb_substr($e->getMessage(), 0, 300), 'invalidated' => null];
             }
         }
 
-        $key = $executionKey ?? ('daily-ticket:' . $date . ':v' . $config['version'] . (!empty($options['force']) ? ':force:' . gmdate('YmdHis') . ':' . substr(uniqid(), -4) : ''));
-        $run = $this->repo->startJobRun(['id' => Backtester::uuid(), 'jobType' => 'DAILY_TICKET', 'executionKey' => $key]);
-        if ($run === null) return ['status' => 'DUPLICATE_SKIPPED', 'executionKey' => $key];
+        $runId = Backtester::uuid();
+        $claim = $this->repo->claimDailyTicketGeneration(
+            $date, self::TICKET_TYPE, $runId, (int) $config['version'], $timezone,
+            $window['start'], $window['endExclusive'], self::RUN_STALE_AFTER_SECONDS
+        );
+        if (empty($claim['claimed'])) {
+            // A worker may have completed between our initial read and claim.
+            $winner = $this->existingTicketResult($date);
+            if ($winner !== null) return $winner;
+            return [
+                'status' => 'GENERATION_IN_PROGRESS', 'generationStatus' => 'RUNNING',
+                'ticketId' => null, 'date' => $date,
+                'message' => 'Another worker is generating this daily ticket', 'invalidated' => $invalidated, 'errors' => [],
+            ];
+        }
+        $attemptCount = max(1, (int) (($claim['row']['attempt_count'] ?? 1)));
+        // When a complete 50-match page honestly produced no ticket, the next
+        // retry advances to the next stored/provider page. Transient failures
+        // and partial pages retry the same fixtures.
+        $priorSummary = is_array($dailyBeforeClaim['rejection_summary'] ?? null) ? $dailyBeforeClaim['rejection_summary'] : [];
+        $priorDiagnostics = is_array($priorSummary['_diagnostics'] ?? null) ? $priorSummary['_diagnostics'] : [];
+        $options['batchOffset'] = ((string) ($dailyBeforeClaim['status'] ?? '') === 'NO_QUALIFIED_TICKET' && !empty($priorDiagnostics['fixturePageFull']))
+            ? max(0, (int) ($priorDiagnostics['batchOffset'] ?? 0) + self::MAX_GENERATION_CEILING)
+            : 0;
+        // Job rows are attempt telemetry, not the idempotency authority. Include
+        // the attempt number so an old completed/failed key can never block a
+        // missing ticket for the whole day.
+        $baseKey = $executionKey ?? ('daily-ticket:' . self::TICKET_TYPE . ':' . $date . ':v' . $config['version']);
+        $key = mb_substr($baseKey, 0, 135) . ':attempt:' . $attemptCount;
+        $run = $this->repo->startJobRun(['id' => $runId, 'jobType' => 'DAILY_TICKET', 'executionKey' => $key]);
+        if ($run === null) {
+            // A manually supplied key may collide with an old attempt number;
+            // use a unique telemetry key while retaining the daily claim.
+            $key = mb_substr($baseKey, 0, 105) . ':retry:' . gmdate('YmdHis') . ':' . substr($runId, 0, 12);
+            $run = $this->repo->startJobRun(['id' => $runId, 'jobType' => 'DAILY_TICKET', 'executionKey' => $key]);
+        }
+        if ($run === null) {
+            $nextRetryAt = gmdate('c', time() + self::RETRY_BASE_SECONDS);
+            $this->repo->updateDailyTicket($date, ['generation_status' => 'RETRYING', 'next_retry_at' => $nextRetryAt, 'last_error_code' => 'JOB_CLAIM_CONFLICT']);
+            return ['status' => 'GENERATION_IN_PROGRESS', 'generationStatus' => 'RETRYING', 'ticketId' => null, 'date' => $date, 'nextRetryAt' => $nextRetryAt, 'message' => 'Generation telemetry is already being recorded; retry scheduled', 'errors' => []];
+        }
+        $this->healthCache = [];
+        $this->providerCodes = [];
+        // Resolved ONCE with the same default the per-fixture gate applies.
+        $requireCalibration = (int) (bool) ($config['require_calibration'] ?? 1);
+        $config['require_calibration'] = $requireCalibration;
+
         // Prediction ids written by THIS run — the only rows the intelligent
         // refresh may never reuse as "previous" readings.
         $recordedThisRun = [];
@@ -138,8 +213,14 @@ class DailyTicketService
         $modelVersionId = null;
         $providerFailures = [];   // providerId → "STATUS: detail" (redacted)
         $providerStatuses = [];   // providerId → STATUS
-        $dataState = 'OK';        // OK | DATA_UNAVAILABLE | NO_PROVIDER | DISABLED
+        $dataState = 'OK';        // OK | DATA_UNAVAILABLE | NO_PROVIDER | DISABLED | ERROR
+        $unexpectedFailure = null;
         $funnel = $this->emptyFunnel();
+        $funnel['systemTimezone'] = $timezone;
+        $funnel['windowStartUtc'] = $window['start'];
+        $funnel['windowEndUtc'] = $window['endExclusive'];
+        $funnel['attempt'] = $attemptCount;
+        $funnel['batchOffset'] = (int) ($options['batchOffset'] ?? 0);
 
         try {
             if (!(bool) $config['module_enabled']) {
@@ -151,29 +232,37 @@ class DailyTicketService
             } elseif (!in_array($config['engine_mode'], ['AI_TICKET_GENERATION', 'USER_APPROVAL_REQUIRED', 'AUTOMATED_EXECUTION'], true)) {
                 $message = 'engine mode ' . $config['engine_mode'] . ' does not generate tickets';
                 $dataState = 'DISABLED';
-            } elseif (!$this->providers->configured()) {
-                $message = 'NO VALUE TICKET TODAY — no sports provider configured (DISABLED_NO_PROVIDER); nothing is fabricated';
-                $dataState = 'NO_PROVIDER';
             } else {
+                // Stored fixtures and their persisted provider identity are a
+                // valid input even when a live provider is temporarily absent.
+                // A provider is only required when storage has no eligible rows.
                 // All-provider intake: every registered feed is asked once (one
                 // health probe per provider per run, the circuit breaker
                 // honoured for each), and every answer is kept. A single
                 // provider behaves exactly as before; with several, the same
                 // real match arriving under several ids is merged below and
                 // evaluated once through its most complete row.
-                $sources = $this->fetchFixtureSources($date, $errors);
+                $sources = $this->fetchFixtureSources($date, $timezone, $errors, $options);
+                $funnel['fixtureInput'] = (string) ($sources['input'] ?? 'PROVIDER');
+                $funnel['fixturePageFull'] = !empty($sources['pageFull']);
+                $funnel['batchOffset'] = (int) ($sources['batchOffset'] ?? $options['batchOffset'] ?? 0);
                 if (!$sources['ok']) {
-                    // Every provider failed. This is a DATA outage, not a
-                    // prediction outcome: report it as such, keep the
-                    // per-provider status codes, and do not claim "no
-                    // qualified games" for a day nobody could look at.
-                    $status = 'DATA_UNAVAILABLE';
-                    $dataState = 'DATA_UNAVAILABLE';
-                    $providerFailures = $sources['failures'];
-                    $providerStatuses = $sources['failureStatuses'] ?? [];
-                    $message = 'NO VALUE TICKET TODAY — all configured sports-data providers failed; no data was fabricated — ' . ($sources['summary'] ?: SportsProviderManager::summarize('fixtures', $providerStatuses));
-                    $errors[] = 'provider failure: ' . json_encode($sources['failures']);
                     $funnel['providersConfigured'] = count($this->providers->all());
+                    if (!$this->providers->configured()) {
+                        $message = 'NO VALUE TICKET TODAY — no stored eligible fixtures and no sports provider configured (DISABLED_NO_PROVIDER); nothing is fabricated';
+                        $dataState = 'NO_PROVIDER';
+                    } else {
+                        // Every provider failed. This is a DATA outage, not a
+                        // prediction outcome: report it as such, keep the
+                        // per-provider status codes, and do not claim "no
+                        // qualified games" for a day nobody could look at.
+                        $status = 'DATA_UNAVAILABLE';
+                        $dataState = 'DATA_UNAVAILABLE';
+                        $providerFailures = $sources['failures'];
+                        $providerStatuses = $sources['failureStatuses'] ?? [];
+                        $message = 'NO VALUE TICKET TODAY — all configured sports-data providers failed; no data was fabricated — ' . ($sources['summary'] ?: SportsProviderManager::summarize('fixtures', $providerStatuses));
+                        $errors[] = 'provider failure: ' . json_encode($sources['failures']);
+                    }
                 } else {
                     $sourceCodes = array_map(fn(array $s): string => $s['provider'], $sources['sources']);
                     $provider = count($sourceCodes) === 1 ? $sourceCodes[0] : implode(',', $sourceCodes);
@@ -261,7 +350,18 @@ class DailyTicketService
                         else $funnel['duplicateFixtures']['truncated'] = true;
                         unset($dupRows);
                     }
-                    usort($primaries, fn(array $a, array $b) => $a['order'] <=> $b['order']);
+                    // One generation worker never walks more than 50 canonical
+                    // matches. Prefer earliest kickoff deterministically, then
+                    // provider arrival order. Remaining rows are explicitly
+                    // deferred instead of triggering hundreds of odds calls.
+                    usort($primaries, static function (array $a, array $b): int {
+                        $kickoff = strcmp((string) ($a['probe']['kickoff'] ?? ''), (string) ($b['probe']['kickoff'] ?? ''));
+                        return $kickoff !== 0 ? $kickoff : ($a['order'] <=> $b['order']);
+                    });
+                    if (count($primaries) > self::MAX_GENERATION_CEILING) {
+                        $funnel['fixtureBatchDeferred'] = count($primaries) - self::MAX_GENERATION_CEILING;
+                        $primaries = array_slice($primaries, 0, self::MAX_GENERATION_CEILING);
+                    }
 
                     // ── Form enrichment, spent where it can still win a ticket,
                     // per fixture provider (team ids are provider-specific). Only
@@ -277,6 +377,13 @@ class DailyTicketService
                     foreach ($sources['sources'] as $source) $instanceByCode[$source['provider']] = $source['instance'];
                     $formStats = ['lookupsUsed' => 0, 'lookupFailures' => 0, 'budgetSkips' => 0, 'budget' => 0, 'providerCapable' => true];
                     foreach ($eligiblePrimaryIndexes as $code => $indexes) {
+                        // Stored context remains usable without a live provider;
+                        // unresolved form simply fails the normal sufficiency
+                        // gate rather than causing a nullable-provider crash.
+                        if (!isset($instanceByCode[$code]) || !$instanceByCode[$code] instanceof SportsDataProvider) {
+                            $formStats['providerCapable'] = false;
+                            continue;
+                        }
                         $raws = [];
                         foreach ($indexes as $i) $raws[] = $primaries[$i]['raw'];
                         $enriched = $this->formResolver->enrich($instanceByCode[$code], $raws);
@@ -611,7 +718,7 @@ class DailyTicketService
                             unset($deferredRows);
                         }
                     }
-                    $funnel['fixturesDeferred'] = $fixturesDeferred;
+                    $funnel['fixturesDeferred'] = $fixturesDeferred + (int) ($funnel['fixtureBatchDeferred'] ?? 0);
 
                     // ── Stage 11: correlation → final ticket ────────────────
                     if (count($candidates) > 0) {
@@ -627,6 +734,12 @@ class DailyTicketService
                         ]);
                         $funnel['correlationQualifiedCandidates'] = (int) ($optimized['poolSize'] ?? 0);
                         if ($optimized['status'] === 'QUALIFIED') {
+                            // A deterministic daily ID makes a crash after the
+                            // ticket/legs write but before linking the daily row
+                            // recoverable. It also lets a retry safely finish a
+                            // partial write without violating the daily FK.
+                            $optimized['ticketId'] = $this->dailyTicketId($date);
+                            $ticketId = $optimized['ticketId'];
                             $rec = $this->governance->record($optimized, (string) $config['version'], $modelVersionId, $config);
                             if (($rec['status'] ?? '') !== 'NO_QUALIFIED_TICKET') {
                                 $status = $rec['status'] === 'APPROVED_NOT_EXECUTED' ? 'APPROVED' : 'PENDING_USER_APPROVAL';
@@ -734,6 +847,11 @@ class DailyTicketService
                 }
             }
         } catch (\Throwable $e) {
+            // An exception is a failed generation attempt, never an honest
+            // NO_QUALIFIED_TICKET verdict. It remains retryable and visible.
+            $unexpectedFailure = $e;
+            $status = 'FAILED';
+            $dataState = 'ERROR';
             $message = 'unexpected failure: ' . $e->getMessage();
             $errors[] = $message;
         }
@@ -757,53 +875,186 @@ class DailyTicketService
 
         $diagnostics = $this->buildDiagnostics($funnel, $date, $evaluated, $recorded, $rejections);
 
+        // GENERATED is earned only after both the ticket and its persisted legs
+        // can be read back. A swallowed/partial database write is a retryable
+        // failure, never a successful daily state.
+        $generatedAt = null;
+        if ($ticketId !== null) {
+            $persisted = $this->repo->findTicket((string) $ticketId);
+            $persistedSelections = $persisted !== null ? $this->repo->ticketSelections((string) $ticketId) : [];
+            if ($persisted === null || $persistedSelections === []) {
+                $errors[] = 'ticket persistence verification failed for ' . $ticketId;
+                $unexpectedFailure = new \RuntimeException('generated ticket did not survive the database round-trip');
+                $status = 'FAILED';
+                $dataState = 'ERROR';
+                $message = 'ticket persistence verification failed; retry scheduled';
+                $ticketId = null;
+            } else {
+                $generatedAt = gmdate('c');
+            }
+        }
+
+        $generationStatus = $ticketId !== null
+            ? 'GENERATED'
+            : (in_array($dataState, ['DATA_UNAVAILABLE', 'ERROR'], true) ? 'RETRYING'
+                : (in_array($dataState, ['DISABLED', 'NO_PROVIDER'], true) ? 'FAILED' : 'PENDING'));
+        $errorCode = $ticketId !== null ? null : $this->failureCode($dataState, $status, $message, $providerStatuses);
+        $nextRetryAt = null;
+        if (in_array($generationStatus, ['RETRYING', 'PENDING'], true)) {
+            $delay = min(self::RETRY_MAX_SECONDS, self::RETRY_BASE_SECONDS * (2 ** min(4, max(0, $attemptCount - 1))));
+            // A genuine no-qualified verdict is not hammered every five minutes;
+            // it remains retryable but waits at least one normal sports sweep.
+            if ($status === 'NO_QUALIFIED_TICKET') $delay = max(900, $delay);
+            $nextRetryAt = gmdate('c', time() + $delay);
+        }
+
         // The rejection summary doubles as the provider-failure ledger on a
-        // DATA_UNAVAILABLE day: PROVIDER:<id> → status, so the stored row, the
-        // dashboard and the API all show WHICH feed failed and WHY. The
-        // diagnostics funnel is stored under a reserved key.
+        // DATA_UNAVAILABLE day. Diagnostics are persisted with the daily row so
+        // a page refresh renders the completed funnel without rerunning it.
         $storedSummary = $rejectionSummary;
         if ($dataState === 'DATA_UNAVAILABLE') {
             foreach ($providerStatuses as $pid => $st) $storedSummary['PROVIDER:' . $pid] = $st;
         }
         $storedSummary['_diagnostics'] = $diagnostics;
         $this->repo->saveDailyTicket([
-            'date' => $date, 'ticket_id' => $ticketId, 'status' => $status,
+            'date' => $date, 'ticket_type' => self::TICKET_TYPE,
+            'ticket_id' => $ticketId, 'status' => $status, 'generation_status' => $generationStatus,
             'configuration_version' => (int) $config['version'],
             'candidates_evaluated' => $evaluated, 'predictions_recorded' => $recorded,
             'rejections' => $rejections, 'rejection_summary' => json_encode($storedSummary),
-            'message' => mb_substr($message, 0, 500), 'provider' => $provider, 'run_id' => $run['id'],
+            'message' => mb_substr($message, 0, 500), 'provider' => $provider, 'run_id' => $runId,
+            'attempt_count' => $attemptCount, 'next_retry_at' => $nextRetryAt,
+            'last_error_code' => $errorCode, 'generated_at' => $generatedAt,
+            'system_timezone' => $timezone, 'window_start_utc' => $window['start'], 'window_end_utc' => $window['endExclusive'],
             'created_at' => gmdate('c'), 'updated_at' => gmdate('c'),
         ]);
-        // A data outage is a FAILED run, and its execution key must not block
-        // the retry: the next sweep (after the quota reset / config fix) gets
-        // a fresh idempotency slot instead of DUPLICATE_SKIPPED all day.
-        $runStatus = $dataState === 'DATA_UNAVAILABLE' ? 'FAILED' : 'COMPLETED';
-        $this->repo->finishJobRun($run['id'], ['status' => $runStatus, 'processed' => $evaluated, 'created' => $recorded, 'updated' => 0, 'errors' => $errors]);
-        if ($dataState === 'DATA_UNAVAILABLE' && method_exists($this->repo, 'releaseJobRun')) {
-            try { $this->repo->releaseJobRun($run['id']); } catch (\Throwable $e) { /* best effort */ }
+
+        // Attempt records are telemetry only. No-ticket attempts are FAILED and
+        // their execution keys are released; only the verified ticket above is
+        // a completed daily generation.
+        $runStatus = $ticketId !== null ? 'COMPLETED' : 'FAILED';
+        $this->repo->finishJobRun($runId, ['status' => $runStatus, 'processed' => $evaluated, 'created' => $recorded, 'updated' => $ticketId !== null ? 1 : 0, 'errors' => $errors]);
+        if ($ticketId === null) {
+            try { $this->repo->releaseJobRun($runId); } catch (\Throwable $e) { $errors[] = 'job release failed: ' . mb_substr($e->getMessage(), 0, 120); }
         }
-        // Same principle for a day that stored NOTHING: no predictions, no
-        // reused predictions, no ticket. That is a BLOCKED day (missing form
-        // data, missing calibration), not a verdict — the operator fixes the
-        // upstream problem and retries the same date without having to bump
-        // the configuration version just to get a fresh execution key. A run
-        // that stored any prediction or ticket keeps its idempotency slot.
-        $nothingStored = $ticketId === null && $recorded === 0 && (int) ($funnel['predictionsReused'] ?? 0) === 0;
-        if ($dataState === 'OK' && $nothingStored && method_exists($this->repo, 'releaseJobRun')) {
-            try { $this->repo->releaseJobRun($run['id']); } catch (\Throwable $e) { /* best effort */ }
-        }
-        $this->audit->emit($dataState === 'DATA_UNAVAILABLE' ? 'SPORTS_DAILY_TICKET_BLOCKED' : 'SPORTS_DAILY_TICKET_RUN', 'Daily ticket run ' . $date . ' → ' . $status, [
-            'date' => $date, 'status' => $status, 'dataState' => $dataState, 'ticketId' => $ticketId, 'evaluated' => $evaluated,
-            'rejections' => $rejections, 'rejectionSummary' => $rejectionSummary, 'diagnostics' => $diagnostics, 'message' => $message, 'provider' => $provider,
+        $this->audit->emit($ticketId === null ? 'SPORTS_DAILY_TICKET_BLOCKED' : 'SPORTS_DAILY_TICKET_RUN', 'Daily ticket run ' . $date . ' → ' . $generationStatus . ' / ' . $status, [
+            'date' => $date, 'ticketType' => self::TICKET_TYPE, 'status' => $status, 'generationStatus' => $generationStatus,
+            'dataState' => $dataState, 'ticketId' => $ticketId, 'evaluated' => $evaluated,
+            'rejections' => $rejections, 'rejectionSummary' => $rejectionSummary, 'diagnostics' => $diagnostics,
+            'message' => $message, 'provider' => $provider, 'attempt' => $attemptCount,
+            'nextRetryAt' => $nextRetryAt, 'errorCode' => $errorCode,
             'providerFailures' => $providerFailures, 'providerStatuses' => $providerStatuses, 'errors' => $errors,
         ]);
         return [
-            'status' => $status, 'dataState' => $dataState, 'ticketId' => $ticketId, 'date' => $date, 'message' => $message,
+            'status' => $status, 'generationStatus' => $generationStatus, 'outcomeStatus' => $status,
+            'dataState' => $dataState, 'ticketId' => $ticketId, 'date' => $date, 'ticketType' => self::TICKET_TYPE,
+            'timezone' => $timezone, 'message' => $message, 'generatedAt' => $generatedAt,
+            'nextRetryAt' => $nextRetryAt, 'errorCode' => $errorCode, 'attempt' => $attemptCount,
             'evaluated' => $evaluated, 'predictionsRecorded' => $recorded, 'rejections' => $rejections, 'rejectionSummary' => $rejectionSummary,
             'diagnostics' => $diagnostics, 'invalidated' => $invalidated,
             'provider' => $provider, 'providerFailures' => $providerFailures, 'providerStatuses' => $providerStatuses,
-            'runId' => $run['id'], 'errors' => $errors,
+            'runId' => $runId, 'executionKey' => $key, 'errors' => $errors,
         ];
+    }
+
+    /** Stable UUID-shaped identity for one ticket type + configured-local date. */
+    private function dailyTicketId(string $date): string
+    {
+        $hex = hash('sha256', self::TICKET_TYPE . '|' . $date);
+        return substr($hex, 0, 8) . '-' . substr($hex, 8, 4) . '-5' . substr($hex, 13, 3)
+            . '-a' . substr($hex, 17, 3) . '-' . substr($hex, 20, 12);
+    }
+
+    /**
+     * Recover a ticket committed immediately before a worker crash. The daily
+     * row may still be RUNNING/FAILED or may not yet reference the ticket, but
+     * deterministic identity plus persisted legs proves the successful write.
+     */
+    private function recoverUnlinkedDailyTicket(string $date, array $config, string $timezone, array $window): ?array
+    {
+        $ticketId = $this->dailyTicketId($date);
+        $ticket = $this->repo->findTicket($ticketId);
+        if ($ticket === null || $this->repo->ticketSelections($ticketId) === []) return null;
+        if (in_array(strtoupper((string) ($ticket['status'] ?? '')), ['CANCELLED'], true)
+            || in_array(strtoupper((string) ($ticket['approval_status'] ?? '')), ['SUPERSEDED'], true)) return null;
+        $generatedAt = (string) ($ticket['created_at'] ?? gmdate('c'));
+        $this->repo->saveDailyTicket([
+            'date' => $date, 'ticket_type' => self::TICKET_TYPE, 'ticket_id' => $ticketId,
+            'status' => (string) ($ticket['approval_status'] ?? $ticket['status'] ?? 'GENERATED'),
+            'generation_status' => 'GENERATED', 'configuration_version' => (int) ($config['version'] ?? 0),
+            'candidates_evaluated' => 0, 'predictions_recorded' => 0, 'rejections' => 0,
+            'rejection_summary' => ['_diagnostics' => ['recoveredAfterInterruptedLink' => true]],
+            'message' => 'Recovered persisted daily ticket after interrupted finalization',
+            'provider' => null, 'run_id' => null, 'attempt_count' => 0,
+            'next_retry_at' => null, 'last_error_code' => null, 'generated_at' => $generatedAt,
+            'system_timezone' => $timezone, 'window_start_utc' => $window['start'],
+            'window_end_utc' => $window['endExclusive'], 'created_at' => $generatedAt, 'updated_at' => gmdate('c'),
+        ]);
+        return $this->existingTicketResult($date);
+    }
+
+    /**
+     * Return the persisted daily ticket when it is complete and still valid.
+     * The job-attempt status is intentionally ignored. This is the sole normal
+     * idempotency terminal: a real ticket row plus at least one persisted leg.
+     */
+    private function existingTicketResult(string $date): ?array
+    {
+        $daily = $this->repo->findDailyTicket($date);
+        $ticketId = is_array($daily) ? trim((string) ($daily['ticket_id'] ?? '')) : '';
+        if ($ticketId === '') return null;
+        $ticket = $this->repo->findTicket($ticketId);
+        if ($ticket === null
+            || strtoupper((string) ($ticket['status'] ?? '')) === 'CANCELLED'
+            || strtoupper((string) ($ticket['approval_status'] ?? '')) === 'SUPERSEDED'
+            || strtoupper((string) ($ticket['settlement_status'] ?? '')) === 'SUPERSEDED') return null;
+        $selections = $this->repo->ticketSelections($ticketId);
+        if ($selections === []) return null;
+
+        $generatedAt = (string) ($daily['generated_at'] ?? $ticket['created_at'] ?? gmdate('c'));
+        if (strtoupper((string) ($daily['generation_status'] ?? '')) !== 'GENERATED') {
+            // A failed/deleted attempt must never hide a ticket that did persist.
+            $this->repo->updateDailyTicket($date, [
+                'generation_status' => 'GENERATED', 'next_retry_at' => null,
+                'last_error_code' => null, 'generated_at' => $generatedAt,
+                'message' => 'Existing persisted daily ticket returned',
+            ]);
+        }
+        $summary = is_array($daily['rejection_summary'] ?? null) ? $daily['rejection_summary'] : [];
+        return [
+            'status' => 'GENERATED', 'generationStatus' => 'GENERATED',
+            'outcomeStatus' => (string) ($daily['status'] ?? $ticket['approval_status'] ?? 'GENERATED'),
+            'existing' => true, 'ticketId' => $ticketId, 'ticket' => $ticket,
+            'selections' => $selections, 'date' => $date, 'ticketType' => self::TICKET_TYPE,
+            'generatedAt' => $generatedAt, 'nextRetryAt' => null, 'errorCode' => null,
+            'evaluated' => (int) ($daily['candidates_evaluated'] ?? 0),
+            'predictionsRecorded' => (int) ($daily['predictions_recorded'] ?? 0),
+            'rejections' => (int) ($daily['rejections'] ?? 0),
+            'diagnostics' => (array) ($summary['_diagnostics'] ?? []),
+            'message' => 'Existing persisted daily ticket returned; no duplicate was created',
+            'runId' => $daily['run_id'] ?? null, 'provider' => $daily['provider'] ?? null,
+            'providerStatuses' => [], 'errors' => [],
+        ];
+    }
+
+    /** Stable, dashboard-safe reason code for retry diagnostics. */
+    private function failureCode(string $dataState, string $status, string $message, array $providerStatuses): string
+    {
+        $upper = strtoupper($message);
+        if (str_contains($upper, 'TIMEOUT') || str_contains($upper, 'TIMED OUT')) {
+            return str_contains($upper, 'ODDS') ? 'ODDS_PROVIDER_TIMEOUT' : 'PROVIDER_TIMEOUT';
+        }
+        foreach ($providerStatuses as $providerStatus) {
+            $providerStatus = strtoupper((string) $providerStatus);
+            if (str_contains($providerStatus, 'TIMEOUT')) return 'PROVIDER_TIMEOUT';
+            if (in_array($providerStatus, ['RATE_LIMITED', 'DAILY_QUOTA_EXHAUSTED'], true)) return 'PROVIDER_' . $providerStatus;
+        }
+        if ($dataState === 'DATA_UNAVAILABLE') return 'SPORTS_PROVIDER_UNAVAILABLE';
+        if ($dataState === 'NO_PROVIDER') return 'NO_PROVIDER_CONFIGURED';
+        if ($dataState === 'DISABLED') return 'ODDS_PREDICTION_DISABLED';
+        if ($dataState === 'ERROR') return 'GENERATION_FAILED';
+        if ($status === 'NO_QUALIFIED_TICKET') return 'NO_QUALIFIED_TICKET';
+        return preg_replace('/[^A-Z0-9_]+/', '_', strtoupper($status)) ?: 'GENERATION_FAILED';
     }
 
     /** Count one rejection under its single primary reason, with provider attribution. */
@@ -857,12 +1108,16 @@ class DailyTicketService
             // Every provider that delivered fixtures this run (all-provider
             // intake), in registration order.
             'fixtureProviders' => [],
+            'fixtureInput' => null,
+            'fixturePageFull' => false,
+            'batchOffset' => 0,
             // Canonical duplicates merged away: saved under their own provider,
             // evaluated once through the primary. Rows are capped; the count
             // never is.
             'fixturesDeduped' => 0,
             'duplicateFixtures' => ['truncated' => false, 'rows' => []],
             'eligibleFixtures' => 0,
+            'fixtureBatchDeferred' => 0,
             'fixturesWithRecentForm' => 0,
             'fixturesWithCarriedForwardForm' => 0,
             'formEnrichmentCandidates' => 0,
@@ -1088,9 +1343,78 @@ class DailyTicketService
      *
      * @return array{ok:bool, sources?:list<array{provider:string, providerId:int, instance:?SportsDataProvider, fixtures:array}>, failures:array<string,string>, failureStatuses:array<string,string>, summary:string}
      */
-    private function fetchFixtureSources(string $date, array &$errors): array
+    private function fetchFixtureSources(string $date, string $timezone, array &$errors, array $options = []): array
     {
-        $collected = $this->providers->collectAll('fixtures', fn(SportsDataProvider $p) => $p->fixtures(['from' => $date, 'to' => $date]));
+        // Stored-first is the normal scheduler/manual path. A preceding fixture
+        // sync may report "0 new" while hundreds of useful rows already exist;
+        // those rows are inputs, not a reason to call the provider again.
+        if (empty($options['refreshFixtures'])) {
+            $window = DailyTicketDate::utcWindow($date, $timezone);
+            // Ticket date is the generation calendar date; fixture kickoffs
+            // may sit in the next local day (for example an evening ticket
+            // built before a next-day match). Keep the look-ahead bounded and
+            // request at most one generation batch from storage.
+            $horizonDate = (new \DateTimeImmutable($date . ' 00:00:00', new \DateTimeZone($timezone)))->modify('+2 days')->format('Y-m-d');
+            $horizon = DailyTicketDate::utcWindow($horizonDate, $timezone);
+            $toInclusive = gmdate('Y-m-d\TH:i:sP', $horizon['startTimestamp'] - 1);
+            $stored = $this->repo->listMatches([
+                'from' => $window['start'], 'to' => $toInclusive, 'status' => 'SCHEDULED',
+                'offset' => max(0, (int) ($options['batchOffset'] ?? 0)),
+            ], self::MAX_GENERATION_CEILING);
+            if ($stored !== []) {
+                $providerCodes = [];
+                foreach ($this->repo->listProviders() as $source) {
+                    $providerCodes[(int) $source['id']] = (string) ($source['provider_code'] ?? '');
+                }
+                $grouped = [];
+                foreach ($stored as $row) {
+                    $providerId = (int) ($row['provider_id'] ?? 0);
+                    $code = (string) ($providerCodes[$providerId] ?? '');
+                    if ($code === '') continue;
+                    // When live providers are configured, scope stored input
+                    // to those enabled feeds. If none is configured at all,
+                    // preserved stored rows remain usable without a provider
+                    // pull (the offline/stored-first recovery path).
+                    if ($this->providers->configured() && $this->providers->provider($code) === null) continue;
+                    $payload = SportsDataNormalizer::document($row['payload'] ?? null);
+                    $raw = $payload;
+                    $raw['externalId'] = (string) ($raw['externalId'] ?? $row['external_id'] ?? '');
+                    $raw['sport'] = (string) ($raw['sport'] ?? $row['sport'] ?? 'football');
+                    $raw['competition'] = (string) ($raw['competition'] ?? $row['competition'] ?? '');
+                    $raw['homeTeam'] = (string) ($raw['homeTeam'] ?? $row['home_team'] ?? '');
+                    $raw['awayTeam'] = (string) ($raw['awayTeam'] ?? $row['away_team'] ?? '');
+                    $raw['kickoff'] = (string) ($raw['kickoff'] ?? $row['kickoff_at'] ?? '');
+                    $raw['status'] = (string) ($raw['status'] ?? $row['status'] ?? 'SCHEDULED');
+                    $raw['sourceTimestamp'] = (string) ($raw['sourceTimestamp'] ?? $row['source_timestamp'] ?? $row['updated_at'] ?? '');
+                    if (empty($raw['roundId']) && !empty($row['round_id'])) $raw['roundId'] = (string) $row['round_id'];
+                    $raw['_windelsStoredFixture'] = true;
+                    $grouped[$code]['providerId'] = $providerId;
+                    $grouped[$code]['fixtures'][] = $raw;
+                }
+                $sources = [];
+                foreach ($grouped as $code => $group) {
+                    $sources[] = [
+                        'provider' => $code, 'providerId' => (int) $group['providerId'],
+                        'instance' => $this->providers->provider($code), 'fixtures' => $group['fixtures'],
+                    ];
+                }
+                if ($sources !== []) {
+                    return [
+                        'ok' => true, 'input' => 'STORED', 'sources' => $sources,
+                        'pageFull' => count($stored) === self::MAX_GENERATION_CEILING,
+                        'batchOffset' => max(0, (int) ($options['batchOffset'] ?? 0)),
+                        'failures' => [], 'failureStatuses' => [], 'summary' => 'stored fixtures reused',
+                    ];
+                }
+            }
+        }
+
+        // Empty cache (or an explicit refresh): ask each configured feed once.
+        $collected = $this->providers->collectAll('fixtures', fn(SportsDataProvider $p) => $p->fixtures([
+            'from' => $date, 'to' => $date, 'timezone' => $timezone,
+            'limit' => self::MAX_GENERATION_CEILING,
+            'page' => intdiv(max(0, (int) ($options['batchOffset'] ?? 0)), self::MAX_GENERATION_CEILING) + 1,
+        ]));
         $sources = [];
         foreach ($collected['results'] as $code => $fixtures) {
             if (!is_array($fixtures)) {
@@ -1110,9 +1434,15 @@ class DailyTicketService
             $sources[] = ['provider' => $code, 'providerId' => $providerId, 'instance' => $this->providers->provider($code), 'fixtures' => $fixtures];
         }
         if ($sources === []) {
-            return ['ok' => false, 'failures' => $collected['failures'], 'failureStatuses' => $collected['failureStatuses'], 'summary' => $collected['summary']];
+            return ['ok' => false, 'input' => 'PROVIDER', 'failures' => $collected['failures'], 'failureStatuses' => $collected['failureStatuses'], 'summary' => $collected['summary']];
         }
-        return ['ok' => true, 'sources' => $sources, 'failures' => $collected['failures'], 'failureStatuses' => $collected['failureStatuses'], 'summary' => ''];
+        $pageFull = false;
+        foreach ($sources as $source) if (count($source['fixtures']) >= self::MAX_GENERATION_CEILING) { $pageFull = true; break; }
+        return [
+            'ok' => true, 'input' => 'PROVIDER', 'sources' => $sources,
+            'pageFull' => $pageFull, 'batchOffset' => max(0, (int) ($options['batchOffset'] ?? 0)),
+            'failures' => $collected['failures'], 'failureStatuses' => $collected['failureStatuses'], 'summary' => '',
+        ];
     }
 
     /**
@@ -1219,25 +1549,43 @@ class DailyTicketService
      */
     private function carryForwardStoredForm(int $providerId, array $rawFixture, int $now, array &$funnel): array
     {
-        if (!empty($rawFixture['context']['recentForm'])) return $rawFixture;
-        $externalId = trim((string) ($rawFixture['externalId'] ?? ''));
-        if ($externalId === '') return $rawFixture;
-        try { $stored = $this->repo->findMatch($providerId, $externalId); }
-        catch (\Throwable $e) { return $rawFixture; }
-        // The stored document, in whichever shape the repository read gave it
-        // back (decoded array or raw JSON text) — a text payload is still the
-        // verified reading of the previous run, never "no stored form".
-        $payload = SportsDataNormalizer::document($stored['payload'] ?? null);
-        $form = $payload['context']['recentForm'] ?? null;
-        if (!is_array($form)) return $rawFixture;
-        foreach (FeatureEngineeringEngine::REQUIRED_FORM_FIELDS as $field) {
-            if (!isset($form[$field]) || !is_numeric($form[$field])) return $rawFixture;
+        $fromStoredFixture = !empty($rawFixture['_windelsStoredFixture']);
+        unset($rawFixture['_windelsStoredFixture']);
+        if (!empty($rawFixture['context']['recentForm']) && !$fromStoredFixture) return $rawFixture;
+
+        if ($fromStoredFixture) {
+            // Stored-first intake already carries the previous document. It
+            // must still pass the same field/timestamp/TTL checks and be counted
+            // as carried forward; stale form is removed before enrichment.
+            $form = $rawFixture['context']['recentForm'] ?? null;
+        } else {
+            $externalId = trim((string) ($rawFixture['externalId'] ?? ''));
+            if ($externalId === '') return $rawFixture;
+            try { $stored = $this->repo->findMatch($providerId, $externalId); }
+            catch (\Throwable $e) { return $rawFixture; }
+            // The stored document, in whichever shape the repository read
+            // returned (decoded array or raw JSON text).
+            $payload = SportsDataNormalizer::document($stored['payload'] ?? null);
+            $form = $payload['context']['recentForm'] ?? null;
         }
-        $stamp = is_string($form['timestamp'] ?? null) ? $form['timestamp'] : null;
-        if ($stamp === null) return $rawFixture;   // unmeasurable age → never reused
-        try { $age = $now - (new \DateTimeImmutable($stamp))->getTimestamp(); }
-        catch (\Throwable $e) { return $rawFixture; }
-        if ($age < 0 || $age > $this->formMaxAgeSeconds()) return $rawFixture;
+
+        $valid = is_array($form);
+        if ($valid) {
+            foreach (FeatureEngineeringEngine::REQUIRED_FORM_FIELDS as $field) {
+                if (!isset($form[$field]) || !is_numeric($form[$field])) { $valid = false; break; }
+            }
+        }
+        $stamp = $valid && is_string($form['timestamp'] ?? null) ? $form['timestamp'] : null;
+        if ($stamp === null) $valid = false; // unmeasurable age → never reused
+        if ($valid) {
+            try { $age = $now - (new \DateTimeImmutable($stamp))->getTimestamp(); }
+            catch (\Throwable $e) { $valid = false; $age = PHP_INT_MAX; }
+            if ($age < 0 || $age > $this->formMaxAgeSeconds()) $valid = false;
+        }
+        if (!$valid) {
+            unset($rawFixture['context']['recentForm']);
+            return $rawFixture;
+        }
         $rawFixture['context'] = array_merge($rawFixture['context'] ?? [], ['recentForm' => $form]);
         $funnel['fixturesWithCarriedForwardForm'] = (int) ($funnel['fixturesWithCarriedForwardForm'] ?? 0) + 1;
         return $rawFixture;

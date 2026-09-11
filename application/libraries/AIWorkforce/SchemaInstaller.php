@@ -74,7 +74,7 @@ final class SchemaInstaller
      * Persistent cache version for the request-time schema guard. Bump whenever
      * idempotent upgrade logic changes without a matching SQL-file mtime change.
      */
-    private const STAMP_VERSION = '2026-09-10-sports-column-width-v1';
+    private const STAMP_VERSION = '2026-09-11-sports-daily-ticket-state-v2';
 
     public static function databaseDir(): string
     {
@@ -198,6 +198,19 @@ final class SchemaInstaller
             $pick('ALTER TABLE sports_ticket_selections ADD COLUMN fair_odds REAL', 'ALTER TABLE sports_ticket_selections ADD COLUMN fair_odds DECIMAL(14,6) NULL', 'ALTER TABLE sports_ticket_selections ADD COLUMN IF NOT EXISTS fair_odds DECIMAL(14,6)'),
             $pick('ALTER TABLE sports_predictions ADD COLUMN odds REAL', 'ALTER TABLE sports_predictions ADD COLUMN odds DECIMAL(14,6) NULL', 'ALTER TABLE sports_predictions ADD COLUMN IF NOT EXISTS odds DECIMAL(14,6)'),
             $pick('ALTER TABLE sports_predictions ADD COLUMN odds_timestamp TEXT', 'ALTER TABLE sports_predictions ADD COLUMN odds_timestamp VARCHAR(32) NULL', 'ALTER TABLE sports_predictions ADD COLUMN IF NOT EXISTS odds_timestamp VARCHAR(32)'),
+            // Daily odds-prediction generation state. `status` remains the
+            // public prediction outcome; generation_status is the lock/retry
+            // state and reaches GENERATED only after a ticket exists.
+            $pick("ALTER TABLE sports_configurations ADD COLUMN system_timezone TEXT NOT NULL DEFAULT 'UTC'", "ALTER TABLE sports_configurations ADD COLUMN system_timezone VARCHAR(64) NOT NULL DEFAULT 'UTC'", "ALTER TABLE sports_configurations ADD COLUMN IF NOT EXISTS system_timezone VARCHAR(64) NOT NULL DEFAULT 'UTC'"),
+            $pick("ALTER TABLE sports_daily_tickets ADD COLUMN ticket_type TEXT NOT NULL DEFAULT 'ODDS_PREDICTION'", "ALTER TABLE sports_daily_tickets ADD COLUMN ticket_type VARCHAR(32) NOT NULL DEFAULT 'ODDS_PREDICTION'", "ALTER TABLE sports_daily_tickets ADD COLUMN IF NOT EXISTS ticket_type VARCHAR(32) NOT NULL DEFAULT 'ODDS_PREDICTION'"),
+            $pick("ALTER TABLE sports_daily_tickets ADD COLUMN generation_status TEXT NOT NULL DEFAULT 'PENDING'", "ALTER TABLE sports_daily_tickets ADD COLUMN generation_status VARCHAR(16) NOT NULL DEFAULT 'PENDING'", "ALTER TABLE sports_daily_tickets ADD COLUMN IF NOT EXISTS generation_status VARCHAR(16) NOT NULL DEFAULT 'PENDING'"),
+            $pick('ALTER TABLE sports_daily_tickets ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0', 'ALTER TABLE sports_daily_tickets ADD COLUMN attempt_count INT NOT NULL DEFAULT 0', 'ALTER TABLE sports_daily_tickets ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0'),
+            $pick('ALTER TABLE sports_daily_tickets ADD COLUMN next_retry_at TEXT', 'ALTER TABLE sports_daily_tickets ADD COLUMN next_retry_at DATETIME NULL', 'ALTER TABLE sports_daily_tickets ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP NULL'),
+            $pick('ALTER TABLE sports_daily_tickets ADD COLUMN last_error_code TEXT', 'ALTER TABLE sports_daily_tickets ADD COLUMN last_error_code VARCHAR(64) NULL', 'ALTER TABLE sports_daily_tickets ADD COLUMN IF NOT EXISTS last_error_code VARCHAR(64)'),
+            $pick('ALTER TABLE sports_daily_tickets ADD COLUMN generated_at TEXT', 'ALTER TABLE sports_daily_tickets ADD COLUMN generated_at DATETIME NULL', 'ALTER TABLE sports_daily_tickets ADD COLUMN IF NOT EXISTS generated_at TIMESTAMP NULL'),
+            $pick("ALTER TABLE sports_daily_tickets ADD COLUMN system_timezone TEXT NOT NULL DEFAULT 'UTC'", "ALTER TABLE sports_daily_tickets ADD COLUMN system_timezone VARCHAR(64) NOT NULL DEFAULT 'UTC'", "ALTER TABLE sports_daily_tickets ADD COLUMN IF NOT EXISTS system_timezone VARCHAR(64) NOT NULL DEFAULT 'UTC'"),
+            $pick('ALTER TABLE sports_daily_tickets ADD COLUMN window_start_utc TEXT', 'ALTER TABLE sports_daily_tickets ADD COLUMN window_start_utc VARCHAR(32) NULL', 'ALTER TABLE sports_daily_tickets ADD COLUMN IF NOT EXISTS window_start_utc VARCHAR(32)'),
+            $pick('ALTER TABLE sports_daily_tickets ADD COLUMN window_end_utc TEXT', 'ALTER TABLE sports_daily_tickets ADD COLUMN window_end_utc VARCHAR(32) NULL', 'ALTER TABLE sports_daily_tickets ADD COLUMN IF NOT EXISTS window_end_utc VARCHAR(32)'),
             $pick('ALTER TABLE lottery_sync_runs ADD COLUMN payload TEXT', 'ALTER TABLE lottery_sync_runs ADD COLUMN payload MEDIUMTEXT NULL', 'ALTER TABLE lottery_sync_runs ADD COLUMN IF NOT EXISTS payload TEXT'),
             $pick('ALTER TABLE sports_matches ADD COLUMN round_id TEXT', 'ALTER TABLE sports_matches ADD COLUMN round_id VARCHAR(64) NULL', 'ALTER TABLE sports_matches ADD COLUMN IF NOT EXISTS round_id VARCHAR(64)'),
             $pick('ALTER TABLE users ADD COLUMN username TEXT', 'ALTER TABLE users ADD COLUMN username VARCHAR(64) NULL', 'ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(64)'),
@@ -264,6 +277,12 @@ final class SchemaInstaller
             $exec("UPDATE sports_configurations SET min_confidence = 75, min_data_quality = 80, max_correlation = 'LOW', max_selections = 5 WHERE version = 0 AND updated_by = 'system' AND reason = 'built-in defaults' AND (min_confidence <> 75 OR min_data_quality <> 80 OR max_correlation <> 'LOW' OR max_selections <> 5)");
         } catch (\Throwable $e) { /* table may not exist yet on partial installs */ }
 
+        // Heal legacy daily rows. A ticket reference is evidence of a generated
+        // result; an attempt/status without a ticket is deliberately NOT.
+        try {
+            $exec("UPDATE sports_daily_tickets SET ticket_type = 'ODDS_PREDICTION', generation_status = CASE WHEN ticket_id IS NOT NULL AND ticket_id <> '' THEN 'GENERATED' WHEN status = 'DATA_UNAVAILABLE' THEN 'RETRYING' ELSE 'PENDING' END, generated_at = CASE WHEN ticket_id IS NOT NULL AND ticket_id <> '' THEN updated_at ELSE NULL END WHERE generation_status IS NULL OR generation_status = 'PENDING'");
+        } catch (\Throwable $e) { /* table/columns may be absent on partial installs */ }
+
         $userBrokers = $pick(
             "CREATE TABLE IF NOT EXISTS user_broker_connections (
                   id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, broker TEXT NOT NULL,
@@ -319,6 +338,10 @@ final class SchemaInstaller
         $indexes = [
             $pick('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)', 'CREATE UNIQUE INDEX uq_users_username ON users(username)', 'CREATE UNIQUE INDEX IF NOT EXISTS uq_users_username ON users(username)'),
             $pick('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_user_uid ON users(user_uid)', 'CREATE UNIQUE INDEX uq_users_user_uid ON users(user_uid)', 'CREATE UNIQUE INDEX IF NOT EXISTS uq_users_user_uid ON users(user_uid)'),
+            // Database-level concurrency guard: one odds-prediction daily slot
+            // per configured-local calendar date. Legacy databases may also
+            // retain their stronger UNIQUE(date) index; both are compatible.
+            $pick('CREATE UNIQUE INDEX IF NOT EXISTS uq_sports_daily_ticket_type_date ON sports_daily_tickets(ticket_type, date)', 'CREATE UNIQUE INDEX uq_sports_daily_ticket_type_date ON sports_daily_tickets(ticket_type, date)', 'CREATE UNIQUE INDEX IF NOT EXISTS uq_sports_daily_ticket_type_date ON sports_daily_tickets(ticket_type, date)'),
             'CREATE INDEX ' . $ifne . 'idx_outreach_lead ON lead_outreach(organization_id, lead_id, created_at)',
             'CREATE INDEX ' . $ifne . 'idx_sports_odds_provider ON sports_odds (provider_id, observed_at)',
             'CREATE INDEX ' . $ifne . 'idx_sports_matches_provider_kickoff ON sports_matches (provider_id, kickoff_at)',

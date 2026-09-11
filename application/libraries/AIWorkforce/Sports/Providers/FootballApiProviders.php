@@ -415,6 +415,7 @@ class ApiFootballProvider implements SportsDataProvider
 
     public function fixtures(array $query): array
     {
+        $requestedPage = isset($query['page']) ? max(1, (int) $query['page']) : 1;
         // Direct date query (single day) — the documented way to fetch all
         // fixtures for a calendar day across leagues.
         if (!empty($query['date'])) {
@@ -423,6 +424,7 @@ class ApiFootballProvider implements SportsDataProvider
                 throw new ProviderException('fixtures: date must be YYYY-MM-DD', ProviderException::DATA_ERROR);
             }
             $params = ['date' => $date];
+            if ($requestedPage > 1) $params['page'] = $requestedPage;
             if (!empty($query['league'])) $params['league'] = (string) $query['league'];
             if (!empty($query['season'])) $params['season'] = (string) $query['season'];
             if (!empty($query['team'])) $params['team'] = (string) $query['team'];
@@ -430,7 +432,9 @@ class ApiFootballProvider implements SportsDataProvider
             if (!empty($query['timezone'])) $params['timezone'] = (string) $query['timezone'];
             if (!empty($query['round'])) $params['round'] = (string) $query['round'];
             if (!empty($query['venue'])) $params['venue'] = (string) $query['venue'];
-            $rows = $this->fetchAllPages('/fixtures', $params);
+            $limit = isset($query['limit']) ? min(50, max(1, (int) $query['limit'])) : null;
+            $rows = $this->fetchAllPages('/fixtures', $params, $limit !== null ? 1 : 40);
+            if ($limit !== null) $rows = array_slice($rows, 0, $limit);
             return $this->mapFixtures($rows);
         }
 
@@ -457,6 +461,7 @@ class ApiFootballProvider implements SportsDataProvider
 
         if ($hasDisambiguatingFilter) {
             $params = ['from' => $from, 'to' => $to];
+            if ($requestedPage > 1) $params['page'] = $requestedPage;
             if (!empty($query['league'])) $params['league'] = (string) $query['league'];
             if (!empty($query['season'])) $params['season'] = (string) $query['season'];
             if (!empty($query['team'])) $params['team'] = (string) $query['team'];
@@ -464,7 +469,9 @@ class ApiFootballProvider implements SportsDataProvider
             if (!empty($query['timezone'])) $params['timezone'] = (string) $query['timezone'];
             if (!empty($query['round'])) $params['round'] = (string) $query['round'];
             if (!empty($query['venue'])) $params['venue'] = (string) $query['venue'];
-            $rows = $this->fetchAllPages('/fixtures', $params);
+            $limit = isset($query['limit']) ? min(50, max(1, (int) $query['limit'])) : null;
+            $rows = $this->fetchAllPages('/fixtures', $params, $limit !== null ? 1 : 40);
+            if ($limit !== null) $rows = array_slice($rows, 0, $limit);
             return $this->mapFixtures($rows);
         }
 
@@ -482,10 +489,12 @@ class ApiFootballProvider implements SportsDataProvider
             );
         }
         $allRows = [];
+        $limit = isset($query['limit']) ? min(50, max(1, (int) $query['limit'])) : null;
         $current = $from;
         $guard = 0;
         while ($current <= $to && $guard++ < 32) {
             $params = ['date' => $current];
+            if ($requestedPage > 1) $params['page'] = $requestedPage;
             if (!empty($query['status'])) $params['status'] = (string) $query['status'];
             if (!empty($query['timezone'])) $params['timezone'] = (string) $query['timezone'];
             if (!empty($query['league'])) $params['league'] = (string) $query['league'];
@@ -493,10 +502,12 @@ class ApiFootballProvider implements SportsDataProvider
             if (!empty($query['team'])) $params['team'] = (string) $query['team'];
             if (!empty($query['round'])) $params['round'] = (string) $query['round'];
             if (!empty($query['venue'])) $params['venue'] = (string) $query['venue'];
-            $rows = $this->fetchAllPages('/fixtures', $params);
+            $rows = $this->fetchAllPages('/fixtures', $params, $limit !== null ? 1 : 40);
             $allRows = array_merge($allRows, $rows);
+            if ($limit !== null && count($allRows) >= $limit) break;
             $current = gmdate('Y-m-d', strtotime($current . ' +1 day'));
         }
+        if ($limit !== null) $allRows = array_slice($allRows, 0, $limit);
         return $this->mapFixtures($allRows);
     }
 
@@ -1128,6 +1139,7 @@ class TheSportsDbProvider implements SportsDataProvider
             throw new ProviderException('fixtures: from/to must be YYYY-MM-DD dates', ProviderException::BAD_REQUEST);
         }
         $all = [];
+        $limit = isset($query['limit']) ? min(50, max(1, (int) $query['limit'])) : null;
         $day = $from;
         $guard = 0;
         $daysTried = 0;
@@ -1141,6 +1153,7 @@ class TheSportsDbProvider implements SportsDataProvider
                 $json = $this->decodeJson($resp);
                 $events = $json['events'] ?? [];
                 if (is_array($events)) $all = array_merge($all, $events);
+                if ($limit !== null && count($all) >= $limit) break;
             } catch (ProviderException $e) {
                 $daysFailed++;
                 $lastError = $e;
@@ -1154,6 +1167,7 @@ class TheSportsDbProvider implements SportsDataProvider
         // Swallowing it here is exactly how an HTTP 400 used to surface as
         // "0 matches evaluated" downstream.
         if ($daysTried > 0 && $daysFailed === $daysTried && $lastError !== null) throw $lastError;
+        if ($limit !== null) $all = array_slice($all, 0, $limit);
         return $this->mapFixtures($all);
     }
 
@@ -1541,6 +1555,8 @@ class SportMonksProvider implements SportsDataProvider
         // until has_more=false so a busy multi-league day is not silently
         // truncated to the first page. Hard cap: 40 pages (2000 fixtures).
         $rows = [];
+        $limit = isset($query['limit']) ? min(50, max(1, (int) $query['limit'])) : null;
+        $maxPages = $limit !== null ? 1 : 40;
         $cursor = null;
         $pages = 0;
         do {
@@ -1562,7 +1578,8 @@ class SportMonksProvider implements SportsDataProvider
                 ? (string) $pagination['next_cursor']
                 : null;
             $pages++;
-        } while ($cursor !== null && $pages < 40);
+        } while ($cursor !== null && $pages < $maxPages);
+        if ($limit !== null) $rows = array_slice($rows, 0, $limit);
         return $this->mapFixtures($rows);
     }
 

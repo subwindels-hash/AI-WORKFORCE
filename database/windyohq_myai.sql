@@ -1219,6 +1219,7 @@ CREATE TABLE `sports_configurations` (
   `version` int(11) NOT NULL,
   `module_enabled` tinyint(1) NOT NULL DEFAULT 0,
   `ticket_engine_enabled` tinyint(1) NOT NULL DEFAULT 0,
+  `system_timezone` varchar(64) NOT NULL DEFAULT 'UTC',
   `platform_mode` varchar(16) NOT NULL DEFAULT 'SANDBOX',
   `engine_mode` varchar(32) NOT NULL DEFAULT 'USER_APPROVAL_REQUIRED',
   `target_odds_min` decimal(10,4) NOT NULL DEFAULT 5.0000,
@@ -1245,8 +1246,8 @@ CREATE TABLE `sports_configurations` (
 -- Dumping data for table `sports_configurations`
 --
 
-INSERT INTO `sports_configurations` (`id`, `version`, `module_enabled`, `ticket_engine_enabled`, `platform_mode`, `engine_mode`, `target_odds_min`, `target_odds_max`, `max_selections`, `risk_level`, `min_confidence`, `min_expected_value`, `max_correlation`, `min_data_quality`, `min_liquidity`, `allowed_markets`, `allowed_leagues`, `max_exposure`, `stake_amount`, `void_policy`, `require_calibration`, `updated_by`, `reason`, `created_at`) VALUES
-(1, 0, 1, 1, 'SANDBOX', 'USER_APPROVAL_REQUIRED', 5.0000, 8.0000, 5, 'CONSERVATIVE', 70.00, 0.02000, 'MEDIUM', 80, NULL, '[]', '[]', 100.00, 10.00, 'RESTITUTE_ODDS', 1, 'system', 'built-in defaults', '2026-08-24 00:00:00');
+INSERT INTO `sports_configurations` (`id`, `version`, `module_enabled`, `ticket_engine_enabled`, `system_timezone`, `platform_mode`, `engine_mode`, `target_odds_min`, `target_odds_max`, `max_selections`, `risk_level`, `min_confidence`, `min_expected_value`, `max_correlation`, `min_data_quality`, `min_liquidity`, `allowed_markets`, `allowed_leagues`, `max_exposure`, `stake_amount`, `void_policy`, `require_calibration`, `updated_by`, `reason`, `created_at`) VALUES
+(1, 0, 1, 1, 'UTC', 'SANDBOX', 'USER_APPROVAL_REQUIRED', 5.0000, 8.0000, 5, 'CONSERVATIVE', 75.00, 0.02000, 'LOW', 80, NULL, '[]', '[]', 100.00, 10.00, 'RESTITUTE_ODDS', 1, 'system', 'built-in defaults', '2026-08-24 00:00:00');
 
 -- --------------------------------------------------------
 
@@ -1257,8 +1258,10 @@ INSERT INTO `sports_configurations` (`id`, `version`, `module_enabled`, `ticket_
 CREATE TABLE `sports_daily_tickets` (
   `id` int(11) NOT NULL,
   `date` date NOT NULL,
+  `ticket_type` varchar(32) NOT NULL DEFAULT 'ODDS_PREDICTION',
   `ticket_id` varchar(36) DEFAULT NULL,
   `status` varchar(32) NOT NULL,
+  `generation_status` varchar(16) NOT NULL DEFAULT 'PENDING',
   `configuration_version` int(11) DEFAULT NULL,
   `candidates_evaluated` int(11) NOT NULL DEFAULT 0,
   `predictions_recorded` int(11) NOT NULL DEFAULT 0,
@@ -1267,6 +1270,13 @@ CREATE TABLE `sports_daily_tickets` (
   `message` varchar(500) DEFAULT NULL,
   `provider` varchar(64) DEFAULT NULL,
   `run_id` varchar(40) DEFAULT NULL,
+  `attempt_count` int(11) NOT NULL DEFAULT 0,
+  `next_retry_at` datetime DEFAULT NULL,
+  `last_error_code` varchar(64) DEFAULT NULL,
+  `generated_at` datetime DEFAULT NULL,
+  `system_timezone` varchar(64) NOT NULL DEFAULT 'UTC',
+  `window_start_utc` varchar(32) DEFAULT NULL,
+  `window_end_utc` varchar(32) DEFAULT NULL,
   `created_at` datetime NOT NULL,
   `updated_at` datetime NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -1553,10 +1563,18 @@ CREATE TABLE `sports_ticket_selections` (
   `ticket_id` varchar(36) NOT NULL,
   `prediction_id` varchar(36) NOT NULL,
   `match_id` bigint(20) NOT NULL,
+  `fixture_id` varchar(128) DEFAULT NULL,
+  `home_team` varchar(255) DEFAULT NULL,
+  `away_team` varchar(255) DEFAULT NULL,
+  `kickoff_time` varchar(32) DEFAULT NULL,
   `market` varchar(96) NOT NULL,
   `selection` varchar(160) NOT NULL,
   `odds` decimal(14,6) NOT NULL,
   `odds_timestamp` varchar(32) NOT NULL,
+  `odds_source` varchar(32) DEFAULT NULL,
+  `fair_odds` decimal(14,6) DEFAULT NULL,
+  `confidence` decimal(10,4) DEFAULT NULL,
+  `data_quality` decimal(10,4) DEFAULT NULL,
   `model_probability` decimal(10,8) DEFAULT NULL,
   `calibrated_probability` decimal(10,8) DEFAULT NULL,
   `expected_value` decimal(12,8) DEFAULT NULL,
@@ -2451,7 +2469,7 @@ ALTER TABLE `sports_configurations`
 --
 ALTER TABLE `sports_daily_tickets`
   ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `date` (`date`),
+  ADD UNIQUE KEY `uq_sports_daily_ticket_type_date` (`ticket_type`,`date`),
   ADD KEY `fk_sports_daily_ticket` (`ticket_id`),
   ADD KEY `fk_sports_daily_config` (`configuration_version`),
   ADD KEY `fk_sports_daily_run` (`run_id`);

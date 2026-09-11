@@ -143,6 +143,21 @@ function ci141_insert_daily(string $date): void
 // 1. Repository contract on real storage: active state cleared, history kept
 // ═══════════════════════════════════════════════════════════════════════════
 
+test('deployed repository contract includes candidate reset and unique daily identity', function () {
+    $repo = ci()->AIWorkforce_model->sports;
+    assert_true(method_exists($repo, 'invalidateActiveCandidates'), 'runtime repository implements the reset method — no undefined-method suppression');
+    assert_true(method_exists($repo, 'claimDailyTicketGeneration'), 'runtime repository implements the atomic daily claim');
+
+    $indexes = ci()->db->query("PRAGMA index_list('sports_daily_tickets')")->result_array();
+    $hasUniqueIdentity = false;
+    foreach ($indexes as $index) {
+        if (empty($index['unique'])) continue;
+        $cols = ci()->db->query("PRAGMA index_info('" . str_replace("'", "''", (string) $index['name']) . "')")->result_array();
+        if (array_column($cols, 'name') === ['ticket_type', 'date']) { $hasUniqueIdentity = true; break; }
+    }
+    assert_true($hasUniqueIdentity, 'database enforces unique(ticket_type, date)');
+});
+
 test('invalidateActiveCandidates clears active state for the window and preserves history', function () {
     ci141_reset();
     $db = ci()->db;
@@ -290,7 +305,7 @@ test('forced daily run invalidates a previous pass before regenerating and is ne
 
     // Seed the fixtures with a first (non-forced) generation so an "old pass"
     // genuinely exists in storage.
-    $first = $service->runDaily($date, 'daily-ticket:141:seed:' . uniqid());
+    $first = $service->runDaily($date, 'daily-ticket:141:seed:' . uniqid(), ['refreshFixtures' => true]);
     assert_not_equals('DUPLICATE_SKIPPED', (string) $first['status']);
     $matches = $db->get_where('sports_matches', ['provider_id' => $providerId])->result_array();
     assert_equals(3, count($matches), 'three fixtures synced');
@@ -323,7 +338,7 @@ test('forced daily run invalidates a previous pass before regenerating and is ne
     assert_in_array('SPORTS_CANDIDATES_INVALIDATED', $types, 'candidate invalidation is an audited event');
 });
 
-test('a new generation supersedes the previous pending ticket for the same fixture window', function () {
+test('a valid persisted daily ticket is returned instead of superseded or duplicated', function () {
     ci141_reset();
     $db = ci()->db;
     $repo = ci141_repo();
@@ -332,34 +347,28 @@ test('a new generation supersedes the previous pending ticket for the same fixtu
     $date = gmdate('Y-m-d', strtotime('+1 day'));
     $service = ci141_force_service();
 
-    $r1 = $service->runDaily($date, 'daily-ticket:141:auto-a:' . uniqid());
+    $r1 = $service->runDaily($date, 'daily-ticket:141:auto-a:' . uniqid(), ['refreshFixtures' => true]);
     assert_equals('PENDING_USER_APPROVAL', (string) $r1['status'], 'first pass records a pending ticket: ' . (string) ($r1['message'] ?? ''));
     $ticket1 = (string) $r1['ticketId'];
     assert_true($ticket1 !== '', 'a ticket id was returned');
 
-    // A second, genuinely proceeding generation (new key — e.g. a later sweep
-    // after a config-version bump) records the new live pass and must retire
-    // the old undecided one so it can never be approved as a stale ticket.
+    // A second scheduler/manual request — even with a different telemetry key —
+    // returns the persisted ticket. Attempt keys are never permission to create
+    // a second date/type ticket.
     $r2 = $service->runDaily($date, 'daily-ticket:141:auto-b:' . uniqid());
-    assert_equals('PENDING_USER_APPROVAL', (string) $r2['status'], 'second pass also qualifies: ' . (string) ($r2['message'] ?? ''));
-    $ticket2 = (string) $r2['ticketId'];
-    assert_not_equals($ticket1, $ticket2, 'a new ticket was recorded');
+    assert_equals('GENERATED', (string) $r2['status']);
+    assert_true(!empty($r2['existing']));
+    assert_equals($ticket1, (string) $r2['ticketId']);
+    assert_equals(1, (int) $db->where('date', $date)->count_all_results('sports_daily_tickets'));
+    assert_equals(1, (int) $db->where('id', $ticket1)->count_all_results('sports_tickets'));
 
-    $old = $db->get_where('sports_tickets', ['id' => $ticket1])->row_array();
-    assert_equals('SUPERSEDED', (string) $old['settlement_status'], 'the old pending ticket is no longer live');
-    assert_equals('SUPERSEDED', (string) $old['approval_status']);
-    assert_equals('CANCELLED', (string) $old['status']);
-    assert_true((int) ($r2['diagnostics']['ticketsSuperseded'] ?? 0) >= 1, 'the funnel reports the supersede');
-
-    // The superseded pass keeps its legs as an audit trail (append-only).
-    assert_true(count($db->get_where('sports_ticket_selections', ['ticket_id' => $ticket1])->result_array()) >= 2, 'superseded ticket legs are retained as history');
-    $new = $db->get_where('sports_tickets', ['id' => $ticket2])->row_array();
-    assert_equals('PENDING_USER_APPROVAL', (string) $new['approval_status'], 'only the new ticket stays pending');
+    $ticket = $db->get_where('sports_tickets', ['id' => $ticket1])->row_array();
+    assert_equals('PENDING_USER_APPROVAL', (string) $ticket['approval_status'], 'returning it does not supersede or mutate governance state');
 
     // Every leg of the real-DB ticket carries odds provenance and a separate
-    // WINDELS fair-odds column (requirement #2/#14).
-    $legs = $db->get_where('sports_ticket_selections', ['ticket_id' => $ticket2])->result_array();
-    assert_true(count($legs) >= 2, 'the new ticket has legs');
+    // WINDELS fair-odds column.
+    $legs = $db->get_where('sports_ticket_selections', ['ticket_id' => $ticket1])->result_array();
+    assert_true(count($legs) >= 2, 'the persisted ticket has legs');
     foreach ($legs as $leg) {
         assert_true(trim((string) ($leg['odds_source'] ?? '')) !== '', 'leg names its odds source: ' . json_encode(array_keys($leg)));
         assert_true(trim((string) ($leg['odds_timestamp'] ?? '')) !== '', 'leg carries the odds last-update timestamp');
@@ -367,16 +376,12 @@ test('a new generation supersedes the previous pending ticket for the same fixtu
         assert_true($leg['fair_odds'] === null || (float) $leg['fair_odds'] > 1.0, 'WINDELS fair odds quotable when stored');
     }
 
-    // The daily slot now points at the new ticket, never the old pass.
     $slot = $db->get_where('sports_daily_tickets', ['date' => $date])->row_array();
-    assert_equals($ticket2, (string) ($slot['ticket_id'] ?? ''), 'the daily slot references the new ticket');
-
-    // A superseded ticket can never be approved afterwards.
-    $types = array_column(ci141_audit()->recent(400), 'type');
-    assert_in_array('SPORTS_TICKET_SUPERSEDED', $types, 'the supersede is audited');
+    assert_equals('GENERATED', (string) ($slot['generation_status'] ?? ''));
+    assert_equals($ticket1, (string) ($slot['ticket_id'] ?? ''));
 });
 
-test('a fresh no-qualified-ticket verdict retires the previous pending ticket; an outage does not', function () {
+test('a later no-odds feed cannot replace an already persisted daily ticket', function () {
     ci141_reset();
     $db = ci()->db;
     $repo = ci141_repo();
@@ -385,7 +390,7 @@ test('a fresh no-qualified-ticket verdict retires the previous pending ticket; a
     $date = gmdate('Y-m-d', strtotime('+1 day'));
 
     // First pass: a qualified pending ticket.
-    $r1 = ci141_force_service()->runDaily($date, 'daily-ticket:141:noq-a:' . uniqid());
+    $r1 = ci141_force_service()->runDaily($date, 'daily-ticket:141:noq-a:' . uniqid(), ['refreshFixtures' => true]);
     assert_equals('PENDING_USER_APPROVAL', (string) $r1['status'], (string) ($r1['message'] ?? ''));
     $ticket1 = (string) $r1['ticketId'];
 
@@ -419,15 +424,16 @@ test('a fresh no-qualified-ticket verdict retires the previous pending ticket; a
         new DecisionRecorder($repo, ci141_audit())
     );
     $r2 = $service2->runDaily($date, 'daily-ticket:141:noq-b:' . uniqid());
-    assert_equals('NO_QUALIFIED_TICKET', (string) $r2['status']);
-    assert_equals('OK', (string) $r2['dataState'], 'a no-odds answer is a verdict, not a provider outage');
+    assert_equals('GENERATED', (string) $r2['status']);
+    assert_true(!empty($r2['existing']));
+    assert_equals($ticket1, (string) $r2['ticketId']);
     $old = $db->get_where('sports_tickets', ['id' => $ticket1])->row_array();
-    assert_equals('SUPERSEDED', (string) $old['settlement_status'], 'the earlier pass cannot remain actionable after a fresh no-ticket verdict');
+    assert_equals('PENDING', (string) $old['settlement_status'], 'the existing valid ticket remains authoritative');
     $slot = $db->get_where('sports_daily_tickets', ['date' => $date])->row_array();
-    assert_true(empty($slot['ticket_id']), 'the daily slot no longer points at the old pass');
+    assert_equals($ticket1, (string) ($slot['ticket_id'] ?? ''));
 });
 
-test('non-forced daily runs keep their idempotent skip behaviour', function () {
+test('non-forced daily runs return the existing ticket rather than duplicate-skipping', function () {
     ci141_reset();
     $repo = ci141_repo();
     $repo->ensureProvider(CI141_FORCE_PROVIDER, CI141_FORCE_PROVIDER);
@@ -437,6 +443,11 @@ test('non-forced daily runs keep their idempotent skip behaviour', function () {
     $first = $service->runDaily($date, $key);
     assert_not_equals('DUPLICATE_SKIPPED', (string) $first['status']);
     $second = $service->runDaily($date, $key);
-    assert_equals('DUPLICATE_SKIPPED', (string) $second['status'], 'without force the same execution key is skipped as before');
+    if (!empty($first['ticketId'])) {
+        assert_equals('GENERATED', (string) $second['status']);
+        assert_equals((string) $first['ticketId'], (string) $second['ticketId']);
+    } else {
+        assert_not_equals('DUPLICATE_SKIPPED', (string) $second['status'], 'an attempt without a ticket remains retryable');
+    }
     assert_null($second['invalidated'] ?? null, 'no invalidation happens on a normal run');
 });

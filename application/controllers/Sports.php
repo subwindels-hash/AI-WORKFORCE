@@ -23,12 +23,12 @@ class Sports extends App_Controller
         // The day the console reports (?date=YYYY-MM-DD, default today). A
         // typo'd date must not be answered with a silently different day: the
         // page shows the fallback day, and says that is what it did and why.
-        $date = \AIWorkforce\Football\RequestParams::date($get, 'date', gmdate('Y-m-d'), $notes);
+        $date = \AIWorkforce\Football\RequestParams::date($get, 'date', $this->ticketToday(), $notes);
         if ($notes !== []) $data['notice'] = trim(implode(' ', array_filter([(string) ($data['notice'] ?? ''), ...$notes])));
         $data['date'] = $date;
         $data['yesterday'] = gmdate('Y-m-d', strtotime($date . ' -1 day'));
         $data['tomorrow'] = gmdate('Y-m-d', strtotime($date . ' +1 day'));
-        $data['isToday'] = ($date === gmdate('Y-m-d'));
+        $data['isToday'] = ($date === $this->ticketToday());
         $data['dashboard'] = $this->platform->sports->dashboard($date);
         $this->render('sports/index', $data);
     }
@@ -42,7 +42,7 @@ class Sports extends App_Controller
         // Today's AI ticket hero: the stored daily run for today plus its
         // ticket and selections. Viewing never generates anything — when no
         // run or ticket exists the hero degrades to an honest empty state.
-        $today = gmdate('Y-m-d');
+        $today = $this->ticketToday();
         $todayRun = null;
         $todayTicket = null;
         $todaySelections = [];
@@ -51,7 +51,19 @@ class Sports extends App_Controller
             $ticketId = is_array($todayRun) ? (string) ($todayRun['ticket_id'] ?? '') : '';
             if ($ticketId !== '') {
                 $todayTicket = $this->platform->model->sports->findTicket($ticketId);
-                if ($todayTicket !== null) $todaySelections = $this->platform->model->sports->ticketSelections($ticketId);
+                if ($todayTicket !== null) {
+                    $todaySelections = $this->platform->model->sports->ticketSelections($ticketId);
+                    foreach ($todaySelections as &$selection) {
+                        $match = $this->platform->model->sports->findMatchById((int) ($selection['match_id'] ?? 0));
+                        if ($match !== null) {
+                            $selection['competition'] = $match['competition'] ?? null;
+                            $selection['kickoff_time'] = $selection['kickoff_time'] ?? $match['kickoff_at'] ?? null;
+                            $selection['home_team'] = $selection['home_team'] ?? $match['home_team'] ?? null;
+                            $selection['away_team'] = $selection['away_team'] ?? $match['away_team'] ?? null;
+                        }
+                    }
+                    unset($selection);
+                }
             }
         } catch (Throwable $e) { /* hero degrades to "not generated" */ }
         $data['todayIso'] = $today;
@@ -59,6 +71,17 @@ class Sports extends App_Controller
         $data['todayTicket'] = $todayTicket;
         $data['todaySelections'] = $todaySelections;
         $this->render('sports/tickets', $data);
+    }
+
+    /** Configured-local calendar date used by the daily ticket scheduler. */
+    private function ticketToday(): string
+    {
+        try {
+            $config = $this->platform->sports->configuration->active();
+            return \AIWorkforce\Sports\DailyTicketDate::today((string) ($config['system_timezone'] ?? 'UTC'));
+        } catch (Throwable $e) {
+            return \AIWorkforce\Sports\DailyTicketDate::today('UTC');
+        }
     }
 
     /**
@@ -111,10 +134,10 @@ class Sports extends App_Controller
     /**
      * Generate an odds prediction ticket from stored fixtures/odds (sports.manage).
      * Browser-accessible equivalent of POST /api/sports/ticket-engine/run for
-     * operators without CLI/cron access. Runs only the DailyTicketService pipeline
-     * (no external provider calls) — it evaluates stored matches, applies
-     * calibration/value/confidence/risk/correlation gates and optimizes an odds prediction ticket.
-     * Idempotent per (date, config version): duplicate execution keys are skipped.
+     * operators without CLI/cron access. DailyTicketService reuses stored
+     * fixtures/odds/predictions first and refreshes only missing or stale data,
+     * then applies every calibration/value/confidence/risk/correlation gate.
+     * Persisted ticket identity is idempotent per (ticket type, local date).
      */
     public function generate_ticket()
     {
@@ -122,16 +145,11 @@ class Sports extends App_Controller
         if (!$this->requireSportsPermission('sports.manage', 'generate odds prediction ticket')) return;
         @set_time_limit(180);
         $date = trim((string) $this->input->post('date'));
-        if ($date === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) $date = gmdate('Y-m-d');
+        if ($date === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) $date = $this->ticketToday();
         // force=1 clears the day's ACTIVE candidate state (no old pass odds can
         // be carried forward) before a clean regeneration runs.
         $force = (bool) $this->input->post('force');
         $sports = $this->platform->sports;
-        if (!$sports->providers->configured()) {
-            $this->flash('error', 'No sports provider is registered. Add a provider key (API-Football, TheSportsDB or SportMonks) via Admin → API or the WINDELS_*_KEY variables in .env, then sync data first.');
-            redirect('/sports');
-            return;
-        }
         try {
             $result = $sports->dailyTickets->runDaily($date, null, $force ? ['force' => true] : []);
             if (($result['status'] ?? '') === 'RESET_FAILED') {
@@ -151,11 +169,14 @@ class Sports extends App_Controller
         $rejections = (int) ($result['rejections'] ?? 0);
         $message = (string) ($result['message'] ?? '');
 
-        if ($status === 'DUPLICATE_SKIPPED') {
-            $this->flash('notice', sprintf('Odds prediction ticket generation skipped (already run for %s — idempotent). %s', $date, $message));
+        if ($status === 'GENERATION_IN_PROGRESS') {
+            $this->flash('notice', 'Odds prediction ticket generation is already in progress for ' . $date . '. Refresh shortly; no duplicate worker was started.');
             redirect('/sports/odds-prediction-ticket');
             return;
         }
+        // DUPLICATE_SKIPPED is intentionally not a daily-ticket outcome. An
+        // earlier attempt without a ticket is retryable; a valid ticket returns
+        // GENERATED with its existing id.
         if ($ticketId) {
             $msg = sprintf('GENERATED odds prediction ticket %s for %s — status %s, %d evaluated, %d predictions, %d rejections. %s',
                 $ticketId, $date, $status, $evaluated, $recorded, $rejections, $message);
@@ -220,7 +241,7 @@ class Sports extends App_Controller
         if ($this->input->method(true) !== 'POST') { redirect('/sports'); return; }
         if (!$this->requireSportsPermission('sports.manage', 'reset active candidates')) return;
         $date = trim((string) $this->input->post('date'));
-        if ($date === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) $date = gmdate('Y-m-d');
+        if ($date === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) $date = $this->ticketToday();
         $to = gmdate('Y-m-d', strtotime($date . ' +1 day'));
         try {
             $counts = $this->platform->model->sports->invalidateActiveCandidates($date, $to, true);
@@ -246,7 +267,7 @@ class Sports extends App_Controller
         if (!$this->requireSportsPermission('sports.manage', 'sync')) return;
         @set_time_limit(180);
         $sports = $this->platform->sports;
-        $date = gmdate('Y-m-d');
+        $date = $this->ticketToday();
         $tomorrow = gmdate('Y-m-d', strtotime($date . ' +1 day'));
         $providers = $sports->providers->all();
         if (!$providers) {
@@ -258,7 +279,12 @@ class Sports extends App_Controller
         $fixtures = 0; $created = 0; $errors = [];
         foreach ($providers as $provider) {
             try {
-                $r = $sports->sync->syncFixtures($provider, ['from' => $date, 'to' => $tomorrow], 'web-sync:fixtures:' . $date . ':' . $provider->id() . ':' . $stamp);
+                $cfg = $sports->configuration->active();
+                $r = $sports->sync->syncFixtures($provider, [
+                    'from' => $date, 'to' => $tomorrow,
+                    'timezone' => (string) ($cfg['system_timezone'] ?? 'UTC'),
+                    'limit' => 50, 'page' => 1,
+                ], 'web-sync:fixtures:' . $date . ':' . $provider->id() . ':' . $stamp);
             } catch (Throwable $e) {
                 $r = ['status' => 'FAILED', 'errors' => [mb_substr($e->getMessage(), 0, 200)]];
             }
@@ -293,12 +319,24 @@ class Sports extends App_Controller
     private function syncWebOdds(\AIWorkforce\Sports\SportsIntelligence $sports, string $date, string $stamp, array &$errors): int
     {
         $done = 0;
-        $end = gmdate('Y-m-d', strtotime($date . ' +1 day')) . 'T00:00:00+00:00';
-        $matches = $this->AIWorkforce_model->sports->listMatches(['from' => $date . 'T00:00:00+00:00', 'to' => $end, 'status' => 'SCHEDULED'], 40);
+        $config = $sports->configuration->active();
+        $window = \AIWorkforce\Sports\DailyTicketDate::utcWindow($date, (string) ($config['system_timezone'] ?? 'UTC'));
+        $end = gmdate('Y-m-d\TH:i:sP', $window['endTimestamp'] - 1);
+        $matches = $this->AIWorkforce_model->sports->listMatches(['from' => $window['start'], 'to' => $end, 'status' => 'SCHEDULED'], 1000);
         $sources = $this->AIWorkforce_model->sports->listProviders();
+        $attempted = 0;
         foreach ($matches as $match) {
+            if ($attempted >= \AIWorkforce\Sports\SportsCronService::ODDS_BATCH_SIZE) break;
             $provider = $this->webProviderById($sports, $sources, (int) $match['provider_id']);
             if ($provider === null) continue;
+            // Reuse valid odds. The web action advances through stale/missing
+            // rows in controlled 50-fixture batches instead of repeatedly
+            // burning quota on the first arbitrary 40 rows.
+            $latest = $this->AIWorkforce_model->sports->latestOdds((int) $match['id']);
+            $maxAge = \AIWorkforce\Sports\OddsFreshnessEngine::maxAgeFor($latest['market'] ?? null, $provider->id());
+            $observed = $latest ? strtotime((string) ($latest['observed_at'] ?? '')) : false;
+            if ($observed !== false && time() - $observed <= $maxAge) continue;
+            $attempted++;
             try {
                 $r = $sports->sync->syncOdds($provider, (string) $match['external_id'], 'web-sync:odds:' . (int) $match['id'] . ':' . $date . ':' . $stamp);
                 if (($r['status'] ?? '') === 'COMPLETED') $done++;

@@ -90,6 +90,13 @@ class SportsDataNormalizer
     private static function crossReferences(array $raw): array
     {
         $out = [];
+        // Preserve already-normalized references when a stored fixture is
+        // normalized again during a later daily run.
+        foreach ((array) ($raw['crossReferences'] ?? []) as $provider => $id) {
+            $provider = trim((string) $provider);
+            $id = is_scalar($id) ? trim((string) $id) : '';
+            if ($provider !== '' && $id !== '') $out[$provider] = $id;
+        }
         foreach (['api-football' => 'apiFootballId'] as $provider => $key) {
             if (isset($raw[$key]) && is_scalar($raw[$key])) {
                 $id = trim((string) $raw[$key]);

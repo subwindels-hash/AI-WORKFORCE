@@ -105,10 +105,118 @@ test('daily ticket E2E: qualified ticket awaits user approval', function () {
     $p = $preds[0];
     assert_not_null($p['odds']);
     assert_true(isset($p['factors']['drivers'], $p['factors']['gate'], $p['factors']['calibration']));
-    // idempotency: same date + config version never creates a second ticket
+    // Idempotency is based on the persisted ticket, not the attempt row: the
+    // same date returns the existing ticket and never creates a second one.
     $again = $service->runDaily($date);
-    assert_equals('DUPLICATE_SKIPPED', $again['status']);
+    assert_equals('GENERATED', $again['status']);
+    assert_true($again['existing']);
+    assert_equals($run['ticketId'], $again['ticketId']);
     assert_equals(1, count($repo->tickets));
+});
+
+test('daily ticket E2E: scheduler cycle generates automatically and second cycle returns it', function () {
+    $repo = new SportsRepositoryStub();
+    $audit = fx_daily_audit();
+    fx_approve_calibration($repo);
+    $sports = new AIWorkforce\Sports\SportsIntelligence($repo, $audit);
+    $sports->providers->register(fx_daily_provider([
+        'f0' => [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.55, 'observedAt' => gmdate('c')]],
+        'f1' => [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.75, 'observedAt' => gmdate('c')]],
+        'f2' => [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.9, 'observedAt' => gmdate('c')]],
+        'f3' => [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 2.1, 'observedAt' => gmdate('c')]],
+        'f4' => [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 2.3, 'observedAt' => gmdate('c')]],
+    ]));
+    $cron = new AIWorkforce\Sports\SportsCronService($repo, $audit, $sports);
+    $date = gmdate('Y-m-d', strtotime('+1 day'));
+
+    $first = $cron->runDailyGenerationCycle($date, ['scheduled' => true]);
+    assert_true(isset($first['fixtures'], $first['odds'], $first['quality'], $first['ticket']), 'focused automatic cycle runs every prerequisite in order');
+    assert_not_null($first['ticket']['ticketId'] ?? null);
+    assert_equals('GENERATED', $repo->findDailyTicket($date)['generation_status']);
+    assert_equals(1, count($repo->tickets));
+    $dashboard = $sports->dashboard($date);
+    assert_equals('GENERATED', $dashboard['ticketEngine']['today']['generation_status'], 'dashboard refresh reads the persisted generation state');
+    assert_equals($first['ticket']['ticketId'], $dashboard['ticketEngine']['ticket']['id']);
+
+    $second = $cron->runDailyGenerationCycle($date, ['scheduled' => true]);
+    assert_equals('GENERATED', $second['ticket']['status']);
+    assert_true(!empty($second['ticket']['existing']));
+    assert_equals($first['ticket']['ticketId'], $second['ticket']['ticketId']);
+    assert_true(!isset($second['fixtures']), 'persisted ticket short-circuits repeated provider work');
+    assert_equals(1, count($repo->tickets));
+});
+
+test('daily ticket E2E: a stale job-attempt key cannot block first-time generation', function () {
+    [$repo, , $service] = fx_daily_stack();
+    fx_approve_calibration($repo);
+    $date = gmdate('Y-m-d', strtotime('+1 day'));
+    $base = 'daily-ticket:test:stale-attempt';
+    $stale = $repo->startJobRun(['id' => 'stale-attempt', 'jobType' => 'DAILY_TICKET', 'executionKey' => $base . ':attempt:1']);
+    assert_not_null($stale);
+
+    $run = $service->runDaily($date, $base);
+    assert_equals('PENDING_USER_APPROVAL', $run['status'], 'the owned daily slot recovers under a distinct telemetry key');
+    assert_not_null($run['ticketId']);
+    assert_equals('GENERATED', $repo->findDailyTicket($date)['generation_status']);
+    assert_equals(1, count($repo->tickets));
+});
+
+test('daily ticket E2E: failed/deleted attempt metadata cannot hide an existing ticket', function () {
+    [$repo, , $service] = fx_daily_stack();
+    fx_approve_calibration($repo);
+    $date = gmdate('Y-m-d', strtotime('+1 day'));
+    $first = $service->runDaily($date);
+    assert_not_null($first['ticketId']);
+
+    // Simulate damaged attempt metadata while retaining the canonical daily
+    // ticket reference. Persisted ticket truth must be checked first.
+    $repo->updateDailyTicket($date, [
+        'generation_status' => 'FAILED', 'last_error_code' => 'SIMULATED_ATTEMPT_DELETE',
+        'next_retry_at' => gmdate('c', time() + 86400),
+    ]);
+    $again = $service->runDaily($date, null, ['scheduled' => true]);
+    assert_equals('GENERATED', $again['status']);
+    assert_true($again['existing']);
+    assert_equals($first['ticketId'], $again['ticketId']);
+    assert_equals(1, count($repo->tickets));
+});
+
+test('daily ticket E2E: interrupted daily linking recovers the persisted deterministic ticket', function () {
+    [$repo, , $service] = fx_daily_stack();
+    fx_approve_calibration($repo);
+    $date = gmdate('Y-m-d', strtotime('+1 day'));
+    $first = $service->runDaily($date);
+    assert_not_null($first['ticketId']);
+    $repo->dailyTickets = []; // simulate crash/deletion after ticket + legs commit
+
+    $again = $service->runDaily($date);
+    assert_equals('GENERATED', $again['status']);
+    assert_true($again['existing']);
+    assert_equals($first['ticketId'], $again['ticketId']);
+    assert_equals('GENERATED', $repo->findDailyTicket($date)['generation_status']);
+    assert_equals(1, count($repo->tickets), 'recovery links the winner instead of generating a duplicate');
+});
+
+test('daily ticket E2E: an active atomic claim reports generation in progress', function () {
+    [$repo, , $service] = fx_daily_stack();
+    fx_approve_calibration($repo);
+    $date = gmdate('Y-m-d', strtotime('+1 day'));
+    $claim = $repo->claimDailyTicketGeneration($date, 'ODDS_PREDICTION', 'worker-a', 1, 'UTC', $date . 'T00:00:00+00:00', gmdate('Y-m-d\\T00:00:00+00:00', strtotime($date . ' +1 day')), 900);
+    assert_true($claim['claimed']);
+
+    $run = $service->runDaily($date);
+    assert_equals('GENERATION_IN_PROGRESS', $run['status']);
+    assert_equals('RUNNING', $run['generationStatus']);
+    assert_equals(0, count($repo->tickets));
+});
+
+test('daily ticket local dates produce DST-safe exclusive UTC windows', function () {
+    $kiritimati = AIWorkforce\Sports\DailyTicketDate::utcWindow('2026-09-11', 'Pacific/Kiritimati');
+    assert_equals('2026-09-10T10:00:00+00:00', $kiritimati['start']);
+    assert_equals('2026-09-11T10:00:00+00:00', $kiritimati['endExclusive']);
+
+    $dst = AIWorkforce\Sports\DailyTicketDate::utcWindow('2026-11-01', 'America/New_York');
+    assert_equals(25 * 3600, $dst['endTimestamp'] - $dst['startTimestamp'], 'fall-back local day is 25 hours, not a hard-coded UTC day');
 });
 
 test('daily ticket E2E: approval flow with audit attribution', function () {
@@ -151,6 +259,36 @@ test('daily ticket E2E: a fresh install breaks the calibration cold start itself
     assert_true(in_array('SPORTS_CALIBRATION_AUTO_APPROVED', $types, true));
 });
 
+test('daily ticket E2E: stored fixtures and fresh odds work without another provider pull', function () {
+    $repo = new SportsRepositoryStub();
+    $audit = fx_daily_audit();
+    $source = fx_daily_provider([
+        'f0' => [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.55, 'observedAt' => gmdate('c')]],
+        'f1' => [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.75, 'observedAt' => gmdate('c')]],
+        'f2' => [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.9, 'observedAt' => gmdate('c')]],
+        'f3' => [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 2.1, 'observedAt' => gmdate('c')]],
+        'f4' => [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 2.3, 'observedAt' => gmdate('c')]],
+    ]);
+    $providerId = (int) $repo->ensureProvider('daily-test', 'daily-test')['id'];
+    foreach ($source->fixtures([]) as $fixture) {
+        $saved = $repo->saveMatch($providerId, AIWorkforce\Sports\SportsDataNormalizer::fixture($fixture, 'daily-test'));
+        foreach ($source->odds((string) $fixture['externalId']) as $odds) {
+            $repo->saveOdds((int) $saved['id'], $providerId, AIWorkforce\Sports\SportsDataNormalizer::odds($odds, 'daily-test'));
+        }
+    }
+    fx_approve_calibration($repo);
+    $emptyProviders = new SportsProviderManager();
+    $config = new ConfigurationService($repo, $audit);
+    $pipeline = new PredictionPipeline(new MatchIntelligenceEngine(new OddsFreshnessEngine()), new FeatureEngineeringEngine(), new PredictionEngine(), new ValueEngine(), new RiskEngine(), new CorrelationEngine(), new ConfidenceEngine());
+    $service = new DailyTicketService($repo, $audit, $emptyProviders, $config, new DataQualityEngine(), $pipeline, new TicketOptimizer(new CorrelationEngine()), new TicketGovernance($repo, $audit, new CorrelationEngine()), new DecisionRecorder($repo, $audit));
+
+    $run = $service->runDaily(gmdate('Y-m-d', strtotime('+1 day')));
+    assert_equals('PENDING_USER_APPROVAL', $run['status']);
+    assert_equals('STORED', $run['diagnostics']['fixtureInput']);
+    assert_equals(5, $run['evaluated']);
+    assert_equals(1, count($repo->tickets));
+});
+
 test('daily ticket E2E: no provider configured → DISABLED_NO_PROVIDER, nothing fabricated', function () {
     $repo = new SportsRepositoryStub();
     $audit = fx_daily_audit();
@@ -187,6 +325,9 @@ test('daily ticket E2E: provider failure is DATA_UNAVAILABLE, never "no qualifie
     // stored row carries the same verdict + the provider ledger
     $daily = $repo->findDailyTicket($date);
     assert_equals('DATA_UNAVAILABLE', $daily['status']);
+    assert_equals('RETRYING', $daily['generation_status']);
+    assert_equals('SPORTS_PROVIDER_UNAVAILABLE', $daily['last_error_code']);
+    assert_true(strtotime((string) $daily['next_retry_at']) > time(), 'temporary provider failure records controlled retry time');
     assert_equals('OFFLINE', $daily['rejection_summary']['PROVIDER:broken'] ?? null);
     // audited as BLOCKED, not as a normal run
     $blocked = array_values(array_filter($audit->events, fn($e) => $e['type'] === 'SPORTS_DAILY_TICKET_BLOCKED'));

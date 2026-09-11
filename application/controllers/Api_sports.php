@@ -33,7 +33,9 @@ class Api_sports extends Api_controller
         if (!$this->requirePermission('sports.view', false)) return;
         $g = $this->input->get(NULL, true) ?: [];
         $notes = [];
-        $date = \AIWorkforce\Football\RequestParams::date($g, 'date', gmdate('Y-m-d'), $notes);
+        $cfg = $this->platform->sports->configuration->active();
+        $timezone = \AIWorkforce\Sports\DailyTicketDate::configuredTimezone((string) ($cfg['system_timezone'] ?? 'UTC'));
+        $date = \AIWorkforce\Football\RequestParams::date($g, 'date', \AIWorkforce\Sports\DailyTicketDate::today($timezone), $notes);
         $payload = $this->platform->sports->dashboard($date);
         // What the endpoint actually did with the query string. Without this a
         // typo'd parameter is indistinguishable from a deliberate one.
@@ -110,10 +112,14 @@ class Api_sports extends Api_controller
     {
         if (!$this->requirePermission('sports.view', false)) return;
         $g = $this->input->get(NULL, true) ?: [];
-        $date = (string) ($g['date'] ?? gmdate('Y-m-d'));
-        if ($date === 'today') $date = gmdate('Y-m-d');
+        $cfg = $this->platform->sports->configuration->active();
+        $timezone = \AIWorkforce\Sports\DailyTicketDate::configuredTimezone((string) ($cfg['system_timezone'] ?? 'UTC'));
+        $today = \AIWorkforce\Sports\DailyTicketDate::today($timezone);
+        $date = (string) ($g['date'] ?? $today);
+        if ($date === 'today') $date = $today;
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) return $this->jsonError('date must be YYYY-MM-DD or today');
-        $rows = $this->AIWorkforce_model->sports->listMatches(['from' => $date . 'T00:00:00+00:00', 'to' => $date . 'T23:59:59+00:00'], (int) ($g['limit'] ?: 500));
+        $window = \AIWorkforce\Sports\DailyTicketDate::utcWindow($date, $timezone);
+        $rows = $this->AIWorkforce_model->sports->listMatches(['from' => $window['start'], 'to' => gmdate('c', $window['endTimestamp'] - 1)], (int) ($g['limit'] ?: 500));
         $fixtures = array_map(fn($m) => [
             'fixture_id' => $m['external_id'] ?? (string) ($m['id'] ?? ''),
             'league_id' => $m['payload']['leagueId'] ?? null,
@@ -223,8 +229,21 @@ class Api_sports extends Api_controller
         $g = $this->input->get(NULL, true) ?: [];
         $filter = array_intersect_key($g, array_flip(['from', 'to', 'status', 'modelVersionId']));
         $tickets = $this->AIWorkforce_model->sports->listTickets($filter, (int) ($g['limit'] ?: 200));
-        foreach ($tickets as &$t) $t['selections'] = $this->AIWorkforce_model->sports->ticketSelections((string) $t['id']);
-        $this->json(['tickets' => $tickets]);
+        foreach ($tickets as &$t) {
+            $t['selections'] = $this->AIWorkforce_model->sports->ticketSelections((string) $t['id']);
+            foreach ($t['selections'] as &$selection) {
+                $match = $this->AIWorkforce_model->sports->findMatchById((int) ($selection['match_id'] ?? 0));
+                if ($match !== null) {
+                    $selection['competition'] = $match['competition'] ?? null;
+                    $selection['kickoff_time'] = $selection['kickoff_time'] ?? $match['kickoff_at'] ?? null;
+                    $selection['home_team'] = $selection['home_team'] ?? $match['home_team'] ?? null;
+                    $selection['away_team'] = $selection['away_team'] ?? $match['away_team'] ?? null;
+                }
+            }
+            unset($selection);
+        }
+        unset($t);
+        $this->json(['tickets' => $tickets, 'dailyGeneration' => $this->AIWorkforce_model->sports->listDailyTickets((int) ($g['limit'] ?: 60))]);
     }
 
     public function show_ticket(string $id)
@@ -427,16 +446,39 @@ class Api_sports extends Api_controller
         $patch = array_diff_key($body, array_flip(['reason', 'allowAutomatedExecution']));
         $result = $this->platform->sports->configuration->update($patch, (string) $user['id'], (string) $body['reason'], !empty($body['allowAutomatedExecution']));
         if (!$result['ok']) return $this->jsonError($result['reason'], 422);
-        $this->json(['configuration' => $result['configuration']]);
+
+        // Enabling/configuring Odds Prediction requests today's generation
+        // automatically. This is the same stored-first, bounded cycle cron uses;
+        // the manual button remains optional. A provider outage is returned in
+        // the diagnostic and persisted as RETRYING rather than undoing the valid
+        // configuration change.
+        $automaticGeneration = null;
+        $cfg = (array) $result['configuration'];
+        if (!empty($cfg['module_enabled']) && !empty($cfg['ticket_engine_enabled'])
+            && in_array((string) ($cfg['engine_mode'] ?? ''), ['AI_TICKET_GENERATION', 'USER_APPROVAL_REQUIRED', 'AUTOMATED_EXECUTION'], true)) {
+            @set_time_limit(180);
+            try {
+                $cron = new \AIWorkforce\Sports\SportsCronService($this->AIWorkforce_model->sports, $this->AIWorkforce_model->audit, $this->platform->sports);
+                $automaticGeneration = $cron->runDailyGenerationCycle(
+                    \AIWorkforce\Sports\DailyTicketDate::today((string) ($cfg['system_timezone'] ?? 'UTC')),
+                    ['scheduled' => false]
+                );
+            } catch (\Throwable $e) {
+                $automaticGeneration = ['status' => 'FAILED', 'message' => mb_substr($e->getMessage(), 0, 300), 'retry' => 'SCHEDULED'];
+            }
+        }
+        $this->json(['configuration' => $result['configuration'], 'automaticGeneration' => $automaticGeneration]);
     }
 
-    /** Triggers the daily ticket run for the given (or current) UTC date. */
+    /** Triggers the daily ticket run for the given (or configured-local current) date. */
     public function run_ticket_engine()
     {
         $user = $this->requirePermission('sports.manage');
         if (!$user) return;
         $body = $this->jsonBody();
-        $date = isset($body['date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $body['date']) ? (string) $body['date'] : gmdate('Y-m-d');
+        $cfg = $this->platform->sports->configuration->active();
+        $today = \AIWorkforce\Sports\DailyTicketDate::today((string) ($cfg['system_timezone'] ?? 'UTC'));
+        $date = isset($body['date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $body['date']) ? (string) $body['date'] : $today;
         // force: invalidate the day's ACTIVE candidate state (old pass odds,
         // stale pending ticket/daily slot) before regenerating from fresh
         // provider data. Settled/historical records are preserved.
@@ -464,7 +506,9 @@ class Api_sports extends Api_controller
         $user = $this->requirePermission('sports.manage');
         if (!$user) return;
         $body = $this->jsonBody();
-        $date = isset($body['date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $body['date']) ? (string) $body['date'] : gmdate('Y-m-d');
+        $cfg = $this->platform->sports->configuration->active();
+        $today = \AIWorkforce\Sports\DailyTicketDate::today((string) ($cfg['system_timezone'] ?? 'UTC'));
+        $date = isset($body['date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $body['date']) ? (string) $body['date'] : $today;
         $to = isset($body['to']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $body['to']) ? (string) $body['to'] : gmdate('Y-m-d', strtotime($date . ' +1 day'));
         try {
             $counts = $this->AIWorkforce_model->sports->invalidateActiveCandidates($date, $to, true);

@@ -246,7 +246,11 @@ class SportsRepositoryStub implements \AIWorkforce\Persistence\SportsRepository
         if (!empty($filter['to'])) $rows = array_values(array_filter($rows, fn($m) => ($m['kickoff_at'] ?? '') <= $filter['to']));
         if (!empty($filter['competition'])) $rows = array_values(array_filter($rows, fn($m) => str_contains((string) ($m['competition'] ?? ''), (string) $filter['competition'])));
         if (!empty($filter['providerId'])) $rows = array_values(array_filter($rows, fn($m) => (int) ($m['provider_id'] ?? 0) === (int) $filter['providerId']));
-        return array_slice($rows, 0, $limit);
+        usort($rows, static function (array $a, array $b): int {
+            $kickoff = strcmp((string) ($a['kickoff_at'] ?? ''), (string) ($b['kickoff_at'] ?? ''));
+            return $kickoff !== 0 ? $kickoff : ((int) ($a['id'] ?? 0) <=> (int) ($b['id'] ?? 0));
+        });
+        return array_slice($rows, max(0, (int) ($filter['offset'] ?? 0)), $limit);
     }
     public function saveMatch(int $providerId, array $m): array
     {
@@ -373,9 +377,43 @@ class SportsRepositoryStub implements \AIWorkforce\Persistence\SportsRepository
     public function listBacktests(int $limit = 20): array { return array_slice(array_reverse($this->backtests), 0, $limit); }
     public function saveModelMetrics(array $m): void { $this->modelMetrics[] = $m; }
     public function listModelMetrics(?int $modelVersionId = null, ?int $windowDays = null, ?string $sampleType = null, int $limit = 200): array { return array_slice(array_reverse(array_values(array_filter($this->modelMetrics, fn($m) => ($modelVersionId === null || (int) $m['model_version_id'] === $modelVersionId) && ($windowDays === null || (int) $m['window_days'] === $windowDays) && ($sampleType === null || ($m['sample_type'] ?? '') === $sampleType)))), 0, $limit); }
-    public function findDailyTicket(string $date): ?array { foreach ($this->dailyTickets as $d) if ($d['date'] === $date) { $d['rejection_summary'] = is_string($d['rejection_summary'] ?? null) ? (json_decode($d['rejection_summary'], true) ?? []) : ($d['rejection_summary'] ?? []); return $d; } return null; }
-    public function saveDailyTicket(array $d): void { foreach ($this->dailyTickets as &$x) if ($x['date'] === $d['date']) { $x = $d; return; } $this->dailyTickets[] = $d; }
-    public function updateDailyTicket(string $date, array $patch): void { foreach ($this->dailyTickets as &$x) if ($x['date'] === $date) $x = array_merge($x, $patch, ['updated_at' => gmdate('c')]); }
+    public function findDailyTicket(string $date): ?array { foreach ($this->dailyTickets as $d) if ($d['date'] === $date && ($d['ticket_type'] ?? 'ODDS_PREDICTION') === 'ODDS_PREDICTION') { $d['rejection_summary'] = is_string($d['rejection_summary'] ?? null) ? (json_decode($d['rejection_summary'], true) ?? []) : ($d['rejection_summary'] ?? []); $d['generation_status'] = $d['generation_status'] ?? (!empty($d['ticket_id']) ? 'GENERATED' : 'PENDING'); return $d; } return null; }
+    public function claimDailyTicketGeneration(string $date, string $ticketType, string $runId, int $configurationVersion, string $timezone, string $windowStartUtc, string $windowEndUtc, int $staleAfterSeconds = 900): array
+    {
+        foreach ($this->dailyTickets as &$row) {
+            if ((string) ($row['date'] ?? '') !== $date || (string) ($row['ticket_type'] ?? 'ODDS_PREDICTION') !== $ticketType) continue;
+            $state = strtoupper((string) ($row['generation_status'] ?? (!empty($row['ticket_id']) ? 'GENERATED' : 'PENDING')));
+            $updated = strtotime((string) ($row['updated_at'] ?? ''));
+            if ($state === 'RUNNING' && $updated !== false && time() - $updated < max(60, $staleAfterSeconds) && (string) ($row['run_id'] ?? '') !== $runId) {
+                $copy = $row; unset($row); return ['claimed' => false, 'state' => 'RUNNING', 'row' => $copy];
+            }
+            if ($state === 'GENERATED' && !empty($row['ticket_id'])) { $copy = $row; unset($row); return ['claimed' => false, 'state' => 'GENERATED', 'row' => $copy]; }
+            $row = array_merge($row, [
+                'ticket_type' => $ticketType, 'ticket_id' => null, 'status' => 'PENDING',
+                'generation_status' => ((int) ($row['attempt_count'] ?? 0) === 0 && $state === 'PENDING') ? 'RUNNING' : 'RETRYING',
+                'configuration_version' => $configurationVersion, 'run_id' => $runId,
+                'attempt_count' => (int) ($row['attempt_count'] ?? 0) + 1,
+                'next_retry_at' => null, 'last_error_code' => null, 'system_timezone' => $timezone,
+                'window_start_utc' => $windowStartUtc, 'window_end_utc' => $windowEndUtc,
+                'updated_at' => gmdate('c'),
+            ]);
+            $copy = $row; unset($row); return ['claimed' => true, 'state' => $copy['generation_status'], 'row' => $copy];
+        }
+        unset($row);
+        $row = [
+            'date' => $date, 'ticket_type' => $ticketType, 'ticket_id' => null, 'status' => 'PENDING',
+            'generation_status' => 'RUNNING', 'configuration_version' => $configurationVersion,
+            'candidates_evaluated' => 0, 'predictions_recorded' => 0, 'rejections' => 0,
+            'rejection_summary' => '{}', 'message' => 'Daily ticket generation is running', 'provider' => null,
+            'run_id' => $runId, 'attempt_count' => 1, 'next_retry_at' => null, 'last_error_code' => null,
+            'generated_at' => null, 'system_timezone' => $timezone, 'window_start_utc' => $windowStartUtc,
+            'window_end_utc' => $windowEndUtc, 'created_at' => gmdate('c'), 'updated_at' => gmdate('c'),
+        ];
+        $this->dailyTickets[] = $row;
+        return ['claimed' => true, 'state' => 'RUNNING', 'row' => $row];
+    }
+    public function saveDailyTicket(array $d): void { $d['ticket_type'] = $d['ticket_type'] ?? 'ODDS_PREDICTION'; foreach ($this->dailyTickets as &$x) if ($x['date'] === $d['date'] && ($x['ticket_type'] ?? 'ODDS_PREDICTION') === $d['ticket_type']) { $d['created_at'] = $x['created_at'] ?? ($d['created_at'] ?? gmdate('c')); $x = $d; return; } $this->dailyTickets[] = $d; }
+    public function updateDailyTicket(string $date, array $patch): void { foreach ($this->dailyTickets as &$x) if ($x['date'] === $date && ($x['ticket_type'] ?? 'ODDS_PREDICTION') === 'ODDS_PREDICTION') $x = array_merge($x, $patch, ['updated_at' => gmdate('c')]); }
     public function listDailyTickets(int $limit = 60): array { usort($this->dailyTickets, fn($a, $b) => strcmp($b['date'], $a['date'])); $rows = array_slice($this->dailyTickets, 0, $limit); foreach ($rows as &$d) if (is_string($d['rejection_summary'] ?? null)) $d['rejection_summary'] = json_decode($d['rejection_summary'], true) ?? []; unset($d); return $rows; }
     public function savePerformanceSnapshot(string $asOf, string $window, array $payload): void { foreach ($this->perfSnapshots as &$s) if ($s['as_of'] === $asOf && $s['window'] === $window) { $s['payload'] = $payload; return; } $this->perfSnapshots[] = ['as_of' => $asOf, 'window' => $window, 'payload' => $payload]; }
     public function performanceSnapshots(string $window, int $limit = 30): array { $rows = array_values(array_filter($this->perfSnapshots, fn($s) => $s['window'] === $window)); return array_slice(array_reverse($rows), 0, $limit); }
@@ -398,7 +436,18 @@ class SportsRepositoryStub implements \AIWorkforce\Persistence\SportsRepository
         }
         return $out;
     }
-    public function saveTicket(array $t): void { $this->tickets[] = $t; }
+    public function saveTicket(array $t): void
+    {
+        foreach ($this->tickets as &$existing) {
+            if ((string) ($existing['id'] ?? '') === (string) ($t['id'] ?? '')) {
+                $existing = array_merge($existing, $t);
+                unset($existing);
+                return;
+            }
+        }
+        unset($existing);
+        $this->tickets[] = $t;
+    }
     public function findTicket(string $id): ?array { foreach ($this->tickets as $t) if ($t['id'] === $id) return $t; return null; }
     public function listTickets(array $filter = [], int $limit = 500): array
     {
@@ -413,10 +462,15 @@ class SportsRepositoryStub implements \AIWorkforce\Persistence\SportsRepository
     public function updateTicket(string $id, array $patch): void { foreach ($this->tickets as &$t) if ($t['id'] === $id) $t = array_merge($t, $patch); }
     public function invalidateActiveCandidates(string $fromDate, string $toDate, bool $purgeInvalidOdds = true): array
     {
+        $cfg = $this->activeConfiguration() ?? [];
+        $timezone = \AIWorkforce\Sports\DailyTicketDate::configuredTimezone((string) ($cfg['system_timezone'] ?? 'UTC'));
+        $fromWindow = \AIWorkforce\Sports\DailyTicketDate::utcWindow($fromDate, $timezone);
+        $afterTo = (new \DateTimeImmutable($toDate . ' 00:00:00', new \DateTimeZone($timezone)))->modify('+1 day')->format('Y-m-d');
+        $endWindow = \AIWorkforce\Sports\DailyTicketDate::utcWindow($afterTo, $timezone);
         $upcoming = [];
         foreach ($this->matches as $m) {
-            $day = substr((string) ($m['kickoff_at'] ?? ''), 0, 10);
-            if ($day >= $fromDate && $day <= $toDate && !in_array((string) ($m['status'] ?? ''), ['FINISHED', 'POSTPONED', 'CANCELLED'], true)) $upcoming[(int) $m['id']] = true;
+            $kickoff = (string) ($m['kickoff_at'] ?? '');
+            if ($kickoff >= $fromWindow['start'] && $kickoff < $endWindow['start'] && !in_array((string) ($m['status'] ?? ''), ['FINISHED', 'POSTPONED', 'CANCELLED'], true)) $upcoming[(int) $m['id']] = true;
         }
         $before = count($this->predictions);
         $this->predictions = array_values(array_filter($this->predictions, fn($p) => !isset($upcoming[(int) $p['match_id']])));
@@ -451,6 +505,11 @@ class SportsRepositoryStub implements \AIWorkforce\Persistence\SportsRepository
     }
     public function supersedePendingTicketsForWindow(string $fromDate, string $toDate, ?string $exceptTicketId = null): array
     {
+        $cfg = $this->activeConfiguration() ?? [];
+        $timezone = \AIWorkforce\Sports\DailyTicketDate::configuredTimezone((string) ($cfg['system_timezone'] ?? 'UTC'));
+        $fromWindow = \AIWorkforce\Sports\DailyTicketDate::utcWindow($fromDate, $timezone);
+        $afterTo = (new \DateTimeImmutable($toDate . ' 00:00:00', new \DateTimeZone($timezone)))->modify('+1 day')->format('Y-m-d');
+        $endWindow = \AIWorkforce\Sports\DailyTicketDate::utcWindow($afterTo, $timezone);
         // Authoritative kickoff/status per internal match id.
         $byId = [];
         foreach ($this->matches as $m) $byId[(int) $m['id']] = $m;
@@ -463,8 +522,8 @@ class SportsRepositoryStub implements \AIWorkforce\Persistence\SportsRepository
                 if ($s['ticket_id'] !== $t['id']) continue;
                 $m = $byId[(int) ($s['match_id'] ?? 0)] ?? null;
                 if ($m === null) continue;
-                $day = substr((string) ($m['kickoff_at'] ?? ''), 0, 10);
-                if ($day >= $fromDate && $day <= $toDate && !in_array((string) ($m['status'] ?? ''), ['FINISHED', 'POSTPONED', 'CANCELLED'], true)) $touches = true;
+                $kickoff = (string) ($m['kickoff_at'] ?? '');
+                if ($kickoff >= $fromWindow['start'] && $kickoff < $endWindow['start'] && !in_array((string) ($m['status'] ?? ''), ['FINISHED', 'POSTPONED', 'CANCELLED'], true)) $touches = true;
             }
             if (!$touches) continue;
             $t = array_merge($t, ['status' => 'CANCELLED', 'approval_status' => 'SUPERSEDED', 'settlement_status' => 'SUPERSEDED', 'reason' => 'Superseded by a newer daily-ticket generation for the same fixture window (active candidate reset)']);
@@ -473,7 +532,21 @@ class SportsRepositoryStub implements \AIWorkforce\Persistence\SportsRepository
         unset($t);
         return ['ticketsSuperseded' => $superseded, 'selectionsDeleted' => 0];
     }
-    public function saveTicketSelection(array $s): void { $this->ticketSelections[] = array_merge(['id' => count($this->ticketSelections) + 1], $s); }
+    public function saveTicketSelection(array $s): void
+    {
+        foreach ($this->ticketSelections as &$existing) {
+            if ((string) ($existing['ticket_id'] ?? '') === (string) ($s['ticket_id'] ?? '')
+                && (int) ($existing['match_id'] ?? 0) === (int) ($s['match_id'] ?? 0)
+                && (string) ($existing['market'] ?? '') === (string) ($s['market'] ?? '')
+                && (string) ($existing['selection'] ?? '') === (string) ($s['selection'] ?? '')) {
+                $existing = array_merge($existing, $s);
+                unset($existing);
+                return;
+            }
+        }
+        unset($existing);
+        $this->ticketSelections[] = array_merge(['id' => count($this->ticketSelections) + 1], $s);
+    }
     public function ticketSelections(string $ticketId): array { return array_values(array_filter($this->ticketSelections, fn($s) => $s['ticket_id'] === $ticketId)); }
     public function updateTicketSelection(int $id, array $patch): void { foreach ($this->ticketSelections as &$s) if ((int) $s['id'] === $id) $s = array_merge($s, $patch); }
     public function oddsBefore(int $matchId, string $timestamp): ?array {

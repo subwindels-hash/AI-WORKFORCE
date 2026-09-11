@@ -150,6 +150,15 @@ interface SportsRepository
 
     /** @return array<string,mixed>|null */
     public function findDailyTicket(string $date): ?array;
+    /**
+     * Atomically claim the one daily generation slot. A fresh RUNNING owner is
+     * never replaced; FAILED/PENDING/RETRYING (and stale RUNNING) states may be
+     * claimed again. GENERATED alone is terminal, and only when its ticket is
+     * independently verified by the service.
+     *
+     * @return array{claimed:bool,state:string,row:?array}
+     */
+    public function claimDailyTicketGeneration(string $date, string $ticketType, string $runId, int $configurationVersion, string $timezone, string $windowStartUtc, string $windowEndUtc, int $staleAfterSeconds = 900): array;
     public function saveDailyTicket(array $d): void;
     public function updateDailyTicket(string $date, array $patch): void;
     /** @return array<int,array<string,mixed>> */
