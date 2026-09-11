@@ -231,13 +231,27 @@ class AIWorkforce_model extends CI_Model
              * believed it had bootstrapped — turn it into an exception that
              * carries the driver's REAL code/message and the statement.
              */
-            private function mustWrite($ok, string $table, string $operation): void
+            private function dbError(): array
+            {
+                $error = method_exists($this->db, 'error') ? $this->db->error() : [];
+                return [
+                    'code' => $error['code'] ?? 0,
+                    'message' => $error['message'] ?? 'unknown database error',
+                    'query' => method_exists($this->db, 'last_query') ? (string) $this->db->last_query() : '',
+                ];
+            }
+
+            /**
+             * Preserve the error from a failed write even when the caller then
+             * performs a read to check whether another worker won the race.
+             */
+            private function mustWrite($ok, string $table, string $operation, ?array $errorOverride = null): void
             {
                 if ($ok !== false) return;
-                $error = method_exists($this->db, 'error') ? $this->db->error() : [];
+                $error = $errorOverride ?? $this->dbError();
                 $code = $error['code'] ?? 0;
                 $message = $error['message'] ?? 'unknown database error';
-                $query = method_exists($this->db, 'last_query') ? (string) $this->db->last_query() : '';
+                $query = (string) ($error['query'] ?? '');
                 throw new \RuntimeException(sprintf(
                     'sports repository %s on %s failed: [%s] %s (SQL: %s)',
                     strtolower($operation), $table, $code !== null ? $code : 0, $message, mb_substr($query, 0, 500)
@@ -402,14 +416,23 @@ class AIWorkforce_model extends CI_Model
                         'system_timezone' => $timezone, 'window_start_utc' => $windowStartUtc, 'window_end_utc' => $windowEndUtc,
                         'created_at' => $now, 'updated_at' => $now,
                     ];
+                    $insertException = null;
                     try { $ok = $this->db->insert('sports_daily_tickets', $insert); }
-                    catch (\Throwable $e) { $ok = false; }
+                    catch (\Throwable $e) {
+                        $ok = false;
+                        $insertException = ['code' => $e->getCode(), 'message' => $e->getMessage(), 'query' => ''];
+                    }
+                    // Capture this before the duplicate-winner read below. A
+                    // failed insert followed by a successful SELECT otherwise
+                    // resets CodeIgniter's error state to [0] and makes schema
+                    // or constraint failures look like a SELECT failure.
+                    $insertError = $insertException ?? $this->dbError();
                     if ($ok !== false) return ['claimed' => true, 'state' => 'RUNNING', 'row' => $insert];
                     // The unique(ticket_type,date) constraint chose a concurrent
                     // winner. Re-read and report it rather than converting the
                     // database race into an undefined/duplicate-skipped state.
                     $row = $this->db->get_where('sports_daily_tickets', ['date' => $date], 1)->row_array();
-                    if (!$row) $this->mustWrite(false, 'sports_daily_tickets', 'INSERT generation claim');
+                    if (!$row) $this->mustWrite(false, 'sports_daily_tickets', 'INSERT generation claim', $insertError);
                 }
 
                 $state = strtoupper((string) ($row['generation_status'] ?? (!empty($row['ticket_id']) ? 'GENERATED' : 'PENDING')));
@@ -453,12 +476,18 @@ class AIWorkforce_model extends CI_Model
                     $ok = $this->db->where('id', (int) $row['id'])->update('sports_daily_tickets', $d);
                     $this->mustWrite($ok, 'sports_daily_tickets', 'UPDATE');
                 } else {
-                    $ok = $this->db->insert('sports_daily_tickets', $d);
+                    $insertException = null;
+                    try { $ok = $this->db->insert('sports_daily_tickets', $d); }
+                    catch (\Throwable $e) {
+                        $ok = false;
+                        $insertException = ['code' => $e->getCode(), 'message' => $e->getMessage(), 'query' => ''];
+                    }
+                    $insertError = $ok === false ? ($insertException ?? $this->dbError()) : null;
                     if ($ok === false) {
                         $winner = $this->db->get_where('sports_daily_tickets', ['date' => $d['date']], 1)->row_array();
                         if ($winner) return;
                     }
-                    $this->mustWrite($ok, 'sports_daily_tickets', 'INSERT');
+                    $this->mustWrite($ok, 'sports_daily_tickets', 'INSERT', $insertError);
                 }
             }
             public function updateDailyTicket(string $date, array $patch): void { $patch = self::withSqlTimestamps(array_merge($patch, ['updated_at' => gmdate('Y-m-d H:i:s')]), ['updated_at', 'next_retry_at', 'generated_at']); $ok = $this->db->where('date', $date)->where('ticket_type', 'ODDS_PREDICTION')->update('sports_daily_tickets', $patch); $this->mustWrite($ok, 'sports_daily_tickets', 'UPDATE'); }

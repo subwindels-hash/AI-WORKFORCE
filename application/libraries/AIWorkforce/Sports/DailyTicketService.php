@@ -151,21 +151,11 @@ class DailyTicketService
         }
 
         $runId = Backtester::uuid();
-        $claim = $this->repo->claimDailyTicketGeneration(
-            $date, self::TICKET_TYPE, $runId, (int) $config['version'], $timezone,
-            $window['start'], $window['endExclusive'], self::RUN_STALE_AFTER_SECONDS
-        );
-        if (empty($claim['claimed'])) {
-            // A worker may have completed between our initial read and claim.
-            $winner = $this->existingTicketResult($date);
-            if ($winner !== null) return $winner;
-            return [
-                'status' => 'GENERATION_IN_PROGRESS', 'generationStatus' => 'RUNNING',
-                'ticketId' => null, 'date' => $date,
-                'message' => 'Another worker is generating this daily ticket', 'invalidated' => $invalidated, 'errors' => [],
-            ];
-        }
-        $attemptCount = max(1, (int) (($claim['row']['attempt_count'] ?? 1)));
+        // Job rows are attempt telemetry, not the idempotency authority. Create
+        // the parent row before claiming the daily slot: production dumps may
+        // retain fk_sports_daily_run(run_id), and a child row cannot reference
+        // a job that is created afterwards.
+        $attemptCount = max(1, (int) ($dailyBeforeClaim['attempt_count'] ?? 0) + 1);
         // When a complete 50-match page honestly produced no ticket, the next
         // retry advances to the next stored/provider page. Transient failures
         // and partial pages retry the same fixtures.
@@ -174,9 +164,6 @@ class DailyTicketService
         $options['batchOffset'] = ((string) ($dailyBeforeClaim['status'] ?? '') === 'NO_QUALIFIED_TICKET' && !empty($priorDiagnostics['fixturePageFull']))
             ? max(0, (int) ($priorDiagnostics['batchOffset'] ?? 0) + self::MAX_GENERATION_CEILING)
             : 0;
-        // Job rows are attempt telemetry, not the idempotency authority. Include
-        // the attempt number so an old completed/failed key can never block a
-        // missing ticket for the whole day.
         $baseKey = $executionKey ?? ('daily-ticket:' . self::TICKET_TYPE . ':' . $date . ':v' . $config['version']);
         $key = mb_substr($baseKey, 0, 135) . ':attempt:' . $attemptCount;
         $run = $this->repo->startJobRun(['id' => $runId, 'jobType' => 'DAILY_TICKET', 'executionKey' => $key]);
@@ -188,9 +175,31 @@ class DailyTicketService
         }
         if ($run === null) {
             $nextRetryAt = gmdate('c', time() + self::RETRY_BASE_SECONDS);
-            $this->repo->updateDailyTicket($date, ['generation_status' => 'RETRYING', 'next_retry_at' => $nextRetryAt, 'last_error_code' => 'JOB_CLAIM_CONFLICT']);
+            if ($dailyBeforeClaim !== null) {
+                $this->repo->updateDailyTicket($date, ['generation_status' => 'RETRYING', 'next_retry_at' => $nextRetryAt, 'last_error_code' => 'JOB_CLAIM_CONFLICT']);
+            }
             return ['status' => 'GENERATION_IN_PROGRESS', 'generationStatus' => 'RETRYING', 'ticketId' => null, 'date' => $date, 'nextRetryAt' => $nextRetryAt, 'message' => 'Generation telemetry is already being recorded; retry scheduled', 'errors' => []];
         }
+
+        $claim = $this->repo->claimDailyTicketGeneration(
+            $date, self::TICKET_TYPE, $runId, (int) $config['version'], $timezone,
+            $window['start'], $window['endExclusive'], self::RUN_STALE_AFTER_SECONDS
+        );
+        if (empty($claim['claimed'])) {
+            // A worker may have completed between our initial read and claim.
+            // The telemetry parent was created first so this path is also valid
+            // on installations that enforce the daily-row foreign keys.
+            $this->repo->finishJobRun($runId, ['status' => 'SKIPPED', 'processed' => 0, 'created' => 0, 'updated' => 0, 'errors' => ['daily generation claim not acquired']]);
+            try { $this->repo->releaseJobRun($runId); } catch (\Throwable $e) { /* telemetry cleanup is best effort */ }
+            $winner = $this->existingTicketResult($date);
+            if ($winner !== null) return $winner;
+            return [
+                'status' => 'GENERATION_IN_PROGRESS', 'generationStatus' => 'RUNNING',
+                'ticketId' => null, 'date' => $date,
+                'message' => 'Another worker is generating this daily ticket', 'invalidated' => $invalidated, 'errors' => [],
+            ];
+        }
+        $attemptCount = max(1, (int) (($claim['row']['attempt_count'] ?? $attemptCount)));
         $this->healthCache = [];
         $this->providerCodes = [];
         // Resolved ONCE with the same default the per-fixture gate applies.
