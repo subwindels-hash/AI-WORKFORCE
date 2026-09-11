@@ -113,3 +113,59 @@ No football table needed a migration for this upgrade: the schema already
 carries every column the pipeline requires (provider fixture ids, coverage,
 data_state, model versions, revisions, settlements, quota columns).
 
+
+## Phase 16 — mock-driven end-to-end verification (2026-09-11)
+
+The whole API-Football path was exercised through the real HTTP stack against
+a deterministic mock provider (`tests/mock-api-football/server.mjs`, offline
+only, selected via the sandbox `.env`; never shipped): fixtures → statistics
+(league table, per-team fallback, head-to-head) → prediction → odds →
+fair-value intelligence → settlement → performance → the odds prediction
+ticket engine. Verified live behaviours:
+
+- All five schedulable matchday fixtures ingest team statistics (12 rows /
+  11 AVAILABLE) **and** head-to-head snapshots (3–7 meetings per pair, weights
+  0.045–0.09) — the long-standing "h2h = 0 rows" symptom was a pipeline bug,
+  not a provider gap (fix 2 below).
+- Priced intelligence is honest in both directions: with market quotes the
+  overround is stripped (PROPORTIONAL_OVERROUND), the edge is reported as
+  computed (a negative edge renders **AVOID**, never a manufactured value), and
+  without quotes the report stays `UNPRICED` / "No price to compare" with the
+  model's fair odds only.
+- Settlement: results pulled from the provider once kickoffs pass, settlement
+  rows insert once (re-runs skip, never duplicate), per-prediction snapshots
+  preserved, Brier / log-loss / absolute goal error graded per row.
+- Performance: 30-day scorecard computed from settlements (accuracy, Brier,
+  ECE, reliability bins); calibration honestly stays PENDING below the 50-sample
+  minimum instead of fitting noise.
+- Ticket engine: NO_QUALIFIED_TICKET with an evidence-based rejection funnel
+  (LOW_CONFIDENCE on thin synthetic form; zero missing-data or infra errors).
+
+### Fixes shipped in this phase (each with a regression test)
+
+1. **Statistics request budget** (`FootballIntelligence::collectStatisticsForDay`):
+   the job never called `beginSweep()`, so it scavenged the fixtures job's
+   leftover request budget in the same process — and when run first or alone
+   (forced from the console) that leftover was 0 and every provider call died
+   with `REQUEST_BUDGET_EXHAUSTED` while the provider was healthy. The job now
+   opens its sweep with `WINDELS_FOOTBALL_BUDGET_STATISTICS` (default 20).
+   Test: `tests/cases/104-football-refresh-cron.php`.
+
+2. **Settlement flip** (`FootballRepositoryDatabase::savePrediction`):
+   settlement re-saves a prediction read back through `decode()` — JSON columns
+   as raw arrays — and the UPDATE failed silently, leaving predictions OPEN
+   forever even though the settlement row and fixture stamp were written (the
+   settle scanner keys off the fixture stamp, so nothing ever revisited them).
+   The repository now re-encodes JSON columns symmetrically with `decode()`.
+   Test: `tests/cases/132-football-repository-refs.php`.
+
+3. **Test determinism**: the sports cron round test used today's 14:00 UTC
+   kickoffs, which the near-kickoff odds guard (kickoff ≤ now + 2h) excludes
+   any time the suite runs after noon UTC; the case now uses tomorrow's
+   matchday. `tests/framework.php`'s in-memory repository honours a caller
+   backdated `startedAt` on sync runs so cadence math is testable.
+
+Suite after this phase: **1208 passed, 0 failed**
+(5 new regression tests). Deployment archive rebuilt:
+`application-deployment.zip`, 710 release files,
+SHA-256 `9b06aabb8576486d5d50b6c3444ebbe547573bec1c25a37e98d8125b37bb108f`.
