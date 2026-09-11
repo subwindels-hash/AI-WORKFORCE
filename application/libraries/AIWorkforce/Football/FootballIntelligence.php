@@ -593,6 +593,13 @@ final class FootballIntelligence
 
     public function collectStatisticsForDay(string $date, int $limit = 24): array
     {
+        // The statistics job owns its provider budget. Without this the sweep
+        // silently scavenged whatever the fixtures job had left in the same
+        // process — and when statistics ran first (or alone, e.g. forced from
+        // the console) the leftover budget was 0, so every standings, team and
+        // head-to-head call died with REQUEST_BUDGET_EXHAUSTED and the job
+        // reported DATA_UNAVAILABLE while the provider was perfectly healthy.
+        $this->gateway()->beginSweep($this->config->requestBudget('statistics'));
         $fixtures = $this->repo->listFixtures(['date' => $date], max(1, min(200, $limit)));
         $errors = []; $leagues = []; $teams = 0; $h2h = 0; $requests = 0;
         foreach ($fixtures as $fixture) {

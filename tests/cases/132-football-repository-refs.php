@@ -88,3 +88,59 @@ test('football: fixture reads join competition + provider refs, memo-safe', func
         $cleanup();
     }
 });
+
+test('football: settling a prediction read back through decode() still flips it to SETTLED', function () {
+    // Regression: savePrediction accepted pre-encoded rows from the prediction
+    // writer, but settlement re-saves a row it read through decode() — JSON
+    // columns arriving as raw arrays. The UPDATE then failed silently (CI query
+    // builder cannot bind arrays), the settlement row and the fixture stamp
+    // were written, and the prediction itself stayed OPEN forever — so the
+    // board kept offering a graded match as open and every settle run re-scanned it.
+    if (!function_exists('get_instance')) {
+        assert_true(true, 'CI-only: this case needs the installed database');
+        return;
+    }
+    $db = ci()->db;
+    $repo = new \AIWorkforce\Persistence\FootballRepositoryDatabase($db);
+    $pid = 'fxtest-settle-flip-' . bin2hex(random_bytes(4));
+    $cleanup = static function () use ($db, $pid): void {
+        $db->where('id', $pid)->delete('football_match_predictions');
+    };
+    $cleanup();
+    try {
+        $repo->savePrediction([
+            'id' => $pid, 'fixture_id' => 987654321, 'provider_id' => 1, 'model_version_id' => null,
+            'prediction_kind' => 'PRE_MATCH', 'generated_at' => gmdate('c'), 'kickoff_at' => gmdate('c', time() + 3600),
+            'status_at_prediction' => 'SCHEDULED',
+            'predicted_result' => 'HOME', 'predicted_home_score' => 2, 'predicted_away_score' => 1,
+            'probability_home' => 0.55, 'probability_draw' => 0.30, 'probability_away' => 0.15,
+            'confidence' => 55.0, 'confidence_basis' => 'RAW',
+            'data_quality_score' => 70, 'data_quality_band' => 'QUALIFIED',
+            'quality_components' => ['form' => 0.5, 'venue' => 0.5],
+            'feature_snapshot' => ['form' => ['last5' => 'WWDWL'], 'odds' => null],
+            'evidence' => [['kind' => 'form', 'detail' => 'last five']],
+            'settlement_state' => 'OPEN',
+        ]);
+        // Settlement path: read back (decode) and write forward with the patch.
+        $stored = $repo->findPrediction($pid);
+        assert_true(is_array($stored) && is_array($stored['quality_components'] ?? null), 'the row reads back decoded');
+        $repo->savePrediction(array_merge($stored, [
+            'settlement_state' => 'SETTLED', 'outcome' => 'Final 2–1 (Home). Predicted HOME 2–1. Result correct; exact score correct.',
+        ]));
+        $after = $db->get_where('football_match_predictions', ['id' => $pid], 1)->row_array();
+        assert_equals('SETTLED', (string) ($after['settlement_state'] ?? ''), 'the settlement flip survives the decoded round-trip');
+        assert_true(is_string($after['quality_components'] ?? null) && json_decode((string) $after['quality_components'], true) !== null,
+            'and the JSON columns are stored encoded, still valid JSON');
+        assert_equals('Final 2–1 (Home). Predicted HOME 2–1. Result correct; exact score correct.', (string) ($after['outcome'] ?? ''),
+            'the grading outcome is on the row');
+
+        // Immutability holds whichever way the row was written: a settled
+        // prediction refuses further edits.
+        $repo->savePrediction(array_merge($stored, ['settlement_state' => 'SETTLED', 'outcome' => 'tampered']));
+        $frozen = $repo->findPrediction($pid);
+        assert_equals('Final 2–1 (Home). Predicted HOME 2–1. Result correct; exact score correct.', (string) ($frozen['outcome'] ?? ''),
+            'a settled prediction is frozen for reproducibility');
+    } finally {
+        $cleanup();
+    }
+});

@@ -43,6 +43,9 @@ final class RefreshPolicy
      */
     private const PROVIDER_PRECONDITIONS = ['today', 'window', 'live', 'pending-results', 'statistics'];
 
+    /** A failed run is retried after at most this many seconds (see evaluate()). */
+    public const FAILED_RETRY_SECONDS = 900;
+
     public function __construct(private FootballRepository $repo, private FootballConfiguration $config, private ProviderGateway $gateway) {}
 
     /** @return list<string> */
@@ -110,9 +113,16 @@ final class RefreshPolicy
         if (is_string($deferral) && $deferral !== '' && strtotime($deferral) > $now) {
             return $verdict(['due' => false, 'reason' => $lastRun['status'] === 'DEFERRED' ? 'PROVIDER_DEFERRED' : 'CADENCE', 'detail' => ['nextRunAt' => $deferral, 'status' => $lastRun['status'] ?? null]]);
         }
+        // A FAILED run must not consume the full bucket cadence: a transient
+        // outage that failed the fixtures sweep would otherwise delay the next
+        // attempt by hours (fixtures: 6 h) even after the provider recovered.
+        // Failed runs become eligible again after a short retry window; the
+        // provider's own backoff circuit still protects the quota above.
+        $failed = ($lastRun['status'] ?? '') === 'FAILED';
+        $effectiveInterval = $failed ? min($interval, self::FAILED_RETRY_SECONDS) : $interval;
         $lastStarted = $lastRun['started_at'] ?? null;
-        if (is_string($lastStarted) && $lastStarted !== '' && ($now - (int) strtotime($lastStarted)) < $interval) {
-            return $verdict(['due' => false, 'reason' => 'CADENCE', 'detail' => ['elapsed' => $now - (int) strtotime($lastStarted)]]);
+        if (is_string($lastStarted) && $lastStarted !== '' && ($now - (int) strtotime($lastStarted)) < $effectiveInterval) {
+            return $verdict(['due' => false, 'reason' => 'CADENCE', 'detail' => ['elapsed' => $now - (int) strtotime($lastStarted), 'retryingAfterFailure' => $failed]]);
         }
         $work = $this->work($precondition);
         if (!$work['present']) {

@@ -1370,7 +1370,14 @@ final class ApiProviders
             }
             return $base;
         }
-        // Any leftover non-https paste becomes https so save() + test() agree.
+        // Vendor hosts are pinned to https above. A custom host with an
+        // EXPLICIT http:// scheme keeps it — an operator who deliberately
+        // points the server-side client at a proxy or internal endpoint has
+        // already made that choice (the key still travels only server-side).
+        // A paste without any scheme defaults to https.
+        if (preg_match('#^http://#i', trim($baseUrl))) {
+            return rtrim($base, '/');
+        }
         if (!preg_match('#^https://#i', $base)) {
             $base = 'https://' . preg_replace('#^https?://#i', '', $urlForParsing);
         }
