@@ -125,7 +125,25 @@ $kickoffStamp = static function (mixed $iso): string {
   <div class="notice warnbox"><b>SANDBOX / DEMO DATA</b> — sports figures are simulated, not real-world performance.</div>
 <?php endif; ?>
 <?php if ($disabled): ?>
-  <div class="notice warnbox"><b>No sports data provider connected.</b> Live fixtures and predictions are unavailable until a verified data source is configured — nothing is fabricated in the meantime.</div>
+  <?php $setup = is_array($sys['providerSetup'] ?? null) ? $sys['providerSetup'] : []; ?>
+  <div class="notice warnbox">
+    <b>No sports data provider connected.</b> Live fixtures and predictions are unavailable until a verified data source is configured — nothing is fabricated in the meantime.
+    <?php if ($operator && $setup): ?>
+      <br><b>Next step:</b> <?= e((string) ($setup['nextStep'] ?? '')) ?>
+      <?php if (!empty($setup['options'])): ?>
+        <div style="margin-top:6px">Connect any one of these in <a href="/admin/api"><b>Admin → API</b></a> (Service: <span class="mono">sports</span>):
+          <ul style="margin:4px 0 0 18px">
+          <?php foreach ((array) $setup['options'] as $opt): ?>
+            <li><b><?= e((string) ($opt['label'] ?? '')) ?></b>
+              — <?= e((string) ($opt['note'] ?? '')) ?>
+              <span class="dim">(or set <span class="mono"><?= e((string) ($opt['primaryEnvKey'] ?? '')) ?></span><?= !empty($opt['environmentConfigured']) ? ' — already present in this environment' : '' ?>)</span>
+            </li>
+          <?php endforeach; ?>
+          </ul>
+        </div>
+      <?php endif; ?>
+    <?php endif; ?>
+  </div>
 <?php elseif (($readiness['engine'] ?? '') === 'BLOCKED'): ?>
   <?php if ($operator): ?>
   <div class="notice err"><b>Prediction engine BLOCKED — 0/<?= (int) ($readiness['total'] ?? 0) ?> sports data providers operational.</b>

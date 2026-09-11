@@ -377,10 +377,27 @@ class SportsIntelligence
             // serve fixtures, BLOCKED when 0/N can (quota, 400, 404, offline).
             'readiness' => $readiness,
             'ticketEngine' => $this->providers->configured() ? $this->configuration->active()['engine_mode'] : 'DISABLED_NO_PROVIDER',
+            // Why there is no feed and what to do about it. DISABLED_NO_PROVIDER
+            // is honest but not actionable on its own; this block names the
+            // exact next step (never a credential value).
+            'providerSetup' => ProviderSetupAdvisor::diagnose($this->providers, $readiness, null, $this->credentialStoreHasSports()),
             'predictionEngine' => $readiness['engine'],
             'configuration' => $this->configuration->active(),
             'message' => $message,
         ];
+    }
+
+    /** Whether Admin → API holds a sports credential (null when unknowable here). */
+    private function credentialStoreHasSports(): ?bool
+    {
+        $db = $this->providerDb;
+        if (!$db) {
+            $ci = function_exists('get_instance') ? get_instance() : null;
+            $db = ($ci && isset($ci->AIWorkforce_model)) ? $ci->AIWorkforce_model->db : null;
+        }
+        if (!$db) return null;
+        try { return \AIWorkforce\ApiProviders::chain($db, 'sports') !== []; }
+        catch (\Throwable $e) { return null; }
     }
 
     /**
