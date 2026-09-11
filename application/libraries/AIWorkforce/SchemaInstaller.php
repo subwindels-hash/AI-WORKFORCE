@@ -74,7 +74,10 @@ final class SchemaInstaller
      * Persistent cache version for the request-time schema guard. Bump whenever
      * idempotent upgrade logic changes without a matching SQL-file mtime change.
      */
-    private const STAMP_VERSION = '2026-09-11-sports-daily-ticket-state-v2';
+    // Bumped after the daily-ticket migration guard was made column-aware.
+    // Existing deployments may already have a stamp from a request that saw
+    // the table but silently missed one of its ALTERs.
+    private const STAMP_VERSION = '2026-09-11-sports-daily-ticket-state-v3';
 
     public static function databaseDir(): string
     {
@@ -399,8 +402,43 @@ final class SchemaInstaller
 
         // Only stamp healthy databases. If a migration failed or permissions hide
         // metadata, keep the old fail-safe behaviour and try again next request.
-        if (self::hasExpectedTables($db, $dialect)) {
+        if (self::hasExpectedTables($db, $dialect)
+            && self::hasDailyTicketColumns($db, $dialect)) {
             self::writeStamp($db, $dialect);
+        }
+    }
+
+    /**
+     * The request-time fast path must verify the contract that is most likely
+     * to break a generation run. Table existence alone is insufficient for
+     * legacy databases because CREATE TABLE IF NOT EXISTS does not add columns.
+     */
+    private static function hasDailyTicketColumns(object $db, string $dialect): bool
+    {
+        $required = [
+            'id', 'date', 'ticket_type', 'ticket_id', 'status', 'generation_status',
+            'configuration_version', 'candidates_evaluated', 'predictions_recorded',
+            'rejections', 'rejection_summary', 'message', 'provider', 'run_id',
+            'attempt_count', 'next_retry_at', 'last_error_code', 'generated_at',
+            'system_timezone', 'window_start_utc', 'window_end_utc', 'created_at', 'updated_at',
+        ];
+        try {
+            if ($dialect === 'sqlite') {
+                $result = $db->query("PRAGMA table_info('sports_daily_tickets')");
+            } elseif ($dialect === 'pgsql') {
+                $result = $db->query("SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'sports_daily_tickets'");
+            } else {
+                $result = $db->query('SHOW COLUMNS FROM sports_daily_tickets');
+            }
+            if (!$result || !method_exists($result, 'result_array')) return false;
+            $columns = [];
+            foreach ($result->result_array() as $row) {
+                $name = $row['name'] ?? $row['column_name'] ?? $row['Field'] ?? reset($row);
+                if ($name !== false && $name !== null) $columns[] = strtolower((string) $name);
+            }
+            return count(array_diff($required, $columns)) === 0;
+        } catch (\Throwable $e) {
+            return false;
         }
     }
 
@@ -456,10 +494,18 @@ final class SchemaInstaller
         $path = self::stampPath($db, $dialect);
         if (!is_file($path)) return false;
         $stamp = json_decode((string) @file_get_contents($path), true);
-        return is_array($stamp)
-            && ($stamp['version'] ?? null) === self::STAMP_VERSION
-            && ($stamp['dialect'] ?? null) === $dialect
-            && ($stamp['fingerprint'] ?? null) === self::fingerprint($dialect);
+        if (!is_array($stamp)
+            || ($stamp['version'] ?? null) !== self::STAMP_VERSION
+            || ($stamp['dialect'] ?? null) !== $dialect
+            || ($stamp['fingerprint'] ?? null) !== self::fingerprint($dialect)) {
+            return false;
+        }
+
+        // A stamp only proves that a previous request ran the migration guard;
+        // older guards could still stamp a database after CodeIgniter returned
+        // false for an ALTER while db_debug was disabled. Verify the columns
+        // used by the atomic daily claim before trusting the fast path.
+        return self::hasDailyTicketColumns($db, $dialect);
     }
 
     private static function writeStamp(object $db, string $dialect): void
@@ -483,7 +529,10 @@ final class SchemaInstaller
             try { $db->query($sql); } catch (\Throwable $e) { /* duplicate */ }
         }, $dialect);
         self::$done = true;
-        if (self::hasExpectedTables($db, $dialect)) self::writeStamp($db, $dialect);
+        if (self::hasExpectedTables($db, $dialect)
+            && self::hasDailyTicketColumns($db, $dialect)) {
+            self::writeStamp($db, $dialect);
+        }
     }
 
     /**
