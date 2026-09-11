@@ -253,9 +253,22 @@ class Tools extends MY_Controller
         echo 'message           : ', (string) ($run['message'] ?? ''), "\n\n";
 
         echo "CONFIGURED THRESHOLDS\n";
-        printf("  min confidence %.0f%%   min data quality %d   min EV %.3f   odds %.2f-%.2f   max selections %d   max correlation %s\n\n",
+        printf("  min confidence %.0f%%   min data quality %d   min EV %.3f   odds %.2f-%.2f   max selections %d   max correlation %s\n",
             (float) $config['min_confidence'], (int) $config['min_data_quality'], (float) $config['min_expected_value'],
             (float) $config['target_odds_min'], (float) $config['target_odds_max'], (int) $config['max_selections'], (string) $config['max_correlation']);
+
+        // Requirements #1/#8: the ADAPTIVE ladder actually in force — the
+        // confidence each data-quality band must reach, and the band below
+        // which nothing is predictable at all.
+        $policy = \AIWorkforce\Sports\ConfidencePolicy::fromConfiguration($config);
+        echo "\nADAPTIVE CONFIDENCE POLICY (data quality band -> confidence required)\n";
+        foreach ($policy->tiers() as $tier) {
+            printf("  %-10s data quality >= %-4d -> %.0f%% confidence required   markets: %s\n",
+                (string) $tier['tier'], (int) $tier['minDataQuality'], (float) $tier['minConfidence'],
+                is_string($tier['markets']) ? (string) $tier['markets'] : 'custom list');
+        }
+        printf("  %-10s data quality <  %-4d -> no prediction is qualified at any confidence\n\n",
+            'REJECT', $policy->minimumDataQuality());
 
         echo "FUNNEL\n";
         $stages = [
@@ -276,9 +289,33 @@ class Tools extends MY_Controller
             'FINAL (ticket legs)' => $funnel['finalQualifiedCandidates'] ?? 0,
         ];
         foreach ($stages as $label => $value) printf("  %-26s %s\n", $label, (string) (int) $value);
+        printf("  %-26s %s\n", 'average confidence',
+            $funnel['averageConfidence'] === null ? 'Unavailable (nothing measurable)' : number_format((float) $funnel['averageConfidence'], 2) . '%');
         echo '  selection tier             ', (string) ($funnel['selectionTier'] ?? '(none)'),
             '   fallback used: ', !empty($funnel['fallbackUsed']) ? 'YES' : 'no', "\n";
         if (!empty($funnel['fallbackReason'])) echo '  fallback reason            ', (string) $funnel['fallbackReason'], "\n";
+        echo "\n";
+
+        // Requirement #14: the day's real spread, so an average can never
+        // hide the shape of the distribution behind it.
+        echo "CONFIDENCE DISTRIBUTION (evaluated candidates)\n";
+        $confidenceBands = (array) ($funnel['confidenceDistribution'] ?? []);
+        if ($confidenceBands === []) echo "  (no candidate was scored)\n";
+        foreach ($confidenceBands as $band => $count) {
+            printf("  %-18s %-4d %s\n", (string) $band, (int) $count, str_repeat('#', min(40, (int) $count)));
+        }
+        echo "\nDATA QUALITY DISTRIBUTION (evaluated candidates)\n";
+        $qualityBands = (array) ($funnel['dataQualityDistribution'] ?? []);
+        if ($qualityBands === []) echo "  (no candidate was scored)\n";
+        foreach ($qualityBands as $band => $count) {
+            printf("  %-18s %-4d %s\n", (string) $band, (int) $count, str_repeat('#', min(40, (int) $count)));
+        }
+        $byTier = (array) ($funnel['candidatesByDataTier'] ?? []);
+        if ($byTier !== []) {
+            echo "\nCANDIDATES BY ADAPTIVE TIER (the requirement each leg actually faced)\n";
+            foreach ($byTier as $tier => $count) printf("  %-18s %d\n", (string) $tier, (int) $count);
+            printf("  %-18s %d\n", 'market-restricted', (int) ($funnel['marketsRestrictedByDataTier'] ?? 0));
+        }
         echo "\n";
 
         echo "REJECTIONS (one primary reason per rejected fixture/candidate)\n";
@@ -312,6 +349,12 @@ class Tools extends MY_Controller
                 (string) round((float) ($row['expectedValue'] ?? 0), 4),
                 (string) ($row['risk'] ?? '-'), (string) ($row['correlation'] ?? '-'),
                 (string) ($row['decision'] ?? '-'), implode(',', (array) ($row['reasons'] ?? [])));
+            // Requirement #13: the minimum THIS candidate was judged against,
+            // and the tier that minimum came from — never a bare rejection.
+            printf("      %-24s tier=%-10s required conf=%-6s required dq=%-4s\n", 'adaptive requirement',
+                (string) ($row['dataTier'] ?? '-'),
+                $row['minConfidence'] === null ? '-' : number_format((float) $row['minConfidence'], 2),
+                (string) (int) ($row['minDataQuality'] ?? 0));
         }
         echo "\n";
 

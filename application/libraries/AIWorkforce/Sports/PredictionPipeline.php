@@ -218,18 +218,40 @@ class PredictionPipeline
         $factors['confidence'] = $conf['breakdown'] ?? null;
         $factors['confidenceComponents'] = $conf['components'] ?? [];
         $factors['confidenceExcluded'] = $conf['excluded'] ?? [];
-        $minConfidence = (float) ($config['min_confidence'] ?? 0);
+
+        // ADAPTIVE CONFIDENCE (requirements #1/#8): the bar a candidate must
+        // clear depends on the data quality behind it, resolved from
+        // configuration — not one hard-coded 75% for every fixture. The
+        // measured confidence itself is reported unchanged, whatever it is.
+        $policy = ConfidencePolicy::fromConfiguration($config);
+        $qualityScore = (int) round((float) ($quality['score'] ?? 0));
+        $measuredConfidence = is_numeric($conf['confidence'] ?? null) ? (float) $conf['confidence'] : null;
+        $verdict = $policy->evaluate($qualityScore, $measuredConfidence, (string) $candidate['market'], (string) $candidate['selection']);
+        $minConfidence = $verdict['requiredConfidence'] ?? $policy->highestConfidenceRequirement();
+
+        // The whole adaptive decision is recorded on the candidate so the UI,
+        // the decision trace and the rejection audit can all show WHAT was
+        // required, WHY, and what was actually measured (requirement #13).
+        $factors['confidencePolicy'] = $verdict;
+        $candidate['confidencePolicy'] = $verdict;
+
         if (!$predictionReady) {
             $stage('confidence', 'SKIPPED', null);
-        } elseif (is_numeric($conf['confidence'] ?? null)) {
-            $stage('confidence', (float) $conf['confidence'] >= $minConfidence ? 'PASSED' : 'FAILED', 'LOW_CONFIDENCE');
-        } else {
+        } elseif ($measuredConfidence === null) {
             $stage('confidence', 'FAILED', 'CONFIDENCE_UNMEASURED');
+        } elseif (!$verdict['marketAllowed']) {
+            // The evidence is too thin for THIS market, though it may still
+            // support a safer one on the same fixture.
+            $stage('confidence', 'FAILED', 'MARKET_RESTRICTED_AT_DATA_TIER');
+        } else {
+            $stage('confidence', $measuredConfidence + 1e-9 >= $minConfidence ? 'PASSED' : 'FAILED', 'LOW_CONFIDENCE');
         }
 
         // ── Stage 6: data quality (configurable floor) ────────────────────
-        $minQuality = (int) ($config['min_data_quality'] ?? $config['minDataQuality'] ?? DataQualityEngine::DEFAULT_MIN_DATA_QUALITY);
-        $stage('dataQuality', ($quality['score'] ?? 0) >= $minQuality ? 'PASSED' : 'FAILED', 'LOW_DATA_QUALITY');
+        // The floor is the lowest band the adaptive policy still accepts;
+        // below it nothing is predictable at any confidence.
+        $minQuality = $policy->minimumDataQuality();
+        $stage('dataQuality', $qualityScore >= $minQuality ? 'PASSED' : 'FAILED', 'LOW_DATA_QUALITY');
 
         // ── Stage 7: value / edge (model probability vs real market odds) ─
         $value = $this->value->assess($prediction ?? ['decision' => 'NO_PREDICTION'], $odds !== null ? ['decimalOdds' => (float) ($odds['decimalOdds'] ?? $odds['decimal_odds'] ?? 0), 'market' => (string) $candidate['market']] : ['decimalOdds' => 0]);

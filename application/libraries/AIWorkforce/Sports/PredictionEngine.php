@@ -26,15 +26,36 @@ class PredictionEngine
     // approved calibration, which is keyed by (model, version).
     public const MODEL_VERSION = '1.1.0';
 
-    /** @var array<string,list<string>> */
+    /**
+     * Every market:selection this model can BOTH price from its features and
+     * settle from a verified score (see ResultVerificationEngine). A market is
+     * listed here only when both are true — pricing something that could never
+     * be settled would leave permanently PENDING legs, and settling something
+     * the model cannot price would mean inventing a probability.
+     *
+     * @var array<string,list<string>>
+     */
     public const SUPPORTED_MARKETS = [
         'MATCH_RESULT' => ['HOME', 'DRAW', 'AWAY'],
         // Every totals line the goal-expectancy model can price. UNDER_1_5
         // deliberately stays out: it is an overround companion price, never
         // a ticket candidate.
-        'TOTAL_GOALS' => ['OVER_1_5', 'OVER_2_5', 'OVER_3_5', 'UNDER_2_5', 'UNDER_3_5'],
-        'BTTS' => ['YES'],
+        'TOTAL_GOALS' => ['OVER_0_5', 'OVER_1_5', 'OVER_2_5', 'OVER_3_5', 'UNDER_2_5', 'UNDER_3_5', 'UNDER_4_5'],
+        'BTTS' => ['YES', 'NO'],
         'DOUBLE_CHANCE' => ['HOME_OR_DRAW', 'AWAY_OR_DRAW', 'HOME_OR_AWAY'],
+        // Draw No Bet: the draw refunds the stake, so it settles as VOID.
+        'DRAW_NO_BET' => ['HOME', 'AWAY'],
+    ];
+
+    /**
+     * Selections that exist only to complete a market's overround (so the
+     * de-vigged fair price can be computed) and must never become a ticket
+     * candidate on their own.
+     *
+     * @var array<string,list<string>>
+     */
+    public const COMPANION_SELECTIONS = [
+        'TOTAL_GOALS' => ['UNDER_0_5', 'UNDER_1_5', 'OVER_4_5'],
     ];
 
     /**
@@ -48,7 +69,16 @@ class PredictionEngine
         'MATCH_RESULT' => ['expectedGoalsProxy', 'homeAttack', 'awayAttack', 'homeDefenseConceded', 'awayDefenseConceded'],
         'BTTS' => ['expectedGoalsProxy', 'homeAttack', 'awayAttack', 'homeDefenseConceded', 'awayDefenseConceded'],
         'DOUBLE_CHANCE' => ['expectedGoalsProxy', 'homeAttack', 'awayAttack', 'homeDefenseConceded', 'awayDefenseConceded'],
+        'DRAW_NO_BET' => ['expectedGoalsProxy', 'homeAttack', 'awayAttack', 'homeDefenseConceded', 'awayDefenseConceded'],
     ];
+
+    /** Is this a companion (overround-only) price rather than a candidate? */
+    public static function isCompanionSelection(?string $market, ?string $selection): bool
+    {
+        $market = strtoupper(trim((string) $market));
+        $selection = strtoupper(trim((string) $selection));
+        return in_array($selection, self::COMPANION_SELECTIONS[$market] ?? [], true);
+    }
 
     public static function isSupportedMarketSelection(?string $market, ?string $selection): bool
     {
@@ -138,7 +168,10 @@ class PredictionEngine
         }
         if ($market === 'BTTS') {
             $bothScorePressure = min($homeStrength, $awayStrength) - 0.75;
-            return $this->logistic($bothScorePressure);
+            $yes = $this->logistic($bothScorePressure);
+            // NO is the exact complement of YES — the same single model
+            // number read from the other side, not a second guess.
+            return $selection === 'NO' ? 1.0 - $yes : $yes;
         }
         if ($market === 'MATCH_RESULT') {
             $home = $this->logistic($homeStrength - $awayStrength + 0.18);
@@ -153,6 +186,16 @@ class PredictionEngine
             $draw = $this->rawProbability('MATCH_RESULT', 'DRAW', $f);
             $away = $this->rawProbability('MATCH_RESULT', 'AWAY', $f);
             $probs = ['HOME_OR_DRAW' => $home + $draw, 'AWAY_OR_DRAW' => $away + $draw, 'HOME_OR_AWAY' => $home + $away];
+            return min(0.99, max(0.01, $probs[$selection] ?? 0.01));
+        }
+        if ($market === 'DRAW_NO_BET') {
+            // The draw refunds the stake, so the market is the 1X2 model
+            // renormalised over the two non-draw outcomes only.
+            $home = $this->rawProbability('MATCH_RESULT', 'HOME', $f);
+            $away = $this->rawProbability('MATCH_RESULT', 'AWAY', $f);
+            $decisive = $home + $away;
+            if ($decisive <= 0) return 0.01;
+            $probs = ['HOME' => $home / $decisive, 'AWAY' => $away / $decisive];
             return min(0.99, max(0.01, $probs[$selection] ?? 0.01));
         }
         return 0.01;

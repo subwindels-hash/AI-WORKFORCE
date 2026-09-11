@@ -45,7 +45,30 @@ final class FairValueEngine
         'TOTAL_GOALS' => ['OVER_1_5', 'UNDER_1_5'],
         'BTTS' => ['YES', 'NO'],
         'DOUBLE_CHANCE' => ['HOME_OR_DRAW', 'AWAY_OR_DRAW', 'HOME_OR_AWAY'],
+        'DRAW_NO_BET' => ['HOME', 'AWAY'],
     ];
+
+    /**
+     * The complete set of outcomes for the market a given selection belongs
+     * to. Goal lines are the reason this is not a flat lookup: Over 2.5 is
+     * de-vigged against Under 2.5, never against Under 1.5. Asking for the
+     * wrong pair would compute a margin from two different markets, so the
+     * line is read from the selection itself.
+     *
+     * @return list<string>
+     */
+    public static function outcomesFor(string $market, string $selection): array
+    {
+        $market = strtoupper(trim($market));
+        $selection = strtoupper(trim($selection));
+        if ($market === 'TOTAL_GOALS') {
+            $line = PredictionEngine::totalsLine($selection);
+            if ($line === null) return self::MARKET_OUTCOMES['TOTAL_GOALS'];
+            $suffix = str_replace('.', '_', (string) $line[0]);
+            return ['OVER_' . $suffix, 'UNDER_' . $suffix];
+        }
+        return self::MARKET_OUTCOMES[$market] ?? [];
+    }
 
     private FootballConfiguration $config;
     private OddsIntelligence $odds;
@@ -80,7 +103,9 @@ final class FairValueEngine
     {
         $market = strtoupper(trim($market));
         $selection = strtoupper(trim($selection));
-        $expected = self::MARKET_OUTCOMES[$market] ?? [];
+        // The overround is only meaningful across the SAME line/market, so
+        // the expected outcome set is resolved from the selection too.
+        $expected = self::outcomesFor($market, $selection);
 
         $quotes = [];
         foreach ($marketPrices as $pricedSelection => $price) {

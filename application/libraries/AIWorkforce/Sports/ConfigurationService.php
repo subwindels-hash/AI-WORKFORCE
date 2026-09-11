@@ -46,6 +46,9 @@ class ConfigurationService
         $row['require_calibration'] = (int) (bool) $row['require_calibration'];
         $row['min_confidence'] = (float) $row['min_confidence'];
         $row['min_data_quality'] = (int) $row['min_data_quality'];
+        // Kept as stored (JSON string or array); ConfidencePolicy normalises
+        // it and falls back to the derived ladder when it is absent/invalid.
+        $row['confidence_policy'] = $row['confidence_policy'] ?? null;
         $row['version'] = (int) $row['version'];
         $row['allowed_markets'] = $row['allowed_markets'] ?? [];
         $row['allowed_leagues'] = $row['allowed_leagues'] ?? [];
@@ -79,8 +82,19 @@ class ConfigurationService
             'min_expected_value' => 0.02,
             'max_correlation' => 'LOW',
             'min_data_quality' => 80,
+            // Adaptive confidence policy (requirements #1/#8). NULL means the
+            // tiers are DERIVED from the two floors above: with the stock
+            // 75 / 80 that is data quality >=85 → 75% confidence required,
+            // 75-84 → 70%, 65-74 → 65% and safer markets only, <65 → rejected.
+            // Set it explicitly to author the tiers directly; nothing in the
+            // engine hard-codes a threshold.
+            'confidence_policy' => null,
             'min_liquidity' => null,
-            'allowed_markets' => ['MATCH_RESULT', 'TOTAL_GOALS', 'BTTS', 'DOUBLE_CHANCE'],
+            // Every market the model can price AND settle (requirement #5).
+            // Draw No Bet is included: it is fully supported end to end, and
+            // leaving it out would have the engine generate predictions the
+            // configuration then discards as OUTSIDE_CONFIGURATION.
+            'allowed_markets' => ['MATCH_RESULT', 'TOTAL_GOALS', 'BTTS', 'DOUBLE_CHANCE', 'DRAW_NO_BET'],
             'allowed_leagues' => [],
             'max_exposure' => 100.0,
             'stake_amount' => 10.0,
@@ -102,6 +116,7 @@ class ConfigurationService
             'module_enabled', 'ticket_engine_enabled', 'system_timezone', 'platform_mode', 'engine_mode',
             'target_odds_min', 'target_odds_max', 'max_selections', 'risk_level',
             'min_confidence', 'min_expected_value', 'max_correlation', 'min_data_quality',
+            'confidence_policy',
             'min_liquidity', 'allowed_markets', 'allowed_leagues', 'max_exposure',
             'stake_amount', 'void_policy', 'require_calibration',
         ])));
@@ -126,6 +141,10 @@ class ConfigurationService
             'min_expected_value' => (float) $next['min_expected_value'],
             'max_correlation' => (string) $next['max_correlation'],
             'min_data_quality' => (int) $next['min_data_quality'],
+            // Adaptive confidence tiers. NULL keeps the derived ladder, so a
+            // configuration that never mentions the policy behaves exactly as
+            // its two floors describe (requirements #1/#8).
+            'confidence_policy' => self::encodePolicy($next['confidence_policy'] ?? null),
             'min_liquidity' => $next['min_liquidity'] === null ? null : (float) $next['min_liquidity'],
             'allowed_markets' => json_encode(array_values((array) $next['allowed_markets'])),
             'allowed_leagues' => json_encode(array_values((array) $next['allowed_leagues'])),
@@ -144,6 +163,14 @@ class ConfigurationService
             'previous' => $previous, 'new' => array_map($present, $stored), 'reason' => $row['reason'],
         ], $actor);
         return ['ok' => true, 'reason' => 'configuration saved', 'configuration' => $stored];
+    }
+
+    /** Store an explicit policy as canonical JSON; null when none is set. */
+    private static function encodePolicy($policy): ?string
+    {
+        if ($policy === null || $policy === '' || $policy === []) return null;
+        $normalized = ConfidencePolicy::normalizePolicy($policy);
+        return $normalized === null ? null : json_encode($normalized);
     }
 
     private function presentable($v)
@@ -179,6 +206,15 @@ class ConfigurationService
         if ((float) $c['min_expected_value'] < 0) return 'min_expected_value must be >= 0';
         $dq = (int) $c['min_data_quality'];
         if ($dq < 50 || $dq > 100) return 'min_data_quality must be within [50, 100]';
+        // An explicit adaptive policy must be readable, or the engine would
+        // silently fall back to the derived ladder and the operator would
+        // believe tiers are in force that are not.
+        $policy = $c['confidence_policy'] ?? null;
+        if ($policy !== null && $policy !== '' && $policy !== []) {
+            if (ConfidencePolicy::normalizePolicy($policy) === null) {
+                return 'confidence_policy must be a list of tiers, each with numeric minDataQuality and minConfidence within [0, 100]';
+            }
+        }
         if ((float) $c['max_exposure'] <= 0) return 'max_exposure must be > 0';
         if ((float) $c['stake_amount'] <= 0) return 'stake_amount must be > 0';
         if ((float) $c['stake_amount'] > (float) $c['max_exposure']) return 'stake_amount cannot exceed max_exposure';

@@ -83,6 +83,11 @@ class TicketOptimizer
         // hard-coded 70/75. Defaults match ConfigurationService::defaults().
         $minConfidence = max(30.0, isset($config['minConfidence']) && is_numeric($config['minConfidence']) ? (float) $config['minConfidence'] : 75.0);
         $minQuality = max(50, isset($config['minDataQuality']) && is_numeric($config['minDataQuality']) ? (int) $config['minDataQuality'] : 80);
+        // The ADAPTIVE policy (requirements #1/#8), when the caller supplies
+        // one: each candidate is then judged against the confidence its own
+        // data quality earns, instead of one flat floor for the whole pool.
+        // Without a policy the flat floors above are used exactly as before.
+        $policy = ($config['confidencePolicy'] ?? null) instanceof ConfidencePolicy ? $config['confidencePolicy'] : null;
         $maxCorrelation = strtoupper((string) ($config['maxCorrelation'] ?? 'LOW'));
         $corrLimit = $maxCorrelation === 'LOW' ? 'LOW' : 'MEDIUM';
         $allowedMarkets = (array) ($config['allowedMarkets'] ?? []);
@@ -102,15 +107,33 @@ class TicketOptimizer
             $reasons = $this->hardExclusions($c, $allowedMarkets, $allowedLeagues);
             $confidence = is_numeric($c['confidence']['confidence'] ?? null) ? (float) $c['confidence']['confidence'] : null;
             $quality = (int) ($c['quality']['score'] ?? 0);
+            // The requirement THIS candidate faces: adaptive when a policy is
+            // configured, the flat floor otherwise.
+            $requiredConfidence = $minConfidence;
+            $requiredQuality = $minQuality;
+            $tier = null;
+            if ($policy !== null) {
+                $verdict = $policy->evaluate($quality, $confidence, (string) ($c['market'] ?? ''), (string) ($c['selection'] ?? ''));
+                $requiredConfidence = $verdict['requiredConfidence'] ?? $policy->highestConfidenceRequirement();
+                $requiredQuality = $verdict['minDataQuality'];
+                $tier = $verdict['tier'];
+            }
+
             $softReasons = [];
             if ($confidence === null) $softReasons[] = 'CONFIDENCE_UNMEASURED';
-            elseif ($confidence < $minConfidence) $softReasons[] = 'LOW_CONFIDENCE';
-            if ($quality < $minQuality) $softReasons[] = 'LOW_DATA_QUALITY';
+            elseif ($confidence + 1e-9 < $requiredConfidence) $softReasons[] = 'LOW_CONFIDENCE';
+            if ($quality < $requiredQuality) $softReasons[] = 'LOW_DATA_QUALITY';
+            if ($policy !== null && !$policy->marketAllowed($quality, (string) ($c['market'] ?? ''), (string) ($c['selection'] ?? ''))) {
+                $softReasons[] = 'MARKET_RESTRICTED_AT_DATA_TIER';
+            }
 
             $row = [
                 'candidate' => $c,
                 'confidence' => $confidence,
                 'quality' => $quality,
+                'requiredConfidence' => $requiredConfidence,
+                'requiredQuality' => $requiredQuality,
+                'dataTier' => $tier,
                 'expectedValue' => (float) ($c['value']['expectedValue'] ?? 0),
                 'risk' => (string) ($c['risk']['classification'] ?? 'HIGH'),
                 'odds' => (float) ($c['value']['odds'] ?? $c['odds'] ?? 0),
@@ -128,8 +151,12 @@ class TicketOptimizer
         // The PREFERRED pool: eligible AND every soft criterion met too.
         $preferred = array_values(array_filter($eligible, fn(array $r): bool => $r['softReasons'] === []));
         // The fallback pool keeps the quality floor (a ticket must still rest
-        // on assessable data) but admits a missed confidence floor.
-        $relaxed = array_values(array_filter($eligible, fn(array $r): bool => !in_array('LOW_DATA_QUALITY', $r['softReasons'], true) && $r['confidence'] !== null));
+        // on assessable data) and the adaptive tier's market restriction (a
+        // market its evidence cannot support stays out at every tier) but
+        // admits a missed confidence floor.
+        $relaxed = array_values(array_filter($eligible, fn(array $r): bool => !in_array('LOW_DATA_QUALITY', $r['softReasons'], true)
+            && !in_array('MARKET_RESTRICTED_AT_DATA_TIER', $r['softReasons'], true)
+            && $r['confidence'] !== null));
 
         $attempts = [];
         $tiers = [
@@ -359,9 +386,14 @@ class TicketOptimizer
             'selection' => $c['selection'] ?? null,
             'modelProbability' => $c['prediction']['calibratedProbability'] ?? null,
             'confidence' => $row['confidence'],
-            'minConfidence' => $minConfidence,
+            // Requirement #13: the minimum shown is the one this candidate
+            // was ACTUALLY judged against — its adaptive tier's requirement
+            // when a policy is in force, the pool floor otherwise.
+            'minConfidence' => $row['requiredConfidence'] ?? $minConfidence,
+            'poolMinConfidence' => $minConfidence,
+            'dataTier' => $row['dataTier'] ?? null,
             'dataQuality' => $row['quality'],
-            'minDataQuality' => $minQuality,
+            'minDataQuality' => $row['requiredQuality'] ?? $minQuality,
             'odds' => $row['odds'],
             'expectedValue' => $row['expectedValue'],
             'edge' => $c['value']['edge'] ?? null,

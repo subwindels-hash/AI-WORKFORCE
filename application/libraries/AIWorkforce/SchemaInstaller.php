@@ -183,6 +183,10 @@ final class SchemaInstaller
                 'ALTER TABLE user_language_profiles ADD COLUMN daily_minutes INT NOT NULL DEFAULT 20',
                 'ALTER TABLE user_language_profiles ADD COLUMN IF NOT EXISTS daily_minutes INTEGER NOT NULL DEFAULT 20',
             ),
+            // Adaptive confidence tiers (requirements #1/#8) on existing
+            // installs. NULL means "derive from min_confidence and
+            // min_data_quality", so upgrading changes no operator's policy.
+            $pick('ALTER TABLE sports_configurations ADD COLUMN confidence_policy TEXT', 'ALTER TABLE sports_configurations ADD COLUMN confidence_policy TEXT NULL', 'ALTER TABLE sports_configurations ADD COLUMN IF NOT EXISTS confidence_policy TEXT'),
             $pick('ALTER TABLE sports_tickets ADD COLUMN stake REAL', 'ALTER TABLE sports_tickets ADD COLUMN stake DECIMAL(12,2) NULL', 'ALTER TABLE sports_tickets ADD COLUMN IF NOT EXISTS stake DECIMAL(12,2)'),
             $pick('ALTER TABLE sports_tickets ADD COLUMN pnl REAL', 'ALTER TABLE sports_tickets ADD COLUMN pnl DECIMAL(14,4) NULL', 'ALTER TABLE sports_tickets ADD COLUMN IF NOT EXISTS pnl DECIMAL(14,4)'),
             $pick('ALTER TABLE sports_tickets ADD COLUMN average_confidence REAL', 'ALTER TABLE sports_tickets ADD COLUMN average_confidence DECIMAL(10,4) NULL', 'ALTER TABLE sports_tickets ADD COLUMN IF NOT EXISTS average_confidence DECIMAL(10,4)'),
