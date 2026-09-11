@@ -45,7 +45,13 @@ class SportsDataNormalizer
         }
         try { $kickoff = (new \DateTimeImmutable((string) $raw['kickoff']))->setTimezone(new \DateTimeZone('UTC'))->format('c'); }
         catch (\Throwable $e) { throw new \InvalidArgumentException('fixture kickoff is invalid'); }
-        $sourceStatus = strtoupper(trim((string) ($raw['statusShort'] ?? $raw['status'] ?? '')));
+        // The provider's OWN wording of the state, kept verbatim beside the
+        // canonical one. An explicit `sourceStatus` is honoured first: feeds
+        // that carry the long description ("Second Half", "Match Finished")
+        // in a separate field from the coarse `status` had it dropped here,
+        // so an in-play fixture reached the eligibility gate looking exactly
+        // like a scheduled one and was waved through.
+        $sourceStatus = strtoupper(trim((string) ($raw['sourceStatus'] ?? $raw['statusShort'] ?? $raw['status'] ?? '')));
         $statusRaw = strtoupper(trim((string) ($raw['status'] ?? 'SCHEDULED')));
         $status = self::canonicalStatus($statusRaw);
         if (!in_array($status, self::ALLOWED_STATUSES, true)) throw new \InvalidArgumentException('fixture status is invalid');

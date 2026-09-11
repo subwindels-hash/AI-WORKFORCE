@@ -199,8 +199,25 @@ class PredictionPipeline
         // (rawModelProbability / calibratedProbability / fairOdds on the prediction)
 
         // ── Stage 5: confidence (WINDELS blend; gated ONCE, here) ─────────
-        $conf = $this->confidence->assess($prediction ?? ['decision' => 'NO_PREDICTION'], $quality, $calibrationInput);
+        // Confidence is computed from the candidate's ACTUAL stored evidence:
+        // team form, recent results, the home/away split, goals scored and
+        // conceded, H2H, league position, injuries/news, the bookmaker's
+        // implied probability, the model probability, the data-quality score
+        // and the market's own consistency. Every absent feed is EXCLUDED and
+        // the remaining weights renormalised — never scored as zero, and
+        // never replaced with an assumed value.
+        $confidenceEvidence = [
+            'features' => $fs['features'] ?? [],
+            'inputs' => $intel['inputs'] ?? [],
+            'market' => $candidate['market'],
+            'selection' => $candidate['selection'],
+            'odds' => $candidate['odds'],
+            'marketPrices' => $extras['marketPrices'] ?? null,
+        ];
+        $conf = $this->confidence->assess($prediction ?? ['decision' => 'NO_PREDICTION'], $quality, $calibrationInput, $confidenceEvidence);
         $factors['confidence'] = $conf['breakdown'] ?? null;
+        $factors['confidenceComponents'] = $conf['components'] ?? [];
+        $factors['confidenceExcluded'] = $conf['excluded'] ?? [];
         $minConfidence = (float) ($config['min_confidence'] ?? 0);
         if (!$predictionReady) {
             $stage('confidence', 'SKIPPED', null);

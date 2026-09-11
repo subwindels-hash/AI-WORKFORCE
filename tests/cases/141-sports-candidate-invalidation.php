@@ -310,6 +310,17 @@ test('forced daily run invalidates a previous pass before regenerating and is ne
     $matches = $db->get_where('sports_matches', ['provider_id' => $providerId])->result_array();
     assert_equals(3, count($matches), 'three fixtures synced');
 
+    // The seed pass may itself have produced a valid daily ticket. A valid
+    // ticket is ALWAYS returned and force is never a loophole for duplicating
+    // one, so clear the persisted ticket to reproduce the state this test is
+    // actually about: an old pass that left candidates behind but no usable
+    // ticket, which a forced run must invalidate before regenerating.
+    foreach ($db->get_where('sports_daily_tickets', ['date' => $date])->result_array() as $slotRow) {
+        $db->where('date', $date)->update('sports_daily_tickets', ['ticket_id' => null, 'generation_status' => 'FAILED']);
+    }
+    $db->where('id !=', '')->delete('sports_ticket_selections');
+    $db->where('id !=', '')->delete('sports_tickets');
+
     // Simulate a stale candidate left over from a previous, different pass.
     $staleId = ci141_insert_prediction((int) $matches[0]['id'], ci141_model_id(), 'ci141-stale-pass', 'MATCH_RESULT', 'AWAY');
     $db->insert('sports_odds', [

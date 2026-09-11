@@ -197,12 +197,25 @@ test('risk: low liquidity is an explicit rejection; confidence is gated once, up
     $lowConf = $eng->assess($value, $quality, ['min_data_quality' => 75, 'min_confidence' => 80], ['confidence' => 70]);
     assert_equals('LOW', $lowConf['classification']);
     assert_not_contains('LOW_CONFIDENCE', implode(',', $lowConf['reasons']));
-    // …and the pipeline DOES reject the candidate, exactly once, on the
-    // actual WINDELS confidence value (weak data quality caps the blend).
-    $out = (new PredictionPipeline())->evaluate(fx_gate_match(), fx_fresh_odds(1.6), fx_gate_quality(55), fx_approved_calibration(), fx_gate_config());
+    // …and the pipeline DOES reject a genuinely weak candidate exactly once
+    // on the actual WINDELS confidence value. Confidence is now measured from
+    // the real evidence, so it is driven below the floor by a badly
+    // calibrated model on a near-coin-flip read, not merely by a low
+    // data-quality number (which is its OWN gate, LOW_DATA_QUALITY).
+    $poorCalibration = array_merge(fx_approved_calibration(), ['intercept' => 0.5, 'slope' => 0.02, 'ece' => 0.45, 'samples' => 60]);
+    $out = (new PredictionPipeline())->evaluate(fx_gate_match(), fx_fresh_odds(1.6), fx_gate_quality(85), $poorCalibration, fx_gate_config());
     assert_equals('REJECTED', $out['decision']);
+    assert_true((float) $out['confidence']['confidence'] < 80.0,
+        'a coin-flip read from a poorly calibrated model scores below the floor, got ' . $out['confidence']['confidence']);
     $lowConfCount = substr_count(implode(',', $out['rejectionReasons']), 'LOW_CONFIDENCE');
     assert_equals(1, $lowConfCount, 'LOW_CONFIDENCE recorded once, never duplicated');
+    assert_equals('LOW_CONFIDENCE', $out['primaryReason'], 'confidence is the single primary blocking reason');
+
+    // Data quality is a SEPARATE gate with its own reason — the two are never
+    // conflated, and neither is counted twice.
+    $weakData = (new PredictionPipeline())->evaluate(fx_gate_match(), fx_fresh_odds(1.6), fx_gate_quality(55), fx_approved_calibration(), fx_gate_config());
+    assert_equals('REJECTED', $weakData['decision']);
+    assert_in_array('LOW_DATA_QUALITY', $weakData['rejectionReasons'], 'a below-floor quality score is its own reason');
     // Insufficient liquidity remains a risk-engine rejection.
     $lowLiq = $eng->assess($value, $quality, ['min_data_quality' => 80, 'min_liquidity' => 10000], ['confidence' => 90, 'liquidity' => 500]);
     assert_equals('REJECTED', $lowLiq['classification']);
