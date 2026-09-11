@@ -403,12 +403,63 @@ $kickoffStamp = static function (mixed $iso): string {
                 <div class="stat" title="Fixtures reusing recentForm a previous run already verified (inside the form TTL, original source and timestamp kept) — no provider request was spent on them"><div class="k">Form carried forward</div><div class="v"><?= (int) $diag['fixturesWithCarriedForwardForm'] ?></div></div>
               <?php endif; ?>
               <div class="stat"><div class="k">Sufficient data</div><div class="v"><?= (int) ($diag['sufficientDataFixtures'] ?? 0) ?></div></div>
+              <div class="stat" title="Distinct market:selection candidates scored across the full stored pool (one real odds row each)"><div class="k">Markets evaluated</div><div class="v"><?= (int) ($diag['marketsEvaluated'] ?? 0) ?></div></div>
+              <div class="stat" title="Fixtures rejected once because no supported market had real odds"><div class="k">No real odds</div><div class="v"><?= (int) ($diag['fixturesRejectedNoOdds'] ?? 0) ?></div></div>
+              <div class="stat" title="Fixtures with real odds older than the configured TTL that no provider could refresh"><div class="k">Stale odds</div><div class="v"><?= (int) ($diag['fixturesRejectedStaleOdds'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Predictions</div><div class="v"><?= (int) ($diag['predictionsGenerated'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Confidence ≥ floor</div><div class="v"><?= (int) ($diag['confidenceQualifiedCandidates'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Positive value</div><div class="v"><?= (int) ($diag['positiveValueCandidates'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Risk qualified</div><div class="v"><?= (int) ($diag['riskQualifiedCandidates'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Final qualified</div><div class="v"><?= (int) ($diag['finalQualifiedCandidates'] ?? 0) ?></div></div>
+              <?php if ((int) ($diag['fixturesDeferred'] ?? 0) > 0): ?>
+                <div class="stat" title="Fixtures past the <?= (int) ($diag['generationCap'] ?? 50) ?>-per-generation cap with no reusable stored prediction; named below, never silently dropped"><div class="k">Deferred (cap <?= (int) ($diag['generationCap'] ?? 50) ?>)</div><div class="v"><?= (int) $diag['fixturesDeferred'] ?></div></div>
+              <?php endif; ?>
             </div>
+            <?php
+              // Fixtures that failed the sufficient-data gate: the concrete
+              // requirement, the missing/stale field and the provider — one
+              // primary blocker per fixture, named instead of a bare zero.
+              $gateFixtures = is_array($diag['sufficientDataGate']['fixtures'] ?? null) ? $diag['sufficientDataGate']['fixtures'] : [];
+              $gateFailures = array_values(array_filter($gateFixtures, fn($g) => empty($g['passed'])));
+            ?>
+            <?php if ($gateFailures !== []): ?>
+            <div class="table-scroll" style="margin-top:12px">
+              <table class="tbl">
+                <thead><tr><th>Fixture</th><th>Provider</th><th>Primary blocker</th><th>Missing / failed field</th></tr></thead>
+                <tbody>
+                  <?php foreach (array_slice($gateFailures, 0, 25) as $g):
+                    $reqs = is_array($g['requirements'] ?? null) ? $g['requirements'] : [];
+                    $detail = '—';
+                    $failedKey = (string) ($g['failedRequirement'] ?? '');
+                    if (isset($reqs[$failedKey])) {
+                        $rq = $reqs[$failedKey];
+                        if ($failedKey === 'MANDATORY_MODEL_DATA') $detail = implode(', ', array_map('e', (array) ($rq['missingMandatory'] ?? []))) ?: 'recentForm';
+                        elseif ($failedKey === 'DATA_QUALITY_FLOOR') $detail = 'quality ' . (int) ($rq['score'] ?? 0) . ' / floor ' . (int) ($rq['minScore'] ?? 0) . ' (' . e((string) ($rq['band'] ?? '?')) . ')';
+                        elseif ($failedKey === 'APPROVED_CALIBRATION') $detail = 'no APPROVED model calibration';
+                    }
+                  ?>
+                    <tr>
+                      <td style="font-weight:700"><?= e((string) ($g['homeTeam'] ?? '?')) ?> vs <?= e((string) ($g['awayTeam'] ?? '?')) ?><div class="dim" style="font-size:10px"><?= e((string) ($g['competition'] ?? '')) ?></div></td>
+                      <td class="mono"><?= e((string) ($g['provider'] ?? '—')) ?></td>
+                      <td class="mono"><?= e((string) ($g['primaryReason'] ?? $failedKey)) ?></td>
+                      <td class="mono" style="font-size:11px"><?= $detail /* pre-escaped above / integers */ ?></td>
+                    </tr>
+                  <?php endforeach; ?>
+                </tbody>
+              </table>
+              <?php if ((int) ($diag['sufficientDataGate']['limit'] ?? 0) > 0 && count($gateFailures) > 25): ?><p class="dim" style="font-size:11px;margin:6px 0 0">Showing 25 of <?= count($gateFailures) ?> blocked fixtures; the funnel counts above cover the full pool.</p><?php endif; ?>
+            </div>
+            <?php endif; ?>
+            <?php $deferredRows = is_array($diag['deferredFixtures']['rows'] ?? null) ? $diag['deferredFixtures']['rows'] : []; if ($deferredRows !== []): ?>
+            <p class="dim" style="font-size:11px;margin:8px 0 0">Deferred past the generation cap (evaluated in later runs; not rejected):
+              <?php
+                $parts = [];
+                foreach (array_slice($deferredRows, 0, 15) as $d) $parts[] = e((string) ($d['provider'] ?? '?')) . ' ' . e((string) ($d['externalId'] ?? '?'));
+                echo implode('; ', $parts);
+                if (!empty($diag['deferredFixtures']['truncated'])) echo '; …';
+              ?>
+            </p>
+            <?php endif; ?>
             <?php $reasons = is_array($diag['topRejectionReasons'] ?? null) ? $diag['topRejectionReasons'] : []; ?>
             <?php $byProvider = is_array($diag['rejectionReasonsByProvider'] ?? null) ? $diag['rejectionReasonsByProvider'] : []; ?>
             <?php if ($reasons): ?>

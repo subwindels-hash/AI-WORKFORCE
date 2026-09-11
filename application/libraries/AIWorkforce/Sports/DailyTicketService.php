@@ -559,6 +559,7 @@ class DailyTicketService
                             }
                             $this->trackCandidateFunnel($candidate, $funnel, $minConfidence, $minEv);
                             $allCandidates[] = $candidate;
+                            $funnel['marketsEvaluated']++;
 
                             if ($candidate['decision'] === 'REJECTED') {
                                 $rejections++;
@@ -591,6 +592,7 @@ class DailyTicketService
                             $funnel['predictionsReused']++;
                             $this->trackCandidateFunnel($candidate, $funnel, $minConfidence, $minEv);
                             $allCandidates[] = $candidate;
+                            $funnel['marketsEvaluated']++;
                             if ($candidate['decision'] === 'REJECTED') {
                                 $rejections++;
                                 $primary = $candidate['primaryReason'] ?? ($candidate['rejectionReasons'][0] ?? 'NO_PREDICTION');
@@ -895,6 +897,8 @@ class DailyTicketService
             'deferredFixtures' => ['truncated' => false, 'rows' => []],
             'predictionsGenerated' => 0,
             'predictionsReused' => 0,
+            // market:selection candidates scored across the full stored pool.
+            'marketsEvaluated' => 0,
             'sufficientDataCandidates' => 0,
             'confidenceQualifiedCandidates' => 0,
             'positiveValueCandidates' => 0,

@@ -146,6 +146,48 @@ test('sports UI: the live scores board shows the match date and time', function 
     assert_true(!str_contains($html, '1970-01-01'), 'a missing kickoff is never rendered as the epoch');
 });
 
+test('sports UI: NO QUALIFIED TICKET panel names every funnel stage, the blocking field and the provider', function () {
+    $diagnostics = [
+        'fixturesEvaluated' => 4, 'eligibleFixtures' => 4, 'fixturesWithFreshOdds' => 3,
+        'fixturesRejectedNoOdds' => 0, 'fixturesRejectedStaleOdds' => 1,
+        'fixturesWithRecentForm' => 2, 'sufficientDataFixtures' => 2,
+        'marketsEvaluated' => 7, 'predictionsGenerated' => 5,
+        'confidenceQualifiedCandidates' => 3, 'positiveValueCandidates' => 3,
+        'riskQualifiedCandidates' => 3, 'finalQualifiedCandidates' => 0,
+        'generationCap' => 50, 'fixturesDeferred' => 1,
+        'deferredFixtures' => ['truncated' => false, 'rows' => [
+            ['matchId' => 9001, 'externalId' => 'DEF-1', 'provider' => 'api-football', 'kickoff' => gmdate('c', strtotime('+1 day'))],
+        ]],
+        'sufficientDataGate' => ['limit' => 100, 'truncated' => false, 'passed' => 2, 'failed' => 1, 'fixtures' => [
+            [
+                'matchId' => 7001, 'externalId' => 'GAP-1', 'homeTeam' => 'Gap Home', 'awayTeam' => 'Gap Away',
+                'competition' => 'Gap League', 'kickoff' => gmdate('c', strtotime('+1 day')), 'provider' => 'sportmonks',
+                'passed' => false, 'failedRequirement' => 'MANDATORY_MODEL_DATA', 'primaryReason' => 'INSUFFICIENT_DATA',
+                'requirements' => ['MANDATORY_MODEL_DATA' => ['ok' => false, 'missingMandatory' => ['recentForm'], 'mandatoryFields' => ['recentForm']]],
+            ],
+        ]],
+        'thresholds' => ['oddsMaxAgeSeconds' => 21600],
+        'topRejectionReasons' => [], 'rejectionReasonsByProvider' => [],
+    ];
+    $daily = [
+        'date' => gmdate('Y-m-d'), 'ticket_id' => null, 'status' => 'NO_QUALIFIED_TICKET',
+        'candidates_evaluated' => 4, 'predictions_recorded' => 5, 'rejections' => 4,
+        'rejection_summary' => ['_diagnostics' => $diagnostics],
+        'message' => 'Today\'s available matches did not meet the configured prediction requirements',
+        'provider' => 'api-football',
+    ];
+    $html = fx_render_sports('index', ['dashboard' => ['ticketEngine' => ['today' => $daily, 'ticket' => null, 'configuration' => ['engine_mode' => 'USER_APPROVAL_REQUIRED']]]]);
+    assert_contains('Markets evaluated', $html);
+    assert_contains('Stale odds', $html);
+    assert_contains('No real odds', $html);
+    assert_contains('Gap Home vs Gap Away', $html, 'the blocked fixture is named');
+    assert_contains('sportmonks', $html, 'the provider behind the blocker is named');
+    assert_contains('recentForm', $html, 'the concrete missing field is named');
+    assert_contains('DEF-1', $html, 'the deferred fixture past the generation cap is named');
+    assert_true(!str_contains($html, 'Undefined array key'), 'no PHP warnings');
+    assert_true(!str_contains($html, 'Fatal error'), 'no render error');
+});
+
 test('sports UI: records console renders records, runs and performance', function () {
     $repo = new SportsRepositoryStub();
     $ticketId = fx_ui_today($repo);
