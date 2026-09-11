@@ -63,6 +63,22 @@ class DailyTicketService
     public const ELIGIBILITY_LEAD_SECONDS = 2 * 3600;
 
     /**
+     * Every provider spelling of "this match has not kicked off yet".
+     *
+     * The eligibility gate used to demand the literal short code `NS`, so a
+     * feed that says "Not Started", "TBD", "PENDING" or "DELAYED" had its
+     * whole page rejected as FIXTURE_NOT_NS_OR_TOO_SOON even though the
+     * canonical status stored on the same row said SCHEDULED and kickoff was
+     * hours away. The list is an explicit ALLOWLIST on purpose: an
+     * unrecognised code is never assumed to mean "not started".
+     */
+    public const NOT_STARTED_SOURCE_STATUSES = [
+        'NS', 'NOT STARTED', 'NOT_STARTED', 'NOTSTARTED',
+        'SCHEDULED', 'SCHED', 'TBA', 'TBD', 'PENDING', 'UPCOMING',
+        'DELAYED', 'PRE', 'PREMATCH', 'PRE-MATCH', 'PRE_MATCH', 'FIXTURE', 'AU',
+    ];
+
+    /**
      * A bounded fixture-discovery read may be wider than the 50-fixture
      * prediction cap. Provider pages are often ordered by kickoff and, in an
      * afternoon run, their first 50 rows can all be already started or inside
@@ -1473,6 +1489,27 @@ class DailyTicketService
                         'instance' => $this->providers->provider($code), 'fixtures' => $group['fixtures'],
                     ];
                 }
+                // A stored page that contains NOT ONE fixture able to pass the
+                // first gate is not an input — it is a stale cache. Returning
+                // it produced exactly the reported dead end: 50 evaluated,
+                // 50 × FIXTURE_NOT_NS_OR_TOO_SOON, 0 eligible, while the
+                // provider had fresh not-started fixtures nobody asked for.
+                // When a live feed is configured, fall through to it instead;
+                // offline/stored-only deployments keep the stored rows and
+                // still get their honest timing verdict.
+                if ($sources !== [] && $this->providers->configured()
+                    && !$this->anyFixtureEligible($sources, time())) {
+                    // Ask the live feed instead. If it cannot do better (every
+                    // provider failed, or its rows are equally expired), the
+                    // stored page is restored so the run still reports its
+                    // honest timing verdict from real data rather than a
+                    // fabricated provider outage.
+                    // array_merge, not `+`: an existing falsy refreshFixtures
+                    // key must be OVERRIDDEN, otherwise this path would call
+                    // itself forever.
+                    $live = $this->fetchFixtureSources($date, $timezone, $errors, array_merge($options, ['refreshFixtures' => true]));
+                    if (!empty($live['ok']) && $this->anyFixtureEligible((array) $live['sources'], time())) return $live;
+                }
                 if ($sources !== []) {
                     return [
                         'ok' => true, 'input' => 'STORED', 'sources' => $sources,
@@ -1541,6 +1578,28 @@ class DailyTicketService
             'pageFull' => $pageFull, 'batchOffset' => max(0, (int) ($options['batchOffset'] ?? 0)),
             'failures' => $collected['failures'], 'failureStatuses' => $collected['failureStatuses'], 'summary' => '',
         ];
+    }
+
+    /**
+     * Does ANY row of these intake sources still pass the first gate?
+     *
+     * A page with no eligible fixture cannot produce a ticket no matter what
+     * the later gates decide, so the engine uses this to tell a usable input
+     * apart from a stale one instead of spending the run proving it.
+     *
+     * @param array<int,array{provider:string, fixtures:array}> $sources
+     */
+    private function anyFixtureEligible(array $sources, int $now): bool
+    {
+        foreach ($sources as $source) {
+            foreach ((array) ($source['fixtures'] ?? []) as $rawFixture) {
+                if (!is_array($rawFixture)) continue;
+                try { $probe = SportsDataNormalizer::fixture($rawFixture, (string) ($source['provider'] ?? '')); }
+                catch (\Throwable $e) { continue; }
+                if ($this->fixtureEligibleForDailyTicket($probe, $now)) return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -1625,9 +1684,25 @@ class DailyTicketService
     private function fixtureEligibleForDailyTicket(array $match, int $now): bool
     {
         if (strtolower((string) ($match['sport'] ?? '')) !== 'football') return false;
-        $sourceStatus = strtoupper((string) ($match['sourceStatus'] ?? $match['status'] ?? ''));
-        $canonical = strtoupper((string) ($match['status'] ?? ''));
-        if ($sourceStatus !== 'NS' && !($sourceStatus === 'SCHEDULED' && $canonical === 'SCHEDULED')) return false;
+        // A not-started fixture is recognised by its MEANING, not by one
+        // provider's spelling of it. Requiring the literal short code "NS"
+        // rejected every feed that says "Not Started", "TBD", "PENDING",
+        // "DELAYED" or simply "SCHEDULED" — a whole page of perfectly
+        // predictable matches counted as FIXTURE_NOT_NS_OR_TOO_SOON while the
+        // canonical status on the very same row said SCHEDULED. Both the
+        // provider's own status and the canonical one are mapped through the
+        // shared normalizer, and the fixture is eligible when they agree that
+        // the match has not kicked off.
+        $canonical = SportsDataNormalizer::canonicalStatus((string) ($match['status'] ?? ''));
+        if ($canonical !== 'SCHEDULED') return false;
+        // The provider's own wording must AGREE, and it is only allowed to
+        // agree with a recognised not-started token. canonicalStatus() falls
+        // back to SCHEDULED for anything it does not know, so an unrecognised
+        // in-play code must never be waved through by that default: unknown
+        // stays ineligible.
+        $rawSourceStatus = strtoupper(trim((string) ($match['sourceStatus'] ?? '')));
+        if ($rawSourceStatus !== ''
+            && !in_array($rawSourceStatus, self::NOT_STARTED_SOURCE_STATUSES, true)) return false;
         try { $kickoff = (new \DateTimeImmutable((string) ($match['kickoff'] ?? '')))->getTimestamp(); }
         catch (\Throwable $e) { return false; }
         return $kickoff > ($now + self::ELIGIBILITY_LEAD_SECONDS);
