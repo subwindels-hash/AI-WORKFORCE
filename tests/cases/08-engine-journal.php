@@ -1,5 +1,7 @@
 <?php
 /** Intelligence engine end-to-end (DB-backed) + journal analytics. */
+
+require_once __DIR__ . '/03-agents.php'; // assert_not_null_or() and the shared fixtures it brings
 use AIWorkforce\Journal\Analytics;
 
 test('engine: full analysis run persists + audits + risk vetoes synthetic', function () {

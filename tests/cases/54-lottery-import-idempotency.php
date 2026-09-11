@@ -5,6 +5,8 @@
  * invalid data as official, idempotent imports, verified results never
  * silently overwritten, full source attribution on every row.
  */
+
+require_once __DIR__ . '/53-lottery-rules-validation.php'; // fx_valid_draw() and the shared fixtures it brings
 use AIWorkforce\Lottery\LotteryIntelligence;
 use AIWorkforce\Lottery\SandboxLotteryProvider;
 use AIWorkforce\Lottery\UnavailableLotteryProvider;

@@ -5,6 +5,8 @@
  * recommendations, mastery tracking. No invented findings.
  */
 
+require_once __DIR__ . '/36-language-teacher.php'; // teacher_profile() and the shared fixtures it brings
+
 /** Drive one vocab review round remembering/forsaking selected words. */
 function adaptive_seed_vocabulary(array $ctx, array $forgetWords = [], int $rounds = 2): void
 {

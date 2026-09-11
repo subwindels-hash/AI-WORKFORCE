@@ -3,6 +3,8 @@
  * PHASE 5 hardening — proposal expiry (spec §5 invalidation) and the
  * scheduled-operations worker.
  */
+
+require_once __DIR__ . '/10-execution-supervisor.php'; // es_state() and the shared fixtures it brings
 /** Real-clock supervisor (expiry compares against wall time, not the session-test clock). */
 function cron_supervisor(FakeTradingConnector $connector)
 {

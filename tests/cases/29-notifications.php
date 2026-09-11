@@ -4,6 +4,9 @@
  * domain wiring (kill switch, approval requests, risk-alert transitions,
  * broker disconnects).
  */
+
+require_once __DIR__ . '/10-execution-supervisor.php'; // es_state() and the shared fixtures it brings
+require_once __DIR__ . '/28-portfolio-monitor.php'; // prm_monitor_with() and the shared fixtures it brings
 use AIWorkforce\Notifications\Notifier;
 
 test('notifications: repository save/list/unread/markRead round trip', function () {

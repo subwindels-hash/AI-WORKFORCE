@@ -3,6 +3,8 @@
  * PHASE 3 — Paper Trading Engine (DB-backed integration through CI3).
  * Governance chain: kill switch -> trading mode -> risk engine -> fill.
  */
+
+require_once __DIR__ . '/03-agents.php'; // assert_not_null_or() and the shared fixtures it brings
 use AIWorkforce\Paper\PaperTradingEngine;
 
 function pt_reset_state(bool $killSwitch = false): void

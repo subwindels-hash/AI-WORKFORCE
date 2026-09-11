@@ -3,6 +3,8 @@
  * AI LANGUAGE LEARNING — Phase 3 (vocabulary): bank, SRS schedule, daily
  * reviews, quiz determinism, flashcard self-assessment, progress reality.
  */
+
+require_once __DIR__ . '/36-language-teacher.php'; // teacher_profile() and the shared fixtures it brings
 use AIWorkforce\LangLearn\VocabularyBank;
 use AIWorkforce\LangLearn\VocabularyService;
 

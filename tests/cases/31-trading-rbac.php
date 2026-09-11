@@ -5,6 +5,8 @@
  * HTTP layer itself is verified against the live server in smoke tests
  * (unauthenticated mutating calls must 403).
  */
+
+require_once __DIR__ . '/10-execution-supervisor.php'; // es_state() and the shared fixtures it brings
 test('installer seeds trading roles and permissions', function () {
     $p = platform();
     $db = $p->model->db;

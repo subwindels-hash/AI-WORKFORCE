@@ -4,6 +4,8 @@
  * writing correction, grammar help, lesson history.
  */
 
+require_once __DIR__ . '/35-language-learning.php'; // ll_user() and the shared fixtures it brings
+
 function teacher_profile(string $tag, string $lang = 'nl'): array
 {
     $p = platform();
