@@ -193,7 +193,12 @@ class Sports extends App_Controller
             redirect('/sports?date=' . $date);
             return;
         }
-        // No record qualified — still a valid outcome (spec §3)
+        // No record qualified — still a valid outcome (spec §3).
+        // The engine's own message already carries a "(N evaluated, … funnel: …)"
+        // breakdown; repeating the status code, the counts and the funnel here
+        // produced the unreadable triple-printed flash. Each fact is stated once.
+        $hasFunnel = stripos($message, 'funnel:') !== false;
+        $hasCounts = (bool) preg_match('/\(\d+ evaluated,/', $message);
         $summary = '';
         if (!empty($result['rejectionSummary']) && is_array($result['rejectionSummary'])) {
             $parts = [];
@@ -203,7 +208,7 @@ class Sports extends App_Controller
         // Diagnostic funnel — which pipeline stage eliminated the candidates.
         $funnel = '';
         $diag = $result['diagnostics'] ?? [];
-        if (is_array($diag) && !empty($diag['fixturesEvaluated'])) {
+        if (!$hasFunnel && is_array($diag) && !empty($diag['fixturesEvaluated'])) {
             $funnel = sprintf(
                 ' Funnel: %d evaluated → %d eligible → %d fresh-odds → %d sufficient-data fixtures → %d predictions → %d confidence-qualified → %d positive-value → %d risk-qualified → %d final.',
                 (int) ($diag['fixturesEvaluated'] ?? 0),
@@ -217,8 +222,14 @@ class Sports extends App_Controller
                 (int) ($diag['finalQualifiedCandidates'] ?? 0)
             );
         }
-        $msg = sprintf('No qualified odds prediction ticket for %s — %s (%d evaluated, %d predictions, %d rejections).%s%s',
-            $date, $status . ($message !== '' ? ': ' . $message : ''), $evaluated, $recorded, $rejections, $summary, $funnel);
+        // "NO_QUALIFIED_TICKET: NO QUALIFIED TICKET — …" said the same thing
+        // twice: the status code is only shown when the message does not
+        // already state the outcome in words.
+        $headline = $message !== '' ? $message : $status;
+        if ($message !== '' && $status !== 'NO_QUALIFIED_TICKET') $headline = $status . ': ' . $message;
+        $counts = $hasCounts ? '' : sprintf(' (%d evaluated, %d predictions, %d rejections)', $evaluated, $recorded, $rejections);
+        $msg = sprintf('No qualified odds prediction ticket for %s — %s%s.%s%s',
+            $date, $headline, $counts, $summary, $funnel);
         if ($status === 'NO_QUALIFIED_TICKET') {
             $this->flash('notice', $msg);
         } else {
