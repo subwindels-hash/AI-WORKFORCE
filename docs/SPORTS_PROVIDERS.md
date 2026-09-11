@@ -108,8 +108,32 @@ is rejected `INSUFFICIENT_DATA` regardless of odds quality. Rows without an
 **Free tier limits, verified live:** list endpoints are capped —
 `all_leagues.php` returns 5 leagues, `eventsday.php` a partial day, and
 `eventsseason.php` a partial season. The adapter never fabricates the
-missing rows; treat free-tier syncs as a sample of the day. v2 (livescore,
-full seasons) requires a premium key.
+missing rows; treat free-tier syncs as a sample of the day. Full seasons
+require a premium key.
+
+**Live scores (`liveFixtures()` → `GET /livescore.php?d=<today>&s=Soccer`):**
+verified live (2026-09) the documented free key `123` DOES get real data back
+on v1 — the vendor's own forum posts about "livescore is Patreon-only" refer
+to the legacy test keys `1`/`2`, which the endpoint now rejects outright with
+HTTP 400 and body `{"Message":"Invalid Premium API key: ..."}`.
+`normalizeKey()` maps `1`/`2`/`3`/`123`/empty all onto `123`, so an
+installation using any of those legacy aliases is unaffected — but a
+genuinely wrong, expired, or revoked key configured through
+`WINDELS_THESPORTSDB_KEY` or Admin → API passes through unchanged and hits
+this same "Invalid Premium API key" wall, which `ProviderHttp::classify()`
+turns into `BAD_REQUEST` and the circuit breaker holds in a config cooldown
+until the key is fixed — check the adapter's `bodySnippet` diagnostic (Admin
+→ Cron / provider health) for that exact vendor message before assuming the
+endpoint itself is broken.
+
+The response body nests rows under **`livescore`**, not `events` like the
+day/season/league endpoints — a mismatch here silently returns zero rows
+instead of failing, so a `processed: 0` COMPLETED sweep is as suspicious as
+an outright error. Each row's in-play minute comes from `strProgress`
+(`"57"`, `"90+4"`) rather than `intElapsed`; the adapter parses the base
+minute and the stoppage-time remainder (`extraMinute`) out of it. Status
+codes on this endpoint are the vendor's own short codes (`1H`, `2H`, `FT`,
+…), not the words "LIVE"/"IN PROGRESS" used elsewhere.
 
 ## SportMonks notes
 
