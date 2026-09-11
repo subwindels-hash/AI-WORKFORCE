@@ -165,7 +165,7 @@ ticket engine. Verified live behaviours:
    matchday. `tests/framework.php`'s in-memory repository honours a caller
    backdated `startedAt` on sync runs so cadence math is testable.
 
-Suite after this phase: **1208 passed, 0 failed**
-(5 new regression tests). Deployment archive rebuilt:
-`application-deployment.zip`, 710 release files,
-SHA-256 `9b06aabb8576486d5d50b6c3444ebbe547573bec1c25a37e98d8125b37bb108f`.
+Suite after this phase: **1208 passed, 0 failed** (5 new regression tests).
+Deployment archive rebuilt deterministically (710 release files) in the same
+commit as this addendum — verify with `python3 tools/build_deployment_zip.py --check`,
+which fails if the archive ever drifts from the source tree.
