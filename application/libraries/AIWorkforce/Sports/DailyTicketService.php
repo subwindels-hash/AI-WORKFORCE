@@ -54,6 +54,14 @@ class DailyTicketService
     public const RETRY_BASE_SECONDS = 300;
     public const RETRY_MAX_SECONDS = 3600;
 
+    /**
+     * A fixture must kick off strictly more than this many seconds from the
+     * runtime clock to be ticket-eligible. It is also the intake cut-off: a
+     * fixture below it can NEVER pass the first gate, so it must never consume
+     * a slot of the 50-fixture generation batch.
+     */
+    public const ELIGIBILITY_LEAD_SECONDS = 2 * 3600;
+
     /** Verified recentForm stays usable for this long before it must be re-read. */
     public const DEFAULT_FORM_MAX_AGE_SECONDS = 7 * 86400;
 
@@ -363,7 +371,15 @@ class DailyTicketService
                     // matches. Prefer earliest kickoff deterministically, then
                     // provider arrival order. Remaining rows are explicitly
                     // deferred instead of triggering hundreds of odds calls.
+                    // Ticket-ELIGIBLE fixtures are ordered first: a provider
+                    // page is mostly matches that already kicked off or start
+                    // inside the eligibility lead, and letting them consume the
+                    // 50-fixture batch is what produced "50 evaluated → 0
+                    // eligible" days. Within each group, earliest kickoff wins
+                    // deterministically, then provider arrival order.
                     usort($primaries, static function (array $a, array $b): int {
+                        $eligible = ((int) !empty($b['eligible'])) <=> ((int) !empty($a['eligible']));
+                        if ($eligible !== 0) return $eligible;
                         $kickoff = strcmp((string) ($a['probe']['kickoff'] ?? ''), (string) ($b['probe']['kickoff'] ?? ''));
                         return $kickoff !== 0 ? $kickoff : ($a['order'] <=> $b['order']);
                     });
@@ -791,9 +807,25 @@ class DailyTicketService
                                 . ' (no candidate passed the eligibility, odds, ' . $confidenceFloor . '%+ confidence, quality, risk/value and correlation gates)';
                     }
                     if ($ticketId === null) {
-                        // Targeted diagnosis of the two most common upstream dead
+                        // Targeted diagnosis of the most common upstream dead
                         // ends, so the message says what to FIX, not only what
                         // failed.
+                        //
+                        // Every fixture the day offered had already kicked off
+                        // or starts inside the eligibility lead: that is a
+                        // TIMING dead end, not a modelling one, and the message
+                        // must say so instead of blaming confidence/value gates
+                        // that never ran.
+                        $tooSoon = (int) ($rejectionSummary['FIXTURE_NOT_NS_OR_TOO_SOON'] ?? 0);
+                        if ((int) ($funnel['eligibleFixtures'] ?? 0) === 0 && $tooSoon > 0 && $evaluated > 0) {
+                            $leadHours = (int) round(self::ELIGIBILITY_LEAD_SECONDS / 3600);
+                            $message = 'NO QUALIFIED TICKET — none of the ' . $evaluated . ' fixture(s) read for ' . $date
+                                . ' was still ticket-eligible: all ' . $tooSoon . ' had already started, were not in the NS/SCHEDULED state, or kick off within the '
+                                . $leadHours . '-hour lead the engine requires. No prediction gate (confidence, quality, value, risk, correlation) was reached'
+                                . (!empty($funnel['fixturePageFull'])
+                                    ? '; a further page of fixtures is available and the next run advances to it'
+                                    : '; run again when later fixtures for the window are published');
+                        }
                         $withForm = (int) ($funnel['fixturesWithRecentForm'] ?? 0);
                         $freshOdds = (int) ($funnel['fixturesWithFreshOdds'] ?? 0);
                         $formCandidates = (int) ($funnel['formEnrichmentCandidates'] ?? 0);
@@ -1366,8 +1398,20 @@ class DailyTicketService
             $horizonDate = (new \DateTimeImmutable($date . ' 00:00:00', new \DateTimeZone($timezone)))->modify('+2 days')->format('Y-m-d');
             $horizon = DailyTicketDate::utcWindow($horizonDate, $timezone);
             $toInclusive = gmdate('Y-m-d\TH:i:sP', $horizon['startTimestamp'] - 1);
+            // Stored rows are read kickoff-ASC and capped at one generation
+            // batch. Reading from the ticket day's 00:00 meant that an
+            // afternoon/evening run spent the whole 50-row page on fixtures
+            // that already kicked off or start within the eligibility lead —
+            // every one of them rejected FIXTURE_NOT_NS_OR_TOO_SOON, so the
+            // engine reported "0 eligible" while perfectly good later
+            // fixtures sat unread behind the page. The intake floor is now the
+            // earliest kickoff that can still pass the eligibility gate.
+            $eligibleFrom = time() + self::ELIGIBILITY_LEAD_SECONDS;
+            $from = $eligibleFrom > $window['startTimestamp']
+                ? gmdate('Y-m-d\TH:i:sP', $eligibleFrom)
+                : $window['start'];
             $stored = $this->repo->listMatches([
-                'from' => $window['start'], 'to' => $toInclusive, 'status' => 'SCHEDULED',
+                'from' => $from, 'to' => $toInclusive, 'status' => 'SCHEDULED',
                 'offset' => max(0, (int) ($options['batchOffset'] ?? 0)),
             ], self::MAX_GENERATION_CEILING);
             if ($stored !== []) {
@@ -1541,7 +1585,7 @@ class DailyTicketService
         if ($sourceStatus !== 'NS' && !($sourceStatus === 'SCHEDULED' && $canonical === 'SCHEDULED')) return false;
         try { $kickoff = (new \DateTimeImmutable((string) ($match['kickoff'] ?? '')))->getTimestamp(); }
         catch (\Throwable $e) { return false; }
-        return $kickoff > ($now + 2 * 3600);
+        return $kickoff > ($now + self::ELIGIBILITY_LEAD_SECONDS);
     }
 
     /**
