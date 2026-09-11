@@ -62,6 +62,15 @@ class DailyTicketService
      */
     public const ELIGIBILITY_LEAD_SECONDS = 2 * 3600;
 
+    /**
+     * A bounded fixture-discovery read may be wider than the 50-fixture
+     * prediction cap. Provider pages are often ordered by kickoff and, in an
+     * afternoon run, their first 50 rows can all be already started or inside
+     * the two-hour lead. Reading this small, bounded buffer lets the engine
+     * find later NS fixtures; it never increases MAX_GENERATION_CEILING.
+     */
+    public const FIXTURE_DISCOVERY_CEILING = self::MAX_GENERATION_CEILING * 4;
+
     /** Verified recentForm stays usable for this long before it must be re-read. */
     public const DEFAULT_FORM_MAX_AGE_SECONDS = 7 * 86400;
 
@@ -166,10 +175,18 @@ class DailyTicketService
         $attemptCount = max(1, (int) ($dailyBeforeClaim['attempt_count'] ?? 0) + 1);
         // When a complete 50-match page honestly produced no ticket, the next
         // retry advances to the next stored/provider page. Transient failures
-        // and partial pages retry the same fixtures.
+        // and partial pages retry the same fixtures. One exception matters for
+        // an upgrade/recovery: an all-timing page (0 eligible, every row
+        // FIXTURE_NOT_NS_OR_TOO_SOON) must be replayed once through the newer
+        // NS-filtered 200-row discovery buffer. Advancing it first would skip
+        // the only page on providers whose day endpoint does not paginate —
+        // exactly the reported "50 evaluated → 0 eligible" dead end.
         $priorSummary = is_array($dailyBeforeClaim['rejection_summary'] ?? null) ? $dailyBeforeClaim['rejection_summary'] : [];
         $priorDiagnostics = is_array($priorSummary['_diagnostics'] ?? null) ? $priorSummary['_diagnostics'] : [];
-        $options['batchOffset'] = ((string) ($dailyBeforeClaim['status'] ?? '') === 'NO_QUALIFIED_TICKET' && !empty($priorDiagnostics['fixturePageFull']))
+        $replayTimingOnlyPage = (int) ($priorDiagnostics['eligibleFixtures'] ?? 0) === 0
+            && (int) ($priorSummary['FIXTURE_NOT_NS_OR_TOO_SOON'] ?? 0) > 0;
+        $options['batchOffset'] = ((string) ($dailyBeforeClaim['status'] ?? '') === 'NO_QUALIFIED_TICKET'
+            && !empty($priorDiagnostics['fixturePageFull']) && !$replayTimingOnlyPage)
             ? max(0, (int) ($priorDiagnostics['batchOffset'] ?? 0) + self::MAX_GENERATION_CEILING)
             : 0;
         $baseKey = $executionKey ?? ('daily-ticket:' . self::TICKET_TYPE . ':' . $date . ':v' . $config['version']);
@@ -1468,9 +1485,32 @@ class DailyTicketService
         }
 
         // Empty cache (or an explicit refresh): ask each configured feed once.
+        //
+        // Do not make the provider's first 50 *calendar-day* rows the ticket
+        // universe. That was the production cause of a misleading
+        // "50 evaluated → 0 eligible" verdict: at an afternoon run a feed
+        // returned 50 finished/in-play or imminent fixtures, while its later
+        // NS fixtures were behind the provider's response cap. Discover a
+        // bounded 200-row candidate buffer across this local day and the next
+        // one, ask providers that support it for NS rows, then apply the same
+        // local eligibility rule below. The prediction/generation hard cap is
+        // still 50; this only makes that cap spendable on viable fixtures.
+        //
+        // The stored-input path above already uses this two-local-day horizon.
+        // Keep live intake aligned with it so a run late in the day can use
+        // verified next-day fixtures rather than declaring a timing failure.
+        $localStart = new \DateTimeImmutable($date . ' 00:00:00', new \DateTimeZone($timezone));
+        $lookAheadDate = $localStart->modify('+1 day')->format('Y-m-d');
         $collected = $this->providers->collectAll('fixtures', fn(SportsDataProvider $p) => $p->fixtures([
-            'from' => $date, 'to' => $date, 'timezone' => $timezone,
-            'limit' => self::MAX_GENERATION_CEILING,
+            'from' => $date, 'to' => $lookAheadDate, 'timezone' => $timezone,
+            // API-Football accepts NS server-side. Other adapters may ignore
+            // it, which is safe because fixtureEligibleForDailyTicket() is the
+            // authoritative provider-neutral gate.
+            'status' => 'NS',
+            // This is deliberately distinct from `limit`: 50 remains the
+            // public/generation page limit, while native adapters use this
+            // opt-in bounded discovery buffer for the ticket engine.
+            'candidateLimit' => self::FIXTURE_DISCOVERY_CEILING,
             'page' => intdiv(max(0, (int) ($options['batchOffset'] ?? 0)), self::MAX_GENERATION_CEILING) + 1,
         ]));
         $sources = [];
