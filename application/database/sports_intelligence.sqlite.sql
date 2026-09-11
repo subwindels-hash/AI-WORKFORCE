@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS sports_configurations (
   version INTEGER NOT NULL UNIQUE,
   module_enabled INTEGER NOT NULL DEFAULT 0,
   ticket_engine_enabled INTEGER NOT NULL DEFAULT 0,
+  system_timezone TEXT NOT NULL DEFAULT 'UTC',
   platform_mode TEXT NOT NULL DEFAULT 'SANDBOX',
   engine_mode TEXT NOT NULL DEFAULT 'USER_APPROVAL_REQUIRED',
   target_odds_min REAL NOT NULL DEFAULT 5.0,
@@ -100,13 +101,17 @@ CREATE TABLE IF NOT EXISTS sports_model_metrics (
 );
 CREATE INDEX IF NOT EXISTS idx_sports_model_metrics ON sports_model_metrics(model_version_id, window_days, computed_at);
 
--- One row per UTC date for the daily ticket engine. NO_QUALIFIED_TICKET is a
--- stored, expected outcome — the engine never forces a ticket to exist.
+-- One row per configured-local calendar date and ticket type. `status` keeps
+-- the prediction outcome (including NO_QUALIFIED_TICKET); generation_status is
+-- the PENDING/RUNNING/GENERATED/FAILED/RETRYING idempotency state. Only a real,
+-- persisted ticket moves the row to GENERATED.
 CREATE TABLE IF NOT EXISTS sports_daily_tickets (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  date TEXT NOT NULL UNIQUE,
+  date TEXT NOT NULL,
+  ticket_type TEXT NOT NULL DEFAULT 'ODDS_PREDICTION',
   ticket_id TEXT,
   status TEXT NOT NULL,
+  generation_status TEXT NOT NULL DEFAULT 'PENDING',
   configuration_version INTEGER,
   candidates_evaluated INTEGER NOT NULL DEFAULT 0,
   predictions_recorded INTEGER NOT NULL DEFAULT 0,
@@ -115,8 +120,16 @@ CREATE TABLE IF NOT EXISTS sports_daily_tickets (
   message TEXT,
   provider TEXT,
   run_id TEXT,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  next_retry_at TEXT,
+  last_error_code TEXT,
+  generated_at TEXT,
+  system_timezone TEXT NOT NULL DEFAULT 'UTC',
+  window_start_utc TEXT,
+  window_end_utc TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  UNIQUE(ticket_type, date)
 );
 
 -- Periodic performance snapshots so dashboards never fabricate history.

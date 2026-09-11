@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS "sports_configurations" (
   "version" INTEGER NOT NULL UNIQUE,
   "module_enabled" SMALLINT NOT NULL DEFAULT 0,
   "ticket_engine_enabled" SMALLINT NOT NULL DEFAULT 0,
+  "system_timezone" VARCHAR(64) NOT NULL DEFAULT 'UTC',
   "platform_mode" VARCHAR(16) NOT NULL DEFAULT 'SANDBOX',
   "engine_mode" VARCHAR(32) NOT NULL DEFAULT 'USER_APPROVAL_REQUIRED',
   "target_odds_min" DECIMAL(10,4) NOT NULL DEFAULT 5.0,
@@ -87,9 +88,11 @@ CREATE TABLE IF NOT EXISTS "sports_model_metrics" (
 CREATE INDEX IF NOT EXISTS "idx_sports_model_metrics" ON "sports_model_metrics" ("model_version_id", "window_days", "computed_at");
 CREATE TABLE IF NOT EXISTS "sports_daily_tickets" (
   "id" SERIAL PRIMARY KEY,
-  "date" DATE NOT NULL UNIQUE,
+  "date" DATE NOT NULL,
+  "ticket_type" VARCHAR(32) NOT NULL DEFAULT 'ODDS_PREDICTION',
   "ticket_id" VARCHAR(36) NULL,
   "status" VARCHAR(32) NOT NULL,
+  "generation_status" VARCHAR(16) NOT NULL DEFAULT 'PENDING',
   "configuration_version" INTEGER NULL,
   "candidates_evaluated" INTEGER NOT NULL DEFAULT 0,
   "predictions_recorded" INTEGER NOT NULL DEFAULT 0,
@@ -98,8 +101,16 @@ CREATE TABLE IF NOT EXISTS "sports_daily_tickets" (
   "message" VARCHAR(500) NULL,
   "provider" VARCHAR(64) NULL,
   "run_id" VARCHAR(40) NULL,
+  "attempt_count" INTEGER NOT NULL DEFAULT 0,
+  "next_retry_at" TIMESTAMP NULL,
+  "last_error_code" VARCHAR(64) NULL,
+  "generated_at" TIMESTAMP NULL,
+  "system_timezone" VARCHAR(64) NOT NULL DEFAULT 'UTC',
+  "window_start_utc" VARCHAR(32) NULL,
+  "window_end_utc" VARCHAR(32) NULL,
   "created_at" TIMESTAMP NOT NULL,
-  "updated_at" TIMESTAMP NOT NULL
+  "updated_at" TIMESTAMP NOT NULL,
+  CONSTRAINT "uq_sports_daily_ticket_type_date" UNIQUE ("ticket_type", "date")
 );
 CREATE TABLE IF NOT EXISTS "sports_performance_snapshots" (
   "id" SERIAL PRIMARY KEY,

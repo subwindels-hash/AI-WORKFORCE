@@ -53,9 +53,9 @@ function fx_ui_today(SportsRepositoryStub $repo): string
 
     $ticketId = 'tkt_ui_0001';
     $repo->saveTicket(['id' => $ticketId, 'created_at' => gmdate('c'), 'model_version_id' => $modelId, 'configuration_version' => '0', 'total_odds' => 6.4, 'selection_count' => 2, 'combined_probability' => 0.15, 'confidence' => 88.0, 'risk' => 'LOW', 'correlation' => 'LOW', 'data_quality_score' => 100, 'status' => 'PENDING', 'approval_status' => 'PENDING_USER_APPROVAL', 'settlement_status' => 'PENDING', 'stake' => 10.0, 'pnl' => null]);
-    $repo->saveTicketSelection(['ticket_id' => $ticketId, 'prediction_id' => 'prd_ui_1', 'match_id' => 9001, 'market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'odds' => 2.0, 'odds_timestamp' => gmdate('c'), 'model_probability' => 0.7, 'calibrated_probability' => 0.75, 'expected_value' => 0.5, 'risk' => 'LOW', 'result' => null, 'status' => 'PENDING']);
+    $repo->saveTicketSelection(['ticket_id' => $ticketId, 'prediction_id' => 'prd_ui_1', 'match_id' => 9001, 'market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'odds' => 2.0, 'odds_timestamp' => gmdate('c'), 'odds_source' => 'ui-test', 'fair_odds' => 1.33, 'confidence' => 88.0, 'data_quality' => 100.0, 'model_probability' => 0.7, 'calibrated_probability' => 0.75, 'expected_value' => 0.5, 'risk' => 'LOW', 'result' => null, 'status' => 'PENDING']);
     $repo->savePrediction(['id' => 'prd_ui_1', 'match_id' => 9001, 'model_version_id' => $modelId, 'market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'raw_probability' => 0.7, 'calibrated_probability' => 0.75, 'expected_value' => 0.5, 'confidence' => 88.0, 'risk' => 'LOW', 'correlation' => 'LOW', 'data_quality_score' => 100, 'decision' => 'PREDICTION_READY', 'rejection_reasons' => '[]', 'factors' => json_encode(['gate' => ['passed' => []], 'drivers' => ['expectedGoalsProxy' => 2.45]]), 'input_version' => FeatureEngineeringEngine::VERSION, 'odds' => 2.0, 'odds_timestamp' => gmdate('c'), 'created_at' => gmdate('c')]);
-    $repo->saveDailyTicket(['date' => gmdate('Y-m-d'), 'ticket_id' => $ticketId, 'status' => 'PENDING_USER_APPROVAL', 'configuration_version' => 0, 'candidates_evaluated' => 1, 'predictions_recorded' => 1, 'rejections' => 0, 'rejection_summary' => json_encode([]), 'message' => 'odds prediction ticket generated; awaiting user approval', 'provider' => 'ui-test', 'run_id' => 'run_ui', 'created_at' => gmdate('c'), 'updated_at' => gmdate('c')]);
+    $repo->saveDailyTicket(['date' => gmdate('Y-m-d'), 'ticket_type' => 'ODDS_PREDICTION', 'ticket_id' => $ticketId, 'status' => 'PENDING_USER_APPROVAL', 'generation_status' => 'GENERATED', 'configuration_version' => 0, 'candidates_evaluated' => 1, 'predictions_recorded' => 1, 'rejections' => 0, 'rejection_summary' => json_encode(['_diagnostics' => ['eligibleFixtures' => 1, 'fixturesWithFreshOdds' => 1, 'fixturesRejectedStaleOdds' => 0, 'marketsEvaluated' => 1, 'predictionsGenerated' => 1, 'correlationQualifiedCandidates' => 1, 'finalQualifiedCandidates' => 1]]), 'message' => 'odds prediction ticket generated; awaiting user approval', 'provider' => 'ui-test', 'run_id' => 'run_ui', 'attempt_count' => 1, 'generated_at' => gmdate('c'), 'created_at' => gmdate('c'), 'updated_at' => gmdate('c')]);
     return $ticketId;
 }
 
@@ -117,6 +117,9 @@ test('sports UI: dashboard renders today odds prediction ticket with gated actio
     assert_contains('sports.approve', $html);
     assert_contains('sports.settle', $html);
     assert_contains('UI League', $html);
+    foreach (['generation GENERATED', 'Ticket ID', 'Generated at', 'Real odds · source', 'WINDELS probability · fair', 'Confidence · quality', 'Edge / value', 'Selected picks', 'ui-test'] as $field) {
+        assert_contains($field, $html, 'generated ticket exposes ' . $field);
+    }
 });
 
 test('sports UI: the live scores board shows the match date and time', function () {

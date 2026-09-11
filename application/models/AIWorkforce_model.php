@@ -264,7 +264,9 @@ class AIWorkforce_model extends CI_Model
                 if (!empty($filter['to'])) $this->db->where('kickoff_at <=', $filter['to']);
                 if (!empty($filter['competition'])) $this->db->like('competition', $filter['competition'], 'after');
                 if (!empty($filter['providerId'])) $this->db->where('provider_id', (int) $filter['providerId']);
-                $rows = $this->db->order_by('kickoff_at', 'ASC')->limit(min(1000, max(1, $limit)))->get('sports_matches')->result_array();
+                $safeLimit = min(1000, max(1, $limit));
+                $offset = max(0, (int) ($filter['offset'] ?? 0));
+                $rows = $this->db->order_by('kickoff_at', 'ASC')->order_by('id', 'ASC')->limit($safeLimit, $offset)->get('sports_matches')->result_array();
                 foreach ($rows as &$row) $row['payload'] = json_decode((string) $row['payload'], true);
                 return $rows;
             }
@@ -372,10 +374,95 @@ class AIWorkforce_model extends CI_Model
             public function listBacktests(int $limit = 20): array { $rows = $this->db->order_by('created_at', 'DESC')->limit(min(200, max(1, $limit)))->get('sports_backtests')->result_array(); foreach ($rows as &$row) { $row['params'] = json_decode((string) $row['params'], true); $row['report'] = json_decode((string) $row['report'], true); } return $rows; }
             public function saveModelMetrics(array $m): void { $ok = $this->db->insert('sports_model_metrics', self::withSqlTimestamps($m, ['computed_at'])); $this->mustWrite($ok, 'sports_model_metrics', 'INSERT'); }
             public function listModelMetrics(?int $modelVersionId = null, ?int $windowDays = null, ?string $sampleType = null, int $limit = 200): array { if ($modelVersionId !== null) $this->db->where('model_version_id', $modelVersionId); if ($windowDays !== null) $this->db->where('window_days', $windowDays); if ($sampleType !== null) $this->db->where('sample_type', $sampleType); return $this->db->order_by('computed_at', 'DESC')->limit(min(1000, max(1, $limit)))->get('sports_model_metrics')->result_array(); }
-            public function findDailyTicket(string $date): ?array { $row = $this->db->get_where('sports_daily_tickets', ['date' => $date], 1)->row_array(); if ($row) $row['rejection_summary'] = json_decode((string) ($row['rejection_summary'] ?: '{}'), true); return $row ?: null; }
-            public function saveDailyTicket(array $d): void { $d = self::withSqlTimestamps($d, ['created_at', 'updated_at']); $row = $this->db->get_where('sports_daily_tickets', ['date' => $d['date']], 1)->row_array(); if ($row) { $ok = $this->db->where('date', $d['date'])->update('sports_daily_tickets', $d); $this->mustWrite($ok, 'sports_daily_tickets', 'UPDATE'); } else { $ok = $this->db->insert('sports_daily_tickets', $d); $this->mustWrite($ok, 'sports_daily_tickets', 'INSERT'); } }
-            public function updateDailyTicket(string $date, array $patch): void { $patch = self::withSqlTimestamps(array_merge($patch, ['updated_at' => gmdate('Y-m-d H:i:s')]), ['updated_at']); $ok = $this->db->where('date', $date)->update('sports_daily_tickets', $patch); $this->mustWrite($ok, 'sports_daily_tickets', 'UPDATE'); }
-            public function listDailyTickets(int $limit = 60): array { $rows = $this->db->order_by('date', 'DESC')->limit(min(366, max(1, $limit)))->get('sports_daily_tickets')->result_array(); foreach ($rows as &$row) $row['rejection_summary'] = json_decode((string) ($row['rejection_summary'] ?: '{}'), true); return $rows; }
+            public function findDailyTicket(string $date): ?array {
+                $row = $this->db->get_where('sports_daily_tickets', ['date' => $date, 'ticket_type' => 'ODDS_PREDICTION'], 1)->row_array();
+                // Legacy databases had UNIQUE(date) but no ticket_type until the
+                // request-time schema upgrade. The fallback keeps a partially
+                // upgraded deployment readable instead of creating a second row.
+                if (!$row) $row = $this->db->get_where('sports_daily_tickets', ['date' => $date], 1)->row_array();
+                if ($row) {
+                    $row['rejection_summary'] = json_decode((string) ($row['rejection_summary'] ?: '{}'), true);
+                    if (empty($row['generation_status'])) $row['generation_status'] = !empty($row['ticket_id']) ? 'GENERATED' : 'PENDING';
+                    $row['ticket_type'] = (string) ($row['ticket_type'] ?? 'ODDS_PREDICTION');
+                }
+                return $row ?: null;
+            }
+            public function claimDailyTicketGeneration(string $date, string $ticketType, string $runId, int $configurationVersion, string $timezone, string $windowStartUtc, string $windowEndUtc, int $staleAfterSeconds = 900): array {
+                $now = gmdate('Y-m-d H:i:s');
+                $row = $this->db->get_where('sports_daily_tickets', ['date' => $date, 'ticket_type' => $ticketType], 1)->row_array();
+                if (!$row) {
+                    $insert = [
+                        'date' => $date, 'ticket_type' => $ticketType, 'ticket_id' => null,
+                        'status' => 'PENDING', 'generation_status' => 'RUNNING',
+                        'configuration_version' => $configurationVersion,
+                        'candidates_evaluated' => 0, 'predictions_recorded' => 0, 'rejections' => 0,
+                        'rejection_summary' => '{}', 'message' => 'Daily ticket generation is running',
+                        'provider' => null, 'run_id' => $runId, 'attempt_count' => 1,
+                        'next_retry_at' => null, 'last_error_code' => null, 'generated_at' => null,
+                        'system_timezone' => $timezone, 'window_start_utc' => $windowStartUtc, 'window_end_utc' => $windowEndUtc,
+                        'created_at' => $now, 'updated_at' => $now,
+                    ];
+                    try { $ok = $this->db->insert('sports_daily_tickets', $insert); }
+                    catch (\Throwable $e) { $ok = false; }
+                    if ($ok !== false) return ['claimed' => true, 'state' => 'RUNNING', 'row' => $insert];
+                    // The unique(ticket_type,date) constraint chose a concurrent
+                    // winner. Re-read and report it rather than converting the
+                    // database race into an undefined/duplicate-skipped state.
+                    $row = $this->db->get_where('sports_daily_tickets', ['date' => $date], 1)->row_array();
+                    if (!$row) $this->mustWrite(false, 'sports_daily_tickets', 'INSERT generation claim');
+                }
+
+                $state = strtoupper((string) ($row['generation_status'] ?? (!empty($row['ticket_id']) ? 'GENERATED' : 'PENDING')));
+                $updated = strtotime((string) ($row['updated_at'] ?? ''));
+                $freshRunning = $state === 'RUNNING' && $updated !== false && (time() - $updated) < max(60, $staleAfterSeconds);
+                if ($freshRunning && (string) ($row['run_id'] ?? '') !== $runId) return ['claimed' => false, 'state' => 'RUNNING', 'row' => $row];
+                if ($state === 'GENERATED' && !empty($row['ticket_id'])) return ['claimed' => false, 'state' => 'GENERATED', 'row' => $row];
+
+                // Compare-and-swap the row observed above. Two workers may both
+                // read FAILED, but only one can still match the old run token.
+                $this->db->where('id', (int) $row['id'])->where('generation_status', (string) ($row['generation_status'] ?? $state));
+                if (empty($row['run_id'])) $this->db->where('run_id IS NULL', null, false);
+                else $this->db->where('run_id', (string) $row['run_id']);
+                $patch = [
+                    'generation_status' => $state === 'PENDING' && (int) ($row['attempt_count'] ?? 0) === 0 ? 'RUNNING' : 'RETRYING',
+                    'status' => 'PENDING', 'ticket_id' => null, 'configuration_version' => $configurationVersion,
+                    'run_id' => $runId, 'attempt_count' => (int) ($row['attempt_count'] ?? 0) + 1,
+                    'next_retry_at' => null, 'last_error_code' => null,
+                    'system_timezone' => $timezone, 'window_start_utc' => $windowStartUtc, 'window_end_utc' => $windowEndUtc,
+                    'message' => $state === 'PENDING' ? 'Daily ticket generation is running' : 'Daily ticket generation is retrying',
+                    'updated_at' => $now,
+                ];
+                $ok = $this->db->update('sports_daily_tickets', $patch);
+                $this->mustWrite($ok, 'sports_daily_tickets', 'UPDATE generation claim');
+                if ((int) $this->db->affected_rows() <= 0) {
+                    $winner = $this->db->get_where('sports_daily_tickets', ['date' => $date], 1)->row_array();
+                    return ['claimed' => false, 'state' => (string) ($winner['generation_status'] ?? 'RUNNING'), 'row' => $winner ?: null];
+                }
+                return ['claimed' => true, 'state' => (string) $patch['generation_status'], 'row' => array_merge($row, $patch)];
+            }
+            public function saveDailyTicket(array $d): void {
+                $d['ticket_type'] = (string) ($d['ticket_type'] ?? 'ODDS_PREDICTION');
+                $d = self::withSqlTimestamps($d, ['created_at', 'updated_at', 'next_retry_at', 'generated_at']);
+                $row = $this->db->get_where('sports_daily_tickets', ['date' => $d['date'], 'ticket_type' => $d['ticket_type']], 1)->row_array();
+                if (!$row) $row = $this->db->get_where('sports_daily_tickets', ['date' => $d['date']], 1)->row_array();
+                if ($row) {
+                    unset($d['id']);
+                    // created_at identifies when the calendar slot was first
+                    // queued; retries update it without rewriting that history.
+                    $d['created_at'] = $row['created_at'];
+                    $ok = $this->db->where('id', (int) $row['id'])->update('sports_daily_tickets', $d);
+                    $this->mustWrite($ok, 'sports_daily_tickets', 'UPDATE');
+                } else {
+                    $ok = $this->db->insert('sports_daily_tickets', $d);
+                    if ($ok === false) {
+                        $winner = $this->db->get_where('sports_daily_tickets', ['date' => $d['date']], 1)->row_array();
+                        if ($winner) return;
+                    }
+                    $this->mustWrite($ok, 'sports_daily_tickets', 'INSERT');
+                }
+            }
+            public function updateDailyTicket(string $date, array $patch): void { $patch = self::withSqlTimestamps(array_merge($patch, ['updated_at' => gmdate('Y-m-d H:i:s')]), ['updated_at', 'next_retry_at', 'generated_at']); $ok = $this->db->where('date', $date)->where('ticket_type', 'ODDS_PREDICTION')->update('sports_daily_tickets', $patch); $this->mustWrite($ok, 'sports_daily_tickets', 'UPDATE'); }
+            public function listDailyTickets(int $limit = 60): array { $rows = $this->db->where('ticket_type', 'ODDS_PREDICTION')->order_by('date', 'DESC')->limit(min(366, max(1, $limit)))->get('sports_daily_tickets')->result_array(); foreach ($rows as &$row) { $row['rejection_summary'] = json_decode((string) ($row['rejection_summary'] ?: '{}'), true); if (empty($row['generation_status'])) $row['generation_status'] = !empty($row['ticket_id']) ? 'GENERATED' : 'PENDING'; } return $rows; }
             public function savePerformanceSnapshot(string $asOf, string $window, array $payload): void {
                 // Normalise the lookup key AND the stored value together —
                 // as_of is a DATETIME column — so an RFC-3339 input matches
@@ -449,18 +536,37 @@ class AIWorkforce_model extends CI_Model
                 return $id;
             }
             public function savePrediction(array $p): void { $this->db->insert('sports_predictions', $p); }
-            public function saveTicket(array $t): void { $this->db->insert('sports_tickets', $t); }
-            public function saveTicketSelection(array $s): void { $this->db->insert('sports_ticket_selections', $s); }
+            public function saveTicket(array $t): void {
+                $existing = $this->db->get_where('sports_tickets', ['id' => $t['id']], 1)->row_array();
+                if ($existing) $this->db->where('id', $t['id'])->update('sports_tickets', $t);
+                else $this->db->insert('sports_tickets', $t);
+            }
+            public function saveTicketSelection(array $s): void {
+                $identity = [
+                    'ticket_id' => $s['ticket_id'], 'match_id' => $s['match_id'],
+                    'market' => $s['market'], 'selection' => $s['selection'],
+                ];
+                $existing = $this->db->get_where('sports_ticket_selections', $identity, 1)->row_array();
+                if ($existing) $this->db->where('id', $existing['id'])->update('sports_ticket_selections', $s);
+                else $this->db->insert('sports_ticket_selections', $s);
+            }
             public function ticketSelections(string $ticketId): array { return $this->db->get_where('sports_ticket_selections', ['ticket_id' => $ticketId])->result_array(); }
             public function updateTicketSelection(int $id, array $patch): void { $this->db->where('id', $id)->update('sports_ticket_selections', $patch); }
             public function findTicket(string $id): ?array { return $this->db->get_where('sports_tickets', ['id' => $id], 1)->row_array() ?: null; }
             public function listTickets(array $filter = [], int $limit = 500): array { if(!empty($filter['from']))$this->db->where('created_at >=',$filter['from']); if(!empty($filter['to']))$this->db->where('created_at <=',$filter['to']); if(!empty($filter['status']))$this->db->where('settlement_status',$filter['status']); if(!empty($filter['modelVersionId']))$this->db->where('model_version_id',(int)$filter['modelVersionId']); return $this->db->order_by('created_at','DESC')->limit(min(500,max(1,$limit)))->get('sports_tickets')->result_array(); }
             public function updateTicket(string $id, array $patch): void { $this->db->where('id', $id)->update('sports_tickets', $patch); }
             public function invalidateActiveCandidates(string $fromDate, string $toDate, bool $purgeInvalidOdds = true): array {
-                // Upcoming, non-terminal matches in the UTC date window.
+                // from/to are configured-local calendar dates. Convert the
+                // inclusive local range to an exclusive UTC timestamp window
+                // so midnight/DST boundaries invalidate the intended fixtures.
+                $cfg = $this->activeConfiguration();
+                $timezone = \AIWorkforce\Sports\DailyTicketDate::configuredTimezone((string) ($cfg['system_timezone'] ?? 'UTC'));
+                $fromWindow = \AIWorkforce\Sports\DailyTicketDate::utcWindow($fromDate, $timezone);
+                $afterTo = (new \DateTimeImmutable($toDate . ' 00:00:00', new \DateTimeZone($timezone)))->modify('+1 day')->format('Y-m-d');
+                $endWindow = \AIWorkforce\Sports\DailyTicketDate::utcWindow($afterTo, $timezone);
                 $matchRows = $this->db->select('id')
-                    ->where('SUBSTR(kickoff_at,1,10) >=', $fromDate)
-                    ->where('SUBSTR(kickoff_at,1,10) <=', $toDate)
+                    ->where('kickoff_at >=', $fromWindow['start'])
+                    ->where('kickoff_at <', $endWindow['start'])
                     ->where_not_in('status', ['FINISHED', 'POSTPONED', 'CANCELLED'])
                     ->get('sports_matches')->result_array();
                 $upcomingIds = array_map(static fn($r) => (int) $r['id'], $matchRows);
@@ -517,6 +623,11 @@ class AIWorkforce_model extends CI_Model
                 return $counts;
             }
             public function supersedePendingTicketsForWindow(string $fromDate, string $toDate, ?string $exceptTicketId = null): array {
+                $cfg = $this->activeConfiguration();
+                $timezone = \AIWorkforce\Sports\DailyTicketDate::configuredTimezone((string) ($cfg['system_timezone'] ?? 'UTC'));
+                $fromWindow = \AIWorkforce\Sports\DailyTicketDate::utcWindow($fromDate, $timezone);
+                $afterTo = (new \DateTimeImmutable($toDate . ' 00:00:00', new \DateTimeZone($timezone)))->modify('+1 day')->format('Y-m-d');
+                $endWindow = \AIWorkforce\Sports\DailyTicketDate::utcWindow($afterTo, $timezone);
                 // PENDING (undecided, unsettled) tickets carrying at least one
                 // leg on an upcoming fixture kicking off inside the window.
                 // Legs are RETAINED as the superseded pass's audit trail; only
@@ -526,8 +637,8 @@ class AIWorkforce_model extends CI_Model
                     ->from('sports_ticket_selections ts')
                     ->join('sports_tickets t', 't.id = ts.ticket_id', 'inner')
                     ->join('sports_matches m', 'm.id = ts.match_id', 'inner')
-                    ->where('SUBSTR(m.kickoff_at,1,10) >=', $fromDate)
-                    ->where('SUBSTR(m.kickoff_at,1,10) <=', $toDate)
+                    ->where('m.kickoff_at >=', $fromWindow['start'])
+                    ->where('m.kickoff_at <', $endWindow['start'])
                     ->where_not_in('m.status', ['FINISHED', 'POSTPONED', 'CANCELLED'])
                     ->where('t.approval_status', 'PENDING_USER_APPROVAL')
                     ->where('t.settlement_status', 'PENDING');

@@ -42,6 +42,7 @@ class ConfigurationService
         $row = array_merge(self::defaults(), $row);
         $row['module_enabled'] = (int) (bool) $row['module_enabled'];
         $row['ticket_engine_enabled'] = (int) (bool) $row['ticket_engine_enabled'];
+        $row['system_timezone'] = DailyTicketDate::configuredTimezone((string) ($row['system_timezone'] ?? ''));
         $row['require_calibration'] = (int) (bool) $row['require_calibration'];
         $row['min_confidence'] = (float) $row['min_confidence'];
         $row['min_data_quality'] = (int) $row['min_data_quality'];
@@ -57,6 +58,10 @@ class ConfigurationService
             'version' => 0,
             'module_enabled' => 1,
             'ticket_engine_enabled' => 1,
+            // The daily ticket date is this local calendar date; fixture and
+            // odds timestamps remain UTC. Can also be supplied at deployment
+            // time through WINDELS_SYSTEM_TIMEZONE / APP_TIMEZONE.
+            'system_timezone' => DailyTicketDate::configuredTimezone(),
             'platform_mode' => 'SANDBOX',
             'engine_mode' => 'USER_APPROVAL_REQUIRED',
             'target_odds_min' => 5.0,
@@ -94,7 +99,7 @@ class ConfigurationService
     {
         $base = $this->active();
         $next = array_merge($base, array_intersect_key($patch, array_flip([
-            'module_enabled', 'ticket_engine_enabled', 'platform_mode', 'engine_mode',
+            'module_enabled', 'ticket_engine_enabled', 'system_timezone', 'platform_mode', 'engine_mode',
             'target_odds_min', 'target_odds_max', 'max_selections', 'risk_level',
             'min_confidence', 'min_expected_value', 'max_correlation', 'min_data_quality',
             'min_liquidity', 'allowed_markets', 'allowed_leagues', 'max_exposure',
@@ -110,6 +115,7 @@ class ConfigurationService
             'version' => (int) $base['version'] + 1,
             'module_enabled' => (int) (bool) $next['module_enabled'],
             'ticket_engine_enabled' => (int) (bool) $next['ticket_engine_enabled'],
+            'system_timezone' => DailyTicketDate::configuredTimezone((string) $next['system_timezone']),
             'platform_mode' => (string) $next['platform_mode'],
             'engine_mode' => (string) $next['engine_mode'],
             'target_odds_min' => (float) $next['target_odds_min'],
@@ -149,6 +155,13 @@ class ConfigurationService
     /** @return string|null error message, or null when valid */
     private function validate(array $c, bool $allowAutomatedExecution): ?string
     {
+        try {
+            $timezone = trim((string) ($c['system_timezone'] ?? ''));
+            if ($timezone === '') return 'system_timezone is required';
+            new \DateTimeZone($timezone);
+        } catch (\Throwable $e) {
+            return 'system_timezone must be a valid IANA timezone (for example UTC, Europe/London or Africa/Johannesburg)';
+        }
         if (!in_array($c['platform_mode'], self::PLATFORM_MODES, true)) return 'platform_mode must be one of ' . implode(', ', self::PLATFORM_MODES);
         if (!in_array($c['engine_mode'], self::ENGINE_MODES, true)) return 'engine_mode must be one of ' . implode(', ', self::ENGINE_MODES);
         if ($c['engine_mode'] === 'AUTOMATED_EXECUTION' && !$allowAutomatedExecution) {

@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS sports_configurations (
   version INT NOT NULL UNIQUE,
   module_enabled TINYINT(1) NOT NULL DEFAULT 0,
   ticket_engine_enabled TINYINT(1) NOT NULL DEFAULT 0,
+  system_timezone VARCHAR(64) NOT NULL DEFAULT 'UTC',
   platform_mode VARCHAR(16) NOT NULL DEFAULT 'SANDBOX',
   engine_mode VARCHAR(32) NOT NULL DEFAULT 'USER_APPROVAL_REQUIRED',
   target_odds_min DECIMAL(10,4) NOT NULL DEFAULT 5.0,
@@ -94,9 +95,13 @@ CREATE TABLE IF NOT EXISTS sports_model_metrics (
 
 CREATE TABLE IF NOT EXISTS sports_daily_tickets (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  date DATE NOT NULL UNIQUE,
+  date DATE NOT NULL,
+  ticket_type VARCHAR(32) NOT NULL DEFAULT 'ODDS_PREDICTION',
   ticket_id VARCHAR(36) NULL,
+  -- status is the prediction outcome retained for API compatibility;
+  -- generation_status is the only idempotency state machine.
   status VARCHAR(32) NOT NULL,
+  generation_status VARCHAR(16) NOT NULL DEFAULT 'PENDING',
   configuration_version INT NULL,
   candidates_evaluated INT NOT NULL DEFAULT 0,
   predictions_recorded INT NOT NULL DEFAULT 0,
@@ -105,8 +110,16 @@ CREATE TABLE IF NOT EXISTS sports_daily_tickets (
   message VARCHAR(500) NULL,
   provider VARCHAR(64) NULL,
   run_id VARCHAR(40) NULL,
+  attempt_count INT NOT NULL DEFAULT 0,
+  next_retry_at DATETIME NULL,
+  last_error_code VARCHAR(64) NULL,
+  generated_at DATETIME NULL,
+  system_timezone VARCHAR(64) NOT NULL DEFAULT 'UTC',
+  window_start_utc VARCHAR(32) NULL,
+  window_end_utc VARCHAR(32) NULL,
   created_at DATETIME NOT NULL,
-  updated_at DATETIME NOT NULL
+  updated_at DATETIME NOT NULL,
+  UNIQUE KEY uq_sports_daily_ticket_type_date (ticket_type, date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS sports_performance_snapshots (

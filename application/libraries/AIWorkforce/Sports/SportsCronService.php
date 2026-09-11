@@ -19,6 +19,7 @@ use AIWorkforce\Sports\Providers\SportsProviderManager;
 class SportsCronService
 {
     public const JOBS = ['fixtures', 'odds', 'live', 'results', 'quality', 'ticket', 'settlement', 'performance', 'monitoring', 'cleanup'];
+    public const ODDS_BATCH_SIZE = 50;
 
     public function __construct(
         private SportsRepository $repo,
@@ -28,7 +29,9 @@ class SportsCronService
 
     public function runAll(?string $date = null, array $options = []): array
     {
-        $date = $date ?? gmdate('Y-m-d');
+        $config = $this->sports->configuration->active();
+        $date = DailyTicketDate::normalize($date, (string) ($config['system_timezone'] ?? 'UTC'));
+        $options['scheduled'] = $options['scheduled'] ?? true;
         $summary = [];
         foreach (self::JOBS as $job) {
             try {
@@ -44,7 +47,8 @@ class SportsCronService
 
     public function run(string $job, ?string $date = null, array $options = []): array
     {
-        $date = $date ?? gmdate('Y-m-d');
+        $config = $this->sports->configuration->active();
+        $date = DailyTicketDate::normalize($date, (string) ($config['system_timezone'] ?? 'UTC'));
         return match ($job) {
             'fixtures' => $this->jobFixtures($date),
             'odds' => $this->jobOdds($date),
@@ -60,14 +64,55 @@ class SportsCronService
         };
     }
 
+    /**
+     * The automatic odds-prediction cycle used after enable/configuration and
+     * by focused workers. It reuses the normal idempotent jobs and does not run
+     * unrelated settlement/performance work.
+     */
+    public function runDailyGenerationCycle(?string $date = null, array $options = []): array
+    {
+        $config = $this->sports->configuration->active();
+        $timezone = (string) ($config['system_timezone'] ?? 'UTC');
+        $date = DailyTicketDate::normalize($date, $timezone);
+
+        // A persisted ticket short-circuits provider work as well as generation.
+        $slot = $this->repo->findDailyTicket($date);
+        if (is_array($slot) && !empty($slot['ticket_id'])) {
+            $ticket = $this->repo->findTicket((string) $slot['ticket_id']);
+            if ($ticket !== null && $this->repo->ticketSelections((string) $slot['ticket_id']) !== []) {
+                return ['date' => $date, 'timezone' => $timezone, 'ticket' => [
+                    'status' => 'GENERATED', 'generationStatus' => 'GENERATED',
+                    'ticketId' => (string) $slot['ticket_id'], 'existing' => true,
+                    'message' => 'Existing persisted daily ticket returned; provider sync was not repeated',
+                ]];
+            }
+        }
+
+        $options['scheduled'] = $options['scheduled'] ?? false;
+        $summary = ['date' => $date, 'timezone' => $timezone];
+        foreach (['fixtures', 'odds', 'quality', 'ticket'] as $job) {
+            try { $summary[$job] = $this->run($job, $date, $options); }
+            catch (\Throwable $e) {
+                $summary[$job] = ['status' => 'FAILED', 'error' => mb_substr($e->getMessage(), 0, 300)];
+                if ($job !== 'ticket') continue;
+            }
+        }
+        return $summary;
+    }
+
     private function jobFixtures(string $date): array
     {
+        $config = $this->sports->configuration->active();
+        $timezone = DailyTicketDate::configuredTimezone((string) ($config['system_timezone'] ?? 'UTC'));
         $from = $date;
         $to = gmdate('Y-m-d', strtotime($date . ' +13 days'));
         $out = [];
         foreach ($this->sports->providers->all() as $provider) {
             $key = 'fixtures:' . $from . ':' . $to . ':' . $provider->id();
-            $result = $this->sports->sync->syncFixtures($provider, ['from' => $from, 'to' => $to], $key);
+            $result = $this->sports->sync->syncFixtures($provider, [
+                'from' => $from, 'to' => $to, 'timezone' => $timezone,
+                'limit' => 50, 'page' => 1,
+            ], $key);
             $out[$provider->id()] = $result;
         }
         return $this->combine('FIXTURES_SYNC', $out, 'no providers configured; nothing synchronized (nothing fabricated)');
@@ -75,35 +120,59 @@ class SportsCronService
 
     private function jobOdds(string $date): array
     {
-        $end = gmdate('Y-m-d', strtotime($date . ' +1 day')) . 'T00:00:00+00:00';
-        $matches = $this->repo->listMatches(['from' => $date . 'T00:00:00+00:00', 'to' => $end, 'status' => 'SCHEDULED'], 500);
-        $matches = array_merge($matches, $this->repo->listMatches(['status' => \AIWorkforce\Sports\LiveScoreService::LIVE_STATUSES], 200));
-        $out = []; $processed = 0; $created = 0; $errors = [];
-        // Split: matches that are round-addressable (stored round_id on a
-        // provider with the round endpoint) sync as whole matchdays in one
-        // request each; everything else keeps the per-fixture odds call.
-        $seen = []; $byRound = []; $legacy = [];
+        $config = $this->sports->configuration->active();
+        $window = DailyTicketDate::utcWindow($date, (string) ($config['system_timezone'] ?? 'UTC'));
+        $toInclusive = gmdate('Y-m-d\TH:i:sP', $window['endTimestamp'] - 1);
+        $matches = $this->repo->listMatches(['from' => $window['start'], 'to' => $toInclusive, 'status' => 'SCHEDULED'], 1000);
         $sources = $this->repo->listProviders();
+        $now = time();
+        $freshReused = 0;
+        $eligible = [];
         foreach ($matches as $match) {
-            $matchKey = (string) $match['id'];
-            if (isset($seen[$matchKey])) continue;
-            $seen[$matchKey] = true;
+            $kickoff = strtotime((string) ($match['kickoff_at'] ?? ''));
+            if ($kickoff === false || $kickoff <= $now + 2 * 3600) continue;
+            $provider = $this->providerById($sources, (int) $match['provider_id']);
+            if ($provider === null) continue;
+            $latest = $this->repo->latestOdds((int) $match['id']);
+            $maxAge = OddsFreshnessEngine::maxAgeFor(
+                $latest['market'] ?? null,
+                $provider->id()
+            );
+            if ($latest !== null && $this->ageOf((string) ($latest['observed_at'] ?? '')) <= $maxAge) {
+                $freshReused++;
+                continue;
+            }
+            $eligible[] = $match;
+        }
+
+        // One worker invocation is one controlled batch. The next scheduled
+        // retry skips rows made fresh here and naturally advances to the next
+        // batch; it never requests all 2,000 stored fixtures at once.
+        $batchSize = self::ODDS_BATCH_SIZE;
+        $envBatch = getenv('WINDELS_SPORTS_ODDS_BATCH_SIZE');
+        if (is_string($envBatch) && ctype_digit($envBatch) && (int) $envBatch > 0) $batchSize = min(self::ODDS_BATCH_SIZE, (int) $envBatch);
+        $deferred = max(0, count($eligible) - $batchSize);
+        $matches = array_slice($eligible, 0, $batchSize);
+        $out = []; $processed = 0; $created = 0; $errors = [];
+
+        // Round-addressable matches use one bulk request; everything else is
+        // per fixture, still within the 50-fixture batch.
+        $byRound = []; $legacy = [];
+        foreach ($matches as $match) {
             $provider = $this->providerById($sources, (int) $match['provider_id']);
             if ($provider === null) continue;
             $roundId = (string) ($match['round_id'] ?? '');
-            if ($roundId !== '' && method_exists($provider, 'round')) {
-                $byRound[$provider->id() . ':' . $roundId][] = $match;
-            } else {
-                $legacy[] = $match;
-            }
+            if ($roundId !== '' && method_exists($provider, 'round')) $byRound[$provider->id() . ':' . $roundId][] = $match;
+            else $legacy[] = $match;
         }
+        $bucket = gmdate('YmdHi', (int) (floor(time() / 900) * 900));
         foreach ($byRound as $groupKey => $groupMatches) {
             [$providerCode, $roundId] = explode(':', (string) $groupKey, 2);
             $provider = $this->sports->providers->provider($providerCode);
             if ($provider === null) { $legacy = array_merge($legacy, $groupMatches); continue; }
-            $key = 'odds-round:' . $providerCode . ':' . $roundId . ':' . $date;
+            $key = 'odds-round:' . $providerCode . ':' . $roundId . ':' . $date . ':' . $bucket;
             $result = $this->sports->sync->syncRound($provider, $roundId, $key, ['results' => false]);
-            foreach ($groupMatches as $match) { $out[(string) $match['id']] = $result['status']; }
+            foreach ($groupMatches as $match) $out[(string) $match['id']] = $result['status'];
             $processed += count($groupMatches);
             if (($result['status'] ?? '') === 'COMPLETED') $created += (int) ($result['created'] ?? 0);
             if (($result['status'] ?? '') === 'FAILED') $errors[] = implode('; ', $result['errors'] ?? []);
@@ -111,14 +180,19 @@ class SportsCronService
         foreach ($legacy as $match) {
             $provider = $this->providerById($sources, (int) $match['provider_id']);
             if ($provider === null) continue;
-            $key = 'odds:' . (int) $match['id'] . ':' . $date . ':' . $provider->id();
+            $key = 'odds:' . (int) $match['id'] . ':' . $date . ':' . $provider->id() . ':' . $bucket;
             $result = $this->sports->sync->syncOdds($provider, (string) $match['external_id'], $key);
             $out[(string) $match['id']] = $result['status'];
             $processed++;
             if (($result['status'] ?? '') === 'COMPLETED') $created += (int) ($result['created'] ?? 0);
             if (($result['status'] ?? '') === 'FAILED') $errors[] = implode('; ', $result['errors'] ?? []);
         }
-        return $this->combine('ODDS_SYNC', $out, count($out) . ' match(es) synced', $processed, $created, $errors);
+        $summary = sprintf('%d stale/missing-odds fixture(s) refreshed in a batch of at most %d; %d fresh reused; %d deferred', $processed, $batchSize, $freshReused, $deferred);
+        return $this->combine('ODDS_SYNC', $out, $summary, $processed, $created, $errors) + [
+            'eligibleFixtures' => count($matches) + $freshReused + $deferred,
+            'freshOddsReused' => $freshReused, 'staleOrMissingOdds' => count($eligible),
+            'batchSize' => $batchSize, 'deferred' => $deferred,
+        ];
     }
 
     /**
@@ -162,8 +236,11 @@ class SportsCronService
         $key = 'quality:' . $date . ':' . $hour;
         $run = $this->repo->startJobRun(['id' => Backtester::uuid(), 'jobType' => 'QUALITY_RECALC', 'executionKey' => $key]);
         if ($run === null) return ['status' => 'DUPLICATE_SKIPPED', 'executionKey' => $key];
-        $end = gmdate('Y-m-d', strtotime($date . ' +1 day')) . 'T00:00:00+00:00';
-        $matches = array_merge($this->repo->listMatches(['from' => $date . 'T00:00:00+00:00', 'to' => $end, 'status' => 'SCHEDULED'], 500), $this->repo->listMatches(['status' => \AIWorkforce\Sports\LiveScoreService::LIVE_STATUSES], 200));
+        $config = $this->sports->configuration->active();
+        $timezone = DailyTicketDate::configuredTimezone((string) ($config['system_timezone'] ?? 'UTC'));
+        $window = DailyTicketDate::utcWindow($date, $timezone);
+        $end = gmdate('c', $window['endTimestamp'] - 1);
+        $matches = array_merge($this->repo->listMatches(['from' => $window['start'], 'to' => $end, 'status' => 'SCHEDULED'], 500), $this->repo->listMatches(['status' => \AIWorkforce\Sports\LiveScoreService::LIVE_STATUSES], 200));
         $updated = 0; $errors = [];
         foreach ($matches as $match) {
             try {
@@ -203,18 +280,16 @@ class SportsCronService
 
     private function jobTicket(string $date, array $options = []): array
     {
-        // Skip the run outright when 0/N providers are operational: it would
-        // only re-prove the outage (and, for a quota-dead feed, spend nothing
-        // thanks to the breaker — but a 404/400 feed would still be probed).
-        $readiness = $this->sports->providers->readiness();
-        if ($readiness['total'] > 0 && $readiness['operational'] === 0) {
-            $ledger = [];
-            foreach ($readiness['providers'] as $pid => $pr) $ledger[$pid] = $pr['status'];
-            $this->audit->emit('SPORTS_DAILY_TICKET_BLOCKED', 'Daily ticket run ' . $date . ' skipped: 0/' . $readiness['total'] . ' providers operational', ['date' => $date, 'providerStatuses' => $ledger]);
-            return ['status' => 'DATA_UNAVAILABLE', 'ticketId' => null, 'message' => 'prediction engine BLOCKED — 0/' . $readiness['total'] . ' sports data providers operational', 'providerStatuses' => $ledger, 'errors' => [SportsProviderManager::summarize('fixtures', $ledger)]];
-        }
-        $result = $this->sports->dailyTickets->runDaily($date, null, !empty($options['force']) ? ['force' => true] : []);
-        return ['status' => $result['status'], 'ticketId' => $result['ticketId'], 'message' => $result['message'], 'invalidated' => $result['invalidated'] ?? null, 'providerStatuses' => $result['providerStatuses'] ?? [], 'errors' => $result['errors']];
+        // Never pre-skip on provider health: fresh stored fixtures/odds may be
+        // sufficient to generate without a provider call. DailyTicketService
+        // owns the persisted RUNNING/GENERATED/FAILED/RETRYING state and records
+        // the outage if stored data cannot complete the run.
+        $dailyOptions = [
+            'scheduled' => (bool) ($options['scheduled'] ?? false),
+        ];
+        if (!empty($options['force'])) $dailyOptions['force'] = true;
+        $result = $this->sports->dailyTickets->runDaily($date, null, $dailyOptions);
+        return $result;
     }
 
     private function jobSettlement(string $date): array

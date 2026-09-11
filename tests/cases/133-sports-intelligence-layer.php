@@ -349,7 +349,7 @@ test('ticket engine: the generation cap defaults to 50, honours the env, never e
         putenv('WINDELS_SPORTS_MAX_GENERATION=1');
         assert_equals(1, $cap(), 'an operator may lower the cap');
         putenv('WINDELS_SPORTS_MAX_GENERATION=5000');
-        assert_equals(500, $cap(), 'the ceiling is enforced — never 500/1000/5000');
+        assert_equals(50, $cap(), 'each generation batch is hard-capped at 50 matches');
         putenv('WINDELS_SPORTS_MAX_GENERATION=0');
         assert_equals(50, $cap(), 'a nonsensical value falls back to the default');
         putenv('WINDELS_SPORTS_MAX_GENERATION=abc');
@@ -369,9 +369,9 @@ test('ticket engine: generation is bounded — deferred fixtures are reported, n
         putenv('WINDELS_SPORTS_MAX_GENERATION=3');
         $run = $service->runDaily(gmdate('Y-m-d', strtotime('+1 day')), 'iv-bounded-r1');
         $diag = $run['diagnostics'];
-        assert_equals(60, $run['evaluated'], 'every fixture is still screened');
+        assert_equals(50, $run['evaluated'], 'one generation pass never screens more than the 50-match batch ceiling');
         assert_equals(3, $diag['generationCap']);
-        assert_equals(57, $diag['fixturesDeferred'], 'fixtures past the cap are counted, not dropped');
+        assert_equals(47, $diag['fixturesDeferred'], 'the remaining fixtures in the bounded 50-match page are explicitly deferred');
         assert_equals(0, $run['rejections'], 'deferral is not a rejection');
         // 3 fixtures × 5 candidate selections (HOME/DRAW/AWAY/OVER_1_5/BTTS
         // YES) = 15 predictions — the companion prices (UNDER_1_5, BTTS NO)
@@ -387,11 +387,41 @@ test('ticket engine: generation is bounded — deferred fixtures are reported, n
     }
 });
 
+test('ticket engine: an honest no-ticket page advances to the next stored batch of at most 50', function () {
+    $fixtures = fx_iv_fixtures(60);
+    $provider = fx_iv_provider('iv-paged', $fixtures);
+    [$repo, $audit, , $service] = fx_iv_stack($provider);
+    fx_iv_approve_calibration($repo);
+    fx_iv_seed_odds($repo, 'iv-paged', $fixtures, 3 * 3600);
+    (new AIWorkforce\Sports\ConfigurationService($repo, $audit))->update([
+        'target_odds_min' => 90.0, 'target_odds_max' => 100.0,
+    ], 'test', 'force an honest no-ticket verdict while testing paging');
+
+    $date = gmdate('Y-m-d', strtotime('+1 day'));
+    $first = $service->runDaily($date, 'iv-paged-r1');
+    assert_equals('NO_QUALIFIED_TICKET', $first['status']);
+    assert_equals(50, $first['evaluated']);
+    assert_true(!empty($first['diagnostics']['fixturePageFull']));
+    assert_equals(0, (int) $first['diagnostics']['batchOffset']);
+
+    $second = $service->runDaily($date, 'iv-paged-r2');
+    assert_not_equals('DUPLICATE_SKIPPED', $second['status']);
+    assert_equals(10, $second['evaluated'], 'only the remaining stored page is evaluated');
+    assert_equals(50, (int) $second['diagnostics']['batchOffset']);
+    assert_true((int) $second['attempt'] >= 2);
+});
+
 test('ticket engine: intelligent refresh reuses stored predictions unless the odds changed', function () {
     $fixtures = fx_iv_fixtures(4);
     $provider = fx_iv_provider('iv-reuse', $fixtures);
-    [$repo, , , $service] = fx_iv_stack($provider);
+    [$repo, $audit, , $service] = fx_iv_stack($provider);
     fx_iv_approve_calibration($repo);
+    // Keep this prediction-cache test on honest no-ticket attempts so the
+    // daily ticket idempotency terminal does not (correctly) short-circuit the
+    // second evaluation. No available combination can reach 90–100 odds.
+    (new AIWorkforce\Sports\ConfigurationService($repo, $audit))->update([
+        'target_odds_min' => 90.0, 'target_odds_max' => 100.0,
+    ], 'test', 'exercise prediction reuse without creating a daily ticket');
     fx_iv_seed_odds($repo, 'iv-reuse', $fixtures, 3 * 3600);
     $date = gmdate('Y-m-d', strtotime('+1 day'));
 
