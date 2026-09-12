@@ -931,3 +931,103 @@ test('football: each line of a ladder is priced and settled on its own terms', f
             'the correct-score board is ordered most likely first');
     }
 });
+
+test('football: the API feed returns the same complete sheet the board and match page show', function () {
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    [$repo, , $module] = fx_fb_harness([
+        fx_fb_row('fx-feed-sheet', gmdate('c', strtotime($day . 'T18:00:00+00:00')), 'Chelsea', 'Fulham', '10', '20'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $board = $module->board()->forDate($day);
+    $matchId = (string) ($board['rows'][0]['matchId'] ?? '');
+    $fixtureId = (int) ($board['rows'][0]['fixtureId'] ?? 0);
+    assert_true($matchId !== '' && $fixtureId > 0, 'the stored fixture has both identities');
+
+    // Quotes spread across SEVERAL RUNGS of two ladders. Before the feed was
+    // widened it answered with one line per market, so the 4.5 goal line and
+    // the -1.5 handicap below were simply absent from the API response even
+    // though the provider had priced them.
+    $now = gmdate('c');
+    $repo->marketOdds = [
+        ['matchId' => $matchId, 'market' => 'Total Goals', 'selection' => 'Over 1.5', 'decimalOdds' => 1.28, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Total Goals', 'selection' => 'Under 1.5', 'decimalOdds' => 3.60, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Total Goals', 'selection' => 'Over 4.5', 'decimalOdds' => 6.50, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Total Goals', 'selection' => 'Under 4.5', 'decimalOdds' => 1.11, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Asian Handicap', 'selection' => 'Home -1.5', 'decimalOdds' => 2.85, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Asian Handicap', 'selection' => 'Away +1.5', 'decimalOdds' => 1.42, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+    ];
+
+    $page = $module->feed()->page($day, 1, 50, false);
+    $candidates = (array) ($page['matches'][0]['marketCandidates'] ?? []);
+    assert_true($candidates !== [], 'the feed carries a market sheet for the match');
+
+    // A rung is identified by market AND line, so the sheet must distinguish
+    // "Over 1.5" from "Over 4.5" instead of collapsing them into one market.
+    $byRung = [];
+    foreach ($candidates as $candidate) {
+        $line = is_numeric($candidate['line'] ?? null) ? number_format((float) $candidate['line'], 2, '.', '') : 'NONE';
+        $byRung[(string) $candidate['key'] . '|' . $line] = $candidate;
+    }
+    assert_true(isset($byRung['OVER_1_5|1.50']), 'the feed exposes the 1.5 goal line');
+    assert_true(isset($byRung['OVER_4_5|4.50']), 'and the 4.5 goal line the provider also priced');
+    assert_true(isset($byRung['ASIAN_HANDICAP|-1.50']), 'and the -1.5 handicap, not only the default -0.5 line');
+
+    // Each rung carries its OWN price — the whole point of quoting per line.
+    $priceOf = static function (array $market, string $selection): ?float {
+        foreach ((array) $market['outcomes'] as $outcome) {
+            if ((string) $outcome['selection'] === $selection) return is_numeric($outcome['odds'] ?? null) ? (float) $outcome['odds'] : null;
+        }
+        return null;
+    };
+    assert_equals(1.28, $priceOf($byRung['OVER_1_5|1.50'], 'OVER'), 'the 1.5 rung keeps its own price');
+    assert_equals(6.50, $priceOf($byRung['OVER_4_5|4.50'], 'OVER'), 'the 4.5 rung keeps its own, different price');
+    assert_equals(2.85, $priceOf($byRung['ASIAN_HANDICAP|-1.50'], 'HOME'), 'the -1.5 handicap keeps its own price');
+    assert_true($priceOf($byRung['OVER_1_5|1.50'], 'OVER') !== $priceOf($byRung['OVER_4_5|4.50'], 'OVER'),
+        'two rungs of one ladder are never served the same price');
+
+    // And each priced rung carries the COMPLETE odds information, not just a
+    // number: this is the contract an API consumer depends on.
+    foreach (['OVER_1_5|1.50', 'OVER_4_5|4.50', 'ASIAN_HANDICAP|-1.50'] as $rung) {
+        foreach ((array) $byRung[$rung]['outcomes'] as $outcome) {
+            foreach (['selection', 'label', 'probability', 'odds', 'impliedProbability', 'edge', 'edgePoints',
+                'oddsObservedAt', 'oddsSource', 'oddsState', 'quoteCount', 'oddsLow', 'oddsHigh', 'oddsSpread',
+                'windelsFairOdds', 'fairOdds', 'fairProbability', 'breakEvenProbability', 'expectedValue',
+                'marginMethod', 'valueClass', 'valueLabel', 'valueReason'] as $field) {
+                assert_true(array_key_exists($field, $outcome), $rung . ' reports ' . $field);
+            }
+        }
+        assert_true(is_array($byRung[$rung]['pricing'] ?? null), $rung . ' carries its price-sheet state');
+        assert_equals('fixture-feed', (string) ($byRung[$rung]['outcomes'][0]['oddsSource'] ?? ''), $rung . ' keeps the price source');
+    }
+
+    // The paged feed stays priced-only (a compact list of what is actually
+    // quoted) while the board and match page also publish unpriced model
+    // estimates. That is a deliberate difference in VERBOSITY, not in the
+    // underlying sheet: every rung the feed returns must be a real rung of the
+    // full sheet, and every quoted rung must be present rather than dropped.
+    $fresh = $module->board()->forDate($day);
+    $boardRungs = [];
+    foreach ((array) ($fresh['rows'][0]['marketCandidates'] ?? []) as $candidate) {
+        $line = is_numeric($candidate['line'] ?? null) ? number_format((float) $candidate['line'], 2, '.', '') : 'NONE';
+        $boardRungs[(string) $candidate['key'] . '|' . $line] = true;
+    }
+    foreach (array_keys($byRung) as $rung) {
+        assert_true(isset($boardRungs[$rung]), 'the feed rung ' . $rung . ' is a real rung of the full sheet');
+    }
+    assert_true(count($boardRungs) >= count($byRung),
+        'the board publishes at least what the priced-only feed does');
+    // Every rung the provider priced reaches the feed — none is silently lost.
+    foreach (['OVER_1_5|1.50', 'OVER_4_5|4.50', 'ASIAN_HANDICAP|-1.50'] as $rung) {
+        assert_true(isset($byRung[$rung]), 'the priced rung ' . $rung . ' reaches the feed');
+    }
+    $detail = $module->predictionFor($fixtureId);
+    $detailRungs = [];
+    foreach ((array) ($detail['markets'] ?? []) as $candidate) {
+        $line = is_numeric($candidate['line'] ?? null) ? number_format((float) $candidate['line'], 2, '.', '') : 'NONE';
+        $detailRungs[(string) $candidate['key'] . '|' . $line] = true;
+    }
+    foreach (array_keys($byRung) as $rung) {
+        assert_true(isset($detailRungs[$rung]), 'and the match page carries the same rung ' . $rung);
+    }
+});

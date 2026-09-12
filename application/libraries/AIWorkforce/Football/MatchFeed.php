@@ -332,10 +332,11 @@ final class MatchFeed
         // batched reads — the score grids and the quoted prices — so choosing a
         // market costs two queries for the page, not one query per match.
         $markets = $this->attachMarkets($entries, $market['market'], $line);
-        // Multiple markets per fixture where verified provider odds exist
-        // (1X2, Over 1.5, BTTS, Double Chance) — each candidate must have
-        // real provider odds, never invented.
-        $multiMarkets = $this->attachMultipleMarkets($entries, self::MULTI_MARKET_CANDIDATES);
+        // Every market at every line per fixture, so the feed answers with the
+        // same complete sheet the board and the match page show rather than a
+        // bounded preview of it. `null` selects the expanded sheet; each
+        // candidate must still carry real provider odds, never invented ones.
+        $multiMarkets = $this->attachMultipleMarkets($entries, null);
         // Provenance is a third batched read: which provider (or providers)
         // this match came from is part of the prediction result, and it is
         // answered for the whole page in one query.
@@ -595,6 +596,13 @@ final class MatchFeed
      * creating odds: an entry is still rendered only when a verified provider
      * price exists (or, on a single match page, as an explicitly unpriced model
      * estimate). Provider-price-only markets remain labelled as such.
+     *
+     * This is the BOUNDED fallback — one entry per market, at the market's
+     * default line. Every real caller (the feed, the board, the match page)
+     * passes `null` to `attachMultipleMarkets()` instead and receives
+     * `PredictionMarkets::fullSheet()`: the same markets walked across every
+     * line of their ladder. Keep this list in step with the catalogue so a
+     * caller that opts into the bounded view still sees each family once.
      */
     public const MULTI_MARKET_CANDIDATES = [
         'MATCH_WINNER', 'DOUBLE_CHANCE', 'DRAW_NO_BET', 'WINNING_MARGIN', 'RESULT_AND_BTTS',
