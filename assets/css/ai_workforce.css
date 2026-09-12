@@ -1560,22 +1560,53 @@ pre.raw {
 }
 .football-ticket-link { background: var(--violet); border-color: var(--violet); color: #fff; }
 .football-ticket-link:hover { color: #fff; border-color: #a78bfa; background: #7c3aed; }
+.football-hero__intro { min-width: 0; }
 .football-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 340px); gap: var(--space-4); align-items: start; }
 .football-main, .football-side { min-width: 0; }
-.football-section { margin: 0; }
+/* One section object for the whole board: every feed block and every rail
+   block is a .panel + .football-section__heading (step, eyebrow, title, meta)
+   + .body. The feed is a numbered reading order (1 → 4); the rail is
+   unnumbered reference. Spacing lives here, never in an inline style. */
+.football-section { margin: 0; display: flex; flex-direction: column; }
 .football-section__heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 13px 20px; border-bottom: 1px solid var(--line); }
 .panel > .football-section__heading { background: transparent; }
 .football-section__heading h3 { margin: 0; }
 .football-section__heading .football-eyebrow { margin-bottom: 2px; }
-.football-updated { padding-top: 5px; font-size: 11px; white-space: nowrap; }
-.football-section .body { padding: 16px 20px 20px; }
-.football-section__divider { height: 1px; background: var(--line); margin: 16px 0; }
+.football-section__title { display: flex; align-items: flex-start; gap: 11px; min-width: 0; }
+.football-section__meta { padding-top: 5px; color: var(--dim); font-size: 11px; white-space: nowrap; }
+.football-step {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-top: 1px;
+  border: 1px solid #2f6bff55;
+  border-radius: 50%;
+  background: #2f6bff1f;
+  color: #9dbcff;
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.football-step--control { border-color: var(--line2); background: #ffffff0d; color: var(--muted); }
+/* Body rhythm: one vertical gap between every child, declared once. */
+.football-section > .body { padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 12px; }
+.football-section > .body > * { margin: 0; }
+.football-section-intro { max-width: 92ch; color: var(--dim); font-size: 11px; line-height: 1.55; }
+.football-section__divider { height: 1px; background: var(--line); margin: 0; }
+.football-inline-form { display: inline; margin: 0; }
+.football-inline-note { font-size: 11px; }
+.football-cell-label { width: 180px; }
+.football-cell-small { font-size: 11px; }
+.football-cell-actions { white-space: nowrap; }
+.btn.is-disabled { opacity: .45; }
 .football-stat-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
 .football-stat-grid .stat { padding: 10px 11px; }
 .football-stat-grid .stat .v { font-size: 20px; }
 .football-stat-grid .trend { margin-top: 2px; font-size: 10px; color: var(--dim); line-height: 1.25; }
 .football-stat-grid--compact { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.football-help { margin: 10px 0 0; color: var(--dim); font-size: 11px; line-height: 1.5; }
+.football-help { margin: 0; color: var(--dim); font-size: 11px; line-height: 1.5; }
 .football-pager { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; }
 .football-pager > :last-child { justify-self: end; }
 .football-pager__status { display: flex; flex-direction: column; text-align: center; font-size: 12px; }
@@ -1587,7 +1618,7 @@ pre.raw {
 .football-table { font-size: 12px; }
 .football-cell-note { margin-top: 2px; font-size: 10px; line-height: 1.35; }
 .football-match-link { color: var(--text); font-weight: 700; }
-.football-fixture-list { display: grid; gap: 10px; margin-top: 14px; }
+.football-fixture-list { display: grid; gap: 10px; }
 .football-fixture { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #0c1320; }
 .football-fixture__header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 13px 14px 10px; border-bottom: 1px solid var(--line); }
 .football-fixture__identity { min-width: 0; }
@@ -1669,8 +1700,6 @@ pre.raw {
 .football-match-hero p { margin: 5px 0 0; color: var(--muted); }
 .football-match-hero__actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .football-match-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(270px, 340px); gap: var(--space-4); align-items: start; }
-.football-match-page .panel > h3 { display: block; padding: 13px 20px; }
-.football-match-page .panel .body { padding: 16px 20px 20px; }
 .football-outcome-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
 .football-outcome { padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel2); }
 .football-outcome span, .football-outcome small { display: block; }
@@ -1678,7 +1707,7 @@ pre.raw {
 .football-outcome b { display: block; margin-top: 2px; font-size: 16px; }
 .football-outcome small { color: var(--dim); font-size: 10px; margin-top: 2px; }
 .football-match-odds { margin: 0; }
-.football-match-odds .football-market-card { margin-top: 10px; }
+.football-section > .body > .football-market-card { margin: 0; }
 
 @media (max-width: 1180px) {
   .sports-layout, .football-layout, .football-match-layout { grid-template-columns: 1fr; }
@@ -1696,9 +1725,9 @@ pre.raw {
   .sports-side, .football-match-side { grid-template-columns: 1fr; }
   /* The section heading stacks so the step + title keep a full line and the
      meta never squeezes the title into two words per row. */
-  .sports-section__heading { flex-direction: column; gap: 6px; padding: 12px 15px; }
-  .sports-section__meta { padding-top: 0; white-space: normal; }
-  .sports-section > .body { padding: 14px 15px 16px; }
+  .sports-section__heading, .football-section__heading { flex-direction: column; gap: 6px; padding: 12px 15px; }
+  .sports-section__meta, .football-section__meta { padding-top: 0; white-space: normal; }
+  .sports-section > .body, .football-section > .body { padding: 14px 15px 16px; }
   .sports-controls, .sports-actions { align-items: stretch; flex-direction: column; }
   .sports-controls form { flex-wrap: wrap; }
   .sports-controls .btn, .sports-actions .btn { width: 100%; }

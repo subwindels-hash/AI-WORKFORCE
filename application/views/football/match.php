@@ -72,14 +72,23 @@ $withheldBlock = is_array($intel['withheld'] ?? null) ? $intel['withheld'] : [];
 
   <div class="football-match-layout">
     <div class="stack">
-      <section class="panel">
-        <h3>Prediction overview</h3>
+      <section class="panel football-section" aria-labelledby="overview-heading">
+        <div class="football-section__heading">
+          <div class="football-section__title">
+            <span class="football-step" aria-hidden="true">1</span>
+            <div>
+              <p class="football-eyebrow">Prediction</p>
+              <h3 id="overview-heading">Prediction overview</h3>
+            </div>
+          </div>
+        </div>
         <div class="body">
+          <p class="football-section-intro">The stored pre-match prediction for this fixture, exactly as it was frozen. Nothing on this page rewrites it.</p>
           <?php if ($contract === null): ?>
             <p><?= e((string) ($prediction['message'] ?? 'No prediction row is stored for this fixture.')) ?></p>
             <?php if (!empty($prediction['reason'])): ?><p class="football-help"><?= e((string) $prediction['reason']) ?></p><?php endif; ?>
             <?php if ($matchId > 0): ?>
-              <form method="post" action="/football/match/<?= $matchId ?>/analyze" style="margin-top:12px" onsubmit="return confirm('Analyze this match from its stored data now?')">
+              <form method="post" action="/football/match/<?= $matchId ?>/analyze" class="football-inline-form" onsubmit="return confirm('Analyze this match from its stored data now?')">
                 <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
                 <button class="btn primary" <?= empty($caps['sync']) ? 'disabled title="Requires the sports.manage permission"' : '' ?>>Analyze this match — generate odds prediction</button>
               </form>
@@ -91,7 +100,7 @@ $withheldBlock = is_array($intel['withheld'] ?? null) ? $intel['withheld'] : [];
               <div class="football-outcome"><span>Predicted score</span><b class="mono"><?= $score($p['predictedScore'] ?? null, 'home') ?>–<?= $score($p['predictedScore'] ?? null, 'away') ?></b><small>pre-match prediction</small></div>
               <div class="football-outcome"><span>Confidence</span><b class="mono"><?= $number($p['confidence'] ?? null, 1) ?>%</b><small><?= e((string) ($p['confidenceBasis'] ?? 'RAW')) ?></small></div>
             </div>
-            <div class="table-scroll" style="margin-top:12px">
+            <div class="table-scroll">
               <table class="tbl">
                 <thead><tr><th>Result</th><th class="num">WINDELS probability</th><th class="num">Raw model</th><th class="num">Fair odds</th></tr></thead>
                 <tbody>
@@ -102,7 +111,7 @@ $withheldBlock = is_array($intel['withheld'] ?? null) ? $intel['withheld'] : [];
                 </tbody>
               </table>
             </div>
-            <dl class="football-key-values" style="margin-top:14px">
+            <dl class="football-key-values">
               <div><dt>Expected total goals</dt><dd class="mono"><?= $number($p['expectedTotalGoals'] ?? null) ?></dd></div>
               <div><dt>Data quality</dt><dd><span class="badge <?= $bandClass((string) ($contract['dataQuality']['status'] ?? '')) ?>"><?= e((string) ($contract['dataQuality']['status'] ?? '—')) ?> · <?= (int) ($contract['dataQuality']['score'] ?? 0) ?>/100</span></dd></div>
               <div><dt>Model version</dt><dd class="mono"><?= e((string) ($contract['model']['version'] ?? '—')) ?> · <?= e((string) ($p['calibrationState'] ?? 'CALIBRATION_PENDING')) ?></dd></div>
@@ -113,10 +122,18 @@ $withheldBlock = is_array($intel['withheld'] ?? null) ? $intel['withheld'] : [];
         </div>
       </section>
 
-      <section class="panel football-match-odds" aria-labelledby="all-odds-heading">
-        <h3 id="all-odds-heading">All market odds and information</h3>
+      <section class="panel football-section football-match-odds" aria-labelledby="all-odds-heading">
+        <div class="football-section__heading">
+          <div class="football-section__title">
+            <span class="football-step" aria-hidden="true">2</span>
+            <div>
+              <p class="football-eyebrow">Full market sheet</p>
+              <h3 id="all-odds-heading">All market odds and information</h3>
+            </div>
+          </div>
+        </div>
         <div class="body">
-          <p class="football-help" style="margin-top:0">Every modelled market is shown below. Where the provider quoted a price, the sheet includes its timestamp and source. Where it did not, the market remains <b>UNPRICED</b>. Provider-price-only markets such as corners, cards and HT/FT never receive a made-up WINDELS probability.</p>
+          <p class="football-section-intro">Every modelled market is shown below. Where the provider quoted a price, the sheet includes its timestamp and source. Where it did not, the market remains <b>UNPRICED</b>. Provider-price-only markets such as corners, cards and HT/FT never receive a made-up WINDELS probability.</p>
           <?php if ($markets === []): ?>
             <div class="empty-state"><p>Analyze this fixture first to build its market sheet. No odds or probabilities are invented before a stored prediction exists.</p></div>
           <?php else: ?>
@@ -169,8 +186,16 @@ $withheldBlock = is_array($intel['withheld'] ?? null) ? $intel['withheld'] : [];
         </div>
       </section>
 
-      <section class="panel" aria-labelledby="intelligence-heading">
-        <h3 id="intelligence-heading">WINDELS Intelligence</h3>
+      <section class="panel football-section" aria-labelledby="intelligence-heading">
+        <div class="football-section__heading">
+          <div class="football-section__title">
+            <span class="football-step" aria-hidden="true">3</span>
+            <div>
+              <p class="football-eyebrow">Reasoning</p>
+              <h3 id="intelligence-heading">WINDELS Intelligence</h3>
+            </div>
+          </div>
+        </div>
         <div class="body">
           <div class="football-outcome-grid">
             <div class="football-outcome"><div>WINDELS Intelligence Score</div><?php if (is_numeric($scoreBlock['score'] ?? null)): ?><b class="mono"><span><?= (int) $scoreBlock['score'] ?>/100</span></b><?php else: ?><div><span class="dim">no score</span></div><?php endif; ?><small><?= e((string) ($scoreBlock['label'] ?? $scoreBlock['note'] ?? 'Insufficient evidence')) ?></small></div>
@@ -178,21 +203,30 @@ $withheldBlock = is_array($intel['withheld'] ?? null) ? $intel['withheld'] : [];
             <div class="football-outcome"><span>Potential Edge</span><b class="mono <?= is_numeric($valueBlock['expectedValue'] ?? null) && (float) $valueBlock['expectedValue'] >= 0 ? 'up' : 'down' ?>"><?= $signedPct($valueBlock['expectedValue'] ?? null) ?></b><small><?= e((string) ($valueBlock['valueLabel'] ?? 'UNPRICED')) ?> · Risk <?= e((string) ($intel['risk']['level'] ?? 'UNKNOWN')) ?></small></div>
           </div>
           <div class="football-section__divider"></div>
-          <p class="football-help" style="margin-top:0"><b>Prediction ≠ Confidence ≠ Value.</b> A prediction is the selected outcome; confidence measures model certainty; value compares that model estimate with a provider price. These are separate readings.</p>
-          <?php if (!empty($withheldBlock['withheld']) || !empty($withheldBlock['limitedEvidence'])): ?><div class="notice <?= !empty($withheldBlock['withheld']) ? 'warnbox' : 'info' ?>" style="margin-top:12px"><b><?= e((string) ($withheldBlock['headline'] ?? 'Prediction withheld — insufficient verified data')) ?></b><?= e((string) ($withheldBlock['reason'] ?? '')) ?></div><?php endif; ?>
-          <?php if (($stabilityBlock['state'] ?? '') === \AIWorkforce\Football\StabilityMonitor::UNSTABLE): ?><div class="notice err" style="margin-top:12px"><b>Prediction unstable — significant model movement.</b><?= e((string) ($stabilityBlock['reason'] ?? '')) ?></div><?php endif; ?>
+          <p class="football-section-intro"><b>Prediction ≠ Confidence ≠ Value.</b> A prediction is the selected outcome; confidence measures model certainty; value compares that model estimate with a provider price. These are separate readings.</p>
+          <?php if (!empty($withheldBlock['withheld']) || !empty($withheldBlock['limitedEvidence'])): ?><div class="notice <?= !empty($withheldBlock['withheld']) ? 'warnbox' : 'info' ?>"><b><?= e((string) ($withheldBlock['headline'] ?? 'Prediction withheld — insufficient verified data')) ?></b><?= e((string) ($withheldBlock['reason'] ?? '')) ?></div><?php endif; ?>
+          <?php if (($stabilityBlock['state'] ?? '') === \AIWorkforce\Football\StabilityMonitor::UNSTABLE): ?><div class="notice err"><b>Prediction unstable — significant model movement.</b><?= e((string) ($stabilityBlock['reason'] ?? '')) ?></div><?php endif; ?>
           <?php $drivers = is_array($driverBlock['drivers'] ?? null) ? $driverBlock['drivers'] : []; ?>
           <?php if ($drivers !== []): ?>
-            <div class="table-scroll" style="margin-top:12px"><table class="tbl"><thead><tr><th>Why WINDELS selected it</th><th>What the data says</th><th>Verdict</th></tr></thead><tbody><?php foreach ($drivers as $driver): ?><tr><td class="dim"><?= e((string) ($driver['label'] ?? '')) ?></td><td><?= e((string) ($driver['detail'] ?? '')) ?><?php if (!empty($driver['source'])): ?><div class="football-cell-note dim mono"><?= e((string) $driver['source']) ?></div><?php endif; ?></td><td><span class="badge <?= ($driver['verdict'] ?? '') === 'STRONG' ? 'b-green' : 'b-gray' ?>"><?= e((string) ($driver['verdict'] ?? '—')) ?></span></td></tr><?php endforeach; ?></tbody></table></div>
+            <div class="table-scroll"><table class="tbl"><thead><tr><th>Why WINDELS selected it</th><th>What the data says</th><th>Verdict</th></tr></thead><tbody><?php foreach ($drivers as $driver): ?><tr><td class="dim"><?= e((string) ($driver['label'] ?? '')) ?></td><td><?= e((string) ($driver['detail'] ?? '')) ?><?php if (!empty($driver['source'])): ?><div class="football-cell-note dim mono"><?= e((string) $driver['source']) ?></div><?php endif; ?></td><td><span class="badge <?= ($driver['verdict'] ?? '') === 'STRONG' ? 'b-green' : 'b-gray' ?>"><?= e((string) ($driver['verdict'] ?? '—')) ?></span></td></tr><?php endforeach; ?></tbody></table></div>
           <?php endif; ?>
           <?php $clocks = is_array($freshBlock['clocks'] ?? null) ? $freshBlock['clocks'] : []; ?>
-          <?php if ($clocks !== []): ?><div class="table-scroll" style="margin-top:12px"><table class="tbl"><thead><tr><th>Last updated</th><th>State</th><th>Age</th></tr></thead><tbody><?php foreach ($clocks as $clock): ?><tr><td><?= e((string) ($clock['label'] ?? '')) ?></td><td><span class="badge <?= $bandClass((string) ($clock['state'] ?? '')) ?>"><?= e((string) ($clock['state'] ?? '—')) ?></span></td><td class="mono"><?= e((string) ($clock['ageLabel'] ?? '—')) ?></td></tr><?php endforeach; ?></tbody></table></div><?php endif; ?>
+          <?php if ($clocks !== []): ?><div class="table-scroll"><table class="tbl"><thead><tr><th>Last updated</th><th>State</th><th>Age</th></tr></thead><tbody><?php foreach ($clocks as $clock): ?><tr><td><?= e((string) ($clock['label'] ?? '')) ?></td><td><span class="badge <?= $bandClass((string) ($clock['state'] ?? '')) ?>"><?= e((string) ($clock['state'] ?? '—')) ?></span></td><td class="mono"><?= e((string) ($clock['ageLabel'] ?? '—')) ?></td></tr><?php endforeach; ?></tbody></table></div><?php endif; ?>
         </div>
       </section>
 
-      <section class="panel">
-        <h3>Teams — form and goal profile</h3>
+      <section class="panel football-section" aria-labelledby="teams-heading">
+        <div class="football-section__heading">
+          <div class="football-section__title">
+            <span class="football-step" aria-hidden="true">4</span>
+            <div>
+              <p class="football-eyebrow">Inputs</p>
+              <h3 id="teams-heading">Teams — form and goal profile</h3>
+            </div>
+          </div>
+        </div>
         <div class="body">
+          <p class="football-section-intro">The stored team inputs the model read. A blank input is reported as DATA_UNAVAILABLE rather than being estimated.</p>
           <?php $home = is_array($teams['HOME'] ?? null) ? $teams['HOME'] : []; $away = is_array($teams['AWAY'] ?? null) ? $teams['AWAY'] : []; ?>
           <div class="table-scroll"><table class="tbl"><thead><tr><th>Input</th><th><?= e((string) ($fixture['homeTeam'] ?? 'Home')) ?></th><th><?= e((string) ($fixture['awayTeam'] ?? 'Away')) ?></th></tr></thead><tbody>
             <?php
@@ -216,8 +250,15 @@ $withheldBlock = is_array($intel['withheld'] ?? null) ? $intel['withheld'] : [];
     </div>
 
     <aside class="football-match-side stack" aria-label="Match evidence and state">
-      <section class="panel">
-        <h3>Data quality — <?= (int) ($quality['score'] ?? 0) ?>/100</h3>
+      <section class="panel football-section" aria-labelledby="quality-heading">
+        <div class="football-section__heading">
+          <div class="football-section__title">
+            <div>
+              <p class="football-eyebrow">Evidence</p>
+              <h3 id="quality-heading">Data quality — <?= (int) ($quality['score'] ?? 0) ?>/100</h3>
+            </div>
+          </div>
+        </div>
         <div class="body">
           <p><span class="badge <?= $bandClass((string) ($quality['band'] ?? 'REJECTED')) ?>"><?= e((string) ($quality['band'] ?? 'REJECTED')) ?></span></p>
           <div class="table-scroll"><table class="tbl"><thead><tr><th>Component</th><th class="num">Value</th><th class="num">Weight</th><th class="num">Contribution</th></tr></thead><tbody><?php foreach ((array) ($quality['components'] ?? []) as $key => $component): ?><tr><td><?= e($pretty((string) $key)) ?></td><td class="num mono"><?= $number($component['value'] ?? null, 1) ?></td><td class="num mono dim"><?= isset($component['weight']) ? $number((float) $component['weight'] * 100, 0) . '%' : '—' ?></td><td class="num mono"><?= $number($component['contribution'] ?? null, 1) ?></td></tr><?php endforeach; ?></tbody></table></div>
@@ -226,24 +267,59 @@ $withheldBlock = is_array($intel['withheld'] ?? null) ? $intel['withheld'] : [];
         </div>
       </section>
 
-      <section class="panel">
-        <h3>Head to head &amp; competition</h3>
+      <section class="panel football-section" aria-labelledby="h2h-heading">
+        <div class="football-section__heading">
+          <div class="football-section__title">
+            <div>
+              <p class="football-eyebrow">Context</p>
+              <h3 id="h2h-heading">Head to head &amp; competition</h3>
+            </div>
+          </div>
+        </div>
         <div class="body"><dl class="football-key-values"><div><dt>Stored meetings</dt><dd><?= (int) ($h2h['meetings'] ?? 0) ?></dd></div><div><dt>Summary</dt><dd><?= e($state($h2h['summary'] ?? null)) ?></dd></div><div><dt>Weight applied</dt><dd class="mono"><?= $number($h2h['weight'] ?? null) ?></dd></div><div><dt>Competition strength</dt><dd class="mono"><?= $number($analysis['competition']['strength'] ?? null, 3) ?></dd></div></dl></div>
       </section>
 
       <?php if ($settlement !== null): ?>
-        <section class="panel"><h3>Settlement (stored, immutable)</h3><div class="body"><dl class="football-key-values"><div><dt>State</dt><dd><?= e((string) ($settlement['status'] ?? $settlement['state'] ?? '—')) ?></dd></div><div><dt>Actual score</dt><dd class="mono"><?= $score($settlement['actualScore'] ?? null, 'home') ?>–<?= $score($settlement['actualScore'] ?? null, 'away') ?></dd></div><div><dt>Settled at</dt><dd class="mono"><?= e($stamp($settlement['settledAt'] ?? null)) ?></dd></div></dl></div></section>
+        <section class="panel football-section" aria-labelledby="settlement-heading"><div class="football-section__heading">
+  <div class="football-section__title">
+    <div>
+      <p class="football-eyebrow">Result</p>
+      <h3 id="settlement-heading">Settlement (stored, immutable)</h3>
+    </div>
+  </div>
+</div><div class="body"><dl class="football-key-values"><div><dt>State</dt><dd><?= e((string) ($settlement['status'] ?? $settlement['state'] ?? '—')) ?></dd></div><div><dt>Actual score</dt><dd class="mono"><?= $score($settlement['actualScore'] ?? null, 'home') ?>–<?= $score($settlement['actualScore'] ?? null, 'away') ?></dd></div><div><dt>Settled at</dt><dd class="mono"><?= e($stamp($settlement['settledAt'] ?? null)) ?></dd></div></dl></div></section>
       <?php endif; ?>
 
       <?php if ($liveEstimates !== []): ?>
-        <section class="panel"><h3>Live model estimates</h3><div class="body"><div class="table-scroll"><table class="tbl"><thead><tr><th>Generated</th><th>Result</th><th class="num">Confidence</th></tr></thead><tbody><?php foreach ($liveEstimates as $estimate): ?><tr><td class="mono dim"><?= e($stamp($estimate['generatedAt'] ?? null, 'M j H:i')) ?></td><td><?= e((string) ($estimate['prediction']['result'] ?? '—')) ?> <?= $score($estimate['prediction']['predictedScore'] ?? null, 'home') ?>–<?= $score($estimate['prediction']['predictedScore'] ?? null, 'away') ?></td><td class="num mono"><?= $number($estimate['prediction']['confidence'] ?? null, 1) ?>%</td></tr><?php endforeach; ?></tbody></table></div><p class="football-help">Stored as separate LIVE rows. Live estimates never rewrite the pre-match prediction; the frozen prediction is never rewritten.</p></div></section>
+        <section class="panel football-section" aria-labelledby="live-estimates-heading"><div class="football-section__heading">
+  <div class="football-section__title">
+    <div>
+      <p class="football-eyebrow">In play</p>
+      <h3 id="live-estimates-heading">Live model estimates</h3>
+    </div>
+  </div>
+</div><div class="body"><div class="table-scroll"><table class="tbl"><thead><tr><th>Generated</th><th>Result</th><th class="num">Confidence</th></tr></thead><tbody><?php foreach ($liveEstimates as $estimate): ?><tr><td class="mono dim"><?= e($stamp($estimate['generatedAt'] ?? null, 'M j H:i')) ?></td><td><?= e((string) ($estimate['prediction']['result'] ?? '—')) ?> <?= $score($estimate['prediction']['predictedScore'] ?? null, 'home') ?>–<?= $score($estimate['prediction']['predictedScore'] ?? null, 'away') ?></td><td class="num mono"><?= $number($estimate['prediction']['confidence'] ?? null, 1) ?>%</td></tr><?php endforeach; ?></tbody></table></div><p class="football-help">Stored as separate LIVE rows. Live estimates never rewrite the pre-match prediction; the frozen prediction is never rewritten.</p></div></section>
       <?php endif; ?>
 
       <?php if ($inMatch !== null && $inMatch !== []): ?>
-        <section class="panel"><h3>Match state as stored</h3><div class="body"><div class="table-scroll"><table class="tbl"><tbody><?php foreach ($inMatch as $key => $value): ?><tr><td class="dim"><?= e($pretty((string) $key)) ?></td><td class="mono"><?= is_array($value) ? e((string) json_encode($value)) : e((string) $value) ?></td></tr><?php endforeach; ?></tbody></table></div></div></section>
+        <section class="panel football-section" aria-labelledby="match-state-heading"><div class="football-section__heading">
+  <div class="football-section__title">
+    <div>
+      <p class="football-eyebrow">In play</p>
+      <h3 id="match-state-heading">Match state as stored</h3>
+    </div>
+  </div>
+</div><div class="body"><div class="table-scroll"><table class="tbl"><tbody><?php foreach ($inMatch as $key => $value): ?><tr><td class="dim"><?= e($pretty((string) $key)) ?></td><td class="mono"><?= is_array($value) ? e((string) json_encode($value)) : e((string) $value) ?></td></tr><?php endforeach; ?></tbody></table></div></div></section>
       <?php endif; ?>
 
-      <section class="panel"><h3>Provenance</h3><div class="body"><p class="football-help" style="margin-top:0">The coverage records below identify whether a stored input existed. They do not fabricate missing data.</p><div class="table-scroll"><table class="tbl"><thead><tr><th>Input</th><th>Coverage</th></tr></thead><tbody><?php foreach ((array) $coverage as $key => $value): ?><tr><td><?= e($pretty((string) $key)) ?></td><td class="mono"><?= is_bool($value) ? ($value ? 'yes' : 'no') : (is_numeric($value) ? (string) $value : e($state($value))) ?></td></tr><?php endforeach; ?><?php if ($coverage === []): ?><tr><td colspan="2" class="dim">No coverage record stored</td></tr><?php endif; ?></tbody></table></div></div></section>
+      <section class="panel football-section" aria-labelledby="provenance-heading"><div class="football-section__heading">
+  <div class="football-section__title">
+    <div>
+      <p class="football-eyebrow">Audit</p>
+      <h3 id="provenance-heading">Provenance</h3>
+    </div>
+  </div>
+</div><div class="body"><p class="football-section-intro">The coverage records below identify whether a stored input existed. They do not fabricate missing data.</p><div class="table-scroll"><table class="tbl"><thead><tr><th>Input</th><th>Coverage</th></tr></thead><tbody><?php foreach ((array) $coverage as $key => $value): ?><tr><td><?= e($pretty((string) $key)) ?></td><td class="mono"><?= is_bool($value) ? ($value ? 'yes' : 'no') : (is_numeric($value) ? (string) $value : e($state($value))) ?></td></tr><?php endforeach; ?><?php if ($coverage === []): ?><tr><td colspan="2" class="dim">No coverage record stored</td></tr><?php endif; ?></tbody></table></div></div></section>
     </aside>
   </div>
 </div>

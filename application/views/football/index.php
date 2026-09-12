@@ -85,10 +85,10 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
     };
     $previous = !empty($pagination['hasPrevious'])
         ? '<a class="btn small" href="' . e($href((int) $pagination['previousPage'])) . '">&larr; Previous</a>'
-        : '<span class="btn small" aria-disabled="true" style="opacity:.45">&larr; Previous</span>';
+        : '<span class="btn small is-disabled" aria-disabled="true">&larr; Previous</span>';
     $next = !empty($pagination['hasNext'])
         ? '<a class="btn small" href="' . e($href((int) $pagination['nextPage'])) . '">Next &rarr;</a>'
-        : '<span class="btn small" aria-disabled="true" style="opacity:.45">Next &rarr;</span>';
+        : '<span class="btn small is-disabled" aria-disabled="true">Next &rarr;</span>';
     return '<nav class="football-pager" aria-label="Match pages">'
         . '<div>' . $previous . '</div>'
         . '<div class="football-pager__status"><b>Page ' . $page . ' of ' . $pages . '</b><span>'
@@ -99,11 +99,11 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
 ?>
 <div class="football-console">
   <section class="football-hero" aria-labelledby="football-heading">
-    <div>
+    <div class="football-hero__intro">
       <p class="football-eyebrow">TODAY'S FOOTBALL PREDICTIONS</p>
       <h2 id="football-heading">Match predictions and odds, in one place</h2>
       <p class="football-hero__copy">
-        <?= e((string) ($board['dateLabel'] ?? $date ?? gmdate('Y-m-d'))) ?>. Review each fixture’s model probability, verified bookmaker price, fair odds and potential edge. Prices are always separated from WINDELS estimates; no bet is placed from this screen.
+        <?= e((string) ($board['dateLabel'] ?? $date ?? gmdate('Y-m-d'))) ?>. One board, read top to bottom: what is stored for the day, the ranked picks drawn from it, every fixture with its full odds sheet, and the measured result of everything already settled. Model probabilities and bookmaker prices are always reported in separate columns and never mixed. No bet is placed from this screen.
       </p>
     </div>
     <div class="football-hero__actions" aria-label="Football date navigation">
@@ -144,38 +144,20 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
 
   <div class="football-layout">
     <div class="football-main stack">
-      <section class="panel football-section" aria-labelledby="day-overview-heading">
-        <div class="football-section__heading">
-          <div><p class="football-eyebrow">Day overview</p><h3 id="day-overview-heading"><?= e((string) ($board['date'] ?? $date ?? 'Fixtures')) ?></h3></div>
-          <span class="dim football-updated">Board read <?= e($kickoff($d['generatedAt'] ?? null, 'H:i')) ?></span>
-        </div>
-        <div class="body">
-          <div class="stat-grid football-stat-grid">
-            <div class="stat"><div class="k">Fixtures found</div><div class="v"><?= (int) ($summary['fixtures'] ?? 0) ?></div><div class="trend">stored for this date</div></div>
-            <div class="stat"><div class="k">Analyzed</div><div class="v"><?= (int) ($summary['analyzed'] ?? 0) ?></div><div class="trend">prediction rows saved</div></div>
-            <div class="stat"><div class="k">Qualified</div><div class="v up"><?= (int) ($summary['qualified'] ?? 0) ?></div><div class="trend">verified data quality</div></div>
-            <div class="stat"><div class="k">Limited evidence</div><div class="v warn"><?= (int) ($summary['limited'] ?? 0) ?></div><div class="trend">usable with caution</div></div>
-            <div class="stat"><div class="k">Withheld</div><div class="v down"><?= (int) ($summary['rejected'] ?? 0) ?></div><div class="trend">below evidence floor</div></div>
-          </div>
-          <?php $pagination = is_array($board['pagination'] ?? null) ? $board['pagination'] : []; ?>
-          <?php if ($pagination !== []): ?>
-            <div class="football-section__divider"></div>
-            <?= $pager($pagination, (string) ($date ?? gmdate('Y-m-d')), $carry) ?>
-            <p class="football-help">This page contains <?= (int) ($pagination['returned'] ?? 0) ?> stored fixture<?= (int) ($pagination['returned'] ?? 0) === 1 ? '' : 's' ?>. Paging only reads saved rows; it never refreshes prices or regenerates a prediction.</p>
-          <?php endif; ?>
-          <?php if (in_array((string) ($board['state'] ?? ''), ['NO_FIXTURES_STORED', 'NO_PREDICTIONS_STORED', 'PAGE_BEYOND_LAST'], true)): ?>
-            <div class="empty-state"><p><?= e((string) ($board['message'] ?? 'No stored fixtures are available for this selection.')) ?></p></div>
-          <?php endif; ?>
-        </div>
-      </section>
-
       <?php if ($isAdmin): ?>
-        <section class="panel football-section" aria-labelledby="football-filters-heading">
+        <section class="panel football-section" id="football-filters" aria-labelledby="football-filters-heading">
           <div class="football-section__heading">
-            <div><p class="football-eyebrow">Board view</p><h3 id="football-filters-heading">Filter stored fixtures and markets</h3></div>
+            <div class="football-section__title">
+              <span class="football-step football-step--control" aria-hidden="true">⚙</span>
+              <div>
+                <p class="football-eyebrow">Board view</p>
+                <h3 id="football-filters-heading">Filter stored fixtures and markets</h3>
+              </div>
+            </div>
             <span class="badge <?= strtoupper($providerMode) === 'MANUAL' ? 'b-amber' : 'b-green' ?>"><?= e($providerMode) ?> · <?= strtoupper($providerMode) === 'MANUAL' ? 'operator selection' : 'admin managed' ?></span>
           </div>
           <div class="body">
+            <p class="football-section-intro">These controls change what the four sections below display. They only reorganize saved fixtures and stored odds — no provider request is spent and no prediction is created.</p>
             <form method="get" action="/football" class="football-filter-form">
               <input type="hidden" name="page" value="1">
               <label class="fld">Data provider
@@ -224,13 +206,52 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         </section>
       <?php endif; ?>
 
-      <?php $picksBlock = is_array($board['picks'] ?? null) ? $board['picks'] : []; $picks = is_array($picksBlock['picks'] ?? null) ? $picksBlock['picks'] : []; ?>
-      <section class="panel football-section" aria-labelledby="top-picks-heading">
+      <section class="panel football-section" id="football-overview" aria-labelledby="day-overview-heading">
         <div class="football-section__heading">
-          <div><p class="football-eyebrow">Ranked reading</p><h3 id="top-picks-heading">Top WINDELS Picks</h3></div>
-          <span class="dim"><?= (int) ($picksBlock['eligible'] ?? 0) ?> eligible on this page</span>
+          <div class="football-section__title">
+            <span class="football-step" aria-hidden="true">1</span>
+            <div>
+              <p class="football-eyebrow">Day overview</p>
+              <h3 id="day-overview-heading">What is stored for <?= e((string) ($board['date'] ?? $date ?? 'this date')) ?></h3>
+            </div>
+          </div>
+          <span class="football-section__meta">Board read <?= e($kickoff($d['generatedAt'] ?? null, 'H:i')) ?></span>
         </div>
         <div class="body">
+          <p class="football-section-intro">The counts below describe saved rows for this date only. A fixture is <b>qualified</b> when its stored evidence clears the data-quality floor, <b>limited</b> when it is usable with caution, and <b>withheld</b> when the evidence is too thin to publish a prediction.</p>
+          <div class="stat-grid football-stat-grid">
+            <div class="stat"><div class="k">Fixtures found</div><div class="v"><?= (int) ($summary['fixtures'] ?? 0) ?></div><div class="trend">stored for this date</div></div>
+            <div class="stat"><div class="k">Analyzed</div><div class="v"><?= (int) ($summary['analyzed'] ?? 0) ?></div><div class="trend">prediction rows saved</div></div>
+            <div class="stat"><div class="k">Qualified</div><div class="v up"><?= (int) ($summary['qualified'] ?? 0) ?></div><div class="trend">verified data quality</div></div>
+            <div class="stat"><div class="k">Limited evidence</div><div class="v warn"><?= (int) ($summary['limited'] ?? 0) ?></div><div class="trend">usable with caution</div></div>
+            <div class="stat"><div class="k">Withheld</div><div class="v down"><?= (int) ($summary['rejected'] ?? 0) ?></div><div class="trend">below evidence floor</div></div>
+          </div>
+          <?php $pagination = is_array($board['pagination'] ?? null) ? $board['pagination'] : []; ?>
+          <?php if ($pagination !== []): ?>
+            <div class="football-section__divider"></div>
+            <?= $pager($pagination, (string) ($date ?? gmdate('Y-m-d')), $carry) ?>
+            <p class="football-help">This page contains <?= (int) ($pagination['returned'] ?? 0) ?> stored fixture<?= (int) ($pagination['returned'] ?? 0) === 1 ? '' : 's' ?>. Paging only reads saved rows; it never refreshes prices or regenerates a prediction.</p>
+          <?php endif; ?>
+          <?php if (in_array((string) ($board['state'] ?? ''), ['NO_FIXTURES_STORED', 'NO_PREDICTIONS_STORED', 'PAGE_BEYOND_LAST'], true)): ?>
+            <div class="empty-state"><p><?= e((string) ($board['message'] ?? 'No stored fixtures are available for this selection.')) ?></p></div>
+          <?php endif; ?>
+        </div>
+      </section>
+
+      <?php $picksBlock = is_array($board['picks'] ?? null) ? $board['picks'] : []; $picks = is_array($picksBlock['picks'] ?? null) ? $picksBlock['picks'] : []; ?>
+      <section class="panel football-section" id="football-picks" aria-labelledby="top-picks-heading">
+        <div class="football-section__heading">
+          <div class="football-section__title">
+            <span class="football-step" aria-hidden="true">2</span>
+            <div>
+              <p class="football-eyebrow">Ranked reading</p>
+              <h3 id="top-picks-heading">Top WINDELS Picks</h3>
+            </div>
+          </div>
+          <span class="football-section__meta"><?= (int) ($picksBlock['eligible'] ?? 0) ?> eligible on this page</span>
+        </div>
+        <div class="body">
+          <p class="football-section-intro">The strongest comparisons drawn from the fixtures in section 3, ordered by intelligence score. Each row keeps the model probability and the bookmaker price in their own columns so the two readings are never confused.</p>
           <?php if ($picks === []): ?>
             <p class="football-help">No fixtures currently satisfy the required prediction and data-quality thresholds. This is a finding, not a gap filled with a forced selection.</p>
           <?php else: ?>
@@ -260,13 +281,19 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
       </section>
 
       <?php $rows = is_array($board['rows'] ?? null) ? $board['rows'] : []; ?>
-      <section class="panel football-section" aria-labelledby="fixtures-heading">
+      <section class="panel football-section" id="football-fixtures" aria-labelledby="fixtures-heading">
         <div class="football-section__heading">
-          <div><p class="football-eyebrow">Fixture odds board</p><h3 id="fixtures-heading">Every match and its available odds</h3></div>
-          <span class="dim"><?= count($rows) ?> match<?= count($rows) === 1 ? '' : 'es' ?> on this page</span>
+          <div class="football-section__title">
+            <span class="football-step" aria-hidden="true">3</span>
+            <div>
+              <p class="football-eyebrow">Fixture odds board</p>
+              <h3 id="fixtures-heading">Every match and its available odds</h3>
+            </div>
+          </div>
+          <span class="football-section__meta"><?= count($rows) ?> match<?= count($rows) === 1 ? '' : 'es' ?> on this page</span>
         </div>
         <div class="body">
-          <p class="football-help">Open any fixture for its complete market sheet. Every modelled selection includes the WINDELS probability and fair odds; every real bookmaker quote adds decimal odds, implied and margin-free probability, market fair odds, break-even point, model edge, expected return, quote range, source and timestamp. Missing prices stay clearly marked <b>UNPRICED</b>.</p>
+          <p class="football-section-intro">Open any fixture for its complete market sheet. Every modelled selection includes the WINDELS probability and fair odds; every real bookmaker quote adds decimal odds, implied and margin-free probability, market fair odds, break-even point, model edge, expected return, quote range, source and timestamp. Missing prices stay clearly marked <b>UNPRICED</b>.</p>
           <?php if ($rows === []): ?>
             <div class="empty-state"><p>No fixtures match this page and filter selection.</p></div>
           <?php else: ?>
@@ -427,9 +454,19 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         </div>
       </section>
 
-      <section class="panel football-section" aria-labelledby="performance-heading">
-        <div class="football-section__heading"><div><p class="football-eyebrow">Measured results</p><h3>30-day performance (settled predictions)</h3></div><span class="dim">settled predictions only</span></div>
+      <section class="panel football-section" id="football-performance" aria-labelledby="performance-heading">
+        <div class="football-section__heading">
+          <div class="football-section__title">
+            <span class="football-step" aria-hidden="true">4</span>
+            <div id="performance-heading">
+              <p class="football-eyebrow">Measured results</p>
+              <h3>30-day performance (settled predictions)</h3>
+            </div>
+          </div>
+          <span class="football-section__meta">settled predictions only</span>
+        </div>
         <div class="body">
+          <p class="football-section-intro">Outcome of predictions that have already been settled against a final result. Nothing here is projected: an unsettled match contributes no figure, so an empty history stays empty rather than being filled in.</p>
           <div class="stat-grid football-stat-grid football-stat-grid--compact">
             <div class="stat"><div class="k">Evaluated</div><div class="v"><?= (int) ($perf['evaluatedPredictions'] ?? 0) ?></div></div>
             <div class="stat"><div class="k">Result accuracy</div><div class="v"><?= $pct($perf['resultAccuracy'] ?? null) ?></div></div>
@@ -445,9 +482,17 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
     </div>
 
     <aside class="football-side stack" aria-label="Football operational context">
-      <section class="panel football-section football-reading-guide">
-        <div class="football-section__heading"><div><p class="football-eyebrow">Reading the board</p><h3>Keep the numbers separate</h3></div></div>
+      <section class="panel football-section football-reading-guide" aria-labelledby="football-guide-heading">
+        <div class="football-section__heading">
+          <div class="football-section__title">
+            <div>
+              <p class="football-eyebrow">Reading the board</p>
+              <h3 id="football-guide-heading">Keep the numbers separate</h3>
+            </div>
+          </div>
+        </div>
         <div class="body">
+          <p class="football-section-intro">Four values appear on every row. They answer different questions and are never blended into one number.</p>
           <dl>
             <div><dt>WINDELS probability</dt><dd>The model’s estimated chance from stored match data.</dd></div>
             <div><dt>Market odds</dt><dd>The decimal bookmaker price supplied by the provider.</dd></div>
@@ -458,7 +503,15 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
       </section>
 
       <section class="panel football-section" aria-labelledby="live-heading">
-        <div class="football-section__heading"><div><p class="football-eyebrow">In play</p><h3>Live now</h3></div><a class="btn small" href="/football/live">Refresh live</a></div>
+        <div class="football-section__heading">
+          <div class="football-section__title">
+            <div id="live-heading">
+              <p class="football-eyebrow">In play</p>
+              <h3>Live now</h3>
+            </div>
+          </div>
+          <a class="btn small" href="/football/live">Refresh live</a>
+        </div>
         <div class="body">
           <?php $liveMatches = is_array($live['matches'] ?? null) ? $live['matches'] : []; ?>
           <?php if ($liveMatches === []): ?><p class="football-help">No match is in play in the stored data. The live sweep runs only while a fixture is reported live.</p><?php else: ?>
@@ -479,7 +532,14 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
       </section>
 
       <section class="panel football-section" aria-labelledby="feed-heading">
-        <div class="football-section__heading"><div><p class="football-eyebrow">Data health</p><h3 id="feed-heading">Data feed</h3></div></div>
+        <div class="football-section__heading">
+          <div class="football-section__title">
+            <div>
+              <p class="football-eyebrow">Data health</p>
+              <h3 id="feed-heading">Data feed</h3>
+            </div>
+          </div>
+        </div>
         <div class="body">
           <?php if (empty($diag['checks'])): ?><p class="football-help">Diagnostics are unavailable; the module could not read its own stored state.</p><?php else: ?>
             <div class="football-check-list">
@@ -487,12 +547,19 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
             </div>
           <?php endif; ?>
           <?php if (!empty($diag['blockers'])): ?><p class="football-help"><b>Blockers:</b> <?= e(implode(', ', (array) $diag['blockers'])) ?></p><?php endif; ?>
-          <?php if (!empty($caps['settle'])): ?><form method="post" action="/football/settle" style="margin-top:12px"><input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><button class="btn small">Run settlement sweep</button></form><?php endif; ?>
+          <?php if (!empty($caps['settle'])): ?><form method="post" action="/football/settle" class="football-inline-form"><input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><button class="btn small">Run settlement sweep</button></form><?php endif; ?>
         </div>
       </section>
 
       <section class="panel football-section" aria-labelledby="model-heading">
-        <div class="football-section__heading"><div><p class="football-eyebrow">Governance</p><h3 id="model-heading">Model &amp; calibration</h3></div></div>
+        <div class="football-section__heading">
+          <div class="football-section__title">
+            <div>
+              <p class="football-eyebrow">Governance</p>
+              <h3 id="model-heading">Model &amp; calibration</h3>
+            </div>
+          </div>
+        </div>
         <div class="body">
           <dl class="football-key-values">
             <div><dt>State</dt><dd><span class="dot <?= $stateClass((string) ($models['state'] ?? '')) ?>"></span> <?= e((string) ($models['label'] ?? 'No model loaded')) ?></dd></div>
@@ -505,7 +572,14 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
       </section>
 
       <section class="panel football-section" aria-labelledby="schedule-heading">
-        <div class="football-section__heading"><div><p class="football-eyebrow">Automation</p><h3 id="schedule-heading">Refresh schedule</h3></div></div>
+        <div class="football-section__heading">
+          <div class="football-section__title">
+            <div>
+              <p class="football-eyebrow">Automation</p>
+              <h3 id="schedule-heading">Refresh schedule</h3>
+            </div>
+          </div>
+        </div>
         <div class="body">
           <p class="football-help">Jobs are provider-aware and run only when due, data is available and the provider is not in backoff.</p>
           <div class="football-schedule-list">

@@ -524,3 +524,157 @@ test('football: a live match card carries the match date and time from the store
         assert_true(!str_contains($html, 'Undefined array key'), 'no PHP warnings from the live card');
     }
 });
+
+/**
+ * The three football screens are ONE reading system, not three layouts.
+ *
+ * Every block — board, match page and models page, feed column and context
+ * rail alike — is the same object: a `.panel.football-section` whose heading
+ * carries an eyebrow ("what is this"), a title, and, in the feed, a step
+ * number that fixes the reading order. Bodies get their internal rhythm from a
+ * single stylesheet rule, so no view needs an inline `margin-top` to look
+ * right. This case pins that uniformity: the previous board mixed multi-line
+ * heading blocks with cramped one-liners, shipped two `aria-labelledby`
+ * references that pointed at ids no element had, and spread 34 inline layout
+ * styles across the three views.
+ */
+test('football UI: every section on every football screen is the same numbered, labelled object', function () {
+    $views = [
+        'board' => fx_fb_source('application/views/football/index.php'),
+        'match' => fx_fb_source('application/views/football/match.php'),
+        'models' => fx_fb_source('application/views/football/models.php'),
+    ];
+
+    // 1. Reading order. The board and both sub-screens number their feed.
+    foreach ([1, 2, 3, 4] as $step) {
+        assert_contains('<span class="football-step" aria-hidden="true">' . $step . '</span>', $views['board'],
+            'the board numbers feed step ' . $step);
+        assert_contains('<span class="football-step" aria-hidden="true">' . $step . '</span>', $views['match'],
+            'the match page numbers step ' . $step);
+    }
+    foreach ([1, 2, 3] as $step) {
+        assert_contains('<span class="football-step" aria-hidden="true">' . $step . '</span>', $views['models'],
+            'the models page numbers step ' . $step);
+    }
+    // The rail is reference material, never part of the numbered order, so the
+    // step count equals the number of feed sections and no more.
+    assert_equals(4, substr_count($views['board'], 'class="football-step"'), 'the board numbers its feed and only its feed');
+
+    // 2. Every aria-labelledby resolves. `live-heading` and
+    // `performance-heading` used to point at nothing at all.
+    foreach ($views as $name => $view) {
+        preg_match_all('/aria-labelledby="([^"]+)"/', $view, $labelled);
+        preg_match_all('/id="([^"]+)"/', $view, $ids);
+        foreach (array_unique($labelled[1] ?? []) as $reference) {
+            assert_true(in_array($reference, $ids[1] ?? [], true),
+                $name . ' names a section with ' . $reference . ', so an element must carry that id');
+        }
+    }
+    assert_contains('id="live-heading"', $views['board'], 'the live rail panel has the heading it claims');
+    assert_contains('id="performance-heading"', $views['board'], 'and so does the 30-day panel');
+    assert_contains('aria-labelledby="football-guide-heading"', $views['board'],
+        'the reading guide is a named landmark like every other section');
+
+    // 3. One heading object everywhere — eyebrow + title, never a bare <h3>
+    // and never a cramped one-liner beside a multi-line block.
+    foreach ($views as $name => $view) {
+        assert_equals(
+            substr_count($view, 'class="football-section__heading"'),
+            substr_count($view, 'class="football-section__title"'),
+            $name . ': every section heading carries the same title block'
+        );
+        // Every heading block opens with an eyebrow. The only eyebrow outside a
+        // section heading is the page hero's, hence the +1.
+        preg_match_all('#<div class="football-section__title">(.*?)</div>\s*</div>#s', $view, $titles);
+        assert_equals(
+            substr_count($view, 'class="football-section__heading"'),
+            count($titles[0] ?? []),
+            $name . ': every heading block is built the same way'
+        );
+        foreach ($titles[1] ?? [] as $title) {
+            assert_true(str_contains($title, 'class="football-eyebrow">'),
+                $name . ': every section says what it is before it shows a number');
+        }
+        assert_equals(
+            substr_count($view, 'class="football-section__heading"') + 1,
+            substr_count($view, 'class="football-eyebrow">'),
+            $name . ': one eyebrow per section, plus the page hero'
+        );
+    }
+    assert_true(substr_count($views['board'], 'class="panel football-section') >= 8,
+        'the board feed and its rail share one section object');
+
+    // 4. Layout lives in the stylesheet. All 34 inline styles are gone.
+    foreach ($views as $name => $view) {
+        assert_equals(0, substr_count($view, 'style="'),
+            $name . ': layout belongs in the stylesheet, not in a style attribute');
+    }
+    foreach (['margin-top:12px', 'padding-top:12px', 'margin-top:10px', 'font-size:11px', 'display:inline', 'opacity:.45'] as $gone) {
+        foreach ($views as $name => $view) {
+            assert_true(!str_contains($view, $gone), $name . ': the ad-hoc rule "' . $gone . '" was replaced by a class');
+        }
+    }
+
+    // 5. The rhythm rule those views now depend on.
+    $css = fx_fb_source('assets/css/ai_workforce.css');
+    assert_contains('.football-section > .body { padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 12px; }', $css,
+        'one gap rule gives every football section the same internal rhythm');
+    assert_contains('.football-section > .body > * { margin: 0; }', $css,
+        'so no child needs to bring its own margin');
+    assert_contains('.football-section__title', $css);
+    assert_contains('.football-step', $css);
+    assert_contains('.football-section-intro', $css, 'each section can open with a plain-language write-up');
+    assert_contains('.football-inline-form', $css, 'the forms that used inline styles have a class');
+
+    // 6. The write-ups themselves: a reader is told what each section is for.
+    foreach (['The counts below describe saved rows for this date only',
+        'The strongest comparisons drawn from the fixtures in section 3',
+        'Outcome of predictions that have already been settled'] as $writeUp) {
+        assert_contains($writeUp, $views['board'], 'the board explains its section: ' . $writeUp);
+    }
+    foreach (['Day overview', 'Ranked reading', 'Fixture odds board', 'Measured results',
+        'Reading the board', 'In play', 'Data health', 'Governance', 'Automation'] as $eyebrow) {
+        assert_contains('football-eyebrow">' . $eyebrow . '</p>', $views['board'],
+            'the board introduces a section as "' . $eyebrow . '"');
+    }
+});
+
+/**
+ * Pinning the rail is a layout contract shared with /sports: the context column
+ * stays put at EVERY scroll position, including the very end of the page, and
+ * only the feed moves. It is asserted here too because /football owns three
+ * screens that use it (`.football-side` and `.football-match-side`) and a
+ * change to the football grid could break the pin without touching /sports.
+ */
+test('football UI: the context rail is pinned for the whole page, feed-only scrolling', function () {
+    $css = fx_fb_source('assets/css/ai_workforce.css');
+    $start = strpos($css, '@media (min-width: 1181px)');
+    assert_true($start !== false, 'the desktop rail contract exists');
+    $rail = substr($css, (int) $start, 1600);
+
+    foreach (['.football-side', '.football-match-side'] as $selector) {
+        assert_contains($selector, $rail, $selector . ' is part of the shared sticky contract');
+    }
+    assert_contains('--rail-top: 76px', $rail, 'the rail parks under the sticky topbar');
+    assert_contains('--rail-tail: 136px', $rail, 'and reserves the page tail, so it cannot be pushed off at maximum scroll');
+    assert_contains('align-self: start', $rail, 'a stretched grid item has no room to stick');
+    assert_contains('overscroll-behavior: auto', $rail, 'the wheel chains back to the feed instead of being trapped');
+    assert_true(!str_contains($rail, 'overscroll-behavior: contain'), 'never trap the wheel over the rail');
+    assert_true((bool) preg_match('/max-height:\s*calc\(100dvh\s*-\s*var\(--rail-top\)\s*-\s*var\(--rail-tail\)\)/', $rail),
+        'the cap subtracts the top offset and the untouchable page tail');
+
+    // Both football grids feed the rail its variables.
+    assert_contains('.football-layout', $rail, 'the board grid declares the rail variables');
+    assert_contains('.football-match-layout', $rail, 'and so does the match grid');
+
+    // One column below the breakpoint: the rail unpins and joins the feed.
+    $mobile = substr($css, (int) strpos($css, '@media (max-width: 1180px)'), 600);
+    assert_contains('position: static', $mobile, 'the rail unpins when it no longer sits beside the feed');
+    assert_contains('max-height: none', $mobile);
+    assert_contains('overflow: visible', $mobile);
+
+    // Both rails are real asides with an accessible name.
+    assert_contains('<aside class="football-side stack" aria-label=', fx_fb_source('application/views/football/index.php'));
+    assert_contains('<aside class="football-match-side stack" aria-label=', fx_fb_source('application/views/football/match.php'));
+    assert_contains('<aside class="football-side stack" aria-label=', fx_fb_source('application/views/football/models.php'));
+});
