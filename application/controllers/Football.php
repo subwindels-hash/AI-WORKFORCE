@@ -44,6 +44,13 @@ class Football extends App_Controller
         // page to one league or reading it in another market re-reads the same
         // predictions, so neither one regenerates a match.
         $competition = isset($get['competition']) ? trim((string) $get['competition']) : null;
+        // The premium-league dropdown is a convenience view of the same
+        // competition filter. Honour it even without JavaScript so the control
+        // is a real form field rather than a visual-only selector.
+        if (($competition === null || $competition === '') && isset($get['premium'])) {
+            $premium = trim((string) $get['premium']);
+            if ($premium !== '') $competition = $premium;
+        }
         $market = isset($get['market']) ? trim((string) $get['market']) : null;
         $line = null;
         if (isset($get['line']) && trim((string) $get['line']) !== '') {

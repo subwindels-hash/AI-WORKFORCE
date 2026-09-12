@@ -1,901 +1,444 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed');
 /**
- * Football Intelligence console (§10/§11/§16).
+ * Football Intelligence board.
  *
- * One panel per concern, rendered from the same payload the JSON API returns:
- * the board, live matches, the data-feed diagnostics, and one 30-day
- * performance window. Every figure is read from a stored row; an absent figure
- * prints — with its state named, never 0.
- *
- * @var array $dashboard
- * @var string $date
- * @var array $caps
+ * This page is intentionally arranged as one clear workflow:
+ * date and actions → day overview → optional filters → ranked picks → every
+ * fixture with its complete priced-market sheet → operational context. Numbers
+ * are read from the stored board payload. A missing provider quote is named as
+ * UNPRICED / DATA_UNAVAILABLE; it is never replaced with a model price.
  */
 $d = $dashboard ?? [];
 $board = $d['board'] ?? [];
-$diag = $d['diagnostics'] ?? [];
+$diagnostics = $d['diagnostics'] ?? [];
+$diag = $diagnostics;
 $perf = $d['performance'] ?? [];
+// Categories remain part of the stored board contract. The unified odds board
+// presents every fixture once rather than duplicating it into several sections.
+$categories = $board['categories'] ?? [];
 $live = $d['live'] ?? [];
 $models = $d['models'] ?? [];
 $caps = $caps ?? ['sync' => false, 'calibrate' => false, 'approve' => false, 'settle' => false];
-$isAdmin = $isAdmin ?? false;
+$isAdmin = !empty($isAdmin);
 $summary = $board['summary'] ?? ['fixtures' => 0, 'analyzed' => 0, 'qualified' => 0, 'limited' => 0, 'rejected' => 0];
-
-// The selection the operator made — competition, premium league and market. It
-// is computed once, at the top, because every pager link and the generate form
-// carry it: paging and generating stay inside the league and market chosen.
 $filters = is_array($board['filters'] ?? null) ? $board['filters'] : [];
-$competitions = is_array($filters['competitions']['competitions'] ?? null) ? $filters['competitions']['competitions'] : [];
-$premium = is_array($filters['competitions']['premium'] ?? null) ? $filters['competitions']['premium'] : null;
-// Every competition on this date the deployment classifies as premium, not just
-// the featured one: the Premium League selector offers the leagues that were
-// classified, in the order the feed sent them.
-$premiumOptions = array_values(array_filter(
-    is_array($filters['competitions']['premiumCompetitions'] ?? null) ? $filters['competitions']['premiumCompetitions'] : [],
-    static fn($entry): bool => is_array($entry) && (string) ($entry['externalId'] ?? '') !== ''));
-$selectedCompetition = is_array($filters['competition'] ?? null) ? $filters['competition'] : null;
+$competitionBlock = is_array($filters['competitions'] ?? null) ? $filters['competitions'] : [];
+$competitions = is_array($competitionBlock['competitions'] ?? null) ? $competitionBlock['competitions'] : [];
+$premiumOptions = array_values(array_filter((array) ($competitionBlock['premiumCompetitions'] ?? []), static fn($entry): bool => is_array($entry) && (string) ($entry['externalId'] ?? '') !== ''));
+$selectedCompetition = is_array($filters['competition'] ?? null) ? $filters['competition'] : [];
 $selectedExternal = (string) ($selectedCompetition['externalId'] ?? '');
-// The "All premium leagues" scope: the board is narrowed to the date's premium
-// leagues as a group (resolved to their external ids) instead of to one league.
-// The Premium League selector offers it, and the Competition selector reports
-// it, because a page that is narrowed to a group must never display itself as
-// narrowed to nothing.
-$resolvedCompetitionState = (string) (is_array($selectedCompetition) ? ($selectedCompetition['state'] ?? '') : '');
 $premiumAllKeyword = \AIWorkforce\Football\MatchFeed::PREMIUM_LEAGUES;
-$premiumAllScope = $resolvedCompetitionState === $premiumAllKeyword;
-$premiumAllMatches = $premiumAllScope && is_array($selectedCompetition) ? (int) ($selectedCompetition['matches'] ?? 0) : 0;
+$premiumAllScope = (string) ($selectedCompetition['state'] ?? '') === $premiumAllKeyword;
 $marketBlock = is_array($board['market'] ?? null) ? $board['market'] : [];
 $marketList = is_array($marketBlock['available'] ?? null) ? $marketBlock['available'] : [];
 $selectedMarket = (string) ($marketBlock['key'] ?? 'MATCH_WINNER');
-// The raw query values, kept apart from the resolved ones: the "All" options
-// are marked selected only when the operator actually asked for no narrowing,
-// while the resolved values keep the locked (admin-managed) controls honest.
 $marketRequested = trim((string) ($market ?? ''));
-$providerRequestedRaw = trim((string) ($providerRequested ?? ''));
-// The data provider, offered only when the catalogue has something to offer:
-// with no feed connected the dropdown is replaced by the reason, because a
-// selector full of modes nobody can honour is a lie dressed as a choice.
 $providerOptions = is_array($providers['options'] ?? null) ? $providers['options'] : [];
-$selectedProvider = strtoupper(trim((string) ($provider ?? '')));
-// Admin-controlled mode (AUTO by default): when locked, the selector offers
-// Auto / Smart only and is disabled, because the backend ignores overrides.
 $providerLocked = !empty($providerLocked) || !empty($providers['locked']);
 $providerMode = (string) ($providerMode ?? ($providers['mode'] ?? 'AUTO'));
-// MANUAL mode explicitly unlocks the complete selection flow. AUTO keeps the
-// provider locked, but must not unnecessarily disable competition, market, or
-// date filters (those are read-only stored-data filters).
-$selectorsLockedByAdmin = strtoupper($providerMode) !== 'MANUAL';
-$selectorDisabled = $selectorsLockedByAdmin ? ' disabled' : '';
-$adminManagedBadge = $selectorsLockedByAdmin
-    ? '<span class="badge b-green" title="AUTO: this selector is managed by the administrator.">AUTO · managed by admin</span>'
-    : '<span class="badge b-amber" title="MANUAL: administrator enabled operator selection.">MANUAL · selectable</span>';
-$adminManagedTitle = $selectorsLockedByAdmin
-    ? 'AUTO: this selector is managed by the administrator.'
-    : 'MANUAL: administrator enabled this selector.';
-$windelsModelId = 'Windels Model id: 1520863';
-// The selection the pager and the generate form carry. It is the *raw*
-// requested value — an empty one means "not narrowed" and must stay empty, so
-// choosing "All" in a selector cannot silently flip the next page to the
-// resolved default (that would show a different dropdown selection on reload).
+$providerRequestedRaw = trim((string) ($providerRequested ?? ''));
+$selectedProvider = strtoupper(trim((string) ($provider ?? 'AUTO')));
+$premium = is_array($competitionBlock['premium'] ?? null) ? $competitionBlock['premium'] : [];
+
 $carry = [];
-$competitionRequested = trim((string) (is_array($selectedCompetition) ? ($selectedCompetition['requested'] ?? '') : ''));
+$competitionRequested = trim((string) ($selectedCompetition['requested'] ?? ''));
 if ($competitionRequested !== '') $carry['competition'] = $competitionRequested;
 if ($marketRequested !== '') $carry['market'] = $marketRequested;
 if ($providerRequestedRaw !== '') $carry['provider'] = $providerRequestedRaw;
-// "All providers" is selected when nothing is pinned: either the operator asked
-// for ALL_PROVIDERS, or the request fell back to Auto/Smart (no administrator
-// manual default) — Auto reads every feed, so the page is already the mixed,
-// best-data-per-fixture board that "All providers" describes.
-$providerAllSelected = !$selectorsLockedByAdmin
-    && ($selectedProvider === \AIWorkforce\Football\ProviderSelector::ALL_PROVIDERS
-        || ($selectedProvider === 'AUTO' && $providerRequestedRaw === ''));
-$premiumHiddenValue = $premiumAllScope ? $premiumAllKeyword : $selectedExternal;
-// The text of the Premium League selector's neutral first option. It must
-// never claim the page is showing every competition while the Competition
-// selector has narrowed it to a non-premium league.
-$premiumNoneLabel = $premiumOptions === []
-    ? 'No premium league stored for this date — every competition shown'
-    : ($selectedExternal !== ''
-        ? 'No premium filter — the competition in Select Competition applies'
-        : 'All competitions — no premium-only filter');
 
-$dash = static fn(mixed $v, int $dp = 1): string => is_numeric($v) ? number_format((float) $v, $dp) : '—';
-$percent = static fn(mixed $v, int $dp = 1): string => is_numeric($v) ? number_format((float) $v * 100, $dp) . '%' : '—';
+$dash = static fn(mixed $value, int $places = 1): string => is_numeric($value) ? number_format((float) $value, $places) : '—';
+$pct = static fn(mixed $value, int $places = 1): string => is_numeric($value) ? number_format((float) $value * 100, $places) . '%' : '—';
+$odds = static fn(mixed $value): string => is_numeric($value) ? number_format((float) $value, 2) : '—';
+$signedPct = static fn(mixed $value): string => is_numeric($value) ? ((float) $value >= 0 ? '+' : '') . number_format((float) $value * 100, 1) . '%' : '—';
 $bandClass = static fn(string $band): string => match (strtoupper($band)) {
-    'QUALIFIED' => 'b-green',
-    'LIMITED', 'LIMITED_DATA' => 'b-amber',
+    'QUALIFIED', 'AVAILABLE', 'FRESH', 'CALIBRATED', 'LOW' => 'b-green',
+    'LIMITED', 'LIMITED_DATA', 'PARTIAL_MARKET', 'STALE', 'MEDIUM' => 'b-amber',
+    'HIGH', 'REJECTED', 'DATA_UNAVAILABLE', 'UNPRICED' => 'b-red',
     default => 'b-gray',
 };
 $stateClass = static fn(string $state): string => match (strtoupper($state)) {
     'READY', 'CONNECTED', 'AVAILABLE', 'ACTIVE', 'MEASURED', 'CALIBRATED', 'ONLINE', 'POPULATED' => 'up',
-    'DEGRADED', 'LIMITED_DATA', 'LIMITED', 'PENDING', 'CADENCE', 'DRAFT', 'TRAINED', 'VALIDATED', 'CALIBRATED', 'APPROVED' => 'synth',
+    'DEGRADED', 'LIMITED_DATA', 'LIMITED', 'PENDING', 'CADENCE', 'DRAFT', 'TRAINED', 'VALIDATED', 'APPROVED' => 'synth',
     default => 'down',
 };
-$kickoffLabel = static fn(?string $iso): string => $iso === null || $iso === '' ? '—' : gmdate('M j, H:i', (int) strtotime($iso)) . ' UTC';
-// Kickoff date and time, printed separately so a live card can say when the
-// match actually started. Both come from the stored fixture; a fixture the
-// provider gave no kickoff for prints the state token, never a guessed time.
-$kickoffStamp = static function (mixed $iso): string {
-    $ts = is_string($iso) && trim($iso) !== '' ? strtotime($iso) : false;
-    return $ts === false ? 'DATA_UNAVAILABLE' : gmdate('D j M Y · H:i', $ts) . ' UTC';
+$kickoff = static function (mixed $iso, string $format = 'D j M · H:i'): string {
+    $stamp = is_string($iso) && trim($iso) !== '' ? strtotime($iso) : false;
+    return $stamp === false ? 'DATA_UNAVAILABLE' : gmdate($format, $stamp) . ' UTC';
 };
-// The pager moves through the matches that are already stored. It is rendered
-// above and below the list from one function so the two cannot drift, and every
-// link carries the date — a page number without a date is a different request.
-$pager = static function (array $pagination, string $date, array $carry = []): string {
+$shortTime = static function (mixed $iso): string {
+    $stamp = is_string($iso) && trim($iso) !== '' ? strtotime($iso) : false;
+    return $stamp === false ? '—' : gmdate('H:i', $stamp) . ' UTC';
+};
+// Used by live fixtures specifically: it prints the fixture's stored kickoff,
+// not the time the page was rendered.
+$kickoffStamp = static function (mixed $iso): string {
+    $stamp = is_string($iso) && trim($iso) !== '' ? strtotime($iso) : false;
+    return $stamp === false ? 'DATA_UNAVAILABLE' : gmdate('D j M Y · H:i', $stamp) . ' UTC';
+};
+$pager = static function (array $pagination, string $viewDate, array $carry): string {
     $total = (int) ($pagination['totalMatches'] ?? 0);
     if ($total === 0) return '';
     $page = (int) ($pagination['page'] ?? 1);
     $pages = (int) ($pagination['totalPages'] ?? 1);
-    $size = (int) ($pagination['pageSize'] ?? 50);
-    // Every link carries the competition and market the page is narrowed to: a
-    // page number alone would silently drop the selection the operator made.
-    $href = static function (int $target) use ($date, $carry): string {
-        $query = array_merge(['date' => $date, 'page' => $target], $carry);
-        return '/football?' . http_build_query($query);
+    $href = static function (int $target) use ($viewDate, $carry): string {
+        return '/football?' . http_build_query(array_merge(['date' => $viewDate, 'page' => $target], $carry));
     };
     $previous = !empty($pagination['hasPrevious'])
         ? '<a class="btn small" href="' . e($href((int) $pagination['previousPage'])) . '">&larr; Previous</a>'
-        : '<span class="btn small" aria-disabled="true" style="opacity:.45;cursor:default">&larr; Previous</span>';
+        : '<span class="btn small" aria-disabled="true" style="opacity:.45">&larr; Previous</span>';
     $next = !empty($pagination['hasNext'])
         ? '<a class="btn small" href="' . e($href((int) $pagination['nextPage'])) . '">Next &rarr;</a>'
-        : '<span class="btn small" aria-disabled="true" style="opacity:.45;cursor:default">Next &rarr;</span>';
-    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
+        : '<span class="btn small" aria-disabled="true" style="opacity:.45">Next &rarr;</span>';
+    return '<nav class="football-pager" aria-label="Match pages">'
         . '<div>' . $previous . '</div>'
-        . '<div style="text-align:center">'
-        . '<div style="font-weight:700">Page ' . $page . ' of ' . $pages . '</div>'
-        . '<div class="dim" style="font-size:11px">' . $size . ' matches per page &middot; showing '
-        . (int) ($pagination['from'] ?? 0) . '&ndash;' . (int) ($pagination['to'] ?? 0) . ' of ' . $total . '</div>'
-        . '</div>'
-        . '<div>' . $next . '</div>'
-        . '</div>';
+        . '<div class="football-pager__status"><b>Page ' . $page . ' of ' . $pages . '</b><span>'
+        . (int) ($pagination['from'] ?? 0) . '–' . (int) ($pagination['to'] ?? 0) . ' of ' . $total
+        . ' matches · ' . (int) ($pagination['pageSize'] ?? 50) . ' matches per page</span></div>'
+        . '<div>' . $next . '</div></nav>';
 };
 ?>
-<div class="page-head">
-  <div>
-    <h2>TODAY'S FOOTBALL PREDICTIONS</h2>
-    <p>
-      <?= e((string) ($board['dateLabel'] ?? $date ?? gmdate('Y-m-d'))) ?> · fixtures, probabilities and scores reported from the connected football data provider only.
-      Every analyzed match carries a usable odds prediction; thinner evidence is labelled and capped, never silently withheld — only data below the quality floor is refused, with its reason stated.
-    </p>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+<div class="football-console">
+  <section class="football-hero" aria-labelledby="football-heading">
+    <div>
+      <p class="football-eyebrow">TODAY'S FOOTBALL PREDICTIONS</p>
+      <h2 id="football-heading">Match predictions and odds, in one place</h2>
+      <p class="football-hero__copy">
+        <?= e((string) ($board['dateLabel'] ?? $date ?? gmdate('Y-m-d'))) ?>. Review each fixture’s model probability, verified bookmaker price, fair odds and potential edge. Prices are always separated from WINDELS estimates; no bet is placed from this screen.
+      </p>
+    </div>
+    <div class="football-hero__actions" aria-label="Football date navigation">
       <a class="btn small" href="/football?date=<?= e($yesterday ?? gmdate('Y-m-d', time() - 86400)) ?>">← Previous day</a>
       <a class="btn small" href="/football">Today</a>
       <a class="btn small" href="/football?date=<?= e($tomorrow ?? gmdate('Y-m-d', time() + 86400)) ?>">Next day →</a>
-      <form method="post" action="/football/sync" style="display:inline" onsubmit="return confirm('Pull fixtures for this date from the connected provider now? The provider\'s own rate limits and daily quota are respected.')">
+    </div>
+  </section>
+
+  <section class="football-actionbar" aria-label="Football actions">
+    <div class="football-actionbar__group">
+      <form method="post" action="/football/sync" onsubmit="return confirm('Pull fixtures for this date from the connected provider now? Provider rate limits and daily quotas are respected.')">
         <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
         <input type="hidden" name="date" value="<?= e((string) ($date ?? gmdate('Y-m-d'))) ?>">
-        <?php if (!empty($caps['sync'])): ?>
-          <button class="btn small primary">Sync this date</button>
-        <?php else: ?>
-          <button class="btn small" disabled title="Requires the sports.manage permission">Sync this date</button>
-        <?php endif; ?>
+        <button class="btn small primary" <?= empty($caps['sync']) ? 'disabled title="Requires the sports.manage permission"' : '' ?>>Sync this date</button>
       </form>
-      <form method="post" action="/football/predict" style="display:inline" onsubmit="return confirm('Generate predictions for the matches on this page that do not have one yet? At most 50 new predictions are created, and matches that already have one are reused, not regenerated.')">
+      <form method="post" action="/football/predict" onsubmit="return confirm('Generate predictions for unmatched fixtures on this page? At most 50 new predictions are created; stored predictions are reused.')">
         <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
         <input type="hidden" name="date" value="<?= e((string) ($date ?? gmdate('Y-m-d'))) ?>">
         <input type="hidden" name="page" value="<?= (int) ($page ?? 1) ?>">
         <input type="hidden" name="competition" value="<?= e((string) ($carry['competition'] ?? '')) ?>">
         <input type="hidden" name="market" value="<?= e((string) ($carry['market'] ?? '')) ?>">
         <input type="hidden" name="provider" value="<?= e((string) ($carry['provider'] ?? '')) ?>">
-        <?php if (!empty($caps['sync'])): ?>
-          <button class="btn small">Generate this page (max 50)</button>
-        <?php else: ?>
-          <button class="btn small" disabled title="Requires the sports.manage permission">Generate this page (max 50)</button>
-        <?php endif; ?>
+        <button class="btn small" <?= empty($caps['sync']) ? 'disabled title="Requires the sports.manage permission"' : '' ?>>Generate this page (max 50)</button>
       </form>
+    </div>
+    <div class="football-actionbar__group">
       <a class="btn small" href="/football/live">Live view</a>
       <a class="btn small" href="/football/models">Models &amp; calibration</a>
-      <a class="btn small" href="/sports" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700">🎯 Odds Prediction Ticket →</a>
+      <a class="btn small football-ticket-link" href="/sports">🎯 Odds prediction tickets</a>
     </div>
-  </div>
-</div>
-<?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
-<?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
+  </section>
 
-<?php if (!empty($diag['demoMode'])): ?>
-  <div class="notice warnbox"><b>DEMO / SANDBOX DATA</b> — the football rows in this deployment come from a simulated source. They are labelled and never mixed into real performance figures.</div>
-<?php endif; ?>
-<?php if (!empty($diag['message'])): ?>
-  <div class="notice warnbox"><b>Football data provider not connected.</b> Live fixtures and predictions are unavailable until a verified data source is configured. Nothing below is invented to fill the gap.</div>
-<?php endif; ?>
+  <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
+  <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
+  <?php if (!empty($diag['demoMode'])): ?><div class="notice warnbox"><b>DEMO / SANDBOX DATA</b> — these football rows are simulated and are never mixed into real-world performance figures.</div><?php endif; ?>
+  <?php if (!empty($diag['message'])): ?><div class="notice warnbox"><b>Football data provider not connected.</b> Live fixtures and prices are unavailable until a verified source is configured. Nothing below is fabricated to fill the gap.</div><?php endif; ?>
 
-<div class="grid cols-main">
-  <div class="stack">
-    <!-- ── the board (§10) ─────────────────────────────────────────────── -->
-    <div class="panel">
-      <h3>Today's football predictions — <?= e((string) ($board['date'] ?? '')) ?></h3>
-      <div class="body" style="padding-top:12px">
-        <div class="stat-grid">
-          <div class="stat"><div class="k">Fixtures found</div><div class="v"><?= (int) ($summary['fixtures'] ?? 0) ?></div></div>
-          <div class="stat"><div class="k">Analyzed</div><div class="v"><?= (int) ($summary['analyzed'] ?? 0) ?></div></div>
-          <div class="stat"><div class="k">Qualified</div><div class="v up"><?= (int) ($summary['qualified'] ?? 0) ?></div></div>
-          <div class="stat"><div class="k">Limited data</div><div class="v"><?= (int) ($summary['limited'] ?? 0) ?></div></div>
-          <div class="stat"><div class="k">Rejected</div><div class="v down"><?= (int) ($summary['rejected'] ?? 0) ?></div></div>
+  <div class="football-layout">
+    <div class="football-main stack">
+      <section class="panel football-section" aria-labelledby="day-overview-heading">
+        <div class="football-section__heading">
+          <div><p class="football-eyebrow">Day overview</p><h3 id="day-overview-heading"><?= e((string) ($board['date'] ?? $date ?? 'Fixtures')) ?></h3></div>
+          <span class="dim football-updated">Board read <?= e($kickoff($d['generatedAt'] ?? null, 'H:i')) ?></span>
         </div>
-        <p class="dim" style="font-size:11px;margin-top:8px">
-          Generated <?= e($kickoffLabel($d['generatedAt'] ?? null)) ?>.
-        </p>
-        <?php if (!empty($caps['sync'])): ?>
-          <!-- Model lifecycle state is internal governance information, not a
-               condition users must satisfy: predictions are generated and
-               published regardless of whether the model version has been
-               administratively marked ACTIVE. Shown to operators only, and
-               worded as status, never as a blocker. -->
-          <details style="margin-top:10px">
-            <summary class="dim" style="cursor:pointer;font-size:11px">Model governance (admin) — data-quality bands &amp; lifecycle state</summary>
-            <p class="dim" style="font-size:11px;margin:6px 0 0">
-              Data-quality bands: qualified ≥ <?= (int) ($board['thresholds']['dataQualityQualified'] ?? 70) ?>/100, limited <?= (int) ($board['thresholds']['dataQualityLimited'] ?? 50) ?>–<?= (int) ($board['thresholds']['dataQualityQualified'] ?? 70) - 1 ?>, rejected below <?= (int) ($board['thresholds']['dataQualityLimited'] ?? 50) ?> — these govern which predictions publish, not whether the module runs.
-              Model lifecycle state: <b><?= e((string) ($board['model']['label'] ?? 'none')) ?></b><?= !empty($board['model']['version']) ? ' · ' . e((string) $board['model']['version']) : '' ?> — informational only; predictions are generated at every lifecycle state and this never blocks the board above.
-            </p>
-            <?php if (!empty($board['model']['note'])): ?>
-              <p class="dim" style="font-size:11px;margin:6px 0 0"><?= e((string) $board['model']['note']) ?></p>
-            <?php endif; ?>
-          </details>
-        <?php endif; ?>
-        <?php if (in_array((string) ($board['state'] ?? ''), ['NO_FIXTURES_STORED', 'NO_PREDICTIONS_STORED', 'PAGE_BEYOND_LAST'], true)): ?>
-          <p class="dim" style="margin-top:12px"><?= e((string) ($board['message'] ?? '')) ?></p>
-        <?php endif; ?>
-
-        <?php
-        $pagination = is_array($board['pagination'] ?? null) ? $board['pagination'] : [];
-        $dateParam = (string) ($date ?? gmdate('Y-m-d'));
-        ?>
-        <?php if ($pagination !== []): ?>
-          <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
-            <?= $pager($pagination, $dateParam, $carry) ?>
-            <p class="dim" style="font-size:11px;margin:8px 0 0">
-              <?= (int) ($summary['analyzed'] ?? 0) ?> of <?= (int) ($summary['fixtures'] ?? 0) ?> matches on this date have a stored prediction ·
-              <?= (int) ($pagination['awaiting'] ?? 0) ?> of the <?= (int) ($pagination['returned'] ?? 0) ?> on this page are still unanalyzed.
-              Paging reads stored rows: it never regenerates a prediction, and generating a page creates at most <?= (int) ($pagination['maxLimit'] ?? 50) ?> new ones.
-            </p>
+        <div class="body">
+          <div class="stat-grid football-stat-grid">
+            <div class="stat"><div class="k">Fixtures found</div><div class="v"><?= (int) ($summary['fixtures'] ?? 0) ?></div><div class="trend">stored for this date</div></div>
+            <div class="stat"><div class="k">Analyzed</div><div class="v"><?= (int) ($summary['analyzed'] ?? 0) ?></div><div class="trend">prediction rows saved</div></div>
+            <div class="stat"><div class="k">Qualified</div><div class="v up"><?= (int) ($summary['qualified'] ?? 0) ?></div><div class="trend">verified data quality</div></div>
+            <div class="stat"><div class="k">Limited evidence</div><div class="v warn"><?= (int) ($summary['limited'] ?? 0) ?></div><div class="trend">usable with caution</div></div>
+            <div class="stat"><div class="k">Withheld</div><div class="v down"><?= (int) ($summary['rejected'] ?? 0) ?></div><div class="trend">below evidence floor</div></div>
           </div>
-        <?php endif; ?>
+          <?php $pagination = is_array($board['pagination'] ?? null) ? $board['pagination'] : []; ?>
+          <?php if ($pagination !== []): ?>
+            <div class="football-section__divider"></div>
+            <?= $pager($pagination, (string) ($date ?? gmdate('Y-m-d')), $carry) ?>
+            <p class="football-help">This page contains <?= (int) ($pagination['returned'] ?? 0) ?> stored fixture<?= (int) ($pagination['returned'] ?? 0) === 1 ? '' : 's' ?>. Paging only reads saved rows; it never refreshes prices or regenerates a prediction.</p>
+          <?php endif; ?>
+          <?php if (in_array((string) ($board['state'] ?? ''), ['NO_FIXTURES_STORED', 'NO_PREDICTIONS_STORED', 'PAGE_BEYOND_LAST'], true)): ?>
+            <div class="empty-state"><p><?= e((string) ($board['message'] ?? 'No stored fixtures are available for this selection.')) ?></p></div>
+          <?php endif; ?>
+        </div>
+      </section>
 
-        <!-- ── the selection (competition → premium league → market) ───────── -->
-        <?php if (!empty($isAdmin)): ?>
-        <div style="margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:10px;background:rgba(127,127,127,.04)">
-          <form method="get" action="/football" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
-            <input type="hidden" name="page" value="1">
-            <div>
-              <label class="dim" style="font-size:11px;display:block">Data Provider <?= $adminManagedBadge ?></label>
-              <?php if ($providerOptions === []): ?>
-                <select disabled style="min-width:200px"><option>No feed connected</option></select>
-              <?php elseif ($providerLocked || $selectorsLockedByAdmin): ?>
-                <select name="provider" disabled style="min-width:200px" title="<?= e($adminManagedTitle) ?>">
-                  <option value="AUTO" selected>Windels Smart Model</option>
-                </select>
-                <input type="hidden" name="provider" value="AUTO">
-              <?php else: ?>
-                <select name="provider" style="min-width:240px" title="Which feed answers this request. All providers lists every stored fixture and takes each match's data from the feed that has it; Auto / Smart picks from health, coverage, odds availability and rate limits; Multi-Provider takes each piece of data from the feed that has it.">
-                  <option value="<?= e(\AIWorkforce\Football\ProviderSelector::ALL_PROVIDERS) ?>"<?= $providerAllSelected ? ' selected' : '' ?>>
-                    All providers — every stored fixture
-                  </option>
-                  <?php $providerNumber = 0; ?>
+      <?php if ($isAdmin): ?>
+        <section class="panel football-section" aria-labelledby="football-filters-heading">
+          <div class="football-section__heading">
+            <div><p class="football-eyebrow">Board view</p><h3 id="football-filters-heading">Filter stored fixtures and markets</h3></div>
+            <span class="badge <?= strtoupper($providerMode) === 'MANUAL' ? 'b-amber' : 'b-green' ?>"><?= e($providerMode) ?> · <?= strtoupper($providerMode) === 'MANUAL' ? 'operator selection' : 'admin managed' ?></span>
+          </div>
+          <div class="body">
+            <form method="get" action="/football" class="football-filter-form">
+              <input type="hidden" name="page" value="1">
+              <label class="fld">Data provider
+                <select class="sel" name="provider" <?= $providerLocked ? 'disabled' : '' ?> title="Provider choice controls synced data; reading this board only uses stored rows.">
+                  <?php if ($providerOptions === []): ?><option value="">No feed connected</option><?php endif; ?>
                   <?php foreach ($providerOptions as $option): ?>
-                    <?php
-                    $value = strtoupper((string) ($option['value'] ?? ''));
-                    $isAuto = in_array($value, ['AUTO', 'SMART'], true);
-                    if (!$isAuto) $providerNumber++;
-                    $providerLabel = $isAuto ? 'Windels Smart Model' : 'Model ' . $providerNumber;
-                    // The AUTO entry is only marked when the operator pinned it
-                    // explicitly; an unpinned request already reads as the
-                    // "All providers" option above it.
-                    $isSelected = $selectedProvider === $value && !($providerAllSelected && $isAuto);
-                    ?>
-                    <option value="<?= e((string) ($option['value'] ?? '')) ?>"<?= $isSelected ? ' selected' : '' ?>>
-                      <?= e($providerLabel) ?>
-                    </option>
+                    <?php $value = (string) ($option['value'] ?? ''); ?>
+                    <option value="<?= e($value) ?>" <?= strtoupper($value) === $selectedProvider ? 'selected' : '' ?>><?= e((string) ($option['label'] ?? $value)) ?></option>
                   <?php endforeach; ?>
                 </select>
-              <?php endif; ?>
-            </div>
-            <div>
-              <label class="dim" style="font-size:11px;display:block">Select Competition <?= $adminManagedBadge ?></label>
-              <?php if ($selectorsLockedByAdmin): ?><input type="hidden" name="competition" value="<?= e((string) ($carry['competition'] ?? '')) ?>"><?php endif; ?>
-              <select name="competition"<?= $selectorDisabled ?> style="min-width:230px" title="<?= e($adminManagedTitle) ?>">
-                <?php if ($premiumOptions !== [] || $premiumAllScope): ?>
-                  <option value="<?= e($premiumAllKeyword) ?>"<?= $premiumAllScope ? ' selected' : '' ?>>All premium leagues (combined<?= $premiumAllMatches > 0 ? ', ' . $premiumAllMatches . ' matches' : '' ?>)</option>
-                <?php endif; ?>
-                <option value=""<?= !$premiumAllScope && $selectedExternal === '' ? ' selected' : '' ?>>All competitions (<?= (int) ($summary['fixtures'] ?? 0) ?> matches)</option>
-                <?php foreach ($competitions as $competition): ?>
-                  <?php $external = (string) ($competition['externalId'] ?? ''); ?>
-                  <option value="<?= e($external) ?>"<?= $selectedExternal === $external ? ' selected' : '' ?>>
-                    <?= e((string) ($competition['name'] ?? 'Unnamed competition')) ?><?= !empty($competition['country']) ? ' · ' . e((string) $competition['country']) : '' ?> (<?= (int) ($competition['matches'] ?? 0) ?>)
-                  </option>
-                <?php endforeach; ?>
-              </select>
-            </div>
-            <div>
-              <label class="dim" style="font-size:11px;display:block">Premium League <?= $adminManagedBadge ?></label>
-              <?php if ($selectorsLockedByAdmin): ?><input type="hidden" name="premium" value="<?= e($premiumHiddenValue) ?>"><?php endif; ?>
-              <select name="premium"<?= $selectorDisabled ?> style="min-width:240px" title="<?= e($adminManagedTitle) ?>" onchange="this.form.competition.value=this.value;this.form.submit();">
-                <option value=""<?= !$premiumAllScope && $selectedExternal === '' ? ' selected' : '' ?>><?= e($premiumNoneLabel) ?></option>
-                <?php if ($premiumOptions !== [] || $premiumAllScope): ?>
-                <option value="<?= e($premiumAllKeyword) ?>"<?= $premiumAllScope ? ' selected' : '' ?>>All premium leagues (combined<?= $premiumAllMatches > 0 ? ', ' . $premiumAllMatches . ' matches' : '' ?>)</option>
-                <?php endif; ?>
-                <?php foreach ($premiumOptions as $entry): ?>
-                  <?php $externalId = (string) ($entry['externalId'] ?? ''); ?>
-                  <option value="<?= e($externalId) ?>"<?= !$premiumAllScope && $selectedExternal === $externalId ? ' selected' : '' ?>>
-                    <?= e((string) ($entry['name'] ?? 'Premium League')) ?> (<?= (int) ($entry['matches'] ?? 0) ?> matches)<?= $externalId === (string) ($premium['externalId'] ?? '') ? ' · featured' : '' ?>
-                  </option>
-                <?php endforeach; ?>
-              </select>
-            </div>
-            <div>
-              <label class="dim" style="font-size:11px;display:block">Select Odds Prediction <?= $adminManagedBadge ?></label>
-              <?php if ($selectorsLockedByAdmin): ?><input type="hidden" name="market" value="<?= e($selectedMarket) ?>"><?php endif; ?>
-              <select name="market"<?= $selectorDisabled ?> style="min-width:250px" title="<?= e($adminManagedTitle) ?>">
-                <option value=""<?= $marketRequested === '' ? ' selected' : '' ?>>All markets — every fixture, default odds view</option>
-                <?php foreach ($marketList as $entry): ?>
-                  <?php $key = (string) ($entry['key'] ?? ''); ?>
-                  <option value="<?= e($key) ?>"<?= $marketRequested !== '' && $selectedMarket === $key ? ' selected' : '' ?>>
-                    <?= e((string) ($entry['label'] ?? $key)) ?><?= empty($entry['oddsAvailable']) && (string) ($entry['derivation'] ?? '') === 'NOT_MODELLED' ? ' — no stored data' : '' ?>
-                  </option>
-                <?php endforeach; ?>
-              </select>
-            </div>
-            <div>
-              <label class="dim" style="font-size:11px;display:block">Date <?= $adminManagedBadge ?></label>
-              <?php if ($selectorsLockedByAdmin): ?><input type="hidden" name="date" value="<?= e($dateParam) ?>"><?php endif; ?>
-              <input type="date" name="date" value="<?= e($dateParam) ?>"<?= $selectorDisabled ?> title="<?= e($adminManagedTitle) ?>">
-            </div>
-            <button class="btn small primary">Apply</button>
-          </form>
-          <p class="dim" style="font-size:11px;margin:8px 0 0">
-            <?= $selectorsLockedByAdmin ? 'These selections are set to AUTO and managed by the administrator; the visible controls are locked for operators.' : 'MANUAL mode is enabled by the administrator; operators may choose the provider, competition, premium league, market, and date.' ?>
-            Every selector also offers its all-value, so the page can list <b>every fixture at once</b> instead of one league or market at a time: <i>All providers</i> reads every connected feed's stored rows (each row names the feed behind it), <i>All competitions</i> and the Premium League selector's first option clear the league narrowing, <i>All premium leagues (combined)</i> narrows to every premium league on the date together, and <i>All markets</i> shows every fixture in the default odds view.
-            Competitions are listed from the provider feed — no league is offered that has no stored match.
-            The market is a view over the predictions already stored: changing it never regenerates a match.
-            The provider chosen here is the one a sync or a fetch reads; paging and market changes read stored rows and cost no provider call.
-          </p>
-        </div>
-        <?php endif; ?>
-
-        <!-- ── Top WINDELS Picks (the ranked reading of this page) ────────── -->
-        <?php $picksBlock = is_array($board['picks'] ?? null) ? $board['picks'] : []; ?>
-        <?php $picks = is_array($picksBlock['picks'] ?? null) ? $picksBlock['picks'] : []; ?>
-        <?php if ($picks !== []): ?>
-          <div style="margin-top:16px;padding:12px;border:1px solid var(--line);border-left:3px solid var(--violet,#6d28d9);border-radius:10px">
-            <h4 style="margin:0 0 4px">⭐ Top WINDELS Picks
-              <span class="dim" style="font-weight:400;font-size:11px">(<?= count($picks) ?> of <?= (int) ($picksBlock['eligible'] ?? 0) ?> eligible on this page · ranked by intelligence score, then value, then confidence)</span>
-            </h4>
-            <table style="width:100%;border-collapse:collapse;font-size:12px">
-              <thead>
-                <tr style="text-align:left;border-bottom:1px solid var(--line)">
-                  <th style="padding:4px 6px">#</th>
-                  <th style="padding:4px 6px">Match</th>
-                  <th style="padding:4px 6px">Pick</th>
-                  <th style="padding:4px 6px" class="mono" title="The WINDELS Intelligence Score — evidence quality, never the market price">Intelligence</th>
-                  <th style="padding:4px 6px" class="mono" title="The WINDELS model probability — never the bookmaker odds">WINDELS probability</th>
-                  <th style="padding:4px 6px" class="mono" title="The real bookmaker price, never a WINDELS figure">Market odds</th>
-                  <th style="padding:4px 6px" class="mono" title="WINDELS fair odds = 1 / model probability">WINDELS fair odds</th>
-                  <th style="padding:4px 6px" class="mono">Value</th>
-                  <th style="padding:4px 6px" class="mono">DQ</th>
-                  <th style="padding:4px 6px">Movement</th>
-                </tr>
-              </thead>
-              <tbody>
-                <?php foreach ($picks as $pick): ?>
-                  <tr style="border-bottom:1px solid var(--line)">
-                    <td style="padding:4px 6px" class="mono"><?= (int) ($pick['rank'] ?? 0) ?></td>
-                    <td style="padding:4px 6px">
-                      <?php $pickId = (int) ($pick['fixtureId'] ?? 0); ?>
-                      <?php if ($pickId > 0): ?>
-                        <a href="/football/match/<?= $pickId ?>" style="font-weight:600"><?= crest($pick['homeTeamLogo'] ?? null) ?><?= e((string) ($pick['homeTeam'] ?? '—')) ?> vs <?= crest($pick['awayTeamLogo'] ?? null) ?><?= e((string) ($pick['awayTeam'] ?? '—')) ?></a>
-                      <?php else: ?>
-                        <span style="font-weight:600"><?= crest($pick['homeTeamLogo'] ?? null) ?><?= e((string) ($pick['homeTeam'] ?? '—')) ?> vs <?= crest($pick['awayTeamLogo'] ?? null) ?><?= e((string) ($pick['awayTeam'] ?? '—')) ?></span>
-                      <?php endif; ?>
-                      <div class="dim" style="font-size:10px"><?= e((string) ($pick['kickoffLabel'] ?? '')) ?></div>
-                    </td>
-                    <td style="padding:4px 6px"><?= e((string) ($pick['selectionLabel'] ?? '—')) ?><?php if (!empty($pick['limitedEvidence'])): ?> <span class="badge b-amber" style="font-size:10px" title="Published on thinner evidence with capped confidence — usable with caution.">limited</span><?php endif; ?></td>
-                    <td style="padding:4px 6px" class="mono"><b><?= (int) ($pick['score'] ?? 0) ?></b>/100</td>
-                    <td style="padding:4px 6px" class="mono"><?= is_numeric($pick['probability'] ?? null) ? number_format((float) $pick['probability'] * 100, 1) . '%' : '—' ?></td>
-                    <td style="padding:4px 6px" class="mono"><?= is_numeric($pick['odds'] ?? null) ? number_format((float) $pick['odds'], 2) : '—' ?></td>
-                    <td style="padding:4px 6px" class="mono"><?= is_numeric($pick['fairOdds'] ?? null) ? number_format((float) $pick['fairOdds'], 2) : '—' ?></td>
-                    <td style="padding:4px 6px" class="mono <?= (float) ($pick['expectedValue'] ?? 0) >= 0 ? 'up' : 'down' ?>"
-                        title="<?= e((string) ($pick['classificationMeaning'] ?? '')) ?>"><?= e((string) ($pick['valueLabel'] ?? '')) ?> · 
-                      <?= is_numeric($pick['expectedValue'] ?? null) ? ($pick['expectedValue'] >= 0 ? '+' : '') . number_format((float) $pick['expectedValue'] * 100, 1) . '%' : e((string) ($pick['valueLabel'] ?? '—')) ?>
-                      <div class="dim" style="font-size:10px"><?= e((string) ($pick['valueLabel'] ?? '')) ?></div>
-                    </td>
-                    <td style="padding:4px 6px" class="mono"><?= (int) ($pick['dataQuality'] ?? 0) ?></td>
-                    <td style="padding:4px 6px">
-                      <?php $movement = (string) ($pick['stabilityState'] ?? ''); $movementWhy = (string) ($pick['stabilityReason'] ?? ''); ?>
-                      <?php if ($movement === \AIWorkforce\Football\StabilityMonitor::UNSTABLE): ?>
-                        <span class="down" style="font-size:10px" title="Excluded from the list when the movement crosses the unstable threshold; shown here only if the row was ranked before that check.">Prediction unstable — significant model movement</span>
-                      <?php elseif ($movement === \AIWorkforce\Football\StabilityMonitor::MOVED): ?>
-                        <span class="dim">moved</span>
-                      <?php elseif ($movement === \AIWorkforce\Football\StabilityMonitor::STABLE): ?>
-                        <span class="dim">stable</span>
-                      <?php else: ?>
-                        <span class="dim">first reading</span>
-                      <?php endif; ?>
-                    </td>
-                  </tr>
-                <?php endforeach; ?>
-              </tbody>
-            </table>
-            <p class="dim" style="font-size:10px;margin:8px 0 0"><?= e((string) ($picksBlock['disclaimer'] ?? '')) ?></p>
-            <?php if (!empty($picksBlock['excluded'])): ?>
-              <p class="dim" style="font-size:10px;margin:4px 0 0">
-                Not on the list, and why:
-                <?php foreach (array_slice((array) $picksBlock['excluded'], 0, 6) as $skipped): ?>
-                  <?= e(trim((string) ($skipped['homeTeam'] ?? '') . ' vs ' . (string) ($skipped['awayTeam'] ?? ''))) ?>
-                  — <?= e((string) ($skipped['reason'] ?? 'excluded')) ?><?= e('; ') ?>
-                <?php endforeach; ?>
-                <?php if (count((array) $picksBlock['excluded']) > 6): ?>+<?= count((array) $picksBlock['excluded']) - 6 ?> more<?php endif; ?>
-              </p>
-            <?php endif; ?>
+                <?php if ($providerLocked): ?><input type="hidden" name="provider" value="AUTO"><?php endif; ?>
+              </label>
+              <label class="fld">Competition
+                <select class="sel" name="competition">
+                  <option value="">All competitions</option>
+                  <option value="<?= e($premiumAllKeyword) ?>" <?= $premiumAllScope ? 'selected' : '' ?>>All premium leagues</option>
+                  <?php foreach ($competitions as $entry): ?>
+                    <?php $value = (string) ($entry['externalId'] ?? ''); ?>
+                    <option value="<?= e($value) ?>" <?= !$premiumAllScope && $selectedExternal === $value ? 'selected' : '' ?>><?= e((string) ($entry['name'] ?? 'Competition')) ?> · <?= (int) ($entry['matches'] ?? 0) ?> matches</option>
+                  <?php endforeach; ?>
+                </select>
+              </label>
+              <label class="fld">Premium league
+                <select class="sel" name="premium" onchange="this.form.competition.value=this.value">
+                  <option value="">No premium-only filter</option>
+                  <?php foreach ($premiumOptions as $entry): ?>
+                    <?php $value = (string) ($entry['externalId'] ?? ''); ?>
+                    <option value="<?= e($value) ?>" <?= !$premiumAllScope && $selectedExternal === $value ? 'selected' : '' ?>><?= e((string) ($entry['name'] ?? 'Premium league')) ?><?= $value === (string) ($premium['externalId'] ?? '') ? ' · featured' : '' ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </label>
+              <label class="fld">Odds market
+                <select class="sel" name="market">
+                  <option value="">All markets — match winner overview</option>
+                  <?php foreach ($marketList as $entry): ?>
+                    <?php $key = (string) ($entry['key'] ?? ''); ?>
+                    <option value="<?= e($key) ?>" <?= $marketRequested !== '' && $selectedMarket === $key ? 'selected' : '' ?>><?= e((string) ($entry['label'] ?? $key)) ?><?= empty($entry['oddsAvailable']) && (string) ($entry['derivation'] ?? '') === 'NOT_MODELLED' ? ' · price not stored' : '' ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </label>
+              <label class="fld">Date <input class="sel" type="date" name="date" value="<?= e((string) ($date ?? gmdate('Y-m-d'))) ?>"></label>
+              <button class="btn primary" type="submit">Apply view</button>
+            </form>
+            <p class="football-help">Filters only reorganize saved fixtures and stored odds. They do not spend a provider request or create a new prediction. The complete odds sheet remains available for every match below.</p>
           </div>
-        <?php endif; ?>
+        </section>
+      <?php endif; ?>
 
-        <!-- ── the page as a market table with transparent multi-market candidates ── -->
-        <?php $rows = is_array($board['rows'] ?? null) ? $board['rows'] : []; ?>
-        <?php if ($rows !== []): ?>
-          <div style="margin-top:16px;overflow-x:auto">
-            <h4 style="margin:0 0 8px"><?= e((string) ($marketBlock['label'] ?? 'Market')) ?> — transparent predictions
-              <span class="dim" style="font-weight:400;font-size:11px">(<?= count($rows) ?> match<?= count($rows) === 1 ? '' : 'es' ?> on this page · 50 per page · multiple markets per fixture from verified provider odds)</span>
-            </h4>
-            <table style="width:100%;border-collapse:collapse;font-size:11px">
-              <thead>
-                <tr style="text-align:left;border-bottom:1px solid var(--line)">
-                  <th style="padding:5px">Match ID</th>
-                  <th style="padding:5px">League</th>
-                  <th style="padding:5px">Home / Away</th>
-                  <th style="padding:5px">Kickoff</th>
-                  <th style="padding:5px">Provider</th>
-                  <th style="padding:5px">Market</th>
-                  <th style="padding:5px">Selection</th>
-                  <th style="padding:5px">Odds</th>
-                  <th style="padding:5px">Odds ts / freshness</th>
-                  <th style="padding:5px">Confidence</th>
-                  <th style="padding:5px">Data quality</th>
-                  <th style="padding:5px">Value / edge</th>
-                  <th style="padding:5px">Risk</th>
-                  <th style="padding:5px">Prediction status</th>
-                </tr>
-              </thead>
-              <tbody>
-                <?php foreach ($rows as $row): ?>
-                  <?php
-                  $m = is_array($row['market'] ?? null) ? $row['market'] : [];
-                  $odds = $m['odds'] ?? null;
-                  $intel = is_array($row['intelligence'] ?? null) ? $row['intelligence'] : [];
-                  $scoreBlock = is_array($intel['score'] ?? null) ? $intel['score'] : [];
-                  $freshBlock = is_array($intel['freshness'] ?? null) ? $intel['freshness'] : [];
-                  $fairBlockEarly = is_array($intel['fairValue'] ?? null) ? $intel['fairValue'] : [];
-                  $qualityBlock = is_array($intel['quality'] ?? null) ? $intel['quality'] : [];
-                  $rowPageId = (int) ($row['fixtureId'] ?? $row['fixtureDatabaseId'] ?? 0);
-                  $rowLeague = (string) ($row['league'] ?? $row['competition'] ?? '—');
-                  $rowProvider = (string) ($row['providerCode'] ?? $row['provider'] ?? '—');
-                  $rowProviderId = $row['providerId'] ?? '—';
-                  $rowCandidates = is_array($row['marketCandidates'] ?? null) ? $row['marketCandidates'] : [];
-                  if ($rowPageId <= 0) continue; // Contract: fixtureDatabaseId never 0 — never produce /football/match/0
-                  ?>
-                  <tr style="border-bottom:1px solid var(--line);background:rgba(109,40,217,.04)">
-                    <td style="padding:5px" class="mono"><div class="dim" style="font-size:9px">Match ID: <?= $rowPageId > 0 ? $rowPageId : '—' ?></div><a href="/football/match/<?= $rowPageId ?>" style="font-weight:700"><?= $rowPageId ?></a><div class="dim" style="font-size:9px"><?= e((string)($row['matchId']??'')) ?></div></td>
-                    <td style="padding:5px"><?= e($rowLeague) ?></td>
-                    <td style="padding:5px"><b><?= crest($row['homeTeamLogo'] ?? null) ?><?= e((string)($row['homeTeam']??'—')) ?></b> vs <b><?= crest($row['awayTeamLogo'] ?? null) ?><?= e((string)($row['awayTeam']??'—')) ?></b></td>
-                    <td style="padding:5px" class="mono"><?= e((string)($row['kickoffLabel']??$row['kickoff']??'—')) ?><div class="dim" style="font-size:9px"><?= e((string)($row['kickoffAt']??$row['kickoff']??'')) ?></div></td>
-                    <td style="padding:5px" class="mono"><?= e($rowProvider) ?><div class="dim" style="font-size:9px">ID <?= e((string)$rowProviderId) ?></div></td>
-                    <td style="padding:5px"><?= e((string)($m['key'] ?? $m['label'] ?? '—')) ?><div class="dim" style="font-size:9px"><?= e((string)($m['label']??'')) ?></div></td>
-                    <td style="padding:5px"><b><?= e((string)($m['selectionLabel'] ?? $m['selection'] ?? '—')) ?></b></td>
-                    <td style="padding:5px" class="mono">
-                      <?php if ($odds===null && is_numeric($fairBlockEarly['windelsFairOdds']??null)): ?>
-                        <?= number_format((float)$fairBlockEarly['windelsFairOdds'],2) ?><div class="dim" style="font-size:9px">WINDELS fair</div>
-                      <?php elseif ($odds===null): ?>
-                        <span class="down">DATA_UNAVAILABLE</span>
-                      <?php else: ?>
-                        <b><?= number_format((float)$odds,2) ?></b><div class="dim" style="font-size:9px">verified</div>
-                      <?php endif; ?>
-                    </td>
-                    <td style="padding:5px" class="mono">
-                      <?= e((string)($m['observedAt'] ?? $m['oddsTimestamp'] ?? '—')) ?>
-                      <?php if (!empty($freshBlock['clocks'])): foreach ($freshBlock['clocks'] as $clock): if (str_contains(strtolower((string)($clock['label']??'')), 'odds')): ?>
-                        <div class="dim" style="font-size:9px"><?= e((string)($clock['ageLabel']??'')) ?> · <?= e((string)($clock['state']??'')) ?></div>
-                      <?php endif; endforeach; endif; ?>
-                    </td>
-                    <td style="padding:5px" class="mono"><?= is_numeric($row['confidence']??null)?number_format((float)$row['confidence'],1).'%':'—' ?></td>
-                    <td style="padding:5px" class="mono"><?= (int)($row['dataQualityScore']??$row['dataQuality']??$qualityBlock['score']??0) ?>/100<div class="dim" style="font-size:9px"><?= e((string)($row['band']??$qualityBlock['band']??'')) ?></div></td>
-                    <td style="padding:5px" class="mono">
-                      <?php if (is_numeric($fairBlockEarly['expectedValue']??null)): ?>
-                        <b class="<?= (float)$fairBlockEarly['expectedValue']>=0?'up':'down' ?>"><?= ($fairBlockEarly['expectedValue']>=0?'+':'').number_format((float)$fairBlockEarly['expectedValue']*100,1) ?>%</b><div class="dim" style="font-size:9px"><?= e((string)($fairBlockEarly['valueLabel']??'')) ?></div>
-                      <?php else: ?><span class="dim">—</span><?php endif; ?>
-                    </td>
-                    <td style="padding:5px"><span class="badge <?= strtolower((string)($row['riskStatus']??$row['risk']['level']??''))==='low'?'b-green':(strtolower((string)($row['riskStatus']??$row['risk']['level']??''))==='medium'?'b-amber':'b-gray') ?>"><?= e((string)($row['riskStatus'] ?? $row['risk']['level'] ?? '—')) ?></span></td>
-                    <td style="padding:5px"><span class="badge <?= ($row['predictionStatus']??$row['analysisState']??'')==='ANALYZED'?'b-green':'b-gray' ?>"><?= e((string)($row['predictionStatus']??$row['analysisState']??'—')) ?></span></td>
-                  </tr>
-                  <?php foreach ($rowCandidates as $cand): ?>
-                    <?php
-                    $candOdds = $cand['odds'] ?? null;
-                    if (empty($cand['key']) || empty($cand['selection']) || $candOdds===null) continue;
-                    if ($candOdds <=1.0 || $candOdds>100.0 || !is_finite((float)$candOdds)) continue;
-                    ?>
-                    <tr style="border-bottom:1px dashed var(--line);background:rgba(0,0,0,.02)">
-                      <td style="padding:5px" class="mono dim"><?= $rowPageId ?> <span style="font-size:9px">candidate</span></td>
-                      <td style="padding:5px" class="dim"><?= e($rowLeague) ?></td>
-                      <td style="padding:5px" class="dim"><?= e((string)($row['homeTeam']??'—')) ?> vs <?= e((string)($row['awayTeam']??'—')) ?></td>
-                      <td style="padding:5px" class="mono dim"><?= e((string)($row['kickoffLabel']??'—')) ?></td>
-                      <td style="padding:5px" class="mono dim"><?= e($rowProvider) ?></td>
-                      <td style="padding:5px"><span class="badge b-violet" style="font-size:10px"><?= e((string)($cand['key']??'')) ?></span><div style="font-size:9px"><?= e((string)($cand['label']??'')) ?></div></td>
-                      <td style="padding:5px"><b><?= e((string)($cand['selectionLabel']??$cand['selection']??'—')) ?></b></td>
-                      <td style="padding:5px" class="mono"><b><?= number_format((float)$candOdds,2) ?></b><div class="dim" style="font-size:9px">verified</div></td>
-                      <td style="padding:5px" class="mono dim"><?= e((string)($cand['observedAt'] ?? '—')) ?></td>
-                      <td style="padding:5px" class="mono dim"><?= is_numeric($row['confidence']??null)?number_format((float)$row['confidence'],1).'%':'—' ?></td>
-                      <td style="padding:5px" class="mono dim"><?= (int)($row['dataQualityScore']??0) ?>/100</td>
-                      <td style="padding:5px" class="mono dim"><?php $cFair = is_array($cand['fairValue']??null)?$cand['fairValue']:[]; echo is_numeric($cFair['expectedValue']??$cand['edge']??null) ? ((($cFair['expectedValue']??$cand['edge'])>=0?'+':'').number_format((float)($cFair['expectedValue']??$cand['edge'])*100,1).'%') : '—'; ?></td>
-                      <td style="padding:5px" class="dim"><?= e((string)($cand['riskLevel']??$row['riskStatus']??'—')) ?></td>
-                      <td style="padding:5px" class="dim"><?= e((string)($row['predictionStatus']??'—')) ?></td>
+      <?php $picksBlock = is_array($board['picks'] ?? null) ? $board['picks'] : []; $picks = is_array($picksBlock['picks'] ?? null) ? $picksBlock['picks'] : []; ?>
+      <section class="panel football-section" aria-labelledby="top-picks-heading">
+        <div class="football-section__heading">
+          <div><p class="football-eyebrow">Ranked reading</p><h3 id="top-picks-heading">Top WINDELS Picks</h3></div>
+          <span class="dim"><?= (int) ($picksBlock['eligible'] ?? 0) ?> eligible on this page</span>
+        </div>
+        <div class="body">
+          <?php if ($picks === []): ?>
+            <p class="football-help">No fixtures currently satisfy the required prediction and data-quality thresholds. This is a finding, not a gap filled with a forced selection.</p>
+          <?php else: ?>
+            <div class="table-scroll">
+              <table class="tbl football-table">
+                <thead><tr><th>#</th><th>Match &amp; pick</th><th class="num">WINDELS probability</th><th class="num">Market odds</th><th class="num">WINDELS fair odds</th><th class="num">Value</th><th class="num">Intelligence</th><th>Movement</th></tr></thead>
+                <tbody>
+                  <?php foreach ($picks as $pick): ?>
+                    <?php $cardPageId = (int) ($pick['fixtureId'] ?? 0); $move = (string) ($pick['stabilityState'] ?? ''); ?>
+                    <tr>
+                      <td class="mono"><?= (int) ($pick['rank'] ?? 0) ?></td>
+                      <td><?php if ($cardPageId > 0): ?><a href="/football/match/<?= $cardPageId ?>" class="football-match-link"><?php endif; ?><?= crest($pick['homeTeamLogo'] ?? null) ?><?= e((string) ($pick['homeTeam'] ?? '—')) ?> vs <?= crest($pick['awayTeamLogo'] ?? null) ?><?= e((string) ($pick['awayTeam'] ?? '—')) ?><?php if ($cardPageId > 0): ?></a><?php endif; ?><div class="dim football-cell-note"><?= e((string) ($pick['selectionLabel'] ?? '—')) ?> · <?= e((string) ($pick['kickoffLabel'] ?? '')) ?></div></td>
+                      <td class="num mono"><?= $pct($pick['probability'] ?? null) ?></td>
+                      <td class="num mono"><?= $odds($pick['odds'] ?? null) ?></td>
+                      <td class="num mono"><?= $odds($pick['fairOdds'] ?? null) ?></td>
+                      <td class="num mono <?= (float) ($pick['expectedValue'] ?? -1) >= 0 ? 'up' : 'down' ?>"><?= $signedPct($pick['expectedValue'] ?? null) ?></td>
+                      <td class="num mono"><?= is_numeric($pick['score'] ?? null) ? (int) $pick['score'] . '/100' : '—' ?></td>
+                      <td><?php if ($move === \AIWorkforce\Football\StabilityMonitor::UNSTABLE): ?><span class="badge b-red" title="This prediction moved materially between stored readings.">Prediction unstable — significant model movement</span><?php elseif ($move === \AIWorkforce\Football\StabilityMonitor::MOVED): ?><span class="badge b-amber">Moved</span><?php else: ?><span class="badge b-gray">Stable / first reading</span><?php endif; ?></td>
                     </tr>
                   <?php endforeach; ?>
-                <?php endforeach; ?>
-              </tbody>
-            </table>
-            <p class="dim" style="font-size:11px;margin-top:8px">
-              Every row shows <b>Match ID</b> (internal DB fixture ID, never 0), <b>League</b>, <b>Home</b>, <b>Away</b>, <b>Kickoff</b>, <b>Provider</b> (code + ID), <b>Market</b>, <b>Selection</b>, <b>Odds</b> (verified provider odds only, validated >1.0 ≤100 finite, never invented), <b>Odds timestamp/freshness</b>, <b>Confidence</b>, <b>Data quality</b>, <b>Value/edge</b>, <b>Risk status</b>, <b>Prediction status</b>.
-              Multiple candidates per fixture (1X2, Over 1.5, BTTS, Double Chance) are shown where provider actually supplies them — deduplicated identical market/selection/bookmaker combos.
-              Next page uses already retrieved/stored fixture data and does NOT regenerate previous page.
-            </p>
-          </div>
-        <?php endif; ?>
-
-        <?php foreach ($board['categories'] ?? [] as $category): ?>
-          <?php $items = $category['items'] ?? []; ?>
-          <div style="margin-top:16px">
-            <h4 style="margin:0 0 8px"><?= e((string) ($category['label'] ?? '')) ?>
-              <span class="dim" style="font-weight:400;font-size:11px">(confidence <?= e((string) ($category['range'] ?? '')) ?> · <?= count($items) ?> fixture<?= count($items) === 1 ? '' : 's' ?>)</span>
-            </h4>
-            <?php if (!empty($category['note']) && $items !== []): ?>
-              <p class="dim" style="font-size:11px;margin:0 0 8px"><?= e((string) $category['note']) ?></p>
-            <?php endif; ?>
-            <?php if ($items === []): ?>
-              <p class="dim" style="font-size:12px;margin:0">No fixtures fall into this category. An empty category is a valid outcome — nothing is promoted into it.</p>
-            <?php else: ?>
-              <div class="stack" style="gap:10px">
-                <?php foreach ($items as $card): ?>
-                  <?php
-                  $prob = $card['probabilities'] ?? ['home' => null, 'draw' => null, 'away' => null];
-                  $probTotal = array_sum(array_map(static fn($v) => is_numeric($v) ? (float) $v * 100 : 0, $prob));
-                  ?>
-                  <div class="panel" style="box-shadow:none;border:1px solid var(--line)">
-                    <div class="body" style="padding:12px">
-                      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline">
-                        <div>
-                          <?php $cardPageId = (int) ($card['fixtureId'] ?? 0); ?>
-                          <?php if ($cardPageId > 0): ?>
-                            <a href="/football/match/<?= $cardPageId ?>" style="font-weight:700;font-size:15px"><?= e((string) ($card['predictedResultLabel'] ?? 'No prediction')) ?></a>
-                          <?php else: ?>
-                            <span style="font-weight:700;font-size:15px" title="This card has no stored fixture, so it has no match page."><?= e((string) ($card['predictedResultLabel'] ?? 'No prediction')) ?></span>
-                          <?php endif; ?>
-                          <div class="dim" style="font-size:11px">
-                            <?= e((string) ($card['competition'] ?? '—')) ?><?= !empty($card['country']) ? ' · ' . e((string) $card['country']) : '' ?> ·
-                            <?= e((string) ($card['kickoff'] ? gmdate('M j, H:i', (int) strtotime((string) $card['kickoff'])) : '—')) ?> UTC ·
-                            <?= e((string) ($card['status'] ?? 'UNKNOWN')) ?><?= $card['minute'] !== null ? ' · ' . (int) $card['minute'] . "'" : '' ?>
-                          </div>
-                        </div>
-                        <div style="text-align:right">
-                          <div class="mono" style="font-size:15px;font-weight:700"><?= e((string) ($card['predictedScore']['label'] ?? '—')) ?></div>
-                          <div class="dim" style="font-size:11px">predicted score</div>
-                        </div>
-                      </div>
-                      <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;font-size:12px">
-                        <span><?= crest($card['homeTeamLogo'] ?? null) ?><?= e((string) ($card['homeTeam'] ?? '—')) ?></span>
-                        <span class="dim">vs</span>
-                        <span><?= crest($card['awayTeamLogo'] ?? null) ?><?= e((string) ($card['awayTeam'] ?? '—')) ?></span>
-                        <?php if (!empty($card['score'])): ?><span class="badge b-violet">live <?= (int) $card['score']['home'] ?>–<?= (int) $card['score']['away'] ?></span><?php endif; ?>
-                        <?php if (!empty($card['highConfidence'])): ?><span class="badge b-green"><?= e((string) $card['highConfidence']) ?></span><?php endif; ?>
-                        <span class="badge <?= $bandClass((string) ($card['band'] ?? '')) ?>"><?= e((string) ($card['band'] ?? 'REJECTED')) ?> · <?= (int) ($card['dataQuality']['score'] ?? 0) ?>/100</span>
-                      </div>
-                      <div style="margin-top:10px">
-                        <div class="meter">
-                          <div class="row"><span class="dim">Home / Draw / Away</span><span class="mono dim"><?= $probTotal > 0 ? number_format($probTotal, 1) . '% covered' : '—' ?></span></div>
-                          <div class="bar" style="display:flex;overflow:hidden">
-                            <?php foreach (['home' => 'var(--violet)', 'draw' => 'var(--muted)', 'away' => 'var(--green)'] as $side => $colour): ?>
-                              <?php $width = is_numeric($prob[$side] ?? null) ? round((float) $prob[$side] * 100, 1) : 0; ?>
-                              <div style="width:<?= $width ?>%;background:<?= $colour ?>" title="<?= e($side) ?> <?= $width ?>%"></div>
-                            <?php endforeach; ?>
-                          </div>
-                          <div class="row" style="margin-top:6px;font-size:12px">
-                            <span>Home <b class="mono"><?= is_numeric($prob['home'] ?? null) ? number_format((float) $prob['home'] * 100, 1) . '%' : '—' ?></b></span>
-                            <span>Draw <b class="mono"><?= is_numeric($prob['draw'] ?? null) ? number_format((float) $prob['draw'] * 100, 1) . '%' : '—' ?></b></span>
-                            <span>Away <b class="mono"><?= is_numeric($prob['away'] ?? null) ? number_format((float) $prob['away'] * 100, 1) . '%' : '—' ?></b></span>
-                          </div>
-                        </div>
-                      </div>
-                      <div class="stat-grid" style="margin-top:10px">
-                        <div class="stat"><div class="k">Confidence</div><div class="v" style="font-size:14px"><?= e((string) ($card['confidenceLabel'] ?? '—')) ?></div></div>
-                        <div class="stat"><div class="k">Confidence basis</div><div class="v" style="font-size:12px"><?= e((string) ($card['confidenceBasis'] ?? 'RAW')) ?></div></div>
-                        <div class="stat"><div class="k">Expected total goals</div><div class="v" style="font-size:14px"><?= $dash($card['expectedTotalGoals'] ?? null, 2) ?></div></div>
-                        <div class="stat"><div class="k">Data quality</div><div class="v" style="font-size:14px"><?= (int) ($card['dataQuality']['score'] ?? 0) ?>/100</div></div>
-                      </div>
-                      <div class="table-scroll">
-                        <table class="tbl" style="margin-top:8px">
-                          <tbody>
-                            <?php foreach (['home' => 'Home form', 'away' => 'Away form'] as $side => $label): ?>
-                              <?php $form = $card['form'][$side] ?? null; $trend = $card['goalTrend'][$side] ?? []; ?>
-                              <tr>
-                                <td class="dim" style="width:120px"><?= e($label) ?></td>
-                                <td>
-                                  <?php if (empty($form) || ($form['state'] ?? '') === 'DATA_UNAVAILABLE'): ?>
-                                    <span class="dim">recent form unavailable</span>
-                                  <?php else: ?>
-                                    <span class="mono"><?= e((string) ($form['string'] ?? '—')) ?></span>
-                                    <span class="dim">(<?= (int) ($form['played'] ?? 0) ?> played, <?= (int) ($form['points'] ?? 0) ?> pts, <?= (int) ($form['goalsFor'] ?? 0) ?> scored / <?= (int) ($form['goalsAgainst'] ?? 0) ?> conceded)</span>
-                                    <span class="dim">· attack <?= $dash($trend['scored'] ?? null, 2) ?> · defence <?= $dash($trend['conceded'] ?? null, 2) ?> · clean sheets <?= $percent($trend['cleanSheetRate'] ?? null, 0) ?></span>
-                                  <?php endif; ?>
-                                </td>
-                              </tr>
-                            <?php endforeach; ?>
-                            <tr>
-                              <td class="dim">Head to head</td>
-                              <td>
-                                <?php if (empty($card['headToHead']) || ($card['headToHead']['state'] ?? '') === 'DATA_UNAVAILABLE'): ?>
-                                  <span class="dim">no head-to-head history stored</span>
-                                <?php else: ?>
-                                  <?= e((string) ($card['headToHead']['summary'] ?? '—')) ?>
-                                  <span class="dim">(weight <?= $dash($card['headToHead']['weight'] ?? null, 2) ?>)</span>
-                                <?php endif; ?>
-                              </td>
-                            </tr>
-                            <?php if (!empty($card['alternativeScores'])): ?>
-                              <tr>
-                                <td class="dim">Alternative scores</td>
-                                <td class="mono">
-                                  <?php foreach (array_slice((array) $card['alternativeScores'], 0, 3) as $alt): ?>
-                                    <?= e((string) ($alt['home'] ?? '?')) ?>–<?= e((string) ($alt['away'] ?? '?')) ?><?= isset($alt['probability']) ? ' (' . number_format((float) $alt['probability'] * 100, 1) . '%)' : '' ?>&nbsp;&nbsp;
-                                  <?php endforeach; ?>
-                                </td>
-                              </tr>
-                            <?php endif; ?>
-                            <tr>
-                              <td class="dim">Model</td>
-                              <td class="mono dim">
-                                <?= e((string) ($card['model']['version'] ?? '—')) ?> · <?= e((string) ($card['model']['status'] ?? 'DRAFT')) ?> ·
-                                calibration <?= e((string) ($card['model']['calibrationState'] ?? 'CALIBRATION_PENDING')) ?><?= !empty($card['model']['calibrationVersion']) ? ' (' . e((string) $card['model']['calibrationVersion']) . ')' : '' ?>
-                              </td>
-                            </tr>
-                            <tr>
-                              <td class="dim">Reasoning</td>
-                              <td><?= e((string) ($card['reason'] ?? '—')) ?></td>
-                            </tr>
-                            <tr>
-                              <td class="dim">Predicted at</td>
-                              <td class="mono dim"><?= e($kickoffLabel($card['generatedAt'] ?? null)) ?> · settlement <?= e((string) ($card['settlementState'] ?? 'OPEN')) ?></td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  </div>
-                <?php endforeach; ?>
-              </div>
-            <?php endif; ?>
-          </div>
-        <?php endforeach; ?>
-
-        <?php if (in_array((string) ($board['state'] ?? ''), ['LIMITED_ONLY', 'DEVELOPING_ONLY'], true) && !empty($board['message'])): ?>
-          <div class="notice info" style="margin-top:14px">
-            <?= e((string) $board['message']) ?>
-          </div>
-        <?php elseif (empty($board['categories']) || (string) ($board['state'] ?? '') === 'NONE_QUALIFIED'): ?>
-          <div class="notice warnbox" style="margin-top:14px">
-            <b>No fixtures currently satisfy the required prediction and data-quality thresholds.</b>
-            <?= $board['message'] !== null && (string) ($board['state'] ?? '') === 'NONE_QUALIFIED' ? '' : 'Fixtures below the threshold stay listed as limited data or rejected instead of being promoted into a prediction tier.' ?>
-          </div>
-        <?php endif; ?>
-
-        <?php if ($pagination !== []): ?>
-          <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--line)">
-            <?= $pager($pagination, $dateParam, $carry) ?>
-          </div>
-        <?php endif; ?>
-      </div>
-    </div>
-
-    <!-- ── live matches (§12) ──────────────────────────────────────────── -->
-    <div class="panel">
-      <h3>Live now</h3>
-      <div class="body" style="padding-top:12px">
-        <?php if (empty($live['matches'])): ?>
-          <?php $liveState = (string) ($live['state'] ?? 'NO_LIVE_FIXTURES'); ?>
-          <p class="dim"><?= $liveState === 'NO_LIVE_FIXTURES'
-              ? 'No match is in play in the stored data. The live sweep runs only while a fixture is reported live, so no provider request is wasted overnight.'
-              : e($liveState === 'DATA_UNAVAILABLE' ? 'Live state unavailable: the provider did not report any in-play fixture.' : $liveState) ?></p>
-        <?php else: ?>
-          <?php foreach ($live['matches'] as $match): $fx = $match['fixture'] ?? []; $lv = $match['live'] ?? []; $estimate = $match['liveModelEstimate'] ?? []; ?>
-            <div class="panel" style="box-shadow:none;border:1px solid var(--line);margin-bottom:10px">
-              <div class="body" style="padding:12px">
-                <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
-                  <div>
-                    <b><?= crest($fx['homeTeamLogo'] ?? null) ?><?= e((string) ($fx['homeTeam'] ?? '—')) ?></b>
-                    <span class="dim">vs</span>
-                    <b><?= crest($fx['awayTeamLogo'] ?? null) ?><?= e((string) ($fx['awayTeam'] ?? '—')) ?></b>
-                    <div class="dim" style="font-size:11px"><?= e((string) ($fx['competition'] ?? '—')) ?> · <?= e((string) ($lv['state'] ?? 'UNKNOWN')) ?><?= isset($lv['minute']) && $lv['minute'] !== null ? ' · ' . (int) $lv['minute'] . "'" : '' ?></div>
-                    <div class="dim mono" style="font-size:11px">Kickoff <?= e($kickoffStamp($fx['kickoff'] ?? null)) ?></div>
-                  </div>
-                  <div style="text-align:right">
-                    <div class="mono" style="font-size:18px;font-weight:700">
-                      <?php if (isset($lv['score']['home'], $lv['score']['away']) && is_numeric($lv['score']['home']) && is_numeric($lv['score']['away'])): ?>
-                        <?= (int) $lv['score']['home'] ?>–<?= (int) $lv['score']['away'] ?>
-                      <?php else: ?>
-                        <span class="dim">DATA_UNAVAILABLE</span>
-                      <?php endif; ?>
-                    </div>
-                    <div class="dim" style="font-size:11px">
-                      red cards
-                      <?= isset($lv['redCards']['home']) && is_numeric($lv['redCards']['home']) ? (int) $lv['redCards']['home'] : '—' ?>/<?= isset($lv['redCards']['away']) && is_numeric($lv['redCards']['away']) ? (int) $lv['redCards']['away'] : '—' ?>
-                    </div>
-                  </div>
-                </div>
-                <div class="table-scroll">
-                  <table class="tbl" style="margin-top:8px">
-                    <tbody>
-                      <tr>
-                        <td class="dim" style="width:150px">Pre-match prediction</td>
-                        <td>
-                          <?php if (empty($match['preMatchPrediction'])): ?>
-                            <span class="dim"><?= e((string) ($match['preMatchPredictionState'] ?? 'NOT_STORED')) ?> — no pre-match prediction is stored for this fixture. It is never written after kickoff.</span>
-                          <?php else: ?>
-                            <?php $pm = $match['preMatchPrediction']; ?>
-                            <span class="mono"><?= e((string) ($pm['prediction']['result'] ?? '—')) ?> <?= (int) ($pm['prediction']['predictedScore']['home'] ?? 0) ?>–<?= (int) ($pm['prediction']['predictedScore']['away'] ?? 0) ?></span>
-                            <span class="dim">· <?= $dash($pm['prediction']['confidence'] ?? null, 1) ?>% (<?= e((string) ($pm['prediction']['confidenceBasis'] ?? 'RAW')) ?>) · stored <?= e($kickoffLabel($pm['generatedAt'] ?? null)) ?></span>
-                          <?php endif; ?>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td class="dim">Live model estimate</td>
-                        <td>
-                          <?php if (($estimate['state'] ?? '') === 'ESTIMATE'): ?>
-                            <span class="mono"><?= e((string) ($estimate['resultLabel'] ?? '—')) ?></span>
-                            <span class="dim">· <?= $dash($estimate['confidence'] ?? null, 1) ?>% (<?= e((string) ($estimate['confidenceBasis'] ?? 'RAW')) ?>) · most likely <?= (int) ($estimate['mostLikelyScore']['home'] ?? 0) ?>–<?= (int) ($estimate['mostLikelyScore']['away'] ?? 0) ?></span>
-                          <?php else: ?>
-                            <span class="dim"><?= e((string) ($estimate['state'] ?? 'NO_ESTIMATE')) ?> — <?= e((string) ($estimate['reason'] ?? 'no live estimate is stored')) ?></span>
-                          <?php endif; ?>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                <p class="dim" style="font-size:11px;margin:6px 0 0">The pre-match prediction and the live estimate are separate stored rows: a kickoff never rewrites the original prediction.</p>
-              </div>
+                </tbody>
+              </table>
             </div>
-          <?php endforeach; ?>
-        <?php endif; ?>
-        <?php if (!empty($live['errors'])): ?>
-          <p class="dim" style="font-size:11px">Live refresh: <?= e(implode(' · ', array_slice((array) $live['errors'], 0, 3))) ?></p>
-        <?php endif; ?>
-      </div>
-    </div>
-  </div>
+          <?php endif; ?>
+          <p class="football-help"><?= e((string) ($picksBlock['disclaimer'] ?? 'Rankings are analytical comparisons, not a promise of a result.')) ?></p>
+        </div>
+      </section>
 
-  <div class="stack">
-    <!-- ── data feed + refresh diagnostics (§13/§16) ───────────────────── -->
-    <div class="panel">
-      <h3>Data feed</h3>
-      <div class="body" style="padding-top:12px">
-        <div class="table-scroll">
-          <table class="tbl">
-            <thead><tr><th>Check</th><th>State</th><th>Detail</th></tr></thead>
-            <tbody>
-              <?php foreach ($diag['checks'] ?? [] as $check): ?>
-                <tr>
-                  <td style="font-weight:700"><?= e((string) ($check['key'] ?? '')) ?></td>
-                  <td><span class="dot <?= $stateClass((string) ($check['state'] ?? '')) ?>"></span> <?= e((string) ($check['value'] ?? '—')) ?></td>
-                  <td class="dim" style="font-size:11px"><?= e((string) ($check['detail'] ?? '')) ?><?= !empty($check['action']) ? '<br><i>' . e((string) $check['action']) . '</i>' : '' ?></td>
-                </tr>
+      <?php $rows = is_array($board['rows'] ?? null) ? $board['rows'] : []; ?>
+      <section class="panel football-section" aria-labelledby="fixtures-heading">
+        <div class="football-section__heading">
+          <div><p class="football-eyebrow">Fixture odds board</p><h3 id="fixtures-heading">Every match and its available odds</h3></div>
+          <span class="dim"><?= count($rows) ?> match<?= count($rows) === 1 ? '' : 'es' ?> on this page</span>
+        </div>
+        <div class="body">
+          <p class="football-help">Open a fixture to see every stored market and every selection the provider priced: decimal odds, implied probability, WINDELS probability, fair odds, expected return, source and timestamp. “Provider price only” means the market is shown but is not modelled.</p>
+          <?php if ($rows === []): ?>
+            <div class="empty-state"><p>No fixtures match this page and filter selection.</p></div>
+          <?php else: ?>
+            <div class="football-fixture-list">
+              <?php foreach ($rows as $row): ?>
+                <?php
+                $rowPageId = (int) ($row['fixtureId'] ?? $row['fixtureDatabaseId'] ?? 0);
+                if ($rowPageId <= 0) continue;
+                $fixtureId = $rowPageId;
+                $primary = is_array($row['market'] ?? null) ? $row['market'] : [];
+                $allMarkets = is_array($row['marketCandidates'] ?? null) ? $row['marketCandidates'] : [];
+                $pricedSelections = 0;
+                foreach ($allMarkets as $candidate) foreach ((array) ($candidate['outcomes'] ?? []) as $outcome) if (($outcome['oddsState'] ?? '') === \AIWorkforce\Football\PredictionMarkets::STATE_AVAILABLE) $pricedSelections++;
+                $primaryValue = is_array($primary['value'] ?? null) ? $primary['value'] : [];
+                $primaryPricing = is_array($primary['pricing'] ?? null) ? $primary['pricing'] : [];
+                ?>
+                <article class="football-fixture" id="fixture-<?= $fixtureId ?>">
+                  <header class="football-fixture__header">
+                    <div class="football-fixture__identity">
+                      <div class="football-fixture__meta"><span><?= e((string) ($row['league'] ?? $row['competition'] ?? '—')) ?></span><span>·</span><span><?= e($kickoff($row['kickoffAt'] ?? $row['kickoff'] ?? null)) ?></span><span>·</span><span><?= e((string) ($row['status'] ?? 'UNKNOWN')) ?></span></div>
+                      <h4><a href="/football/match/<?= $rowPageId ?>"><?= crest($row['homeTeamLogo'] ?? null, 22) ?><?= e((string) ($row['homeTeam'] ?? '—')) ?> <span>vs</span> <?= crest($row['awayTeamLogo'] ?? null, 22) ?><?= e((string) ($row['awayTeam'] ?? '—')) ?></a></h4>
+                    </div>
+                    <div class="football-fixture__badges">
+                      <span class="badge <?= $bandClass((string) ($row['band'] ?? '')) ?>">DQ <?= (int) ($row['dataQualityScore'] ?? $row['dataQuality'] ?? 0) ?>/100</span>
+                      <span class="badge <?= $bandClass((string) ($row['riskStatus'] ?? $row['risk']['level'] ?? '')) ?>"><?= e((string) ($row['riskStatus'] ?? $row['risk']['level'] ?? 'UNKNOWN')) ?> risk</span>
+                      <span class="badge <?= ($row['predictionStatus'] ?? '') === 'ANALYZED' ? 'b-green' : 'b-gray' ?>"><?= e((string) ($row['predictionStatus'] ?? 'NOT_ANALYZED')) ?></span>
+                    </div>
+                  </header>
+                  <div class="football-fixture__summary">
+                    <div><span class="football-summary-label">Overview market</span><b><?= e((string) ($primary['label'] ?? $marketBlock['label'] ?? 'Match Winner')) ?></b><span><?= e((string) ($primary['selectionLabel'] ?? 'No selection')) ?></span></div>
+                    <div><span class="football-summary-label">WINDELS probability</span><b class="mono"><?= $pct($primary['probability'] ?? null) ?></b><span><?= e((string) ($primary['source'] ?? '')) ?></span></div>
+                    <div><span class="football-summary-label">Bookmaker odds</span><b class="mono"><?= $odds($primary['odds'] ?? null) ?></b><span><?= is_numeric($primary['odds'] ?? null) ? 'verified provider price' : 'UNPRICED' ?></span></div>
+                    <div><span class="football-summary-label">Potential edge</span><b class="mono <?= (float) ($primaryValue['expectedValue'] ?? -1) >= 0 ? 'up' : 'down' ?>"><?= $signedPct($primaryValue['expectedValue'] ?? null) ?></b><span><?= e((string) ($primaryValue['valueLabel'] ?? 'No value verdict')) ?></span></div>
+                    <div><span class="football-summary-label">Confidence</span><b class="mono"><?= $dash($row['confidence'] ?? null) ?>%</b><span><?= e((string) ($row['band'] ?? '')) ?></span></div>
+                  </div>
+                  <details class="football-odds-disclosure">
+                    <summary><span><b>All available odds</b> <span class="dim">· <?= count($allMarkets) ?> priced market<?= count($allMarkets) === 1 ? '' : 's' ?> · <?= $pricedSelections ?> quoted selection<?= $pricedSelections === 1 ? '' : 's' ?></span></span><span class="football-disclosure-action">Open sheet</span></summary>
+                    <div class="football-odds-sheet">
+                      <?php if ($allMarkets === []): ?>
+                        <p class="football-help">No verified provider prices are stored for this match yet. The model overview above remains separate from bookmaker odds.</p>
+                      <?php endif; ?>
+                      <?php foreach ($allMarkets as $candidate): ?>
+                        <?php
+                        $outcomes = is_array($candidate['outcomes'] ?? null) ? $candidate['outcomes'] : [];
+                        $pricing = is_array($candidate['pricing'] ?? null) ? $candidate['pricing'] : [];
+                        $providerOnly = (string) ($candidate['source'] ?? '') === \AIWorkforce\Football\PredictionMarkets::SOURCE_ODDS;
+                        ?>
+                        <section class="football-market-card">
+                          <header>
+                            <div><p><?= e((string) ($candidate['group'] ?? 'Market')) ?></p><h5><?= e((string) ($candidate['label'] ?? $candidate['key'] ?? 'Market')) ?></h5></div>
+                            <div class="football-market-card__badges"><span class="badge <?= $providerOnly ? 'b-amber' : 'b-blue' ?>"><?= $providerOnly ? 'Provider price only' : 'WINDELS modelled' ?></span><span class="badge <?= $bandClass((string) ($candidate['riskLevel'] ?? '')) ?>"><?= e((string) ($candidate['riskLevel'] ?? 'UNKNOWN')) ?> risk</span></div>
+                          </header>
+                          <div class="table-scroll">
+                            <table class="tbl football-odds-table">
+                              <thead><tr><th>Selection</th><th class="num">WINDELS probability</th><th class="num">Bookmaker odds</th><th class="num">Implied probability</th><th class="num">WINDELS fair odds</th><th class="num">Expected return</th><th>Quote information</th></tr></thead>
+                              <tbody>
+                                <?php foreach ($outcomes as $outcome): ?>
+                                  <?php $expected = $outcome['expectedValue'] ?? null; ?>
+                                  <tr>
+                                    <td><b><?= e((string) ($outcome['label'] ?? $outcome['selection'] ?? '—')) ?></b><?php if (!empty($outcome['note'])): ?><div class="dim football-cell-note"><?= e((string) $outcome['note']) ?></div><?php endif; ?></td>
+                                    <td class="num mono"><?= $pct($outcome['probability'] ?? null) ?></td>
+                                    <td class="num mono"><?= is_numeric($outcome['odds'] ?? null) ? $odds($outcome['odds']) : 'UNPRICED' ?></td>
+                                    <td class="num mono"><?= $pct($outcome['impliedProbability'] ?? null) ?></td>
+                                    <td class="num mono"><?= $odds($outcome['windelsFairOdds'] ?? null) ?></td>
+                                    <td class="num mono <?= is_numeric($expected) && (float) $expected >= 0 ? 'up' : (is_numeric($expected) ? 'down' : 'dim') ?>"><?= $signedPct($expected) ?></td>
+                                    <td class="football-quote"><span><?= e((string) ($outcome['oddsSource'] ?? '—')) ?></span><small><?= e($kickoff($outcome['oddsObservedAt'] ?? null, 'Y-m-d H:i')) ?></small><?php if ((int) ($outcome['quoteCount'] ?? 0) > 1): ?><small><?= (int) $outcome['quoteCount'] ?> quotes · <?= $odds($outcome['oddsLow'] ?? null) ?>–<?= $odds($outcome['oddsHigh'] ?? null) ?></small><?php endif; ?></td>
+                                  </tr>
+                                <?php endforeach; ?>
+                              </tbody>
+                            </table>
+                          </div>
+                          <footer><span><?= e((string) ($candidate['basis'] ?? '')) ?></span><span>Pricing: <?= e((string) ($pricing['state'] ?? 'UNPRICED')) ?><?php if (is_numeric($pricing['marginPoints'] ?? null)): ?> · market margin <?= $dash($pricing['marginPoints'], 2) ?>pp<?php endif; ?><?php if (!empty($pricing['pricedAt'])): ?> · latest <?= e($kickoff($pricing['pricedAt'], 'Y-m-d H:i')) ?><?php endif; ?></span></footer>
+                        </section>
+                      <?php endforeach; ?>
+                      <p class="football-odds-sheet__note">Bookmaker odds are provider quotes. WINDELS fair odds are 1 ÷ model probability; expected return is shown only where a model probability and a valid price can be compared. Market margin is calculated only for a complete mutually exclusive price sheet.</p>
+                    </div>
+                  </details>
+                  <footer class="football-fixture__footer"><span>Match ID: <?= $rowPageId > 0 ? $rowPageId : '—' ?></span><span>Provider <b class="mono"><?= e((string) ($row['providerCode'] ?? '—')) ?></b></span><span>Odds updated <b class="mono"><?= e($kickoff($primaryPricing['pricedAt'] ?? null, 'Y-m-d H:i')) ?></b></span><a href="/football/match/<?= $fixtureId ?>">Open full match analysis →</a></footer>
+                </article>
               <?php endforeach; ?>
-            </tbody>
-          </table>
+            </div>
+          <?php endif; ?>
+          <?php if ($pagination !== []): ?><div class="football-section__divider"></div><?= $pager($pagination, (string) ($date ?? gmdate('Y-m-d')), $carry) ?><?php endif; ?>
         </div>
-        <?php if (empty($diag['checks'])): ?>
-          <p class="dim">Diagnostics unavailable: the module could not read its own state.</p>
-        <?php endif; ?>
-        <?php if (!empty($diag['blockers'])): ?>
-          <p style="font-size:12px;margin-top:10px"><b>Blockers:</b> <span class="mono"><?= e(implode(', ', (array) $diag['blockers'])) ?></span></p>
-        <?php endif; ?>
-        <?php if (!empty($diag['warnings'])): ?>
-          <p class="dim" style="font-size:12px;margin-top:6px"><b>Warnings:</b> <span class="mono"><?= e(implode(', ', (array) $diag['warnings'])) ?></span> — a warning never blocks a prediction by itself.</p>
-        <?php endif; ?>
-        <?php if (!empty($caps['settle'])): ?>
-          <form method="post" action="/football/settle" style="margin-top:10px">
-            <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
-            <button class="btn small">Run settlement sweep</button>
-          </form>
-        <?php else: ?>
-          <button class="btn small" disabled title="Requires the sports.settle permission" style="margin-top:10px">Run settlement sweep (needs sports.settle)</button>
-        <?php endif; ?>
-      </div>
-    </div>
+      </section>
 
-    <!-- ── 30-day performance, once (§15) ──────────────────────────────── -->
-    <div class="panel">
-      <h3>30-day performance (settled predictions)</h3>
-      <div class="body" style="padding-top:12px">
-        <div class="stat-grid">
-          <div class="stat"><div class="k">Predictions evaluated</div><div class="v"><?= (int) ($perf['evaluatedPredictions'] ?? 0) ?></div></div>
-          <div class="stat"><div class="k">Correct results</div><div class="v"><?= (int) ($perf['correctResults'] ?? 0) ?></div></div>
-          <div class="stat"><div class="k">Result accuracy</div><div class="v"><?= $percent($perf['resultAccuracy'] ?? null) ?></div></div>
-          <div class="stat"><div class="k">Correct exact scores</div><div class="v"><?= (int) ($perf['correctScores'] ?? 0) ?></div></div>
-          <div class="stat"><div class="k">Correct-score accuracy</div><div class="v"><?= $percent($perf['exactScoreAccuracy'] ?? null, 2) ?></div></div>
-          <div class="stat"><div class="k">Avg confidence</div><div class="v"><?= $dash($perf['averageConfidence'] ?? null) ?>%</div></div>
-          <div class="stat"><div class="k">Brier score</div><div class="v mono"><?= $dash($perf['brier'] ?? null, 4) ?></div></div>
-          <div class="stat"><div class="k">Log loss</div><div class="v mono"><?= $dash($perf['logLoss'] ?? null, 4) ?></div></div>
-          <div class="stat"><div class="k">ECE</div><div class="v mono"><?= $dash($perf['ece'] ?? null, 4) ?></div></div>
-          <div class="stat"><div class="k">Avg data quality</div><div class="v"><?= $dash($perf['averageDataQuality'] ?? null) ?>/100</div></div>
-          <div class="stat"><div class="k">Avg goal error</div><div class="v mono"><?= $dash($perf['averageGoalError'] ?? null, 2) ?></div></div>
-          <div class="stat"><div class="k">Window</div><div class="v" style="font-size:12px"><?= (int) ($perf['windowDays'] ?? 30) ?> days</div></div>
-        </div>
-        <?php if (($perf['state'] ?? '') !== 'MEASURED'): ?>
-          <p class="dim" style="margin-top:10px">No settled predictions yet. Historical performance metrics will appear after predicted matches have completed.</p>
-        <?php endif; ?>
-        <?php if (!empty($perf['note'])): ?>
-          <p class="dim" style="font-size:11px;margin-top:6px"><?= e((string) $perf['note']) ?></p>
-        <?php endif; ?>
-        <?php if (!empty($perf['byModel'])): ?>
-          <div class="table-scroll">
-            <table class="tbl" style="margin-top:10px">
-              <thead><tr><th>Model version</th><th class="num">Evaluated</th><th class="num">Result acc.</th><th class="num">Exact-score acc.</th><th class="num">Brier</th></tr></thead>
-              <tbody>
-                <?php foreach ($perf['byModel'] as $row): ?>
-                  <tr>
-                    <td class="mono"><?= e((string) ($row['modelVersion'] ?? '')) ?> <span class="dim"><?= e((string) ($row['status'] ?? '')) ?></span></td>
-                    <td class="num"><?= (int) ($row['evaluated'] ?? 0) ?></td>
-                    <td class="num"><?= $percent($row['resultAccuracy'] ?? null) ?></td>
-                    <td class="num"><?= $percent($row['exactScoreAccuracy'] ?? null, 2) ?></td>
-                    <td class="num mono"><?= $dash($row['brier'] ?? null, 4) ?></td>
-                  </tr>
-                <?php endforeach; ?>
-              </tbody>
-            </table>
+      <section class="panel football-section" aria-labelledby="performance-heading">
+        <div class="football-section__heading"><div><p class="football-eyebrow">Measured results</p><h3>30-day performance (settled predictions)</h3></div><span class="dim">settled predictions only</span></div>
+        <div class="body">
+          <div class="stat-grid football-stat-grid football-stat-grid--compact">
+            <div class="stat"><div class="k">Evaluated</div><div class="v"><?= (int) ($perf['evaluatedPredictions'] ?? 0) ?></div></div>
+            <div class="stat"><div class="k">Result accuracy</div><div class="v"><?= $pct($perf['resultAccuracy'] ?? null) ?></div></div>
+            <div class="stat"><div class="k">Exact-score accuracy</div><div class="v"><?= $pct($perf['exactScoreAccuracy'] ?? null, 2) ?></div></div>
+            <div class="stat"><div class="k">Brier score</div><div class="v mono"><?= $dash($perf['brier'] ?? null, 4) ?></div></div>
+            <div class="stat"><div class="k">Avg. confidence</div><div class="v"><?= $dash($perf['averageConfidence'] ?? null) ?>%</div></div>
+            <div class="stat"><div class="k">Avg. data quality</div><div class="v"><?= $dash($perf['averageDataQuality'] ?? null) ?>/100</div></div>
           </div>
-        <?php endif; ?>
-      </div>
-    </div>
-
-    <!-- ── model + calibration summary (details on /football/models) ───── -->
-    <div class="panel">
-      <h3>Model &amp; calibration</h3>
-      <div class="body" style="padding-top:12px">
-        <div class="table-scroll">
-          <table class="tbl">
-            <tbody>
-              <tr><td class="dim" style="width:130px">State</td><td><span class="dot <?= $stateClass((string) ($models['state'] ?? '')) ?>"></span> <?= e((string) ($models['label'] ?? 'no model loaded')) ?></td></tr>
-              <tr><td class="dim">Active version</td><td class="mono"><?= e((string) ($models['activeModel']['version'] ?? '—')) ?></td></tr>
-              <tr><td class="dim">Calibration</td><td class="mono"><?= e((string) ($models['calibration']['calibrationVersion'] ?? ($models['calibration']['status'] ?? 'CALIBRATION_PENDING'))) ?> · <?= (int) ($models['calibration']['samples'] ?? 0) ?> samples</td></tr>
-              <tr><td class="dim">Approved calibrations</td><td class="mono"><?= (int) ($models['approvedCalibrationCount'] ?? 0) ?></td></tr>
-            </tbody>
-          </table>
+          <?php if (($perf['state'] ?? '') !== 'MEASURED'): ?><p class="football-help">No settled predictions yet. Historical accuracy and calibration metrics will appear after predicted matches complete.</p><?php endif; ?>
+          <?php if (!empty($perf['note'])): ?><p class="football-help"><?= e((string) $perf['note']) ?></p><?php endif; ?>
         </div>
-        <?php if (!empty($models['reason'])): ?><p class="dim" style="font-size:11px;margin-top:8px"><?= e((string) $models['reason']) ?></p><?php endif; ?>
-        <p style="margin-top:8px"><a class="btn small" href="/football/models">Models &amp; calibration — full state, history and approvals</a></p>
-      </div>
+      </section>
     </div>
 
-    <!-- ── refresh schedule (§13) ───────────────────────────────────────── -->
-    <div class="panel">
-      <h3>Refresh schedule</h3>
-      <div class="body" style="padding-top:12px">
-        <p class="dim" style="font-size:11px;margin-top:0">Cadence is provider-aware: each job runs only when its interval has elapsed, the provider is not in backoff, it was not asked to defer, and there is work waiting. Next wake: <span class="mono"><?= e($kickoffLabel($diag['cadence']['nextWakeAt'] ?? null)) ?></span></p>
-        <div class="table-scroll">
-          <table class="tbl">
-            <thead><tr><th>Job</th><th class="num">Interval</th><th>Status</th><th class="num">Requests</th></tr></thead>
-            <tbody>
-              <?php foreach (($diag['cadence']['jobs'] ?? []) as $job): ?>
-                <tr>
-                  <td class="mono"><?= e(str_replace('football-', '', (string) ($job['job'] ?? ''))) ?></td>
-                  <td class="num dim"><?= (int) ($job['interval'] ?? 0) ?>s</td>
-                  <td>
-                    <?php if (!empty($job['due'])): ?><span class="badge b-green">DUE</span>
-                    <?php else: ?><span class="badge b-gray"><?= e((string) ($job['reason'] ?? 'DUE')) ?></span><?php endif; ?>
-                    <?php if (!empty($job['nextRunAt'])): ?><div class="dim" style="font-size:10px">next <?= e(gmdate('H:i', (int) strtotime((string) $job['nextRunAt']))) ?> UTC</div><?php endif; ?>
-                  </td>
-                  <td class="num mono"><?= $job['requests'] === null ? '—' : (int) $job['requests'] ?></td>
-                </tr>
+    <aside class="football-side stack" aria-label="Football operational context">
+      <section class="panel football-section football-reading-guide">
+        <div class="football-section__heading"><div><p class="football-eyebrow">Reading the board</p><h3>Keep the numbers separate</h3></div></div>
+        <div class="body">
+          <dl>
+            <div><dt>WINDELS probability</dt><dd>The model’s estimated chance from stored match data.</dd></div>
+            <div><dt>Market odds</dt><dd>The decimal bookmaker price supplied by the provider.</dd></div>
+            <div><dt>WINDELS fair odds</dt><dd>1 ÷ model probability. This is not a bookmaker offer.</dd></div>
+            <div><dt>Potential edge</dt><dd>The model/price comparison, not a guarantee and not an instruction to bet. No selection is guaranteed.</dd></div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="panel football-section" aria-labelledby="live-heading">
+        <div class="football-section__heading"><div><p class="football-eyebrow">In play</p><h3>Live now</h3></div><a class="btn small" href="/football/live">Refresh live</a></div>
+        <div class="body">
+          <?php $liveMatches = is_array($live['matches'] ?? null) ? $live['matches'] : []; ?>
+          <?php if ($liveMatches === []): ?><p class="football-help">No match is in play in the stored data. The live sweep runs only while a fixture is reported live.</p><?php else: ?>
+            <div class="football-live-list">
+              <?php foreach ($liveMatches as $liveMatch): ?>
+                <?php $fx = is_array($liveMatch['fixture'] ?? null) ? $liveMatch['fixture'] : []; $liveState = is_array($liveMatch['live'] ?? null) ? $liveMatch['live'] : []; ?>
+                <div>
+                  <b><?= crest($fx['homeTeamLogo'] ?? null) ?><?= e((string) ($fx['homeTeam'] ?? '—')) ?> <?= isset($liveState['score']['home']) ? (int) $liveState['score']['home'] : '—' ?>–<?= isset($liveState['score']['away']) ? (int) $liveState['score']['away'] : '—' ?> <?= crest($fx['awayTeamLogo'] ?? null) ?><?= e((string) ($fx['awayTeam'] ?? '—')) ?></b>
+                  <span><?= e((string) ($fx['competition'] ?? '—')) ?> · <?= e((string) ($liveState['state'] ?? 'LIVE')) ?><?= isset($liveState['minute']) && $liveState['minute'] !== null ? ' · ' . (int) $liveState['minute'] . "'" : '' ?></span>
+                  <span class="mono">Kickoff <?= e($kickoffStamp($fx['kickoff'] ?? null)) ?></span>
+                </div>
               <?php endforeach; ?>
-            </tbody>
-          </table>
+            </div>
+            <p class="football-help">The pre-match prediction and live estimate are separate stored rows; the original prediction is never rewritten after kickoff.</p>
+          <?php endif; ?>
+          <?php if (!empty($live['errors'])): ?><p class="football-help">Live refresh: <?= e(implode(' · ', array_slice((array) $live['errors'], 0, 3))) ?></p><?php endif; ?>
         </div>
-      </div>
-    </div>
+      </section>
+
+      <section class="panel football-section" aria-labelledby="feed-heading">
+        <div class="football-section__heading"><div><p class="football-eyebrow">Data health</p><h3 id="feed-heading">Data feed</h3></div></div>
+        <div class="body">
+          <?php if (empty($diag['checks'])): ?><p class="football-help">Diagnostics are unavailable; the module could not read its own stored state.</p><?php else: ?>
+            <div class="football-check-list">
+              <?php foreach ($diag['checks'] as $check): ?><div><span class="dot <?= $stateClass((string) ($check['state'] ?? '')) ?>"></span><div><b><?= e((string) ($check['key'] ?? 'Check')) ?></b><small><?= e((string) ($check['detail'] ?? $check['value'] ?? '—')) ?></small></div></div><?php endforeach; ?>
+            </div>
+          <?php endif; ?>
+          <?php if (!empty($diag['blockers'])): ?><p class="football-help"><b>Blockers:</b> <?= e(implode(', ', (array) $diag['blockers'])) ?></p><?php endif; ?>
+          <?php if (!empty($caps['settle'])): ?><form method="post" action="/football/settle" style="margin-top:12px"><input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><button class="btn small">Run settlement sweep</button></form><?php endif; ?>
+        </div>
+      </section>
+
+      <section class="panel football-section" aria-labelledby="model-heading">
+        <div class="football-section__heading"><div><p class="football-eyebrow">Governance</p><h3 id="model-heading">Model &amp; calibration</h3></div></div>
+        <div class="body">
+          <dl class="football-key-values">
+            <div><dt>State</dt><dd><span class="dot <?= $stateClass((string) ($models['state'] ?? '')) ?>"></span> <?= e((string) ($models['label'] ?? 'No model loaded')) ?></dd></div>
+            <div><dt>Active version</dt><dd class="mono"><?= e((string) ($models['activeModel']['version'] ?? '—')) ?></dd></div>
+            <div><dt>Calibration</dt><dd class="mono"><?= e((string) ($models['calibration']['calibrationVersion'] ?? ($models['calibration']['status'] ?? 'CALIBRATION_PENDING'))) ?></dd></div>
+          </dl>
+          <?php if (!empty($models['reason'])): ?><p class="football-help"><?= e((string) $models['reason']) ?></p><?php endif; ?>
+          <a class="btn small" href="/football/models">Open models &amp; calibration</a>
+        </div>
+      </section>
+
+      <section class="panel football-section" aria-labelledby="schedule-heading">
+        <div class="football-section__heading"><div><p class="football-eyebrow">Automation</p><h3 id="schedule-heading">Refresh schedule</h3></div></div>
+        <div class="body">
+          <p class="football-help">Jobs are provider-aware and run only when due, data is available and the provider is not in backoff.</p>
+          <div class="football-schedule-list">
+            <?php foreach ((array) ($diag['cadence']['jobs'] ?? []) as $job): ?><div><span class="mono"><?= e(str_replace('football-', '', (string) ($job['job'] ?? 'job'))) ?></span><span><?= !empty($job['due']) ? '<b class="up">Due</b>' : e((string) ($job['reason'] ?? 'Waiting')) ?></span><small><?= (int) ($job['interval'] ?? 0) ?>s</small></div><?php endforeach; ?>
+          </div>
+        </div>
+      </section>
+    </aside>
   </div>
 </div>
