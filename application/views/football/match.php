@@ -133,7 +133,7 @@ $withheldBlock = is_array($intel['withheld'] ?? null) ? $intel['withheld'] : [];
           </div>
         </div>
         <div class="body">
-          <p class="football-section-intro">Every modelled market is shown below. Where the provider quoted a price, the sheet includes its timestamp and source. Where it did not, the market remains <b>UNPRICED</b>. Provider-price-only markets such as corners, cards and HT/FT never receive a made-up WINDELS probability.</p>
+          <p class="football-section-intro">Every market WINDELS can answer for this match is shown below — match result, double chance, draw no bet, winning margin, result-and-BTTS, every goal line from 0.5 to 6.5, odd/even, goal bands, team goals, clean sheets, correct score, Asian handicap and the first- and second-half markets. Each one is summed from the same stored score grid, so the sheet is one model read many ways rather than many models. Where the provider quoted a price, the sheet includes its timestamp and source. Where it did not, the market remains <b>UNPRICED</b> with its model probability still shown. Provider-price-only markets such as corners, cards and HT/FT never receive a made-up WINDELS probability.</p>
           <?php if ($markets === []): ?>
             <div class="empty-state"><p>Analyze this fixture first to build its market sheet. No odds or probabilities are invented before a stored prediction exists.</p></div>
           <?php else: ?>

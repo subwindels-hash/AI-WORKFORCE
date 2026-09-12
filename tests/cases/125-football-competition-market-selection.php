@@ -26,6 +26,7 @@ require_once TESTSPATH . 'football_support.php';
 use AIWorkforce\Football\DataState;
 use AIWorkforce\Football\FootballConfiguration;
 use AIWorkforce\Football\MatchFeed;
+use AIWorkforce\Football\OddsIntelligence;
 use AIWorkforce\Football\PredictionMarkets;
 use AIWorkforce\Football\QualityBand;
 
@@ -164,8 +165,37 @@ test('football: the odds prediction dropdown carries every documented market', f
     $keys = array_column($markets->catalog(), 'key');
     foreach (['MATCH_WINNER', 'DOUBLE_CHANCE', 'DRAW_NO_BET', 'OVER_0_5', 'OVER_1_5', 'OVER_2_5', 'OVER_3_5',
         'UNDER_1_5', 'UNDER_2_5', 'UNDER_3_5', 'BTTS', 'BTTS_AND_OVER_2_5', 'FIRST_HALF_WINNER',
-        'FIRST_HALF_OVER_UNDER', 'HALF_TIME_FULL_TIME', 'CORRECT_SCORE', 'ASIAN_HANDICAP', 'CORNERS', 'CARDS'] as $key) {
+        'FIRST_HALF_OVER_UNDER', 'HALF_TIME_FULL_TIME', 'CORRECT_SCORE', 'ASIAN_HANDICAP', 'CORNERS', 'CARDS',
+        // The wider per-match sheet: more goal lines, team goals, combination
+        // and second-half markets — every one of them grid-derived.
+        'OVER_4_5', 'OVER_5_5', 'OVER_6_5', 'BTTS_AND_UNDER_2_5', 'TOTAL_GOALS_ODD_EVEN', 'TOTAL_GOALS_BAND',
+        'HOME_TEAM_TOTAL_GOALS', 'AWAY_TEAM_TOTAL_GOALS', 'HOME_CLEAN_SHEET', 'AWAY_CLEAN_SHEET',
+        'WINNING_MARGIN', 'RESULT_AND_BTTS', 'FIRST_HALF_DOUBLE_CHANCE', 'FIRST_HALF_BTTS',
+        'SECOND_HALF_WINNER', 'SECOND_HALF_OVER_UNDER'] as $key) {
         assert_true(in_array($key, $keys, true), 'the catalogue offers ' . $key);
+    }
+    // Provider spellings for the wider sheet resolve to their own market and
+    // are never absorbed by the shorter name they contain.
+    $spellings = [
+        'First Half Both Teams To Score' => 'FIRST_HALF_BTTS',
+        'First Half Double Chance' => 'FIRST_HALF_DOUBLE_CHANCE',
+        'Second Half Winner' => 'SECOND_HALF_WINNER',
+        '2nd Half Goals' => 'SECOND_HALF_OVER_UNDER',
+        'Goals Odd/Even' => 'TOTAL_GOALS_ODD_EVEN',
+        'Goal Range' => 'TOTAL_GOALS_BAND',
+        'Winning Margin' => 'WINNING_MARGIN',
+        'Result and Both Teams To Score' => 'RESULT_AND_BTTS',
+        'BTTS and Under 2.5' => 'BTTS_AND_UNDER_2_5',
+        'Home Clean Sheet' => 'HOME_CLEAN_SHEET',
+        'Home Team Total Goals' => 'HOME_TEAM_TOTAL_GOALS',
+        // Regression: the unqualified families must still map to themselves.
+        'Both Teams To Score' => 'BTTS', 'Double Chance' => 'DOUBLE_CHANCE',
+        'Match Winner' => 'MATCH_WINNER', 'Total Goals' => 'OVER_UNDER',
+        'Half Time / Full Time' => 'HALF_TIME_FULL_TIME', 'Correct Score' => 'CORRECT_SCORE',
+    ];
+    foreach ($spellings as $raw => $expected) {
+        assert_equals($expected, PredictionMarkets::normalizeProviderMarket($raw),
+            '"' . $raw . '" is recognised as ' . $expected);
     }
     // A market the engine does not offer is answered with the default and a note.
     $notes = [];
@@ -562,14 +592,16 @@ test('football: a match detail exposes every priced market and every priced sele
 
     // The dedicated match response includes the full catalogue, not the old
     // four-market preview. Modelled but unpriced markets remain explicit.
+    // Over/Under 4.5 is now a catalogue line in its own right, so the only
+    // family these quotes add beyond the catalogue is Team to Score First.
     $catalogueCount = count((new PredictionMarkets(new FootballConfiguration([])))->catalog());
-    assert_equals($catalogueCount + 2, count($markets),
+    assert_equals($catalogueCount + 1, count($markets),
         'the match response carries the full catalogue plus every additional provider family and line');
     foreach (['MATCH_WINNER', 'OVER_2_5', 'OVER_4_5', 'TEAM_TO_SCORE_FIRST', 'CORNERS', 'CARDS'] as $key) {
         assert_true(isset($markets[$key]), 'priced market ' . $key . ' is visible on the sheet');
     }
     assert_equals(3.75, (float) ($markets['OVER_4_5']['outcomes'][0]['odds'] ?? 0),
-        'a provider totals line outside the fixed catalogue retains its real price');
+        'the 4.5 goal line retains its real provider price');
     assert_equals(PredictionMarkets::SOURCE_ODDS, (string) $markets['TEAM_TO_SCORE_FIRST']['source'],
         'an additional provider family is visible without an invented model estimate');
     $scores = array_column((array) $markets['CORRECT_SCORE']['outcomes'], null, 'selection');
@@ -602,7 +634,7 @@ test('football: a match detail exposes every priced market and every priced sele
 
     $board = $module->board()->forDate($day);
     $candidateKeys = array_column((array) ($board['rows'][0]['marketCandidates'] ?? []), 'key');
-    assert_equals($catalogueCount + 2, count($candidateKeys),
+    assert_equals($catalogueCount + 1, count($candidateKeys),
         'the board carries the complete catalogue plus each additional provider family and line');
     assert_true(in_array('OVER_4_5', $candidateKeys, true) && in_array('TEAM_TO_SCORE_FIRST', $candidateKeys, true),
         'real provider markets outside the fixed catalogue are never silently dropped');
@@ -610,4 +642,165 @@ test('football: a match detail exposes every priced market and every priced sele
         'the board now carries every additional priced market');
     assert_true(in_array('HALF_TIME_FULL_TIME', $candidateKeys, true),
         'an unpriced market stays visible rather than being silently omitted');
+});
+
+test('football: every added market is summed from the score grid and is exhaustive', function () {
+    [$repo, $module, $day] = fx_fb_two_leagues(2, 0);
+    $module->predictions()->predictDay($day);
+    $page = $module->feed()->page($day, 1, 50, false, ['competition' => '39']);
+    $predictionId = (string) ($page['matches'][0]['prediction']['predictionId'] ?? '');
+    assert_true($predictionId !== '', 'the page holds a stored prediction');
+    $grid = [];
+    foreach ($module->repository()->listScoreProbabilities($predictionId, 200) as $gridRow) {
+        $grid[] = ['home' => (int) $gridRow['home_goals'], 'away' => (int) $gridRow['away_goals'],
+            'probability' => (float) $gridRow['probability']];
+    }
+    $markets = $module->markets();
+    $row = $repo->findPrediction($predictionId);
+
+    // Each added market prices a set of MUTUALLY EXCLUSIVE outcomes. That is
+    // the property that makes an overround removable, so it is asserted
+    // directly: the legs of one market sum to the whole distribution.
+    // The full-match markets are summed straight off the stored grid, so they
+    // are always answerable. The half markets additionally need the expected
+    // goals stored with the prediction; where those exist they must obey the
+    // same law, and where they do not the market must be EMPTY rather than
+    // partially derived.
+    $fullMatch = ['BTTS_AND_UNDER_2_5', 'TOTAL_GOALS_ODD_EVEN', 'TOTAL_GOALS_BAND',
+        'HOME_TEAM_TOTAL_GOALS', 'AWAY_TEAM_TOTAL_GOALS', 'HOME_CLEAN_SHEET', 'AWAY_CLEAN_SHEET',
+        'WINNING_MARGIN', 'RESULT_AND_BTTS', 'OVER_4_5', 'OVER_5_5', 'OVER_6_5'];
+    $halfBased = ['FIRST_HALF_DOUBLE_CHANCE', 'FIRST_HALF_BTTS', 'SECOND_HALF_WINNER', 'SECOND_HALF_OVER_UNDER'];
+    foreach (array_merge($fullMatch, $halfBased) as $key) {
+        $market = $markets->market($key);
+        assert_not_null($market, $key . ' is in the catalogue');
+        $evaluated = $markets->evaluate($row, $grid, [], $market);
+        if (in_array($key, $halfBased, true) && (array) $evaluated['outcomes'] === []) {
+            assert_equals(PredictionMarkets::STATE_UNAVAILABLE, (string) $evaluated['state'],
+                $key . ' says so plainly when the half grid cannot be built');
+            continue;
+        }
+        assert_equals(PredictionMarkets::STATE_AVAILABLE, (string) $evaluated['state'], $key . ' is answerable from stored data');
+        $probabilities = array_column((array) $evaluated['outcomes'], 'probability');
+        assert_true(count($probabilities) >= 2, $key . ' prices more than one selection');
+        $total = 0.0;
+        foreach ($probabilities as $probability) {
+            assert_true(is_numeric($probability), $key . ' derives a real probability for every leg');
+            assert_true((float) $probability >= 0.0 && (float) $probability <= 1.0, $key . ' stays inside [0,1]');
+            $total += (float) $probability;
+        }
+        assert_true(abs($total - 1.0) < 0.001, $key . ' legs sum to one distribution, got ' . round($total, 6));
+        // Derived, never invented: no price exists in this call, so no price
+        // may appear on any leg.
+        foreach ((array) $evaluated['outcomes'] as $outcome) {
+            assert_null($outcome['odds'] ?? null, $key . ' invents no price when the feed quoted none');
+            assert_equals(PredictionMarkets::STATE_UNAVAILABLE, (string) ($outcome['oddsState'] ?? ''), $key . ' reports the missing price');
+        }
+    }
+
+    // Cross-market agreement: the added markets must not contradict the ones
+    // that were already trusted, because they read the same grid.
+    $at = static function (array $evaluated, string $selection): float {
+        foreach ((array) $evaluated['outcomes'] as $outcome) {
+            if ((string) $outcome['selection'] === $selection) return (float) $outcome['probability'];
+        }
+        return -1.0;
+    };
+    $btts = $markets->evaluate($row, $grid, [], $markets->market('BTTS'));
+    $bttsOver = $markets->evaluate($row, $grid, [], $markets->market('BTTS_AND_OVER_2_5'));
+    $bttsUnder = $markets->evaluate($row, $grid, [], $markets->market('BTTS_AND_UNDER_2_5'));
+    assert_true(abs($at($bttsOver, 'YES') + $at($bttsUnder, 'YES') - $at($btts, 'YES')) < 0.001,
+        'BTTS splits exactly into its over-2.5 and under-2.5 halves');
+
+    $margin = $markets->evaluate($row, $grid, [], $markets->market('WINNING_MARGIN'));
+    $resultBtts = $markets->evaluate($row, $grid, [], $markets->market('RESULT_AND_BTTS'));
+    $homeWin = (float) $row['probability_home'];
+    assert_true(abs($at($margin, 'HOME_1') + $at($margin, 'HOME_2') + $at($margin, 'HOME_3_PLUS') - $homeWin) < 0.01,
+        'the home winning margins add back up to the home win probability');
+    assert_true(abs($at($resultBtts, 'HOME_YES') + $at($resultBtts, 'HOME_NO') - $homeWin) < 0.01,
+        'result-and-BTTS splits the home win without changing it');
+
+    // A home clean sheet is exactly "the away side does not score", which is
+    // also the under-0.5 side of away team goals. Both are read off the same
+    // grid, so they must agree to the last decimal.
+    $cleanSheet = $markets->evaluate($row, $grid, [], $markets->market('HOME_CLEAN_SHEET'));
+    $awayGoals = $markets->evaluate($row, $grid, [], $markets->market('AWAY_TEAM_TOTAL_GOALS'), 0.5);
+    assert_true(abs($at($cleanSheet, 'YES') - $at($awayGoals, 'UNDER')) < 0.000001,
+        'a home clean sheet is the away side under 0.5 goals, read from the same grid');
+
+    // A second-half market states its assumption rather than posing as a
+    // stored per-half input.
+    $secondHalf = $markets->evaluate($row, $grid, [], $markets->market('SECOND_HALF_OVER_UNDER'));
+    if ((array) $secondHalf['outcomes'] !== []) {
+        assert_true(str_contains((string) $secondHalf['basis'], 'SECOND_HALF_SHARE'),
+            'the second-half basis names the goal share it assumed');
+        assert_equals(PredictionMarkets::SOURCE_ASSUMED, (string) $secondHalf['source'],
+            'and it is labelled as resting on an assumption, not on a stored half-time input');
+    }
+
+    // Unmodelled families are still never given a probability.
+    foreach (['CORNERS', 'CARDS', 'HALF_TIME_FULL_TIME'] as $key) {
+        $evaluated = $markets->evaluate($row, $grid, [], $markets->market($key));
+        assert_equals([], (array) $evaluated['outcomes'], $key . ' invents nothing without a provider price');
+    }
+});
+
+test('football: an added market carries its complete odds information when priced', function () {
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    [$repo, , $module] = fx_fb_harness([
+        fx_fb_row('fx-wide-odds', gmdate('c', strtotime($day . 'T18:00:00+00:00')), 'Arsenal', 'Brentford', '10', '20'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $page = $module->board()->forDate($day);
+    $matchId = (string) ($page['rows'][0]['matchId'] ?? '');
+    $fixtureId = (int) ($page['rows'][0]['fixtureId'] ?? 0);
+    assert_true($matchId !== '' && $fixtureId > 0, 'the stored fixture has both identities');
+
+    // Both legs of two added markets are quoted, so each market is a COMPLETE
+    // priced set and its margin can honestly be removed.
+    $now = gmdate('c');
+    $repo->marketOdds = [
+        ['matchId' => $matchId, 'market' => 'Goals Odd/Even', 'selection' => 'Odd', 'decimalOdds' => 1.95, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Goals Odd/Even', 'selection' => 'Even', 'decimalOdds' => 1.90, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Home Clean Sheet', 'selection' => 'Yes', 'decimalOdds' => 2.60, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Home Clean Sheet', 'selection' => 'No', 'decimalOdds' => 1.48, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Second Half Winner', 'selection' => 'Home', 'decimalOdds' => 2.20, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+    ];
+
+    $detail = $module->predictionFor($fixtureId);
+    $markets = [];
+    foreach ((array) ($detail['markets'] ?? []) as $market) $markets[(string) ($market['key'] ?? '')] = $market;
+
+    foreach (['TOTAL_GOALS_ODD_EVEN', 'HOME_CLEAN_SHEET'] as $key) {
+        $market = (array) $markets[$key];
+        assert_equals(PredictionMarkets::SOURCE_GRID, (string) $market['source'], $key . ' is a modelled market, not a price passthrough');
+        assert_equals(OddsIntelligence::PRICE_COMPLETE, (string) ($market['pricing']['state'] ?? ''), $key . ' has both of its legs priced');
+        foreach ((array) $market['outcomes'] as $outcome) {
+            foreach (['odds', 'impliedProbability', 'probability', 'edge', 'edgePoints', 'oddsObservedAt', 'oddsSource',
+                'windelsFairOdds', 'fairOdds', 'fairProbability', 'breakEvenProbability', 'expectedValue',
+                'quoteCount', 'oddsLow', 'oddsHigh', 'oddsSpread', 'valueClass', 'valueLabel', 'valueReason'] as $field) {
+                assert_true(array_key_exists($field, $outcome), $key . ' reports ' . $field);
+            }
+            assert_true(is_numeric($outcome['odds'] ?? null), $key . ' shows the real quoted price');
+            assert_true(is_numeric($outcome['probability'] ?? null), $key . ' shows its model probability beside the price');
+            assert_equals('fixture-feed', (string) ($outcome['oddsSource'] ?? ''), $key . ' keeps the price source');
+            assert_equals($now, (string) ($outcome['oddsObservedAt'] ?? ''), $key . ' keeps the observation time');
+        }
+    }
+
+    // A half-priced market is reported as partial and never de-vigged.
+    $secondHalf = (array) $markets['SECOND_HALF_WINNER'];
+    assert_equals(OddsIntelligence::PRICE_PARTIAL, (string) ($secondHalf['pricing']['state'] ?? ''),
+        'one quoted leg of a three-way market is a partial price, not a complete one');
+    $bySelection = array_column((array) $secondHalf['outcomes'], null, 'selection');
+    assert_equals(2.20, (float) ($bySelection['HOME']['odds'] ?? 0), 'the quoted leg keeps its price');
+    assert_null($bySelection['DRAW']['odds'] ?? null, 'the unquoted legs stay unpriced rather than being filled in');
+
+    // An unpriced added market is still visible, as an explicit UNPRICED row.
+    $margin = (array) $markets['WINNING_MARGIN'];
+    assert_equals(7, count((array) $margin['outcomes']), 'every winning-margin bucket is listed');
+    foreach ((array) $margin['outcomes'] as $outcome) {
+        assert_null($outcome['odds'] ?? null, 'no price is invented for an unquoted market');
+        assert_true(is_numeric($outcome['probability'] ?? null), 'but the model probability is still published');
+    }
 });
