@@ -67,6 +67,14 @@ final class PredictionMarkets
     private const WEAK_BANDS = [QualityBand::REJECTED];
 
     /**
+     * Correct score lists every scoreline the grid meaningfully reaches. A cell
+     * below this probability is noise rather than a quotable scoreline, but the
+     * leaders are always kept even in a wide-open match.
+     */
+    private const CORRECT_SCORE_MIN_PROBABILITY = 0.001;
+    private const CORRECT_SCORE_MIN_ROWS = 12;
+
+    /**
      * The catalogue. `derivation` says which stored input answers the market,
      * `line` carries the goal line or handicap line where one applies, and
      * `assumed` marks a market that rests on a stated, configurable assumption
@@ -98,6 +106,101 @@ final class PredictionMarkets
             if ($market['key'] === $key) return $market;
         }
         return null;
+    }
+
+    /**
+     * The lines a line-based market is quoted at.
+     *
+     * A bookmaker does not price "the" Asian handicap — it prices a ladder of
+     * them, and "Home -1.5" is a different bet from "Home -0.5" with a
+     * different probability and a different price. The catalogue advertises one
+     * default line per market so that a market *selector* stays short; this is
+     * the full ladder the all-odds sheet walks, so a match shows every line
+     * rather than a single representative one.
+     *
+     * Every line here is priced by the same grid arithmetic as the default one
+     * — a ladder adds coverage, never a new model. Quarter lines are included
+     * for the handicap because `handicap()` settles them by splitting the stake
+     * across the two bounding half lines, which is how they really settle.
+     *
+     * @return list<float>
+     */
+    public function linesFor(string $marketKey): array
+    {
+        return match (self::priceFamily($marketKey)) {
+            'OVER_UNDER' => [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5],
+            'HOME_TEAM_TOTAL_GOALS', 'AWAY_TEAM_TOTAL_GOALS' => [0.5, 1.5, 2.5, 3.5],
+            'FIRST_HALF_OVER_UNDER', 'SECOND_HALF_OVER_UNDER' => [0.5, 1.5, 2.5],
+            'ASIAN_HANDICAP' => [-2.5, -2.0, -1.75, -1.5, -1.25, -1.0, -0.75, -0.5, -0.25, 0.0,
+                0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5],
+            default => [],
+        };
+    }
+
+    /**
+     * The complete per-match sheet: every catalogue market, expanded across
+     * every line it is quoted at.
+     *
+     * Returned entries have the same shape as catalogue entries, so a caller
+     * evaluates them through the existing batched pass. A line-based market
+     * contributes one entry per line on its ladder; every other market
+     * contributes itself unchanged.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function fullSheet(): array
+    {
+        $out = [];
+        $walked = [];
+        foreach ($this->catalog() as $market) {
+            $key = (string) $market['key'];
+            $lines = $this->linesFor($key);
+            if ($lines === []) { $out[] = $market; continue; }
+            // OVER_0_5 … OVER_6_5 and UNDER_1_5 … UNDER_3_5 are ten catalogue
+            // keys describing ONE bookmaker family. The ladder belongs to the
+            // family, so it is walked exactly once — expanding per key would
+            // print every goal line ten times over.
+            $family = self::priceFamily($key);
+            if (isset($walked[$family])) continue;
+            $walked[$family] = true;
+            foreach ($lines as $line) {
+                $entry = $market;
+                $entry['key'] = self::ladderKey($family, $line);
+                $entry['line'] = $line;
+                $entry['label'] = self::lineLabelFor($key, $line);
+                $out[] = $entry;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * The catalogue key of one rung of a ladder.
+     *
+     * Goal lines keep the canonical OVER_<line> spelling so that the rest of
+     * the engine — `outcomes()`, `providerMarketMatches()`, the OddsBounds
+     * ceiling — recognises them exactly as it recognises the fixed catalogue
+     * keys. Every other family carries its line separately and keeps one key.
+     */
+    private static function ladderKey(string $family, float $line): string
+    {
+        if ($family !== 'OVER_UNDER') return $family;
+        return 'OVER_' . str_replace('.', '_', self::lineLabel($line));
+    }
+
+    /** The display label of one rung of a ladder. */
+    private static function lineLabelFor(string $marketKey, float $line): string
+    {
+        $label = self::lineLabel($line);
+        return match (self::priceFamily($marketKey)) {
+            'OVER_UNDER' => 'Total Goals — Over/Under ' . $label,
+            'HOME_TEAM_TOTAL_GOALS' => 'Home Team Total Goals — ' . $label,
+            'AWAY_TEAM_TOTAL_GOALS' => 'Away Team Total Goals — ' . $label,
+            'FIRST_HALF_OVER_UNDER' => 'First Half Goals — ' . $label,
+            'SECOND_HALF_OVER_UNDER' => 'Second Half Goals — ' . $label,
+            'ASIAN_HANDICAP' => 'Asian Handicap — Home ' . self::handicapLabel($line),
+            default => $label,
+        };
     }
 
     /**
@@ -172,7 +275,9 @@ final class PredictionMarkets
         $signature = static fn(string $family, ?float $line): string => $family . '|'
             . ($line === null ? 'NONE' : rtrim(rtrim(number_format($line, 4, '.', ''), '0'), '.'));
         $represented = [];
-        foreach ($this->catalog() as $market) {
+        // Every rung of every ladder counts as represented, so a provider line
+        // the sheet already walks is not reported a second time as an "extra".
+        foreach ($this->fullSheet() as $market) {
             $family = self::priceFamily((string) $market['key']);
             $line = self::familyCarriesLine($family) && is_numeric($market['line'] ?? null)
                 ? (float) $market['line'] : null;
@@ -831,16 +936,27 @@ final class PredictionMarkets
         return $this->combine(['HOME' => [$homeLabel, $home], 'DRAW' => [$drawLabel, $draw], 'AWAY' => [$awayLabel, $away]]);
     }
 
-    /** The top scorelines of the grid — correct score is a grid market, not a guess. */
+    /**
+     * The scorelines of the grid — correct score is a grid market, not a guess.
+     *
+     * A bookmaker prices a whole correct-score board, so the sheet lists every
+     * scoreline the grid actually reaches, ordered most-likely first. Cells with
+     * no meaningful mass are dropped rather than printed as a wall of zeroes:
+     * they are not scorelines anyone prices, and listing them would bury the
+     * ones that matter. `includeQuotedScores()` still adds any further scoreline
+     * the provider quoted, so a real price is never hidden by this threshold.
+     */
     private function correctScore(array $grid): array
     {
         $rows = $grid;
         usort($rows, static fn(array $a, array $b) => (float) $b['probability'] <=> (float) $a['probability']);
         $out = [];
-        foreach (array_slice($rows, 0, 6) as $row) {
+        foreach ($rows as $row) {
+            $probability = round((float) $row['probability'], 6);
+            if ($probability < self::CORRECT_SCORE_MIN_PROBABILITY && count($out) >= self::CORRECT_SCORE_MIN_ROWS) continue;
             $label = (int) $row['home'] . '–' . (int) $row['away'];
             $out[] = ['selection' => (int) $row['home'] . '-' . (int) $row['away'], 'label' => $label,
-                'probability' => round((float) $row['probability'], 6), 'note' => null];
+                'probability' => $probability, 'note' => null];
         }
         return $out;
     }

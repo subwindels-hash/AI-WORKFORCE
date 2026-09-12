@@ -592,11 +592,12 @@ test('football: a match detail exposes every priced market and every priced sele
 
     // The dedicated match response includes the full catalogue, not the old
     // four-market preview. Modelled but unpriced markets remain explicit.
-    // Over/Under 4.5 is now a catalogue line in its own right, so the only
-    // family these quotes add beyond the catalogue is Team to Score First.
-    $catalogueCount = count((new PredictionMarkets(new FootballConfiguration([])))->catalog());
-    assert_equals($catalogueCount + 1, count($markets),
-        'the match response carries the full catalogue plus every additional provider family and line');
+    // The match sheet is the EXPANDED sheet: every market, walked across every
+    // line of its ladder. The only family these quotes add beyond it is Team to
+    // Score First — every goal line they quote is already a rung.
+    $sheetCount = count((new PredictionMarkets(new FootballConfiguration([])))->fullSheet());
+    assert_equals($sheetCount + 1, count($markets),
+        'the match response carries every market and line, plus each additional provider family');
     foreach (['MATCH_WINNER', 'OVER_2_5', 'OVER_4_5', 'TEAM_TO_SCORE_FIRST', 'CORNERS', 'CARDS'] as $key) {
         assert_true(isset($markets[$key]), 'priced market ' . $key . ' is visible on the sheet');
     }
@@ -606,7 +607,7 @@ test('football: a match detail exposes every priced market and every priced sele
         'an additional provider family is visible without an invented model estimate');
     $scores = array_column((array) $markets['CORRECT_SCORE']['outcomes'], null, 'selection');
     assert_equals(99.0, (float) ($scores['6-6']['odds'] ?? 0),
-        'every quoted correct score is retained even when it is outside the six model leaders');
+        'every quoted correct score is retained even when it is outside the grid the model lists');
 
     $winner = (array) $markets['MATCH_WINNER'];
     assert_equals(3, count((array) $winner['outcomes']), 'all three 1X2 legs are retained');
@@ -634,8 +635,8 @@ test('football: a match detail exposes every priced market and every priced sele
 
     $board = $module->board()->forDate($day);
     $candidateKeys = array_column((array) ($board['rows'][0]['marketCandidates'] ?? []), 'key');
-    assert_equals($catalogueCount + 1, count($candidateKeys),
-        'the board carries the complete catalogue plus each additional provider family and line');
+    assert_equals($sheetCount + 1, count($candidateKeys),
+        'the board carries every market and line, plus each additional provider family');
     assert_true(in_array('OVER_4_5', $candidateKeys, true) && in_array('TEAM_TO_SCORE_FIRST', $candidateKeys, true),
         'real provider markets outside the fixed catalogue are never silently dropped');
     assert_true(in_array('CORNERS', $candidateKeys, true) && in_array('CARDS', $candidateKeys, true),
@@ -802,5 +803,131 @@ test('football: an added market carries its complete odds information when price
     foreach ((array) $margin['outcomes'] as $outcome) {
         assert_null($outcome['odds'] ?? null, 'no price is invented for an unquoted market');
         assert_true(is_numeric($outcome['probability'] ?? null), 'but the model probability is still published');
+    }
+});
+
+test('football: every line of every line-based market is on the match sheet', function () {
+    $markets = new PredictionMarkets(new FootballConfiguration([]));
+    $sheet = $markets->fullSheet();
+
+    // One entry per market per line, and never the same family/line twice.
+    $signatures = [];
+    foreach ($sheet as $entry) {
+        $line = is_numeric($entry['line'] ?? null) ? number_format((float) $entry['line'], 2, '.', '') : 'NONE';
+        $signature = (string) $entry['key'] . '|' . $line;
+        assert_true(!isset($signatures[$signature]), 'the sheet lists ' . $signature . ' exactly once');
+        $signatures[$signature] = true;
+    }
+
+    $linesOf = static function (array $sheet, string $key): array {
+        $lines = [];
+        foreach ($sheet as $entry) {
+            if ((string) $entry['key'] !== $key) continue;
+            if (is_numeric($entry['line'] ?? null)) $lines[] = (float) $entry['line'];
+        }
+        sort($lines);
+        return $lines;
+    };
+
+    // The goal ladder keeps the canonical OVER_<line> spelling, so the rest of
+    // the engine recognises a rung exactly as it recognises a catalogue key.
+    foreach ([0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5] as $line) {
+        $key = 'OVER_' . str_replace('.', '_', rtrim(rtrim(number_format($line, 2), '0'), '.'));
+        assert_true(isset($signatures[$key . '|' . number_format($line, 2, '.', '')]),
+            'the goal ladder offers ' . $key);
+    }
+    // And the family is walked ONCE: OVER_2_5 and UNDER_2_5 are two catalogue
+    // keys for one bookmaker market, so the ladder must not be printed twice.
+    $goalRungs = 0;
+    foreach ($sheet as $entry) {
+        if (str_starts_with((string) $entry['key'], 'OVER_') || str_starts_with((string) $entry['key'], 'UNDER_')) $goalRungs++;
+    }
+    assert_equals(7, $goalRungs, 'the goal family contributes one rung per line, not one per catalogue alias');
+
+    // A real bookmaker prices a handicap ladder, quarter lines included.
+    $handicap = $linesOf($sheet, 'ASIAN_HANDICAP');
+    assert_equals(19, count($handicap), 'the handicap ladder is a real ladder, not one representative line');
+    foreach ([-1.5, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 1.5] as $line) {
+        assert_true(in_array($line, $handicap, true), 'the handicap ladder offers ' . $line);
+    }
+    assert_equals([0.5, 1.5, 2.5, 3.5], $linesOf($sheet, 'HOME_TEAM_TOTAL_GOALS'), 'home team goals are quoted across their ladder');
+    assert_equals([0.5, 1.5, 2.5], $linesOf($sheet, 'FIRST_HALF_OVER_UNDER'), 'first-half goals are quoted across their ladder');
+    assert_equals([0.5, 1.5, 2.5], $linesOf($sheet, 'SECOND_HALF_OVER_UNDER'), 'second-half goals are quoted across their ladder');
+
+    // Markets without a line appear exactly once and keep no line.
+    foreach (['MATCH_WINNER', 'BTTS', 'WINNING_MARGIN', 'CORRECT_SCORE', 'CORNERS'] as $key) {
+        assert_true(isset($signatures[$key . '|NONE']), $key . ' appears once, without a line');
+    }
+    assert_true(count($sheet) > count($markets->catalog()),
+        'the expanded sheet is strictly larger than the one-line-per-market catalogue');
+});
+
+test('football: each line of a ladder is priced and settled on its own terms', function () {
+    [$repo, $module, $day] = fx_fb_two_leagues(2, 0);
+    $module->predictions()->predictDay($day);
+    $page = $module->feed()->page($day, 1, 50, false, ['competition' => '39']);
+    $predictionId = (string) ($page['matches'][0]['prediction']['predictionId'] ?? '');
+    $grid = [];
+    foreach ($module->repository()->listScoreProbabilities($predictionId, 200) as $gridRow) {
+        $grid[] = ['home' => (int) $gridRow['home_goals'], 'away' => (int) $gridRow['away_goals'],
+            'probability' => (float) $gridRow['probability']];
+    }
+    $markets = $module->markets();
+    $row = $repo->findPrediction($predictionId);
+    $at = static function (array $evaluated, string $selection): float {
+        foreach ((array) $evaluated['outcomes'] as $outcome) {
+            if ((string) $outcome['selection'] === $selection) return (float) $outcome['probability'];
+        }
+        return -1.0;
+    };
+
+    // A ladder is only worth showing if each rung is a DIFFERENT bet. Over 0.5
+    // must be likelier than Over 1.5, and so on down the ladder.
+    $previous = 1.1;
+    foreach ([0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5] as $line) {
+        $key = 'OVER_' . str_replace('.', '_', rtrim(rtrim(number_format($line, 2), '0'), '.'));
+        $evaluated = $markets->evaluate($row, $grid, [], $markets->market($key), $line);
+        $over = $at($evaluated, 'OVER');
+        assert_true($over >= 0.0 && $over <= 1.0, $key . ' is a real probability');
+        assert_true($over < $previous, $key . ' is strictly less likely than the line below it');
+        assert_true(abs($over + $at($evaluated, 'UNDER') - 1.0) < 0.000001, $key . ' and its under leg are one distribution');
+        $previous = $over;
+    }
+
+    // The handicap ladder must be monotonic too: a bigger head start can only
+    // help the home side. Quarter lines settle by splitting the stake, so they
+    // sit strictly between their two bounding half lines.
+    $homeAt = [];
+    foreach ([-1.5, -1.25, -1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5] as $line) {
+        $evaluated = $markets->evaluate($row, $grid, [], $markets->market('ASIAN_HANDICAP'), $line);
+        assert_equals(2, count((array) $evaluated['outcomes']), 'a handicap line is a two-way market');
+        $homeAt[(string) $line] = $at($evaluated, 'HOME');
+    }
+    $ordered = array_values($homeAt);
+    for ($i = 0; $i < count($ordered) - 1; $i++) {
+        assert_true($ordered[$i] <= $ordered[$i + 1] + 0.000001,
+            'the home side never gets less likely as its handicap improves');
+    }
+    assert_true($homeAt['-0.75'] > $homeAt['-1'] && $homeAt['-0.75'] < $homeAt['-0.5'],
+        'a quarter line sits between the two half lines its stake is split across');
+
+    // Correct score now lists a real board rather than six leaders, and it is
+    // still a set of disjoint grid cells that never exceeds certainty.
+    $score = $markets->evaluate($row, $grid, [], $markets->market('CORRECT_SCORE'));
+    $rows = (array) $score['outcomes'];
+    assert_true(count($rows) > 6, 'the correct-score board is wider than the old six-row preview, got ' . count($rows));
+    $total = 0.0;
+    $seen = [];
+    foreach ($rows as $outcome) {
+        $selection = (string) $outcome['selection'];
+        assert_true(!isset($seen[$selection]), 'each scoreline is listed once: ' . $selection);
+        $seen[$selection] = true;
+        if (is_numeric($outcome['probability'] ?? null)) $total += (float) $outcome['probability'];
+    }
+    assert_true($total <= 1.000001, 'disjoint scorelines never sum past certainty, got ' . round($total, 6));
+    $ordering = array_values(array_filter(array_column($rows, 'probability'), 'is_numeric'));
+    for ($i = 0; $i < count($ordering) - 1; $i++) {
+        assert_true((float) $ordering[$i] >= (float) $ordering[$i + 1] - 0.000001,
+            'the correct-score board is ordered most likely first');
     }
 });

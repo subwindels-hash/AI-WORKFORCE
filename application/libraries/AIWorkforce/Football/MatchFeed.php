@@ -664,6 +664,11 @@ final class MatchFeed
         // provider market/line the catalogue does not enumerate. An explicit
         // list (used by the legacy compact feed) remains deliberately bounded.
         $includeProviderExtras = $marketKeys === null;
+        // The complete sheet walks every LINE of every line-based market, not
+        // one representative line per market: "Over 3.5" and "Over 1.5" are
+        // different bets with different probabilities and different prices, and
+        // a match sheet that shows only one of them is hiding the rest.
+        $sheet = $includeProviderExtras ? $this->markets->fullSheet() : null;
         $marketKeys = $marketKeys ?? self::MULTI_MARKET_CANDIDATES;
         $ids = [];
         $matchIds = [];
@@ -689,9 +694,20 @@ final class MatchFeed
             $effectivePricedOnly = $pricedOnly || !$hasPrediction;
             $candidates = [];
 
-            foreach ($marketKeys as $key) {
-                $catalogEntry = $this->markets->market($key);
-                if ($catalogEntry === null) continue;
+            // Either the expanded sheet (one entry per market per line) or the
+            // bounded key list the legacy compact feed asks for.
+            $sheetEntries = [];
+            if ($sheet !== null) {
+                $sheetEntries = $sheet;
+            } else {
+                foreach ($marketKeys as $key) {
+                    $catalogEntry = $this->markets->market($key);
+                    if ($catalogEntry !== null) $sheetEntries[] = $catalogEntry;
+                }
+            }
+
+            foreach ($sheetEntries as $catalogEntry) {
+                $key = (string) $catalogEntry['key'];
 
                 // The board displays only markets with a provider price. The
                 // per-match odds sheet can opt into the full catalogue so that
