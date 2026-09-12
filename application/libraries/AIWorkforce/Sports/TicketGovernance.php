@@ -28,7 +28,17 @@ class TicketGovernance
      */
     public function record(array $optimized, string $configurationVersion, ?int $modelVersionId = null, array $config = []): array
     {
-        if (($optimized['status'] ?? '') !== 'QUALIFIED') return ['status' => 'NO_QUALIFIED_TICKET', 'reason' => $optimized['reason'] ?? 'No compliant combination'];
+        if (($optimized['status'] ?? '') !== 'QUALIFIED') {
+            // Round 3b: never a bare NO_QUALIFIED_TICKET with no explanation —
+            // carry through the exact machine-readable failure code and the
+            // full candidate-level decision trace TicketOptimizer already built.
+            return [
+                'status' => 'NO_QUALIFIED_TICKET',
+                'failureCode' => $optimized['failureCode'] ?? FailureTaxonomy::NO_COMBINABLE_TICKET,
+                'reason' => $optimized['reason'] ?? 'No compliant combination',
+                'candidateDecisions' => $optimized['candidateDecisions'] ?? [],
+            ];
+        }
         $sels = $optimized['selections'];
         // A ticket is only as honest as its legs. Every selection is validated
         // BEFORE anything is persisted: a real internal match id (never 0 or
@@ -82,6 +92,11 @@ class TicketGovernance
                 'home_team' => $s['match']['homeTeam'] ?? null,
                 'away_team' => $s['match']['awayTeam'] ?? null,
                 'kickoff_time' => $s['match']['kickoff'] ?? null,
+                // Provider-supplied crest URLs (or the SANDBOX simulation's
+                // own labeled placeholder), never invented for a provider
+                // that sent none.
+                'home_team_logo' => $s['match']['homeTeamLogo'] ?? null,
+                'away_team_logo' => $s['match']['awayTeamLogo'] ?? null,
                 'market' => $s['market'], 'selection' => $s['selection'],
                 'odds' => $s['value']['odds'] ?? $s['odds'], 'odds_timestamp' => $s['oddsTimestamp'],
                 // Which feed supplied the real bookmaker price (provenance),

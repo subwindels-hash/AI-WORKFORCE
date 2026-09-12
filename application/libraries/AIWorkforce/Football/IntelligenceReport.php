@@ -269,8 +269,22 @@ final class IntelligenceReport
             $identity = ['matchId' => (string) ($row['matchId'] ?? ''), 'fixtureId' => (int) ($row['fixtureId'] ?? 0),
                 'homeTeam' => (string) ($row['homeTeam'] ?? DataState::UNAVAILABLE),
                 'awayTeam' => (string) ($row['awayTeam'] ?? DataState::UNAVAILABLE),
+                'homeTeamLogo' => $row['homeTeamLogo'] ?? null,
+                'awayTeamLogo' => $row['awayTeamLogo'] ?? null,
                 'kickoffLabel' => (string) ($row['kickoffLabel'] ?? DataState::UNAVAILABLE)];
             $market = (array) ($row['market'] ?? []);
+            // Top Picks is a forward-looking recommendation list, not the
+            // day's historical record (the board table below it keeps every
+            // match, finished or not, for that purpose). A match whose
+            // provider status is terminal — full time, postponed, cancelled,
+            // suspended — is never still "a pick": there is nothing left to
+            // act on, so it is excluded here rather than ranked alongside
+            // matches a reader can still do something about.
+            $rowStatus = strtoupper((string) ($row['status'] ?? ''));
+            if (in_array($rowStatus, \AIWorkforce\Sports\SportsDataNormalizer::TERMINAL_STATUSES, true)) {
+                $excluded[] = $identity + ['reason' => 'Match status is ' . $rowStatus . '; Top Picks only ranks matches still to be played.'];
+                continue;
+            }
             if (($row['analysisState'] ?? '') !== 'ANALYZED' || $intelligence === []) {
                 $excluded[] = $identity + ['reason' => 'Not analyzed — no stored prediction to rank.'];
                 continue;

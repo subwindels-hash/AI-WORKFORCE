@@ -88,6 +88,16 @@ class PredictionPipeline
      *   previousPrediction stored prediction row for the same selection, for
      *                     the stability reading (null = baseline);
      *   matchUpdatedAt    when the fixture data was last refreshed.
+     *   modelState        the deployed model version's lifecycle status
+     *                     (e.g. DRAFT, TRAINED, APPROVED, ACTIVE) when known.
+     *                     Requirement (Round 3b): DRAFT is recorded as an
+     *                     informational MODEL_STATE_WARNING and never blocks
+     *                     a prediction on its own — only an APPROVED
+     *                     calibration (a separate, already-gated fact) does.
+     *   oddsProvider      which provider's price is being evaluated, for the
+     *                     structured diagnostic record.
+     *   fallbackAttempted whether an odds/provider fallback was already tried
+     *                     upstream for this fixture (DailyTicketService).
      */
     public function evaluate(array $match, ?array $odds, array $quality, ?array $calibration, array $config = [], ?int $now = null, array $extras = []): array
     {
@@ -124,25 +134,45 @@ class PredictionPipeline
             'oddsStatus' => $freshness['oddsStatus'] ?? null,
             'intelligence' => $intel,
             'quality' => $quality,
+            // Governance/model-state info is kept strictly separate from
+            // user-facing availability (Round 3b requirement #11): the
+            // deployed model's lifecycle status is RECORDED for admins, but
+            // a DRAFT model state is never, on its own, a reason a
+            // prediction is withheld. Only the ACTUAL gates below (an
+            // approved calibration, confidence, data quality, value, risk)
+            // decide availability.
+            'modelState' => isset($extras['modelState']) ? (string) $extras['modelState'] : null,
+            'modelStateWarning' => (isset($extras['modelState']) && strtoupper((string) $extras['modelState']) === 'DRAFT')
+                ? 'MODEL_STATE_WARNING: DRAFT — the deployed model version has not been manually activated; this does not block predictions, only an approved calibration does'
+                : null,
+            'oddsProvider' => $odds['oddsSource'] ?? $odds['provider'] ?? null,
+            'fallbackAttempted' => !empty($extras['fallbackAttempted']),
+            'fallbackResult' => $extras['fallbackResult'] ?? null,
         ];
 
         $failed = [];                 // every failed stage's reason, in stage order
         $missingFields = [];          // concrete missing model inputs
         $staleFields = [];            // concrete stale inputs
+        $failedStage = null;          // the FIRST stage whose failure produced the primary reason
 
         // Record a stage outcome. Only a FAILED stage contributes a rejection
         // reason; a stage that could not run (SKIPPED) never adds one, so a
-        // single upstream failure is never counted twice.
-        $stage = function (string $name, string $outcome, ?string $reason) use (&$factors, &$failed): void {
+        // single upstream failure is never counted twice. The stage name of
+        // the FIRST failure is kept alongside the reason so every rejection
+        // can name exactly which pipeline stage stopped it, not just why.
+        $stage = function (string $name, string $outcome, ?string $reason) use (&$factors, &$failed, &$failedStage): void {
             $factors['stages'][$name] = $outcome;
-            if ($outcome === 'FAILED' && $reason !== null && !in_array($reason, $failed, true)) $failed[] = $reason;
+            if ($outcome === 'FAILED' && $reason !== null) {
+                if ($failedStage === null) $failedStage = $name;
+                if (!in_array($reason, $failed, true)) $failed[] = $reason;
+            }
         };
 
         $intelReady = ($intel['decision'] ?? '') === 'INTELLIGENCE_READY';
         $stage('dataNormalization', $intelReady ? 'PASSED' : 'FAILED', ($intel['rejectionReasons'] ?? [])[0] ?? 'MATCH_DATA_INVALID');
         if (!$intelReady) {
             foreach ($intel['rejectionReasons'] ?? ['MATCH_DATA_INVALID'] as $r) if (!in_array($r, $failed, true)) $failed[] = $r;
-            return $this->finalize($candidate, $factors, null, null, null, null, 'REJECTED', $failed, 'NO_PREDICTION', $quality, $missingFields, $staleFields);
+            return $this->finalize($candidate, $factors, null, null, null, null, 'REJECTED', $failed, 'NO_PREDICTION', $quality, $missingFields, $staleFields, $failedStage);
         }
 
         // ── Stage 2: odds availability / freshness (before any prediction) ─
@@ -155,7 +185,7 @@ class PredictionPipeline
             $stage('oddsAvailability', 'PASSED', null);
         }
         if ($failed) {
-            return $this->finalize($candidate, $factors, null, null, null, null, 'REJECTED', $failed, 'NO_PREDICTION', $quality, $missingFields, $staleFields);
+            return $this->finalize($candidate, $factors, null, null, null, null, 'REJECTED', $failed, 'NO_PREDICTION', $quality, $missingFields, $staleFields, $failedStage);
         }
 
         // ── Stage 3: prediction (features + model + calibration) ──────────
@@ -255,6 +285,7 @@ class PredictionPipeline
 
         // ── Stage 7: value / edge (model probability vs real market odds) ─
         $value = $this->value->assess($prediction ?? ['decision' => 'NO_PREDICTION'], $odds !== null ? ['decimalOdds' => (float) ($odds['decimalOdds'] ?? $odds['decimal_odds'] ?? 0), 'market' => (string) $candidate['market']] : ['decimalOdds' => 0]);
+        $factors['minExpectedValue'] = isset($config['min_expected_value']) && is_numeric($config['min_expected_value']) ? (float) $config['min_expected_value'] : 0.02;
         if (!$predictionReady) {
             $stage('valueEdge', 'SKIPPED', null);
         } else {
@@ -350,10 +381,10 @@ class PredictionPipeline
 
         $decision = $failed ? 'REJECTED' : 'QUALIFIED';
         $predictionDecision = $failed ? 'NO_PREDICTION' : 'PREDICTION_READY';
-        return $this->finalize($candidate, $factors, $value, $conf, $risk, $prediction ?? null, $decision, $failed, $predictionDecision, $quality, $missingFields, $staleFields);
+        return $this->finalize($candidate, $factors, $value, $conf, $risk, $prediction ?? null, $decision, $failed, $predictionDecision, $quality, $missingFields, $staleFields, $failedStage);
     }
 
-    private function finalize(array $candidate, array $factors, ?array $value, ?array $conf, ?array $risk, ?array $prediction, string $decision, array $rejectionReasons, string $predictionDecision, array $quality, array $missingFields = [], array $staleFields = []): array
+    private function finalize(array $candidate, array $factors, ?array $value, ?array $conf, ?array $risk, ?array $prediction, string $decision, array $rejectionReasons, string $predictionDecision, array $quality, array $missingFields = [], array $staleFields = [], ?string $failedStage = null): array
     {
         $candidate['value'] = $value ?? ['qualified' => false, 'reason' => $rejectionReasons[0] ?? 'NO_PREDICTION'];
         $candidate['confidence'] = $conf ?? ['confidence' => null, 'breakdown' => null];
@@ -395,8 +426,75 @@ class PredictionPipeline
             'oddsAgeSeconds' => $candidate['oddsAgeSeconds'] ?? null,
             'oddsSource' => $candidate['oddsSource'] ?? null,
         ];
+        // ── Round 3b structured diagnostic record ──────────────────────────
+        // Every evaluated candidate — qualified or rejected — carries the
+        // exact field set the pipeline audit requires: identity, market,
+        // provider/odds provenance, the measured numbers AND the minimums
+        // they were judged against, an exact machine-readable failure code
+        // (never a bare category), the stage that produced it, and whether
+        // the rejection is worth retrying or names a fixed configured rule.
+        $failureCode = $decision === 'REJECTED' ? FailureTaxonomy::translate($candidate['primaryReason']) : null;
+        $candidate['failureCode'] = $failureCode;
+        $candidate['failureReason'] = $failureCode !== null ? self::humanFailureReason($failureCode, $candidate['rejectionDetail']) : null;
+        $candidate['failedStage'] = $decision === 'REJECTED' ? $failedStage : null;
+        $candidate['retryable'] = $failureCode !== null ? FailureTaxonomy::retryable($failureCode) : null;
+        $candidate['marketStatus'] = $candidate['oddsStatus'] ?? ($candidate['odds'] === null ? 'UNAVAILABLE' : 'QUOTED');
+        $candidate['predictionStatus'] = $decision === 'QUALIFIED' ? 'PREDICTION_READY' : ($predictionDecision === 'PREDICTION_READY' ? 'PREDICTION_READY_NOT_QUALIFIED' : 'NO_PREDICTION');
+        $candidate['diagnostic'] = [
+            'matchId' => $candidate['matchId'] ?? null,
+            'homeTeam' => $candidate['match']['homeTeam'] ?? null,
+            'awayTeam' => $candidate['match']['awayTeam'] ?? null,
+            'kickoffTime' => $candidate['match']['kickoff'] ?? null,
+            'market' => $candidate['market'] ?? null,
+            'selection' => $candidate['selection'] ?? null,
+            'provider' => $candidate['oddsProvider'] ?? $candidate['oddsSource'] ?? null,
+            'odds' => $candidate['odds'] ?? null,
+            'oddsTimestamp' => $candidate['oddsTimestamp'] ?? null,
+            'dataQualityScore' => $candidate['rejectionDetail']['dataQuality'] ?? (is_numeric($quality['score'] ?? null) ? (int) $quality['score'] : null),
+            'modelVersion' => $candidate['prediction']['modelVersion'] ?? PredictionEngine::MODEL_VERSION,
+            'modelState' => $candidate['modelState'] ?? null,
+            'modelStateWarning' => $candidate['modelStateWarning'] ?? null,
+            'predictedProbability' => $candidate['prediction']['calibratedProbability'] ?? null,
+            'confidenceScore' => $candidate['rejectionDetail']['confidence'] ?? null,
+            'minimumRequiredConfidence' => $candidate['rejectionDetail']['minConfidence'] ?? null,
+            'expectedValue' => $candidate['value']['expectedValue'] ?? null,
+            'minimumRequiredValue' => $factors['minExpectedValue'] ?? null,
+            'marketStatus' => $candidate['marketStatus'],
+            'predictionStatus' => $candidate['predictionStatus'],
+            'failureCode' => $failureCode,
+            'failureReason' => $candidate['failureReason'],
+            'failedStage' => $candidate['failedStage'],
+            'retryable' => $candidate['retryable'],
+            'fallbackAttempted' => $candidate['fallbackAttempted'] ?? false,
+            'fallbackResult' => $candidate['fallbackResult'] ?? null,
+        ];
         $candidate['factors'] = $factors;
         return $candidate;
+    }
+
+    /**
+     * A rejection must show the actual numbers that caused it, never a bare
+     * category label (Round 3b): "Predicted probability: 61.4% / Required:
+     * 70.0% / Match: X vs Y / Market: Z / Selection: W" style detail, built
+     * from the same rejectionDetail every audit row already carries.
+     */
+    private static function humanFailureReason(string $failureCode, array $detail): string
+    {
+        $base = FailureTaxonomy::userMessage($failureCode);
+        $parts = [];
+        if ($failureCode === FailureTaxonomy::CONFIDENCE_TOO_LOW && $detail['confidence'] !== null && $detail['minConfidence'] !== null) {
+            $parts[] = sprintf('measured confidence %.1f%% is below the required %.1f%%', (float) $detail['confidence'], (float) $detail['minConfidence']);
+        }
+        if ($failureCode === FailureTaxonomy::DATA_QUALITY_TOO_LOW && $detail['dataQuality'] !== null && $detail['minDataQuality'] !== null) {
+            $parts[] = sprintf('data quality %d%% is below the required %d%%', (int) $detail['dataQuality'], (int) $detail['minDataQuality']);
+        }
+        if (($detail['missingFields'] ?? []) !== []) {
+            $parts[] = 'missing: ' . implode(', ', array_slice($detail['missingFields'], 0, 6));
+        }
+        if (($detail['staleFields'] ?? []) !== []) {
+            $parts[] = 'stale: ' . implode(', ', $detail['staleFields']);
+        }
+        return $parts === [] ? $base : $base . ' (' . implode('; ', $parts) . ')';
     }
 
     /**

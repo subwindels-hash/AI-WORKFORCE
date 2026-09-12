@@ -799,6 +799,36 @@ final class MatchFeed
         return $provider !== '' ? $provider . ':' . $external : $external;
     }
 
+    /**
+     * A verified crest URL for one side of a stored fixture, or null.
+     *
+     * The fixture row itself carries no logo column — `football_fixtures`
+     * only stores team identity, never a media URL directly — so the crest
+     * is read back from the raw provider payload the fixture was synced
+     * with (`FixtureSyncService::normalize()` preserves it verbatim in
+     * `payload.homeTeamLogo`/`payload.awayTeamLogo`). Only a real absolute
+     * http(s) URL is ever returned: a provider that supplied nothing (or
+     * garbage) yields null rather than a placeholder or a guess, so a card
+     * never shows one club's crest on another's row.
+     *
+     * @param array<string,mixed> $fixture
+     */
+    public static function fixtureLogo(array $fixture, string $side): ?string
+    {
+        $payload = $fixture['payload'] ?? null;
+        if (is_string($payload) && $payload !== '') {
+            $decoded = json_decode($payload, true);
+            $payload = is_array($decoded) ? $decoded : null;
+        }
+        if (!is_array($payload)) return null;
+        $key = $side === 'home' ? 'homeTeamLogo' : 'awayTeamLogo';
+        $value = $payload[$key] ?? null;
+        if (!is_string($value)) return null;
+        $value = trim($value);
+        if ($value === '') return null;
+        return (filter_var($value, FILTER_VALIDATE_URL) && preg_match('#^https?://#i', $value)) ? $value : null;
+    }
+
     /** @param array<string,mixed> $prediction */
     public static function predictionSummary(array $prediction): array
     {
@@ -865,6 +895,8 @@ final class MatchFeed
             'minute' => $fixture['minute'] ?? null,
             'homeTeam' => (string) ($fixture['home_team'] ?? DataState::UNAVAILABLE),
             'awayTeam' => (string) ($fixture['away_team'] ?? DataState::UNAVAILABLE),
+            'homeTeamLogo' => self::fixtureLogo($fixture, 'home'),
+            'awayTeamLogo' => self::fixtureLogo($fixture, 'away'),
             'score' => (isset($fixture['home_score'], $fixture['away_score']) && $fixture['home_score'] !== null)
                 ? ['home' => (int) $fixture['home_score'], 'away' => (int) $fixture['away_score']] : null,
             'dataState' => (string) ($fixture['data_state'] ?? DataState::UNAVAILABLE),

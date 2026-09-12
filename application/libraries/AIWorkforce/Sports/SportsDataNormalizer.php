@@ -63,6 +63,12 @@ class SportsDataNormalizer
             'leagueId' => isset($raw['leagueId']) ? trim((string) $raw['leagueId']) : '',
             'kickoff' => $kickoff, 'status' => $status,
             'timezone' => isset($raw['timezone']) && trim((string) $raw['timezone']) !== '' ? trim((string) $raw['timezone']) : null,
+            // The provider's own crest/badge URL, when it sent one. Never
+            // invented for a real provider that omitted it — the UI shows no
+            // image rather than guessing one. The SANDBOX provider labels its
+            // own deterministic placeholder crests the same way.
+            'homeTeamLogo' => self::optionalUrl($raw['homeTeamLogo'] ?? null),
+            'awayTeamLogo' => self::optionalUrl($raw['awayTeamLogo'] ?? null),
             // A fixture row without a provider stamp is still a real fixture —
             // the persistence layer stamps receipt time. ODDS stamps are
             // different: a price must prove its own age, so odds() keeps
@@ -110,6 +116,20 @@ class SportsDataNormalizer
             }
         }
         return $out;
+    }
+
+    /**
+     * A provider-supplied crest/logo URL, kept only when it is a real
+     * absolute http(s) URL. Anything else the provider sent (blank, a
+     * relative path, garbage) is dropped rather than stored and rendered as
+     * a broken image.
+     */
+    private static function optionalUrl($value): ?string
+    {
+        if (!is_string($value)) return null;
+        $value = trim($value);
+        if ($value === '') return null;
+        return filter_var($value, FILTER_VALIDATE_URL) && preg_match('#^https?://#i', $value) ? $value : null;
     }
 
     /**

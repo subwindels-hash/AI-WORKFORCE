@@ -196,6 +196,11 @@ final class SchemaInstaller
             $pick('ALTER TABLE sports_ticket_selections ADD COLUMN home_team TEXT', 'ALTER TABLE sports_ticket_selections ADD COLUMN home_team VARCHAR(255) NULL', 'ALTER TABLE sports_ticket_selections ADD COLUMN IF NOT EXISTS home_team VARCHAR(255)'),
             $pick('ALTER TABLE sports_ticket_selections ADD COLUMN away_team TEXT', 'ALTER TABLE sports_ticket_selections ADD COLUMN away_team VARCHAR(255) NULL', 'ALTER TABLE sports_ticket_selections ADD COLUMN IF NOT EXISTS away_team VARCHAR(255)'),
             $pick('ALTER TABLE sports_ticket_selections ADD COLUMN kickoff_time TEXT', 'ALTER TABLE sports_ticket_selections ADD COLUMN kickoff_time VARCHAR(32) NULL', 'ALTER TABLE sports_ticket_selections ADD COLUMN IF NOT EXISTS kickoff_time VARCHAR(32)'),
+            // Team crest URLs, carried through from the provider fixture so a
+            // ticket leg can show each side's logo. Null for providers (or
+            // legacy rows) that never sent one — never a guessed image.
+            $pick('ALTER TABLE sports_ticket_selections ADD COLUMN home_team_logo TEXT', 'ALTER TABLE sports_ticket_selections ADD COLUMN home_team_logo VARCHAR(500) NULL', 'ALTER TABLE sports_ticket_selections ADD COLUMN IF NOT EXISTS home_team_logo VARCHAR(500)'),
+            $pick('ALTER TABLE sports_ticket_selections ADD COLUMN away_team_logo TEXT', 'ALTER TABLE sports_ticket_selections ADD COLUMN away_team_logo VARCHAR(500) NULL', 'ALTER TABLE sports_ticket_selections ADD COLUMN IF NOT EXISTS away_team_logo VARCHAR(500)'),
             $pick('ALTER TABLE sports_ticket_selections ADD COLUMN confidence REAL', 'ALTER TABLE sports_ticket_selections ADD COLUMN confidence DECIMAL(10,4) NULL', 'ALTER TABLE sports_ticket_selections ADD COLUMN IF NOT EXISTS confidence DECIMAL(10,4)'),
             $pick('ALTER TABLE sports_ticket_selections ADD COLUMN data_quality REAL', 'ALTER TABLE sports_ticket_selections ADD COLUMN data_quality DECIMAL(10,4) NULL', 'ALTER TABLE sports_ticket_selections ADD COLUMN IF NOT EXISTS data_quality DECIMAL(10,4)'),
             // Odds provenance on the leg itself: which feed supplied the real

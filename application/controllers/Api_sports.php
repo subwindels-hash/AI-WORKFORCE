@@ -188,10 +188,30 @@ class Api_sports extends Api_controller
     /** AI decision report: why the AI selected/rejected this (spec §28/§29). */
     public function decision_report(string $id)
     {
-        if (!$this->requirePermission('sports.view', false)) return;
+        $user = $this->requirePermission('sports.view', false);
+        if (!$user) return;
         $p = $this->AIWorkforce_model->sports->findPrediction($id);
         if (!$p) return $this->jsonError('prediction not found', 404);
         $match = $this->AIWorkforce_model->sports->findMatchById((int) $p['match_id']);
+        $isAdmin = (bool) $this->platform()->identity->can($user, 'sports.manage');
+        // Round 3b: governance/model-state and the full diagnostic trace are
+        // admin/developer only (sports.manage). Ordinary sports.view users —
+        // every registered member gets that permission by default — see a
+        // plain, non-technical availability message with no internal codes,
+        // model-version identifiers or governance-rule detail.
+        if (!$isAdmin) {
+            $simpleStatus = ($p['decision'] ?? '') === 'PREDICTION_READY' ? 'AVAILABLE' : 'UNAVAILABLE';
+            $this->json([
+                'predictionId' => $p['id'],
+                'match' => $match ? ['homeTeam' => $match['home_team'], 'awayTeam' => $match['away_team'], 'competition' => $match['competition'], 'kickoff' => $match['kickoff_at']] : null,
+                'market' => $p['market'], 'selection' => $p['selection'],
+                'status' => $simpleStatus,
+                'message' => $simpleStatus === 'AVAILABLE'
+                    ? 'A prediction is available for this match and market.'
+                    : 'Prediction unavailable — insufficient verified data for this match or market right now.',
+            ]);
+            return;
+        }
         $model = $this->AIWorkforce_model->sports->findModelVersion((int) $p['model_version_id']);
         $quality = $this->AIWorkforce_model->sports->latestQuality((int) $p['match_id']);
         $factors = is_array($p['factors']) ? $p['factors'] : [];

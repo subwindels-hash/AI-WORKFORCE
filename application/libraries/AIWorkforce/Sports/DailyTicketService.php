@@ -532,9 +532,17 @@ class DailyTicketService
                         }
 
                         // ── Stage 1: fixture eligibility ─────────────────────
-                        if (!$this->fixtureEligibleForDailyTicket($match, $runtimeNow)) {
+                        $eligibilityFailure = $this->fixtureEligibilityReason($match, $runtimeNow);
+                        if ($eligibilityFailure !== null) {
                             $rejections++;
+                            // The retry/backoff logic below keys off the
+                            // legacy aggregate bucket (rejectionSummary), so
+                            // that counter is unchanged; the exact taxonomy
+                            // code (MATCH_FINISHED / MATCH_ALREADY_STARTED /
+                            // KICKOFF_TOO_CLOSE / …) goes into the audit row
+                            // admins and developers actually read.
                             $this->countRejection($rejectionSummary, 'FIXTURE_NOT_NS_OR_TOO_SOON', $reasonProviders, $itemProvider);
+                            $this->recordFixtureRejectionAudit($funnel, $match, $eligibilityFailure, $itemProvider, ['failedStage' => 'fixtureEligibility']);
                             continue;
                         }
                         $funnel['eligibleFixtures']++;
@@ -549,6 +557,15 @@ class DailyTicketService
                         if (!$oddsStage['ok']) {
                             $rejections++;
                             $this->countRejection($rejectionSummary, $oddsStage['reason'], $reasonProviders, $oddsStage['provider'] ?? $itemProvider);
+                            $this->recordFixtureRejectionAudit($funnel, $match, $oddsStage['reason'], $oddsStage['provider'] ?? $itemProvider, [
+                                'failedStage' => 'oddsAvailability',
+                                // ODDS_UNAVAILABLE/STALE_ODDS are worth a later
+                                // retry (a fresh sync/provider fallback may
+                                // supply a price); MARKET_UNAVAILABLE is a
+                                // coverage gap the book will not fill.
+                                'retryable' => $oddsStage['reason'] !== 'MARKET_UNAVAILABLE',
+                                'fallbackAttempted' => (int) ($funnel['oddsRefreshAttempts'] ?? 0) > 0,
+                            ]);
                             continue;
                         }
                         $usableOdds = $oddsStage['rows'];
@@ -637,6 +654,21 @@ class DailyTicketService
                             if ($failedRequirement === 'MANDATORY_MODEL_DATA') $funnel['fixturesMissingMandatoryData']++;
                             elseif ($failedRequirement === 'APPROVED_CALIBRATION') $funnel['fixturesWithoutCalibration']++;
                             else $funnel['fixturesBelowQualityFloor']++;
+                            // MODEL_NOT_CALIBRATED names a real, already-approved
+                            // governance rule (require_calibration + an APPROVED
+                            // sports_calibrations row) — never a DRAFT model
+                            // state on its own (Round 3b req: model-state
+                            // never blocks; only this explicit, configured
+                            // gate may, and it is named exactly here).
+                            $this->recordFixtureRejectionAudit($funnel, $match, $primaryReason, $itemProvider, [
+                                'failedStage' => 'sufficientDataGate',
+                                'dataQuality' => (int) ($qualityAssessment['score'] ?? 0),
+                                'minDataQuality' => (int) $adaptiveFloor,
+                                'missing' => $missingMandatory,
+                                'explanation' => $failedRequirement === 'APPROVED_CALIBRATION'
+                                    ? 'governance rule: require_calibration is enabled and no APPROVED row exists in sports_calibrations for this model version (configured via the ticket configuration and /api/sports/calibrations)'
+                                    : null,
+                            ]);
                             continue;
                         }
                         $funnel['sufficientDataFixtures']++;
@@ -678,6 +710,18 @@ class DailyTicketService
                             'modelVersion' => PredictionEngine::MODEL_VERSION,
                             'featureVersion' => FeatureEngineeringEngine::VERSION,
                         ]);
+                        // Governance/user-facing separation (Round 3b req #11):
+                        // the model's lifecycle STATE is read once and recorded
+                        // on every candidate for admin diagnostics, but it is
+                        // never itself a gate — DRAFT/lack of manual activation
+                        // must never block a user-facing prediction. Only the
+                        // already-existing, separate APPROVED-calibration check
+                        // (require_calibration) may block.
+                        $modelState = null;
+                        try {
+                            $modelRow = $modelVersionId !== null ? $this->repo->findModelVersion($modelVersionId) : null;
+                            $modelState = is_array($modelRow) ? (string) ($modelRow['status'] ?? null) : null;
+                        } catch (\Throwable $e) { $modelState = null; }
                         foreach ($predictable as &$predictableItem) {
                             $predictableItem['previousByKey'] = $this->previousPredictionsFor((int) $predictableItem['matchRow']['id'], $recordedThisRun);
                             $missing = 0;
@@ -707,6 +751,11 @@ class DailyTicketService
                                 'marketPrices' => $item['marketPrices'][$odds['market']] ?? [],
                                 'previousPrediction' => $previousByKey[$odds['market'] . ':' . $odds['selection']] ?? null,
                                 'matchUpdatedAt' => $matchRow['updated_at'] ?? null,
+                                // Governance info, kept separate from availability
+                                // (Round 3b req #11): recorded for the admin
+                                // diagnostic trace, never a gate on its own.
+                                'modelState' => $modelState,
+                                'fallbackAttempted' => (int) ($funnel['oddsRefreshAttempts'] ?? 0) > 0,
                             ]);
 
                             $factors = array_merge(['market' => $candidate['market'], 'selection' => $candidate['selection']], $candidate['factors']);
@@ -778,6 +827,8 @@ class DailyTicketService
                                 'marketPrices' => $item['marketPrices'][$odds['market']] ?? [],
                                 'previousPrediction' => $previous,
                                 'matchUpdatedAt' => $item['matchRow']['updated_at'] ?? null,
+                                'modelState' => $modelState ?? null,
+                                'fallbackAttempted' => (int) ($funnel['oddsRefreshAttempts'] ?? 0) > 0,
                             ]);
                             $candidate['predictionId'] = $previous['id'] ?? null;
                             $funnel['predictionsReused']++;
@@ -1210,6 +1261,56 @@ class DailyTicketService
     }
 
     /**
+     * One auditable row for a rejection that happens BEFORE a candidate ever
+     * reaches the per-market pipeline — fixture eligibility (kickoff too
+     * close / already started), odds-stage failures (ODDS_UNAVAILABLE,
+     * STALE_ODDS, MARKET_UNAVAILABLE) and the sufficient-data gate. These
+     * never had a `PredictionPipeline` candidate to read fields from, so the
+     * structured Round 3b record is built directly from what IS known at
+     * this stage — every unmeasured field stays an honest null, never a
+     * fabricated number.
+     */
+    private function recordFixtureRejectionAudit(array &$funnel, array $match, string $primary, string $provider, array $extra = []): void
+    {
+        $ledger = &$funnel['rejectionAudit'];
+        if (count($ledger['rows']) >= (int) $ledger['limit']) { $ledger['truncated'] = true; unset($ledger); return; }
+        $failureCode = FailureTaxonomy::translate($primary);
+        $ledger['rows'][] = array_merge([
+            'fixture' => trim((string) ($match['homeTeam'] ?? '?') . ' vs ' . (string) ($match['awayTeam'] ?? '?')),
+            'matchId' => $match['id'] ?? null,
+            'competition' => $match['competition'] ?? null,
+            'kickoff' => $match['kickoff'] ?? null,
+            'market' => null,
+            'selection' => null,
+            'provider' => $provider,
+            'reason' => $primary,
+            'allReasons' => [$primary],
+            'missing' => [],
+            'available' => [],
+            'dataQuality' => null,
+            'minDataQuality' => null,
+            'confidence' => null,
+            'minConfidence' => null,
+            'dataTier' => null,
+            'explanation' => null,
+            'odds' => null,
+            'oddsTimestamp' => null,
+            'predictedProbability' => null,
+            'expectedValue' => null,
+            'minimumRequiredValue' => null,
+            'modelState' => null,
+            'modelStateWarning' => null,
+            'failureCode' => $failureCode,
+            'failureReason' => FailureTaxonomy::userMessage($failureCode),
+            'failedStage' => null,
+            'retryable' => FailureTaxonomy::retryable($failureCode),
+            'fallbackAttempted' => false,
+            'fallbackResult' => null,
+        ], $extra);
+        unset($ledger);
+    }
+
+    /**
      * Record one fresh-odds fixture's evaluation against the sufficient-data
      * gate: mandatory model inputs (e.g. verified recentForm), an APPROVED
      * calibration, and the data-quality floor. Every requirement's result is
@@ -1297,6 +1398,7 @@ class DailyTicketService
         $ledger = &$funnel['rejectionAudit'];
         if (count($ledger['rows']) >= (int) $ledger['limit']) { $ledger['truncated'] = true; unset($ledger); return; }
         $detail = is_array($candidate['rejectionDetail'] ?? null) ? $candidate['rejectionDetail'] : [];
+        $failureCode = (string) ($candidate['failureCode'] ?? FailureTaxonomy::translate($primary));
         $ledger['rows'][] = [
             'fixture' => trim((string) ($candidate['match']['homeTeam'] ?? '?') . ' vs ' . (string) ($candidate['match']['awayTeam'] ?? '?')),
             'matchId' => $candidate['matchId'] ?? null,
@@ -1317,6 +1419,25 @@ class DailyTicketService
             'minConfidence' => $detail['minConfidence'] ?? null,
             'dataTier' => $detail['dataTier'] ?? null,
             'explanation' => $detail['policyExplanation'] ?? null,
+            // Round 3b: the exact structured diagnostic record — machine
+            // readable failure code, the stage that produced it, whether it
+            // is worth retrying, the odds/provider provenance, the actual
+            // measured probability/value against their minimums, and the
+            // admin-facing full reason with concrete numbers (never a bare
+            // category label).
+            'odds' => $candidate['odds'] ?? null,
+            'oddsTimestamp' => $candidate['oddsTimestamp'] ?? null,
+            'predictedProbability' => $candidate['prediction']['calibratedProbability'] ?? null,
+            'expectedValue' => $candidate['value']['expectedValue'] ?? null,
+            'minimumRequiredValue' => $candidate['factors']['minExpectedValue'] ?? null,
+            'modelState' => $candidate['modelState'] ?? null,
+            'modelStateWarning' => $candidate['modelStateWarning'] ?? null,
+            'failureCode' => $failureCode,
+            'failureReason' => $candidate['failureReason'] ?? FailureTaxonomy::userMessage($failureCode),
+            'failedStage' => $candidate['failedStage'] ?? null,
+            'retryable' => $candidate['retryable'] ?? FailureTaxonomy::retryable($failureCode),
+            'fallbackAttempted' => $candidate['fallbackAttempted'] ?? false,
+            'fallbackResult' => $candidate['fallbackResult'] ?? null,
         ];
         unset($ledger);
     }
@@ -1523,7 +1644,86 @@ class DailyTicketService
         $funnel['averageConfidence'] = $measuredCount > 0
             ? round(((float) $funnel['confidenceSum']) / $measuredCount, 2)
             : null;
+        $funnel['runSummary'] = $this->buildRunSummary($funnel, $evaluated, $recorded, $rejections);
         return $funnel;
+    }
+
+    /**
+     * Round 3b — the per-run diagnostic summary: matches discovered/
+     * evaluated/skipped, markets evaluated/valid, predictions generated/
+     * rejected, and rejections broken down by the EXACT machine-readable
+     * failure code (never a bare "confidence too low"), each with its count
+     * and up to a handful of concrete example rows carrying the actual
+     * numbers that caused it. This is the "immediately obvious whether the
+     * problem is data, odds, provider, market, model, confidence, value or
+     * a business-rule gate" view the pipeline audit requires.
+     */
+    private function buildRunSummary(array $funnel, int $evaluated, int $recorded, int $rejections): array
+    {
+        $rows = (array) ($funnel['rejectionAudit']['rows'] ?? []);
+        $byCode = [];
+        foreach ($rows as $row) {
+            $code = (string) ($row['failureCode'] ?? 'UNKNOWN_ERROR');
+            if (!isset($byCode[$code])) {
+                $byCode[$code] = ['failureCode' => $code, 'count' => 0, 'retryable' => $row['retryable'] ?? true, 'examples' => []];
+            }
+            $byCode[$code]['count']++;
+            if (count($byCode[$code]['examples']) < 5) {
+                $byCode[$code]['examples'][] = [
+                    'match' => $row['fixture'] ?? null,
+                    'market' => $row['market'] ?? null,
+                    'selection' => $row['selection'] ?? null,
+                    'provider' => $row['provider'] ?? null,
+                    'failureReason' => $row['failureReason'] ?? null,
+                    'failedStage' => $row['failedStage'] ?? null,
+                    'predictedProbability' => $row['predictedProbability'] ?? null,
+                    'confidence' => $row['confidence'] ?? null,
+                    'minConfidence' => $row['minConfidence'] ?? null,
+                    'dataQuality' => $row['dataQuality'] ?? null,
+                    'minDataQuality' => $row['minDataQuality'] ?? null,
+                    'expectedValue' => $row['expectedValue'] ?? null,
+                    'minimumRequiredValue' => $row['minimumRequiredValue'] ?? null,
+                    'fallbackAttempted' => $row['fallbackAttempted'] ?? false,
+                ];
+            }
+        }
+        uasort($byCode, fn($a, $b) => $b['count'] <=> $a['count']);
+        return [
+            // Every fixture read this run, whether or not it survived
+            // eligibility (kickoff timing, status) — the widest count, so a
+            // "0 eligible" day still shows how many fixtures the provider
+            // actually returned.
+            'matchesDiscovered' => $evaluated,
+            'matchesEvaluated' => (int) ($funnel['eligibleFixtures'] ?? 0),
+            'matchesSkipped' => $rejections,
+            'marketsEvaluated' => (int) ($funnel['marketsEvaluated'] ?? 0),
+            'marketsValid' => (int) ($funnel['sufficientDataCandidates'] ?? 0),
+            'predictionsGenerated' => (int) ($funnel['predictionsGenerated'] ?? 0) + (int) ($funnel['predictionsReused'] ?? 0),
+            'predictionsRejected' => $rejections,
+            'rejectionsByFailureCode' => array_values($byCode),
+            // Named exactly for the "which rule, where configured, exact
+            // threshold, retryable, which fallback attempted" requirement.
+            'governanceRules' => [
+                [
+                    'rule' => 'require_calibration',
+                    'configuredAt' => 'active ticket configuration (ConfigurationService), field require_calibration',
+                    'description' => 'When enabled, a fixture may only be predicted using an APPROVED row in sports_calibrations for the deployed model version. A DRAFT/unapproved model version never blocks on its own — only the absence of an approved calibration does.',
+                    'blocked' => (int) ($funnel['fixturesWithoutCalibration'] ?? 0),
+                    'retryable' => true,
+                    'fallbackAttempted' => !empty($funnel['calibrationBootstrap']),
+                    'fallbackResult' => $funnel['calibrationBootstrap'] ?? null,
+                ],
+                [
+                    'rule' => 'confidence_policy (adaptive tiers)',
+                    'configuredAt' => 'active ticket configuration (min_confidence/min_data_quality or explicit confidence_policy) via ConfidencePolicy::fromConfiguration',
+                    'description' => 'Each candidate must reach the confidence its own measured data quality tier requires (EXCELLENT/GOOD/LIMITED); below the floor, no market is predictable at any confidence.',
+                    'blocked' => (int) (($funnel['topRejectionReasons']['LOW_CONFIDENCE'] ?? 0) + ($funnel['topRejectionReasons']['CONFIDENCE_UNMEASURED'] ?? 0)),
+                    'retryable' => true,
+                    'fallbackAttempted' => !empty($funnel['fallbackUsed']),
+                    'fallbackResult' => $funnel['fallbackReason'] ?? null,
+                ],
+            ],
+        ];
     }
 
     /** Compact one-line funnel for the human-readable message. */
@@ -1607,6 +1807,12 @@ class DailyTicketService
                 'match' => ($c['match']['homeTeam'] ?? '?') . ' vs ' . ($c['match']['awayTeam'] ?? '?'),
                 'homeTeam' => $c['match']['homeTeam'] ?? null,
                 'awayTeam' => $c['match']['awayTeam'] ?? null,
+                // Provider-supplied crest URLs, carried through so a page that
+                // renders straight from this funnel (no ticket row to read
+                // logos from) can still show each club's own verified crest —
+                // never a placeholder, never guessed from the team name.
+                'homeTeamLogo' => $c['match']['homeTeamLogo'] ?? null,
+                'awayTeamLogo' => $c['match']['awayTeamLogo'] ?? null,
                 'kickoff' => $c['match']['kickoff'] ?? null,
                 'competition' => $c['match']['competition'] ?? null,
                 'provider' => $c['oddsSource'] ?? null,
@@ -1947,7 +2153,18 @@ class DailyTicketService
      */
     private function fixtureEligibleForDailyTicket(array $match, int $now): bool
     {
-        if (strtolower((string) ($match['sport'] ?? '')) !== 'football') return false;
+        return $this->fixtureEligibilityReason($match, $now) === null;
+    }
+
+    /**
+     * Round 3b: the taxonomy-exact reason a fixture is NOT eligible for daily
+     * ticket evaluation — MATCH_FINISHED, MATCH_ALREADY_STARTED or
+     * KICKOFF_TOO_CLOSE — never the single catch-all FIXTURE_NOT_NS_OR_TOO_SOON
+     * bucket a diagnostics consumer cannot act on. Returns null when eligible.
+     */
+    private function fixtureEligibilityReason(array $match, int $now): ?string
+    {
+        if (strtolower((string) ($match['sport'] ?? '')) !== 'football') return 'NOT_SUPPORTED_SPORT';
         // A not-started fixture is recognised by its MEANING, not by one
         // provider's spelling of it. Requiring the literal short code "NS"
         // rejected every feed that says "Not Started", "TBD", "PENDING",
@@ -1958,7 +2175,8 @@ class DailyTicketService
         // shared normalizer, and the fixture is eligible when they agree that
         // the match has not kicked off.
         $canonical = SportsDataNormalizer::canonicalStatus((string) ($match['status'] ?? ''));
-        if ($canonical !== 'SCHEDULED') return false;
+        if ($canonical === 'FINISHED') return FailureTaxonomy::MATCH_FINISHED;
+        if ($canonical !== 'SCHEDULED') return FailureTaxonomy::MATCH_ALREADY_STARTED;
         // The provider's own wording must AGREE, and it is only allowed to
         // agree with a recognised not-started token. canonicalStatus() falls
         // back to SCHEDULED for anything it does not know, so an unrecognised
@@ -1966,11 +2184,13 @@ class DailyTicketService
         // stays ineligible.
         $rawSourceStatus = strtoupper(trim((string) ($match['sourceStatus'] ?? '')));
         if ($rawSourceStatus !== ''
-            && !in_array($rawSourceStatus, self::NOT_STARTED_SOURCE_STATUSES, true)) return false;
+            && !in_array($rawSourceStatus, self::NOT_STARTED_SOURCE_STATUSES, true)) return FailureTaxonomy::MATCH_ALREADY_STARTED;
         try { $kickoff = (new \DateTimeImmutable((string) ($match['kickoff'] ?? '')))->getTimestamp(); }
-        catch (\Throwable $e) { return false; }
-        return $kickoff > ($now + self::ELIGIBILITY_LEAD_SECONDS);
+        catch (\Throwable $e) { return FailureTaxonomy::MATCH_NOT_FOUND; }
+        if ($kickoff <= ($now + self::ELIGIBILITY_LEAD_SECONDS)) return FailureTaxonomy::KICKOFF_TOO_CLOSE;
+        return null;
     }
+
 
     /**
      * Reuse recentForm that a PREVIOUS run already verified for this fixture.
