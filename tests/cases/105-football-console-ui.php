@@ -194,6 +194,22 @@ test('football: the football screens own their panels — no duplication, no lef
     // §10/§11: the board and its card vocabulary live here, once.
     assert_equals(1, substr_count($console, "TODAY'S FOOTBALL PREDICTIONS"), 'the board heading appears once');
     assert_equals(1, substr_count($console, '<h3>30-day performance'), 'the 30-day panel appears once');
+    $railStart = strpos($console, '<aside class="football-side');
+    $performanceStart = strpos($console, 'id="football-performance"');
+    assert_true($railStart !== false && $performanceStart !== false && $performanceStart > $railStart,
+        'the complete performance panel lives in the sidebar rail');
+    foreach (['Predictions evaluated', 'Correct results', 'Result accuracy', 'Correct exact scores',
+        'Correct-score accuracy', 'Avg confidence', 'Brier score', 'Log loss', 'ECE',
+        'Avg data quality', 'Avg goal error', 'Approved calibrations'] as $metric) {
+        assert_equals(1, substr_count($console, '>' . $metric . '<'), $metric . ' appears once in the sidebar performance panel');
+    }
+    foreach (['evaluatedPredictions', 'correctResults', 'resultAccuracy', 'correctScores',
+        'exactScoreAccuracy', 'averageConfidence', 'brier', 'logLoss', 'ece',
+        'averageDataQuality', 'averageGoalError'] as $field) {
+        assert_contains("\$perf['" . $field . "']", $console, $field . ' is bound to the stored performance report');
+    }
+    assert_contains("\$models['approvedCalibrationCount']", $console,
+        'approved calibrations are bound to the stored model summary');
     assert_contains('$board[\'categories\']', $console, 'the view iterates the confidence categories the board produced');
     // The categories themselves are a data contract, so they are checked where
     // they are produced.
@@ -545,20 +561,21 @@ test('football UI: every section on every football screen is the same numbered, 
         'models' => fx_fb_source('application/views/football/models.php'),
     ];
 
-    // 1. Reading order. The board and both sub-screens number their feed.
-    foreach ([1, 2, 3, 4] as $step) {
+    // 1. Reading order. Each screen numbers its feed; the board's performance
+    // report is now part of the sidebar rail and therefore stays unnumbered.
+    foreach ([1, 2, 3] as $step) {
         assert_contains('<span class="football-step" aria-hidden="true">' . $step . '</span>', $views['board'],
             'the board numbers feed step ' . $step);
-        assert_contains('<span class="football-step" aria-hidden="true">' . $step . '</span>', $views['match'],
-            'the match page numbers step ' . $step);
-    }
-    foreach ([1, 2, 3] as $step) {
         assert_contains('<span class="football-step" aria-hidden="true">' . $step . '</span>', $views['models'],
             'the models page numbers step ' . $step);
     }
+    foreach ([1, 2, 3, 4] as $step) {
+        assert_contains('<span class="football-step" aria-hidden="true">' . $step . '</span>', $views['match'],
+            'the match page numbers step ' . $step);
+    }
     // The rail is reference material, never part of the numbered order, so the
     // step count equals the number of feed sections and no more.
-    assert_equals(4, substr_count($views['board'], 'class="football-step"'), 'the board numbers its feed and only its feed');
+    assert_equals(3, substr_count($views['board'], 'class="football-step"'), 'the board numbers its feed and only its feed');
 
     // 2. Every aria-labelledby resolves. `live-heading` and
     // `performance-heading` used to point at nothing at all.
@@ -629,7 +646,7 @@ test('football UI: every section on every football screen is the same numbered, 
     // 6. The write-ups themselves: a reader is told what each section is for.
     foreach (['The counts below describe saved rows for this date only',
         'The strongest comparisons drawn from the fixtures in section 3',
-        'Outcome of predictions that have already been settled'] as $writeUp) {
+        'Measured from stored settlements only'] as $writeUp) {
         assert_contains($writeUp, $views['board'], 'the board explains its section: ' . $writeUp);
     }
     foreach (['Day overview', 'Ranked reading', 'Fixture odds board', 'Measured results',

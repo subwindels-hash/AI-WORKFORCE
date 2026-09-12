@@ -48,6 +48,10 @@ if ($providerRequestedRaw !== '') $carry['provider'] = $providerRequestedRaw;
 
 $dash = static fn(mixed $value, int $places = 1): string => is_numeric($value) ? number_format((float) $value, $places) : '—';
 $pct = static fn(mixed $value, int $places = 1): string => is_numeric($value) ? number_format((float) $value * 100, $places) . '%' : '—';
+$count = static fn(mixed $value): string => is_numeric($value) ? number_format((int) $value) : '—';
+$percentPoints = static fn(mixed $value, int $places = 1): string => is_numeric($value) ? number_format((float) $value, $places) . '%' : '—';
+$qualityScore = static fn(mixed $value): string => is_numeric($value) ? number_format((float) $value, 1) . '/100' : '—';
+$goalError = static fn(mixed $value): string => is_numeric($value) ? number_format((float) $value, 2) . ' goals' : '—';
 $odds = static fn(mixed $value): string => is_numeric($value) ? number_format((float) $value, 2) : '—';
 $signedPct = static fn(mixed $value): string => is_numeric($value) ? ((float) $value >= 0 ? '+' : '') . number_format((float) $value * 100, 1) . '%' : '—';
 $bandClass = static fn(string $band): string => match (strtoupper($band)) {
@@ -157,7 +161,7 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
             <span class="badge <?= strtoupper($providerMode) === 'MANUAL' ? 'b-amber' : 'b-green' ?>"><?= e($providerMode) ?> · <?= strtoupper($providerMode) === 'MANUAL' ? 'operator selection' : 'admin managed' ?></span>
           </div>
           <div class="body">
-            <p class="football-section-intro">These controls change what the four sections below display. They only reorganize saved fixtures and stored odds — no provider request is spent and no prediction is created.</p>
+            <p class="football-section-intro">These controls change what the three board sections below display. They only reorganize saved fixtures and stored odds — no provider request is spent and no prediction is created.</p>
             <form method="get" action="/football" class="football-filter-form">
               <input type="hidden" name="page" value="1">
               <label class="fld">Data provider
@@ -454,34 +458,40 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         </div>
       </section>
 
-      <section class="panel football-section" id="football-performance" aria-labelledby="performance-heading">
+    </div>
+
+    <aside class="football-side stack" aria-label="Football performance and operational context">
+      <section class="panel football-section football-performance-panel" id="football-performance" aria-labelledby="performance-heading">
         <div class="football-section__heading">
           <div class="football-section__title">
-            <span class="football-step" aria-hidden="true">4</span>
             <div id="performance-heading">
               <p class="football-eyebrow">Measured results</p>
               <h3>30-day performance (settled predictions)</h3>
             </div>
           </div>
-          <span class="football-section__meta">settled predictions only</span>
+          <span class="football-section__meta">30 days</span>
         </div>
         <div class="body">
-          <p class="football-section-intro">Outcome of predictions that have already been settled against a final result. Nothing here is projected: an unsettled match contributes no figure, so an empty history stays empty rather than being filled in.</p>
-          <div class="stat-grid football-stat-grid football-stat-grid--compact">
-            <div class="stat"><div class="k">Evaluated</div><div class="v"><?= (int) ($perf['evaluatedPredictions'] ?? 0) ?></div></div>
-            <div class="stat"><div class="k">Result accuracy</div><div class="v"><?= $pct($perf['resultAccuracy'] ?? null) ?></div></div>
-            <div class="stat"><div class="k">Exact-score accuracy</div><div class="v"><?= $pct($perf['exactScoreAccuracy'] ?? null, 2) ?></div></div>
-            <div class="stat"><div class="k">Brier score</div><div class="v mono"><?= $dash($perf['brier'] ?? null, 4) ?></div></div>
-            <div class="stat"><div class="k">Avg. confidence</div><div class="v"><?= $dash($perf['averageConfidence'] ?? null) ?>%</div></div>
-            <div class="stat"><div class="k">Avg. data quality</div><div class="v"><?= $dash($perf['averageDataQuality'] ?? null) ?>/100</div></div>
-          </div>
-          <?php if (($perf['state'] ?? '') !== 'MEASURED'): ?><p class="football-help">No settled predictions yet. Historical accuracy and calibration metrics will appear after predicted matches complete.</p><?php endif; ?>
+          <p class="football-section-intro">Measured from stored settlements only. Unsettled predictions are excluded, and unavailable measurements remain blank rather than being estimated.</p>
+          <dl class="football-performance-list">
+            <div><dt>Predictions evaluated</dt><dd class="mono"><?= $count($perf['evaluatedPredictions'] ?? null) ?></dd></div>
+            <div><dt>Correct results</dt><dd class="mono"><?= $count($perf['correctResults'] ?? null) ?></dd></div>
+            <div><dt>Result accuracy</dt><dd class="mono"><?= $pct($perf['resultAccuracy'] ?? null) ?></dd></div>
+            <div><dt>Correct exact scores</dt><dd class="mono"><?= $count($perf['correctScores'] ?? null) ?></dd></div>
+            <div><dt>Correct-score accuracy</dt><dd class="mono"><?= $pct($perf['exactScoreAccuracy'] ?? null, 2) ?></dd></div>
+            <div><dt>Avg confidence</dt><dd class="mono"><?= $percentPoints($perf['averageConfidence'] ?? null) ?></dd></div>
+            <div><dt>Brier score</dt><dd class="mono"><?= $dash($perf['brier'] ?? null, 4) ?></dd></div>
+            <div><dt>Log loss</dt><dd class="mono"><?= $dash($perf['logLoss'] ?? null, 4) ?></dd></div>
+            <div><dt>ECE</dt><dd class="mono"><?= $dash($perf['ece'] ?? null, 4) ?></dd></div>
+            <div><dt>Avg data quality</dt><dd class="mono"><?= $qualityScore($perf['averageDataQuality'] ?? null) ?></dd></div>
+            <div><dt>Avg goal error</dt><dd class="mono"><?= $goalError($perf['averageGoalError'] ?? null) ?></dd></div>
+            <div><dt>Approved calibrations</dt><dd class="mono"><?= $count($models['approvedCalibrationCount'] ?? null) ?></dd></div>
+          </dl>
+          <?php if (($perf['state'] ?? '') !== 'MEASURED'): ?><p class="football-help"><?= e((string) ($perf['message'] ?? 'No settled predictions yet. Historical performance metrics will appear after predicted matches have completed.')) ?></p><?php endif; ?>
           <?php if (!empty($perf['note'])): ?><p class="football-help"><?= e((string) $perf['note']) ?></p><?php endif; ?>
         </div>
       </section>
-    </div>
 
-    <aside class="football-side stack" aria-label="Football operational context">
       <section class="panel football-section football-reading-guide" aria-labelledby="football-guide-heading">
         <div class="football-section__heading">
           <div class="football-section__title">
