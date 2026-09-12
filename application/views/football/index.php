@@ -135,7 +135,7 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
       </form>
     </div>
     <div class="football-actionbar__group">
-      <a class="btn small" href="/football/live">Live view</a>
+      <a class="btn small" href="#football-live-panel">Live match</a>
       <a class="btn small" href="/football/models">Models &amp; calibration</a>
       <a class="btn small football-ticket-link" href="/sports">🎯 Odds prediction tickets</a>
     </div>

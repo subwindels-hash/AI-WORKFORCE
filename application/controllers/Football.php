@@ -130,22 +130,16 @@ class Football extends App_Controller
     }
 
     /**
-     * Live view: the same board page, after one bounded live-score sweep.
-     * It renders the identical view on purpose — a second "live" template would
-     * be a second copy of the same figures, and the two would drift.
+     * Legacy live-view shortcut.
+     *
+     * Viewing a page must never spend a provider request. The provider-aware
+     * scheduler owns live sweeps, while the football page polls the stored live
+     * endpoint automatically. Keep old bookmarks useful by taking them straight
+     * to that panel without mutating state.
      */
     public function live()
     {
-        if (!empty($this->footballCaps()['sync'])) {
-            try {
-                $this->platform->football->syncLive(true);
-            } catch (Throwable $e) {
-                $this->flash('error', 'Live refresh refused: ' . $e->getMessage());
-            }
-        } else {
-            $this->flash('notice', 'Showing the stored live state. A live-score refresh needs sports.manage.');
-        }
-        redirect('/football');
+        redirect('/football#football-live-panel');
     }
 
     /** One fixture: stored facts, features, data quality and the prediction. */

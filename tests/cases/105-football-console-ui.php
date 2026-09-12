@@ -514,6 +514,18 @@ test('football: a live match card carries the match date and time from the store
     assert_contains('id="football-live-list"', $livePanel, 'the live-only list is the poll target');
     assert_true(!str_contains($livePanel, 'Refresh live'), 'there is no manual refresh control inside an always-on panel');
     assert_true(!str_contains($livePanel, 'pre-match prediction'), 'the compact panel displays only the live-match state');
+    assert_contains('href="#football-live-panel">Live match</a>', $console,
+        'the action-bar shortcut scrolls to the automatic panel instead of triggering a provider refresh');
+    assert_true(!str_contains($console, 'href="/football/live"'),
+        'the console offers no GET action that spends a provider request');
+    $controller = fx_fb_source('application/controllers/Football.php');
+    $legacyStart = strpos($controller, 'public function live()');
+    $legacyEnd = strpos($controller, 'public function match(', (int) $legacyStart);
+    $legacyLive = substr($controller, (int) $legacyStart, (int) $legacyEnd - (int) $legacyStart);
+    assert_contains("redirect('/football#football-live-panel')", $legacyLive,
+        'old live-view bookmarks land on the automatic panel');
+    assert_true(!str_contains($legacyLive, 'syncLive'),
+        'opening the legacy live-view URL never calls the provider');
     assert_contains("fetch('/api/football/fixtures/live'", $console, 'the live panel polls the stored football-live endpoint');
     assert_contains('kickoffStamp(fixture.kickoff)', $console, 'polled cards preserve the stored kickoff date and time');
     assert_contains('document.hidden', $console, 'polling pauses while the page is hidden');
