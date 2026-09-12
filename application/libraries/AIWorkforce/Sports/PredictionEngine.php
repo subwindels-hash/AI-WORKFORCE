@@ -45,6 +45,24 @@ class PredictionEngine
         'DOUBLE_CHANCE' => ['HOME_OR_DRAW', 'AWAY_OR_DRAW', 'HOME_OR_AWAY'],
         // Draw No Bet: the draw refunds the stake, so it settles as VOID.
         'DRAW_NO_BET' => ['HOME', 'AWAY'],
+        // Handicap and correct score are sums over the SCORE GRID
+        // (ScoreGridPricer), not closed-form readings. Only lines that
+        // settle cleanly to WON/LOST/VOID from a full-time score are
+        // listed: quarter lines (-0.25/-0.75) split the stake into a
+        // half-win the settlement layer has no status for, so they are
+        // deliberately absent rather than rounded to a neighbour.
+        'ASIAN_HANDICAP' => [
+            'HOME_MINUS_0_5', 'HOME_MINUS_1', 'HOME_MINUS_1_5', 'HOME_MINUS_2',
+            'HOME_PLUS_0_5', 'HOME_PLUS_1', 'HOME_PLUS_1_5',
+            'AWAY_MINUS_0_5', 'AWAY_MINUS_1', 'AWAY_MINUS_1_5',
+            'AWAY_PLUS_0_5', 'AWAY_PLUS_1', 'AWAY_PLUS_1_5', 'AWAY_PLUS_2',
+        ],
+        'CORRECT_SCORE' => [
+            'SCORE_0_0', 'SCORE_1_0', 'SCORE_0_1', 'SCORE_1_1',
+            'SCORE_2_0', 'SCORE_0_2', 'SCORE_2_1', 'SCORE_1_2',
+            'SCORE_2_2', 'SCORE_3_0', 'SCORE_0_3', 'SCORE_3_1',
+            'SCORE_1_3', 'SCORE_3_2', 'SCORE_2_3', 'SCORE_3_3',
+        ],
     ];
 
     /**
@@ -70,6 +88,10 @@ class PredictionEngine
         'BTTS' => ['expectedGoalsProxy', 'homeAttack', 'awayAttack', 'homeDefenseConceded', 'awayDefenseConceded'],
         'DOUBLE_CHANCE' => ['expectedGoalsProxy', 'homeAttack', 'awayAttack', 'homeDefenseConceded', 'awayDefenseConceded'],
         'DRAW_NO_BET' => ['expectedGoalsProxy', 'homeAttack', 'awayAttack', 'homeDefenseConceded', 'awayDefenseConceded'],
+        // The score grid is built from the four goal rates; the aggregate
+        // proxy is not one of its inputs.
+        'ASIAN_HANDICAP' => ['homeAttack', 'awayAttack', 'homeDefenseConceded', 'awayDefenseConceded'],
+        'CORRECT_SCORE' => ['homeAttack', 'awayAttack', 'homeDefenseConceded', 'awayDefenseConceded'],
     ];
 
     /** Is this a companion (overround-only) price rather than a candidate? */
@@ -112,6 +134,20 @@ class PredictionEngine
         return [(float) ($m[2] . '.' . $m[3]), $m[1]];
     }
 
+    private ?ScoreGridPricer $gridPricer = null;
+
+    /** The shared score-grid pricer (Dixon-Coles), built on first use. */
+    private function gridPricer(): ScoreGridPricer
+    {
+        return $this->gridPricer ??= new ScoreGridPricer();
+    }
+
+    /** Markets whose probability is a sum over the joint score grid. */
+    public static function isScoreGridMarket(?string $market): bool
+    {
+        return in_array(strtoupper(trim((string) $market)), ['ASIAN_HANDICAP', 'CORRECT_SCORE'], true);
+    }
+
     public function predictOver15(array $featureSet, array $calibration): array
     {
         return $this->predict('TOTAL_GOALS', 'OVER_1_5', $featureSet, $calibration);
@@ -131,6 +167,14 @@ class PredictionEngine
             if (!isset($features[$key]) || !is_numeric($features[$key])) $missing[] = $key;
         }
         if ($missing !== []) return $this->reject('INSUFFICIENT_DATA', $featureSet, $market, $selection, $missing);
+
+        // A score-grid market can legitimately fail to produce a price (a
+        // line outside the configured grid, degenerate expectancies). That
+        // is stated as UNPRICEABLE_MARKET, never floored to a token 0.01.
+        if (self::isScoreGridMarket($market)) {
+            $gridProbability = $this->gridPricer()->probability($market, $selection, $features);
+            if ($gridProbability === null) return $this->reject('UNPRICEABLE_MARKET', $featureSet, $market, $selection);
+        }
 
         $raw = $this->rawProbability($market, $selection, $features);
         $calibrated = min(0.99, max(0.01, (float)$calibration['intercept'] + (float)$calibration['slope'] * $raw));
@@ -187,6 +231,12 @@ class PredictionEngine
             $away = $this->rawProbability('MATCH_RESULT', 'AWAY', $f);
             $probs = ['HOME_OR_DRAW' => $home + $draw, 'AWAY_OR_DRAW' => $away + $draw, 'HOME_OR_AWAY' => $home + $away];
             return min(0.99, max(0.01, $probs[$selection] ?? 0.01));
+        }
+        if (self::isScoreGridMarket($market)) {
+            // Summed over the SAME normalised grid the football board reads,
+            // so a scoreline cannot mean two different things.
+            $gridProbability = $this->gridPricer()->probability($market, $selection, $f);
+            return $gridProbability ?? 0.01;
         }
         if ($market === 'DRAW_NO_BET') {
             // The draw refunds the stake, so the market is the 1X2 model

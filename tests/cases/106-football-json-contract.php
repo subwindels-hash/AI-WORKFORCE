@@ -11,6 +11,8 @@
  * credential — they are readable without a session by design, so that has to be
  * proven, not intended.
  */
+
+require_once __DIR__ . '/102-football-prediction-pipeline.php'; // fx_fb_predict() and the shared fixtures it brings
 require_once TESTSPATH . 'football_support.php';
 
 use AIWorkforce\Football\CalibrationService;

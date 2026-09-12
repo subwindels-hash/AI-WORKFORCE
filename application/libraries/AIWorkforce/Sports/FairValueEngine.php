@@ -67,6 +67,23 @@ final class FairValueEngine
             $suffix = str_replace('.', '_', (string) $line[0]);
             return ['OVER_' . $suffix, 'UNDER_' . $suffix];
         }
+        if ($market === 'ASIAN_HANDICAP') {
+            // A handicap is de-vigged against its MIRROR: Home -1.5 pairs with
+            // Away +1.5, never with another line. Pairing across lines would
+            // compute an overround from two different markets.
+            $parsed = ScoreGridPricer::handicapSelection($selection);
+            if ($parsed === null) return [];
+            $opposite = $parsed['side'] === 'HOME' ? 'AWAY' : 'HOME';
+            $line = -$parsed['line'];
+            $sign = $line < 0 ? 'MINUS' : 'PLUS';
+            $magnitude = rtrim(rtrim(number_format(abs($line), 1, '.', ''), '0'), '.');
+            $suffix = str_replace('.', '_', $magnitude === '' ? '0' : $magnitude);
+            return [$selection, $opposite . '_' . $sign . '_' . $suffix];
+        }
+        // CORRECT_SCORE is deliberately absent: its complete outcome set is
+        // the entire scoreline space, which no book prices exhaustively. The
+        // market therefore stays PARTIAL and gets no de-vigged fair price —
+        // the gap is stated by the shared engine, never estimated.
         return self::MARKET_OUTCOMES[$market] ?? [];
     }
 

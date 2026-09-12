@@ -34,6 +34,15 @@ class OddsFreshnessEngine
     public const STATUS_FRESH = 'FRESH';
     public const STATUS_STALE = 'STALE';
     public const STATUS_UNAVAILABLE = 'UNAVAILABLE';
+    /**
+     * The bookmaker does not OFFER this market for this fixture — a coverage
+     * gap, not a feed gap. Distinct from UNAVAILABLE ("we hold no price"):
+     * a small book that simply never quotes Asian handicap on a lower
+     * division is behaving normally, whereas a fixture whose 1X2 price we
+     * failed to fetch is a data problem worth chasing. Collapsing the two
+     * made every coverage gap look like a broken feed.
+     */
+    public const STATUS_MARKET_UNAVAILABLE = 'MARKET_UNAVAILABLE';
     public const STATUS_INVALID_TIMESTAMP = 'INVALID_TIMESTAMP';
 
     public const ENV_MAX_AGE = 'WINDELS_SPORTS_ODDS_MAX_AGE';

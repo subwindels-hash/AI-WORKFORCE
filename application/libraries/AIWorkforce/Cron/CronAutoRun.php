@@ -11,7 +11,34 @@ namespace AIWorkforce\Cron;
 class CronAutoRun
 {
     public const TRIGGER_KEY = 'cron.last_trigger';
+    public const ENABLED_KEY = 'cron.auto_run';
     public const THROTTLE_SECONDS = 120;
+
+    /**
+     * Auto-run is ON until an operator turns it off.
+     *
+     * Every job in CronScheduler::JOBS ships defaultEnabled=true, but the
+     * jobs only ever execute when something TRIGGERS the runner. On a
+     * deployment with no hosting cron configured, the dashboard auto-trigger
+     * is that something — and it used to read an unset setting as "off", so
+     * a fresh install had every job enabled, due, and never running. That is
+     * what left the odds-prediction ticket ungenerated until somebody hit
+     * Run-now by hand.
+     *
+     * Defaulting to on matches the jobs' own default and is safe: the
+     * trigger is still throttled, still fires only when a job is due, and a
+     * real hosting cron remains the more reliable primary driver. An
+     * operator's explicit '0' always wins.
+     */
+    public const DEFAULT_ENABLED = true;
+
+    /** Whether the dashboard auto-trigger may fire (unset ⇒ DEFAULT_ENABLED). */
+    public static function isEnabled(CronStateStore $store): bool
+    {
+        $raw = $store->get(self::ENABLED_KEY);
+        if ($raw === null || $raw === '') return self::DEFAULT_ENABLED;
+        return $raw === '1';
+    }
 
     /**
      * @param callable|null $dispatch fn(string $url): bool — injectable for tests
@@ -27,7 +54,7 @@ class CronAutoRun
     ): string {
         if (($sapi ?? PHP_SAPI) === 'cli') return 'cli';
         if ($runUrl === '') return 'no_url';
-        if ($store->get('cron.auto_run') !== '1') return 'disabled';
+        if (!self::isEnabled($store)) return 'disabled';
         $now = $now ?? time();
         $last = (int) ($store->get(self::TRIGGER_KEY) ?? 0);
         if ($now - $last < self::THROTTLE_SECONDS) return 'throttled';

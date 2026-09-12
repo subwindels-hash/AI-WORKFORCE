@@ -169,15 +169,21 @@ test('football: the statistics job owns its own request budget', function () {
     // every standings / team / head-to-head call died with
     // REQUEST_BUDGET_EXHAUSTED and a healthy provider was reported as
     // DATA_UNAVAILABLE. It must open the sweep with its own configured budget.
+    // The fixture must fall on the day that is actually synced. A fixed
+    // time()+3600 offset crosses UTC midnight when the suite runs late in the
+    // day (23:03 → the fixture lands on tomorrow while syncDay asks for
+    // today), leaving the pass with nothing to store and failing this test
+    // for a reason unrelated to the request budget it covers.
+    $statsDay = gmdate('Y-m-d', time() + 3600);
     [$repo, $provider, $module] = fx_fb_harness(
         [fx_fb_row('fx-stats-budget', gmdate('c', time() + 3600), 'Manchester City', 'Everton', '10', '20')],
         ['skipHistory' => true]
     );
-    $sync = $module->fixtures()->syncDay(gmdate('Y-m-d'), 'test:stats-budget', null, 2);
+    $sync = $module->fixtures()->syncDay($statsDay, 'test:stats-budget', null, 2);
     assert_equals('COMPLETED', (string) $sync['status'], 'the fixtures pass stored the day');
     $callsBefore = $provider->calls;
 
-    $stats = $module->collectStatisticsForDay(gmdate('Y-m-d'), 12);
+    $stats = $module->collectStatisticsForDay($statsDay, 12);
     assert_equals('COMPLETED', (string) $stats['status'], 'statistics runs on its own budget, not leftovers');
     assert_true($provider->calls > $callsBefore, 'the provider was actually asked for the league table');
     assert_equals(4, (int) $stats['teamRows'], 'the standings were ingested');
@@ -190,9 +196,9 @@ test('football: the statistics job owns its own request budget', function () {
         ['skipHistory' => true],
         ['WINDELS_FOOTBALL_BUDGET_STATISTICS' => '0']
     );
-    $muted->fixtures()->syncDay(gmdate('Y-m-d'), 'test:stats-zero', null, 2);
+    $muted->fixtures()->syncDay($statsDay, 'test:stats-zero', null, 2);
     $callsBeforeZero = $provider2->calls;
-    $mutedStats = $muted->collectStatisticsForDay(gmdate('Y-m-d'), 12);
+    $mutedStats = $muted->collectStatisticsForDay($statsDay, 12);
     assert_equals($callsBeforeZero, $provider2->calls, 'a zero-budget statistics job spends no provider requests');
     assert_equals(0, (int) $mutedStats['teamRows'], 'so nothing is ingested');
     assert_equals(0, (int) $mutedStats['headToHead'], 'and the shortage is visible in the counts, not hidden');

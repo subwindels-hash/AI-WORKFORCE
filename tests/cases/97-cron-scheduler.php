@@ -137,6 +137,10 @@ test('cron auto-trigger matrix: gating, throttle, due check, dispatch', function
     $hits = [];
     $dispatch = function (string $url) use (&$hits) { $hits[] = $url; return true; };
     assert_equals('cli', CronAutoRun::maybeTrigger($scheduler, $store, 'https://x/cron/run?key=k', $dispatch, $now, 'cli'));
+    // Auto-run now DEFAULTS to on (see case 151): an unset setting used to
+    // read as "off", which left a fresh install with every job enabled, every
+    // job due and nothing ever running. Only an explicit '0' disables it.
+    $store->set('cron.auto_run', '0');
     assert_equals('disabled', CronAutoRun::maybeTrigger($scheduler, $store, 'https://x/cron/run?key=k', $dispatch, $now, 'apache2handler'));
     $store->set('cron.auto_run', '1');
     assert_equals('triggered', CronAutoRun::maybeTrigger($scheduler, $store, 'https://x/cron/run?key=k', $dispatch, $now, 'apache2handler'));

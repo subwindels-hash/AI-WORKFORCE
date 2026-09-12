@@ -59,7 +59,7 @@ $dueCount = count(array_filter($jobs, fn($j) => !empty($j['enabled']) && !empty(
   <div class="body">
     <form method="post" action="/admin/cron/save" class="admin-form">
       <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
-      <label class="choice"><input type="checkbox" name="auto_run" value="1" <?= $autoRun ? 'checked' : '' ?>> Auto-run: fire due jobs in the background whenever a super admin visits the dashboard (fallback — a real hosting cron below is more reliable)</label>
+      <label class="choice"><input type="checkbox" name="auto_run" value="1" <?= $autoRun ? 'checked' : '' ?>> Auto-run <span class="dim">(on by default)</span>: fire due jobs — including the daily odds-prediction ticket — in the background whenever a super admin visits the dashboard. This is the fallback that keeps generation automatic when no hosting cron is configured; a real hosting cron below is more reliable.</label>
       <?php foreach ($jobs as $id => $j): ?>
         <label class="choice"><input type="checkbox" name="enabled_<?= e((string) $id) ?>" value="1" <?= !empty($j['enabled']) ? 'checked' : '' ?>> <b><?= e((string) ($j['label'] ?? $id)) ?></b> <span class="dim">— <?= e((string) ($j['schedule'] ?? '')) ?> · <?= e((string) ($j['description'] ?? '')) ?></span></label>
       <?php endforeach; ?>

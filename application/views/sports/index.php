@@ -125,7 +125,25 @@ $kickoffStamp = static function (mixed $iso): string {
   <div class="notice warnbox"><b>SANDBOX / DEMO DATA</b> — sports figures are simulated, not real-world performance.</div>
 <?php endif; ?>
 <?php if ($disabled): ?>
-  <div class="notice warnbox"><b>No sports data provider connected.</b> Live fixtures and predictions are unavailable until a verified data source is configured — nothing is fabricated in the meantime.</div>
+  <?php $setup = is_array($sys['providerSetup'] ?? null) ? $sys['providerSetup'] : []; ?>
+  <div class="notice warnbox">
+    <b>No sports data provider connected.</b> Live fixtures and predictions are unavailable until a verified data source is configured — nothing is fabricated in the meantime.
+    <?php if ($operator && $setup): ?>
+      <br><b>Next step:</b> <?= e((string) ($setup['nextStep'] ?? '')) ?>
+      <?php if (!empty($setup['options'])): ?>
+        <div style="margin-top:6px">Connect any one of these in <a href="/admin/api"><b>Admin → API</b></a> (Service: <span class="mono">sports</span>):
+          <ul style="margin:4px 0 0 18px">
+          <?php foreach ((array) $setup['options'] as $opt): ?>
+            <li><b><?= e((string) ($opt['label'] ?? '')) ?></b>
+              — <?= e((string) ($opt['note'] ?? '')) ?>
+              <span class="dim">(or set <span class="mono"><?= e((string) ($opt['primaryEnvKey'] ?? '')) ?></span><?= !empty($opt['environmentConfigured']) ? ' — already present in this environment' : '' ?>)</span>
+            </li>
+          <?php endforeach; ?>
+          </ul>
+        </div>
+      <?php endif; ?>
+    <?php endif; ?>
+  </div>
 <?php elseif (($readiness['engine'] ?? '') === 'BLOCKED'): ?>
   <?php if ($operator): ?>
   <div class="notice err"><b>Prediction engine BLOCKED — 0/<?= (int) ($readiness['total'] ?? 0) ?> sports data providers operational.</b>
@@ -427,7 +445,15 @@ $kickoffStamp = static function (mixed $iso): string {
               <?php endif; ?>
               <div class="stat"><div class="k">Sufficient data</div><div class="v"><?= (int) ($diag['sufficientDataFixtures'] ?? 0) ?></div></div>
               <div class="stat" title="Distinct market:selection candidates scored across the full stored pool (one real odds row each)"><div class="k">Markets evaluated</div><div class="v"><?= (int) ($diag['marketsEvaluated'] ?? 0) ?></div></div>
-              <div class="stat" title="Fixtures rejected once because no supported market had real odds"><div class="k">No real odds</div><div class="v"><?= (int) ($diag['fixturesRejectedNoOdds'] ?? 0) ?></div></div>
+              <div class="stat" title="FEED gap: no price at all was held or fetched for the fixture — worth a retry"><div class="k">No real odds</div><div class="v"><?= (int) ($diag['fixturesRejectedNoOdds'] ?? 0) ?></div></div>
+              <?php if ((int) ($diag['fixturesRejectedMarketUnavailable'] ?? 0) > 0): ?>
+                <?php
+                  $unsupported = (array) ($diag['unsupportedMarketsQuoted'] ?? []);
+                  arsort($unsupported);
+                  $topUnsupported = array_slice(array_keys($unsupported), 0, 4);
+                ?>
+                <div class="stat" title="COVERAGE gap, not a feed problem: the bookmaker priced these fixtures but not a market this engine can price&#10;&#10;Quoted instead: <?= e($topUnsupported ? implode(', ', $topUnsupported) : 'companion prices only') ?>"><div class="k">Market not offered</div><div class="v"><?= (int) $diag['fixturesRejectedMarketUnavailable'] ?></div></div>
+              <?php endif; ?>
               <div class="stat" title="Fixtures with real odds older than the configured TTL that no provider could refresh"><div class="k">Stale odds</div><div class="v"><?= (int) ($diag['fixturesRejectedStaleOdds'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Predictions</div><div class="v"><?= (int) ($diag['predictionsGenerated'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Confidence ≥ floor</div><div class="v"><?= (int) ($diag['confidenceQualifiedCandidates'] ?? 0) ?></div></div>

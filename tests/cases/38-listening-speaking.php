@@ -4,6 +4,8 @@
  * real reading bank, deterministic scoring, honest provider boundaries
  * (browser TTS/STT feature-detected; pronunciation scores never invented).
  */
+
+require_once __DIR__ . '/36-language-teacher.php'; // teacher_profile() and the shared fixtures it brings
 use AIWorkforce\LangLearn\AudioPracticeService;
 
 test('listening exercises are built from real reading bank items', function () {

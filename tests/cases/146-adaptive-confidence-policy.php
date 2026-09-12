@@ -17,6 +17,8 @@
  *  6. Every rejection states what was required and what was missing (#13).
  */
 
+require_once __DIR__ . '/145-odds-ticket-engine-funnel.php'; // fx145_audit() and the shared fixtures it brings
+
 use AIWorkforce\Sports\ConfidencePolicy;
 use AIWorkforce\Sports\ConfigurationService;
 use AIWorkforce\Sports\FeatureEngineeringEngine;

@@ -3,6 +3,8 @@
  * PHASE 5 — Portfolio Risk Monitor (spec §14) and the strategy live-approval
  * gate (spec §12 paper-trading evidence).
  */
+
+require_once __DIR__ . '/10-execution-supervisor.php'; // FakeTradingConnector() and the shared fixtures it brings
 use AIWorkforce\Portfolio\PortfolioRiskMonitor;
 
 function prm_monitor_with(array $withBrokers = []): PortfolioRiskMonitor

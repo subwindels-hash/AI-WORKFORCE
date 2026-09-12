@@ -11,6 +11,8 @@
  * never presented as LIVE, and auto-refresh is withheld for it.
  */
 
+require_once __DIR__ . '/02-providers.php'; // FakeProvider() and the shared fixtures it brings
+
 /** Snapshot the market-data rows so these tests cannot leak into other suites. */
 function fx_md_snapshot(): array
 {

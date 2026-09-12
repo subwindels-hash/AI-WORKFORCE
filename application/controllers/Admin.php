@@ -1278,7 +1278,7 @@ class Admin extends App_Controller
         $scheduler = new \AIWorkforce\Cron\CronScheduler($store);
         $data = $this->base('Cron Jobs', 'cron');
         $data['jobs'] = $scheduler->status();
-        $data['autoRun'] = $store->get('cron.auto_run') === '1';
+        $data['autoRun'] = \AIWorkforce\Cron\CronAutoRun::isEnabled($store);
         $data['lastTrigger'] = $store->get('cron.last_trigger');
         $data['secret'] = \AIWorkforce\Cron\CronSecrets::ensure($store);
         $data['runUrl'] = $this->cronRunUrl($data['secret']);
@@ -1293,7 +1293,7 @@ class Admin extends App_Controller
         if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/cron'); return; }
         $store = new \AIWorkforce\Cron\PlatformSettingsCronStore($this->AIWorkforce_model->db);
         $scheduler = new \AIWorkforce\Cron\CronScheduler($store);
-        $store->set('cron.auto_run', $this->input->post('auto_run') === '1' ? '1' : '0');
+        $store->set(\AIWorkforce\Cron\CronAutoRun::ENABLED_KEY, $this->input->post('auto_run') === '1' ? '1' : '0');
         foreach (array_keys(\AIWorkforce\Cron\CronScheduler::JOBS) as $id) {
             $scheduler->setEnabled($id, $this->input->post('enabled_' . $id) === '1');
         }

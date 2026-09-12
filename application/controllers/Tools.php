@@ -28,7 +28,7 @@ class Tools extends MY_Controller
         $footballJobs = class_exists(\AIWorkforce\Football\FootballCronService::class)
             ? implode('|', \AIWorkforce\Football\FootballCronService::JOBS)
             : 'fixtures|upcoming|live|results|statistics|predict|settle|performance|cleanup';
-        echo "AI Workforce tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n  php index.php tools marketdata        — market-data connectivity report (add --activate to go live, --probe to fetch real bars)\n  php index.php tools cron              — scheduled operations: portfolio risk scan, broker transitions, proposal expiry\n  php index.php tools scheduler [job]   — unified scheduler: runs every enabled + due job ({$groups})\n  php index.php tools sports-cron [job] [date] — sports scheduled jobs (fixtures|odds|results|quality|ticket|settlement|performance|monitoring|cleanup); optional YYYY-MM-DD re-runs a job for that day\n  php index.php tools sports-calibration-check [date] — calibration persistence check after a CALIBRATION_PERSIST_FAILED alert\n  php index.php tools football-cron [job] — football refresh jobs ({$footballJobs}); --force bypasses cadence\n  php index.php tools lottery-cron [job] — lottery scheduled jobs (sync|health|statistics|systems|tickets|backtests|intelligence|cleanup)\n  php index.php tools lottery-smoke     — live check of the configured lottery feed (LoteriasAPI / authorized feed); add --raw to print the vendor's own payload\n";
+        echo "AI Workforce tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n  php index.php tools marketdata        — market-data connectivity report (add --activate to go live, --probe to fetch real bars)\n  php index.php tools cron              — scheduled operations: portfolio risk scan, broker transitions, proposal expiry\n  php index.php tools scheduler [job]   — unified scheduler: runs every enabled + due job ({$groups})\n  php index.php tools sports-cron [job] [date] — sports scheduled jobs (fixtures|odds|results|quality|ticket|settlement|performance|monitoring|cleanup); optional YYYY-MM-DD re-runs a job for that day\n  php index.php tools sports-providers  — why the odds engine has no data feed and exactly how to connect one (no secrets printed)\n  php index.php tools sports-calibration-check [date] — calibration persistence check after a CALIBRATION_PERSIST_FAILED alert\n  php index.php tools football-cron [job] — football refresh jobs ({$footballJobs}); --force bypasses cadence\n  php index.php tools lottery-cron [job] — lottery scheduled jobs (sync|health|statistics|systems|tickets|backtests|intelligence|cleanup)\n  php index.php tools lottery-smoke     — live check of the configured lottery feed (LoteriasAPI / authorized feed); add --raw to print the vendor's own payload\n";
     }
 
     public function install()
@@ -405,6 +405,45 @@ class Tools extends MY_Controller
             echo "\n";
         }
         echo 'TICKET-FUNNEL-RESULT: ', empty($run['ticketId']) ? 'NO_TICKET' : 'TICKET', "\n";
+    }
+
+    /**
+     * Why the odds-prediction engine has no data feed, and what to fix.
+     *
+     *   php index.php tools sports-providers
+     *
+     * Diagnostic only: it never writes a credential and never registers a
+     * provider. Credential VALUES are never printed — only whether the
+     * variable is present.
+     */
+    public function sports_providers()
+    {
+        $sports = $this->platform->sports;
+        $status = $sports->status();
+        $setup = (array) ($status['providerSetup'] ?? []);
+
+        echo "Sports data providers\n=====================\n";
+        echo 'State:      ', (string) ($setup['state'] ?? 'UNKNOWN'), "\n";
+        echo 'Engine:     ', (string) ($status['ticketEngine'] ?? '?'), "\n";
+        echo 'Registered: ', ($setup['registeredProviders'] ?? []) ? implode(', ', (array) $setup['registeredProviders']) : '(none)', "\n";
+        echo 'Operational:', ' ', (int) ($setup['operationalProviders'] ?? 0), '/', (int) ($setup['totalProviders'] ?? 0), "\n";
+        $store = $setup['credentialStoreConfigured'] ?? null;
+        echo 'Admin → API sports credential: ', $store === null ? 'unknown' : ($store ? 'yes' : 'no'), "\n\n";
+        echo (string) ($setup['headline'] ?? ''), "\n";
+        echo 'Next step: ', (string) ($setup['nextStep'] ?? ''), "\n\n";
+
+        if (($setup['state'] ?? '') !== \AIWorkforce\Sports\ProviderSetupAdvisor::STATE_READY) {
+            echo "Connect any ONE of these (Admin → API, service 'sports'):\n";
+            foreach ((array) ($setup['options'] ?? []) as $opt) {
+                printf("  • %-14s %s\n", (string) $opt['label'], (string) $opt['note']);
+                printf("    signup: %s\n", (string) $opt['signup']);
+                printf("    env:    %s%s\n", (string) $opt['primaryEnvKey'],
+                    !empty($opt['environmentConfigured']) ? '  [present in this environment]' : '');
+            }
+            echo "\n";
+        }
+        echo (string) ($setup['disclaimer'] ?? ''), "\n";
+        echo 'SPORTS-PROVIDERS-RESULT: ', (string) ($setup['state'] ?? 'UNKNOWN'), "\n";
     }
 
     public function sports_calibration_check()

@@ -25,6 +25,8 @@
  * INSUFFICIENT_DATA rejection, and carried-forward form is only reused inside
  * its TTL with its original source and timestamp intact.
  */
+
+require_once __DIR__ . '/133-sports-calibration-bootstrap.php'; // cb_audit() and the shared fixtures it brings
 use AIWorkforce\Sports\ConfidenceEngine;
 use AIWorkforce\Sports\ConfigurationService;
 use AIWorkforce\Sports\CorrelationEngine;

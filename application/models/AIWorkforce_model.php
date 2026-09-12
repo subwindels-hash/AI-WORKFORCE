@@ -215,6 +215,26 @@ class AIWorkforce_model extends CI_Model
                 return $v;
             }
 
+            /**
+             * Any array reaching the query builder is interpolated with PHP's
+             * array-to-string conversion, producing the bare token Array in the
+             * SQL — MySQL then reports [1054] Unknown column 'Array' and the
+             * write is lost. JSON-backed columns are encoded here so a caller
+             * passing a decoded structure can never corrupt the statement.
+             */
+            private static function withJsonColumns(array $row, array $keys): array
+            {
+                foreach ($keys as $key) {
+                    if (!array_key_exists($key, $row)) continue;
+                    $value = $row[$key];
+                    if (is_array($value) || is_object($value)) {
+                        $encoded = json_encode($value);
+                        $row[$key] = $encoded === false ? '{}' : $encoded;
+                    }
+                }
+                return $row;
+            }
+
             /** Normalise the named temporal keys of a row/patch in place. */
             private static function withSqlTimestamps(array $row, array $keys): array
             {
@@ -465,6 +485,7 @@ class AIWorkforce_model extends CI_Model
             }
             public function saveDailyTicket(array $d): void {
                 $d['ticket_type'] = (string) ($d['ticket_type'] ?? 'ODDS_PREDICTION');
+                $d = self::withJsonColumns($d, ['rejection_summary']);
                 $d = self::withSqlTimestamps($d, ['created_at', 'updated_at', 'next_retry_at', 'generated_at']);
                 $row = $this->db->get_where('sports_daily_tickets', ['date' => $d['date'], 'ticket_type' => $d['ticket_type']], 1)->row_array();
                 if (!$row) $row = $this->db->get_where('sports_daily_tickets', ['date' => $d['date']], 1)->row_array();
@@ -490,7 +511,7 @@ class AIWorkforce_model extends CI_Model
                     $this->mustWrite($ok, 'sports_daily_tickets', 'INSERT', $insertError);
                 }
             }
-            public function updateDailyTicket(string $date, array $patch): void { $patch = self::withSqlTimestamps(array_merge($patch, ['updated_at' => gmdate('Y-m-d H:i:s')]), ['updated_at', 'next_retry_at', 'generated_at']); $ok = $this->db->where('date', $date)->where('ticket_type', 'ODDS_PREDICTION')->update('sports_daily_tickets', $patch); $this->mustWrite($ok, 'sports_daily_tickets', 'UPDATE'); }
+            public function updateDailyTicket(string $date, array $patch): void { $patch = self::withJsonColumns($patch, ['rejection_summary']); $patch = self::withSqlTimestamps(array_merge($patch, ['updated_at' => gmdate('Y-m-d H:i:s')]), ['updated_at', 'next_retry_at', 'generated_at']); $ok = $this->db->where('date', $date)->where('ticket_type', 'ODDS_PREDICTION')->update('sports_daily_tickets', $patch); $this->mustWrite($ok, 'sports_daily_tickets', 'UPDATE'); }
             public function listDailyTickets(int $limit = 60): array { $rows = $this->db->where('ticket_type', 'ODDS_PREDICTION')->order_by('date', 'DESC')->limit(min(366, max(1, $limit)))->get('sports_daily_tickets')->result_array(); foreach ($rows as &$row) { $row['rejection_summary'] = json_decode((string) ($row['rejection_summary'] ?: '{}'), true); if (empty($row['generation_status'])) $row['generation_status'] = !empty($row['ticket_id']) ? 'GENERATED' : 'PENDING'; } return $rows; }
             public function savePerformanceSnapshot(string $asOf, string $window, array $payload): void {
                 // Normalise the lookup key AND the stored value together —
