@@ -117,9 +117,21 @@ test('sports UI: dashboard renders today odds prediction ticket with gated actio
     assert_contains('sports.approve', $html);
     assert_contains('sports.settle', $html);
     assert_contains('UI League', $html);
-    foreach (['generation GENERATED', 'Ticket ID', 'Generated at', 'Real odds · source', 'WINDELS probability · fair', 'Confidence · quality', 'Edge / value', 'Selected picks', 'ui-test'] as $field) {
+    foreach (['generation GENERATED', 'Ticket ID', 'Generated at', 'Real odds · source', 'WINDELS probability · fair', 'Confidence · quality', 'Edge / value', 'Selected picks', 'ui-test',
+        'implied / break-even', 'fair odds', 'data quality', 'model edge', 'EV', 'status PENDING', 'How to read the odds'] as $field) {
         assert_contains($field, $html, 'generated ticket exposes ' . $field);
     }
+    assert_contains('class="sports-main stack"', $html, 'the page has a dedicated content feed');
+    assert_contains('class="sports-side stack"', $html, 'and a separate context rail');
+    assert_true(strpos($html, "Today's intelligence") < strpos($html, "Today's odds prediction ticket"), 'overview precedes the ticket');
+    assert_true(strpos($html, "Today's odds prediction ticket") < strpos($html, 'Live scores — auto-updating'), 'ticket precedes live scores');
+    assert_true(strpos($html, 'Live scores — auto-updating') < strpos($html, '30-day odds prediction ticket performance'), 'live scores precede measured performance');
+
+    $css = file_get_contents(FCPATH . 'assets/css/ai_workforce.css');
+    assert_contains('.sports-side, .football-side, .football-match-side', $css, 'the local context rails share one sticky contract');
+    assert_contains('position: sticky', $css);
+    assert_contains('max-height: calc(100dvh - 92px)', $css, 'an over-height rail stays bounded to the viewport');
+    assert_contains('overflow-y: auto', $css, 'and can expose all of its own context without moving the content feed');
 });
 
 test('sports UI: the live scores board shows the match date and time', function () {

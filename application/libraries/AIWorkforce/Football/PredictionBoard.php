@@ -128,9 +128,13 @@ final class PredictionBoard
         // read for the grids, one for the quoted prices, and each card is
         // annotated. Choosing another market cannot regenerate a match.
         $markets = $this->feed->attachMarkets($entries, $market['market'], $line);
-        // Multiple market candidates per fixture where verified provider odds exist
-        // (1X2, Over 1.5, BTTS, Double Chance) — each candidate must have real provider odds.
-        $multiMarkets = $this->feed->attachMultipleMarkets($entries, \AIWorkforce\Football\MatchFeed::MULTI_MARKET_CANDIDATES);
+        // Build the complete market sheet for every analyzed fixture in the
+        // same two batched database reads. This is intentionally the full
+        // catalogue, not the old priced-only preview: model-derived fair odds
+        // remain visible when a bookmaker has not quoted the market (clearly
+        // marked UNPRICED), while real quotes retain their source and timestamp.
+        // No provider request and no prediction regeneration happens here.
+        $multiMarkets = $this->feed->attachMultipleMarkets($entries, null, false);
         $marketsByPrediction = [];
         $rows = [];
         foreach ($markets as $index => $block) {
