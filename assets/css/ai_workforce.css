@@ -1403,11 +1403,22 @@ pre.raw {
 .sports-diagnostics > :last-child { margin-bottom: 12px; }
 
 /* Desktop context rails stay in view while the long match/ticket feed moves.
-   A rail taller than the viewport gets its own small internal scrollbar; its
-   sticky range still ends with the parent layout, so it never overlaps the
-   page footer. */
+   Keep the rail itself out of the scroll flow: once its bottom reaches the
+   viewport, sticky positioning holds it there and the feed can continue on
+   its own. This avoids a second scrollbar competing with the sports feed.
+   The sticky range still ends with the parent layout, so it never overlaps
+   the page footer. */
 @media (min-width: 1181px) {
-  .sports-side, .football-side, .football-match-side {
+  /* Sports is a single-feed console: do not make the context rail a second
+     scroll container. It pins at its bottom while only the feed continues. */
+  .sports-side {
+    position: sticky;
+    top: 76px;
+    align-self: start;
+  }
+
+  /* Football retains its compact, independently scrollable diagnostics rail. */
+  .football-side, .football-match-side {
     position: sticky;
     top: 76px;
     max-height: calc(100vh - 92px);
@@ -1418,8 +1429,8 @@ pre.raw {
     scrollbar-color: var(--line2) transparent;
     padding-right: 3px;
   }
-  .sports-side::-webkit-scrollbar, .football-side::-webkit-scrollbar, .football-match-side::-webkit-scrollbar { width: 5px; }
-  .sports-side::-webkit-scrollbar-thumb, .football-side::-webkit-scrollbar-thumb, .football-match-side::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 999px; }
+  .football-side::-webkit-scrollbar, .football-match-side::-webkit-scrollbar { width: 5px; }
+  .football-side::-webkit-scrollbar-thumb, .football-match-side::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 999px; }
 }
 
 /* ---------- Football intelligence: organized board and all-odds sheets ---------- */
