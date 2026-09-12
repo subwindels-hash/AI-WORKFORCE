@@ -1607,6 +1607,12 @@ class DailyTicketService
                 'match' => ($c['match']['homeTeam'] ?? '?') . ' vs ' . ($c['match']['awayTeam'] ?? '?'),
                 'homeTeam' => $c['match']['homeTeam'] ?? null,
                 'awayTeam' => $c['match']['awayTeam'] ?? null,
+                // Provider-supplied crest URLs, carried through so a page that
+                // renders straight from this funnel (no ticket row to read
+                // logos from) can still show each club's own verified crest —
+                // never a placeholder, never guessed from the team name.
+                'homeTeamLogo' => $c['match']['homeTeamLogo'] ?? null,
+                'awayTeamLogo' => $c['match']['awayTeamLogo'] ?? null,
                 'kickoff' => $c['match']['kickoff'] ?? null,
                 'competition' => $c['match']['competition'] ?? null,
                 'provider' => $c['oddsSource'] ?? null,

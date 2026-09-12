@@ -214,13 +214,24 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
           <div class="stat"><div class="k">Rejected</div><div class="v down"><?= (int) ($summary['rejected'] ?? 0) ?></div></div>
         </div>
         <p class="dim" style="font-size:11px;margin-top:8px">
-          Data-quality thresholds: qualified ≥ <?= (int) ($board['thresholds']['dataQualityQualified'] ?? 70) ?>/100, limited <?= (int) ($board['thresholds']['dataQualityLimited'] ?? 50) ?>–<?= (int) ($board['thresholds']['dataQualityQualified'] ?? 70) - 1 ?>, rejected below <?= (int) ($board['thresholds']['dataQualityLimited'] ?? 50) ?>.
-          Model in use: <b><?= e((string) ($board['model']['label'] ?? 'none')) ?></b><?= !empty($board['model']['version']) ? ' · ' . e((string) $board['model']['version']) : '' ?>.
           Generated <?= e($kickoffLabel($d['generatedAt'] ?? null)) ?>.
         </p>
-        <?php if (!empty($board['model']['note'])): ?>
-          <?php $modelNoticeState = (string) ($board['model']['state'] ?? 'MODEL') === 'ACTIVE' ? 'ACTIVE MODEL' : 'AUTO MODEL'; ?>
-          <div class="notice info" style="margin-top:10px"><b><?= e($modelNoticeState) ?></b> — <?= e((string) $board['model']['note']) ?></div>
+        <?php if (!empty($caps['sync'])): ?>
+          <!-- Model lifecycle state is internal governance information, not a
+               condition users must satisfy: predictions are generated and
+               published regardless of whether the model version has been
+               administratively marked ACTIVE. Shown to operators only, and
+               worded as status, never as a blocker. -->
+          <details style="margin-top:10px">
+            <summary class="dim" style="cursor:pointer;font-size:11px">Model governance (admin) — data-quality bands &amp; lifecycle state</summary>
+            <p class="dim" style="font-size:11px;margin:6px 0 0">
+              Data-quality bands: qualified ≥ <?= (int) ($board['thresholds']['dataQualityQualified'] ?? 70) ?>/100, limited <?= (int) ($board['thresholds']['dataQualityLimited'] ?? 50) ?>–<?= (int) ($board['thresholds']['dataQualityQualified'] ?? 70) - 1 ?>, rejected below <?= (int) ($board['thresholds']['dataQualityLimited'] ?? 50) ?> — these govern which predictions publish, not whether the module runs.
+              Model lifecycle state: <b><?= e((string) ($board['model']['label'] ?? 'none')) ?></b><?= !empty($board['model']['version']) ? ' · ' . e((string) $board['model']['version']) : '' ?> — informational only; predictions are generated at every lifecycle state and this never blocks the board above.
+            </p>
+            <?php if (!empty($board['model']['note'])): ?>
+              <p class="dim" style="font-size:11px;margin:6px 0 0"><?= e((string) $board['model']['note']) ?></p>
+            <?php endif; ?>
+          </details>
         <?php endif; ?>
         <?php if (in_array((string) ($board['state'] ?? ''), ['NO_FIXTURES_STORED', 'NO_PREDICTIONS_STORED', 'PAGE_BEYOND_LAST'], true)): ?>
           <p class="dim" style="margin-top:12px"><?= e((string) ($board['message'] ?? '')) ?></p>
@@ -371,9 +382,9 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                     <td style="padding:4px 6px">
                       <?php $pickId = (int) ($pick['fixtureId'] ?? 0); ?>
                       <?php if ($pickId > 0): ?>
-                        <a href="/football/match/<?= $pickId ?>" style="font-weight:600"><?= e((string) ($pick['homeTeam'] ?? '—')) ?> vs <?= e((string) ($pick['awayTeam'] ?? '—')) ?></a>
+                        <a href="/football/match/<?= $pickId ?>" style="font-weight:600"><?= crest($pick['homeTeamLogo'] ?? null) ?><?= e((string) ($pick['homeTeam'] ?? '—')) ?> vs <?= crest($pick['awayTeamLogo'] ?? null) ?><?= e((string) ($pick['awayTeam'] ?? '—')) ?></a>
                       <?php else: ?>
-                        <span style="font-weight:600"><?= e((string) ($pick['homeTeam'] ?? '—')) ?> vs <?= e((string) ($pick['awayTeam'] ?? '—')) ?></span>
+                        <span style="font-weight:600"><?= crest($pick['homeTeamLogo'] ?? null) ?><?= e((string) ($pick['homeTeam'] ?? '—')) ?> vs <?= crest($pick['awayTeamLogo'] ?? null) ?><?= e((string) ($pick['awayTeam'] ?? '—')) ?></span>
                       <?php endif; ?>
                       <div class="dim" style="font-size:10px"><?= e((string) ($pick['kickoffLabel'] ?? '')) ?></div>
                     </td>
@@ -464,7 +475,7 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                   <tr style="border-bottom:1px solid var(--line);background:rgba(109,40,217,.04)">
                     <td style="padding:5px" class="mono"><div class="dim" style="font-size:9px">Match ID: <?= $rowPageId > 0 ? $rowPageId : '—' ?></div><a href="/football/match/<?= $rowPageId ?>" style="font-weight:700"><?= $rowPageId ?></a><div class="dim" style="font-size:9px"><?= e((string)($row['matchId']??'')) ?></div></td>
                     <td style="padding:5px"><?= e($rowLeague) ?></td>
-                    <td style="padding:5px"><b><?= e((string)($row['homeTeam']??'—')) ?></b> vs <b><?= e((string)($row['awayTeam']??'—')) ?></b></td>
+                    <td style="padding:5px"><b><?= crest($row['homeTeamLogo'] ?? null) ?><?= e((string)($row['homeTeam']??'—')) ?></b> vs <b><?= crest($row['awayTeamLogo'] ?? null) ?><?= e((string)($row['awayTeam']??'—')) ?></b></td>
                     <td style="padding:5px" class="mono"><?= e((string)($row['kickoffLabel']??$row['kickoff']??'—')) ?><div class="dim" style="font-size:9px"><?= e((string)($row['kickoffAt']??$row['kickoff']??'')) ?></div></td>
                     <td style="padding:5px" class="mono"><?= e($rowProvider) ?><div class="dim" style="font-size:9px">ID <?= e((string)$rowProviderId) ?></div></td>
                     <td style="padding:5px"><?= e((string)($m['key'] ?? $m['label'] ?? '—')) ?><div class="dim" style="font-size:9px"><?= e((string)($m['label']??'')) ?></div></td>
@@ -568,9 +579,9 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
                         </div>
                       </div>
                       <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;font-size:12px">
-                        <span><?= e((string) ($card['homeTeam'] ?? '—')) ?></span>
+                        <span><?= crest($card['homeTeamLogo'] ?? null) ?><?= e((string) ($card['homeTeam'] ?? '—')) ?></span>
                         <span class="dim">vs</span>
-                        <span><?= e((string) ($card['awayTeam'] ?? '—')) ?></span>
+                        <span><?= crest($card['awayTeamLogo'] ?? null) ?><?= e((string) ($card['awayTeam'] ?? '—')) ?></span>
                         <?php if (!empty($card['score'])): ?><span class="badge b-violet">live <?= (int) $card['score']['home'] ?>–<?= (int) $card['score']['away'] ?></span><?php endif; ?>
                         <?php if (!empty($card['highConfidence'])): ?><span class="badge b-green"><?= e((string) $card['highConfidence']) ?></span><?php endif; ?>
                         <span class="badge <?= $bandClass((string) ($card['band'] ?? '')) ?>"><?= e((string) ($card['band'] ?? 'REJECTED')) ?> · <?= (int) ($card['dataQuality']['score'] ?? 0) ?>/100</span>
@@ -696,9 +707,9 @@ $pager = static function (array $pagination, string $date, array $carry = []): s
               <div class="body" style="padding:12px">
                 <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
                   <div>
-                    <b><?= e((string) ($fx['homeTeam'] ?? '—')) ?></b>
+                    <b><?= crest($fx['homeTeamLogo'] ?? null) ?><?= e((string) ($fx['homeTeam'] ?? '—')) ?></b>
                     <span class="dim">vs</span>
-                    <b><?= e((string) ($fx['awayTeam'] ?? '—')) ?></b>
+                    <b><?= crest($fx['awayTeamLogo'] ?? null) ?><?= e((string) ($fx['awayTeam'] ?? '—')) ?></b>
                     <div class="dim" style="font-size:11px"><?= e((string) ($fx['competition'] ?? '—')) ?> · <?= e((string) ($lv['state'] ?? 'UNKNOWN')) ?><?= isset($lv['minute']) && $lv['minute'] !== null ? ' · ' . (int) $lv['minute'] . "'" : '' ?></div>
                     <div class="dim mono" style="font-size:11px">Kickoff <?= e($kickoffStamp($fx['kickoff'] ?? null)) ?></div>
                   </div>

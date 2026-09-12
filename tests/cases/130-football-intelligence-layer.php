@@ -473,6 +473,56 @@ test('football: picks rank evidence, exclude what is not fit, and never promise'
         'the eligibility rule is published, not left as a mood');
 });
 
+test('football: a finished match never appears in Top Picks, whatever its score', function () {
+    // A match that has already been played has nothing left to pick — Top
+    // Picks is forward-looking, so a terminal status excludes it even when
+    // every other qualification (score, quality, market) would have let it
+    // through, and even though the board table below keeps it for the record.
+    $row = static fn(array $overrides): array => array_merge([
+        'analysisState' => 'ANALYZED', 'matchId' => 'm', 'fixtureId' => 1, 'homeTeam' => 'A', 'awayTeam' => 'B',
+        'kickoffLabel' => 'today', 'confidence' => 80.0, 'dataQuality' => 91.0, 'status' => 'SCHEDULED',
+        'risk' => ['level' => 'LOW'],
+        'market' => ['state' => PredictionMarkets::STATE_AVAILABLE, 'key' => 'MATCH_WINNER', 'label' => 'Match Winner — 1X2',
+            'selection' => 'HOME', 'selectionLabel' => 'Home win', 'probability' => 0.61],
+        'intelligence' => [
+            'state' => IntelligenceReport::STATE_SCORED,
+            'score' => ['score' => 95, 'band' => IntelligenceScore::BAND_EXCELLENT, 'available' => true],
+            'quality' => ['score' => 91.0, 'band' => QualityBand::QUALIFIED, 'checklist' => [], 'missing' => []],
+            'fairValue' => ['state' => 'AVAILABLE', 'valueClass' => OddsIntelligence::CLASS_POSITIVE_VALUE,
+                'valueLabel' => 'Positive value', 'expectedValue' => 0.1, 'edgePoints' => 7.0, 'odds' => 1.85,
+                'windelsFairOdds' => 1.64],
+            'stability' => ['state' => StabilityMonitor::STABLE, 'reason' => ''],
+            'freshness' => ['state' => FreshnessTracker::CURRENT],
+            'withheld' => ['withheld' => false],
+        ],
+    ], $overrides);
+    $report = new IntelligenceReport(new FootballRepositoryStub(), new FootballConfiguration([]),
+        new StabilityMonitor(new FootballRepositoryStub(), new FootballConfiguration([])),
+        new IntelligenceScore(new FootballConfiguration([])), new PredictionDrivers(),
+        new FreshnessTracker(new FootballConfiguration([])));
+
+    $picks = $report->picks([
+        $row([]),
+        $row(['fixtureId' => 2, 'homeTeam' => 'C', 'awayTeam' => 'D', 'status' => 'FINISHED']),
+        $row(['fixtureId' => 3, 'homeTeam' => 'E', 'awayTeam' => 'F', 'status' => 'postponed']),
+        $row(['fixtureId' => 4, 'homeTeam' => 'G', 'awayTeam' => 'H', 'status' => 'CANCELLED']),
+        $row(['fixtureId' => 5, 'homeTeam' => 'I', 'awayTeam' => 'J', 'status' => 'SUSPENDED']),
+    ], 'Match Winner — 1X2');
+
+    $listed = (array) $picks['picks'];
+    assert_equals(1, count($listed), 'only the still-to-be-played match is listed');
+    assert_equals(1, (int) $listed[0]['fixtureId'], 'the scheduled match is the one kept');
+    assert_equals(1, (int) $picks['eligible'], 'eligible counts only what can still be acted on');
+    assert_equals(5, (int) $picks['considered'], 'considered still counts everything the page held');
+
+    $excluded = (array) $picks['excluded'];
+    assert_equals(4, count($excluded), 'every finished/postponed/cancelled/suspended match is excluded');
+    foreach ($excluded as $entry) {
+        assert_true(str_contains((string) $entry['reason'], 'Top Picks only ranks matches still to be played'),
+            'each is excluded because it is no longer live to be played, not for a data reason');
+    }
+});
+
 test('football: withheld predictions are withheld on every surface', function () {
     // A fixture with no history at all cannot reach the quality floor, so the
     // module must refuse it and say the sentence the brief asked for.

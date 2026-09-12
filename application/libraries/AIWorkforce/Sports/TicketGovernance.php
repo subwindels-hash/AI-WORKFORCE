@@ -82,6 +82,11 @@ class TicketGovernance
                 'home_team' => $s['match']['homeTeam'] ?? null,
                 'away_team' => $s['match']['awayTeam'] ?? null,
                 'kickoff_time' => $s['match']['kickoff'] ?? null,
+                // Provider-supplied crest URLs (or the SANDBOX simulation's
+                // own labeled placeholder), never invented for a provider
+                // that sent none.
+                'home_team_logo' => $s['match']['homeTeamLogo'] ?? null,
+                'away_team_logo' => $s['match']['awayTeamLogo'] ?? null,
                 'market' => $s['market'], 'selection' => $s['selection'],
                 'odds' => $s['value']['odds'] ?? $s['odds'], 'odds_timestamp' => $s['oddsTimestamp'],
                 // Which feed supplied the real bookmaker price (provenance),

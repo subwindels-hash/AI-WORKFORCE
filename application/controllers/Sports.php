@@ -60,6 +60,15 @@ class Sports extends App_Controller
                             $selection['kickoff_time'] = $selection['kickoff_time'] ?? $match['kickoff_at'] ?? null;
                             $selection['home_team'] = $selection['home_team'] ?? $match['home_team'] ?? null;
                             $selection['away_team'] = $selection['away_team'] ?? $match['away_team'] ?? null;
+                            // Legacy selections (recorded before the crest
+                            // columns existed) fall back to the stored
+                            // fixture payload — never guessed for rows that
+                            // still have neither.
+                            if (empty($selection['home_team_logo']) || empty($selection['away_team_logo'])) {
+                                $payload = is_array($match['payload'] ?? null) ? $match['payload'] : [];
+                                $selection['home_team_logo'] = $selection['home_team_logo'] ?? ($payload['homeTeamLogo'] ?? null);
+                                $selection['away_team_logo'] = $selection['away_team_logo'] ?? ($payload['awayTeamLogo'] ?? null);
+                            }
                         }
                         // Market reaction as it stood WHEN THE PICK WAS MADE.
                         // Read back from the decision record rather than

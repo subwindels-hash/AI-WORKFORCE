@@ -41,7 +41,7 @@ $windelsModelId = 'Windels Model id: 1520863';
 ?>
 <div class="page-head">
   <div>
-    <h2><?= e((string) ($fixture['homeTeam'] ?? '—')) ?> vs <?= e((string) ($fixture['awayTeam'] ?? '—')) ?></h2>
+    <h2><?= crest($fixture['homeTeamLogo'] ?? null, 24) ?><?= e((string) ($fixture['homeTeam'] ?? '—')) ?> vs <?= crest($fixture['awayTeamLogo'] ?? null, 24) ?><?= e((string) ($fixture['awayTeam'] ?? '—')) ?></h2>
     <p>
       <?= e($state($fixture['competition'] ?? null)) ?><?= !empty($fixture['country']) ? ' · ' . e((string) $fixture['country']) : '' ?>
       · kickoff <?= e(!empty($fixture['kickoff']) ? gmdate('D M j, H:i', (int) strtotime((string) $fixture['kickoff'])) . ' UTC' : 'DATA_UNAVAILABLE') ?>

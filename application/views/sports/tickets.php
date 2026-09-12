@@ -229,7 +229,15 @@ $heroMarketLabel = function (string $market, string $selection): string {
             <?php foreach ($heroSelections as $sel): ?>
               <tr>
                 <td style="font-weight:700">
-                  <?= e(trim((string) (($sel['home_team'] ?? '') . ' vs ' . ($sel['away_team'] ?? '')))) ?>
+                  <span style="display:inline-flex;align-items:center;gap:5px;vertical-align:middle">
+                    <?php if (!empty($sel['home_team_logo'])): ?><img src="<?= e((string) $sel['home_team_logo']) ?>" alt="" width="18" height="18" style="border-radius:3px;object-fit:contain" loading="lazy" onerror="this.style.display='none'"><?php endif; ?>
+                    <?= e((string) ($sel['home_team'] ?? '')) ?>
+                  </span>
+                  <span class="dim" style="font-weight:400"> vs </span>
+                  <span style="display:inline-flex;align-items:center;gap:5px;vertical-align:middle">
+                    <?php if (!empty($sel['away_team_logo'])): ?><img src="<?= e((string) $sel['away_team_logo']) ?>" alt="" width="18" height="18" style="border-radius:3px;object-fit:contain" loading="lazy" onerror="this.style.display='none'"><?php endif; ?>
+                    <?= e((string) ($sel['away_team'] ?? '')) ?>
+                  </span>
                   <span class="dim" style="display:block;font-size:10px;font-weight:400"><?= e((string) ($sel['competition'] ?? '—')) ?> · <?= e((string) ($sel['kickoff_time'] ?? '—')) ?></span>
                 </td>
                 <td><span class="dim" style="display:block;font-size:10px"><?= e((string) ($sel['market'] ?? '')) ?></span><?= e($heroMarketLabel((string) ($sel['market'] ?? ''), (string) ($sel['selection'] ?? ''))) ?></td>
@@ -282,12 +290,72 @@ $heroMarketLabel = function (string $market, string $selection): string {
         </div>
       <?php endif; ?>
     <?php elseif ($heroStatus === 'NO_QUALIFIED_TICKET'): ?>
-      <p style="margin:0 0 6px;font-weight:700">NO_QUALIFIED_TICKET — today&apos;s available matches did not meet the configured safety requirements.</p>
+      <p style="margin:0 0 6px;font-weight:700">NO_QUALIFIED_TICKET — no COMBINED ticket could be safely assembled from today&apos;s matches (the odds-range, correlation and selection-count rules a multi-leg ticket must obey were not all satisfiable together).</p>
       <?php if (is_array($heroRun) && trim((string) ($heroRun['message'] ?? '')) !== ''): ?>
         <p class="dim" style="margin:0;font-size:12px"><?= e((string) $heroRun['message']) ?></p>
       <?php endif; ?>
     <?php else: ?>
       <p class="dim" style="margin:0">Automatic daily generation is pending. When Odds Prediction is enabled, the scheduler syncs eligible fixtures, refreshes stale odds in controlled batches, evaluates the safety gates and persists today&apos;s result. The button above is an optional manual retry.</p>
+    <?php endif; ?>
+    <?php
+    // A COMBINED ticket (one accumulator across several matches) and an
+    // INDIVIDUAL prediction are different products with different rules —
+    // combining legs must additionally respect an odds-range, a selection
+    // count and a correlation cap that a single match never has to clear.
+    // NO_QUALIFIED_TICKET means only that the COMBINE step found no legal
+    // combination; it says nothing about whether any individual match was
+    // actually predicted. Every model-qualified individual prediction from
+    // today's run is shown here regardless of the combined-ticket outcome,
+    // so a real, usable prediction is never hidden behind an unrelated
+    // combination failure.
+    $heroTopPicks = is_array($heroDiag['topPicks'] ?? null) ? $heroDiag['topPicks'] : [];
+    ?>
+    <?php if ($heroTopPicks !== []): ?>
+      <div style="margin-top:16px">
+        <h4 style="margin:0 0 6px">Individual match predictions<?= $heroTicket === null ? ' — no combined ticket today' : '' ?></h4>
+        <p class="dim" style="margin:0 0 8px;font-size:11px">
+          <?= $heroTicket === null
+              ? 'A combined multi-match ticket could not be assembled today (see the reason above), but the matches below were individually predicted and qualified on their own evidence. Each is a real prediction from verified odds — approve/use them individually.'
+              : 'Every match the model qualified today, whether or not it was selected into the combined ticket above.' ?>
+          <?= e((string) ($heroDiag['topPicksDisclaimer'] ?? '')) ?>
+        </p>
+        <div class="table-scroll">
+          <table class="tbl" style="font-size:12px">
+            <thead><tr><th>Match · competition · kickoff</th><th>Market · prediction</th><th class="num">Real odds</th><th class="num">WINDELS probability · fair</th><th class="num">Confidence</th><th class="num">Data quality</th><th class="num">Value / edge</th><th>Risk</th></tr></thead>
+            <tbody>
+              <?php foreach ($heroTopPicks as $pick): ?>
+                <tr>
+                  <td style="font-weight:700">
+                    <span style="display:inline-flex;align-items:center;gap:5px;vertical-align:middle">
+                      <?php if (!empty($pick['homeTeamLogo'])): ?><img src="<?= e((string) $pick['homeTeamLogo']) ?>" alt="" width="16" height="16" style="border-radius:3px;object-fit:contain" loading="lazy" onerror="this.style.display='none'"><?php endif; ?>
+                      <?= e((string) ($pick['homeTeam'] ?? '?')) ?>
+                    </span>
+                    <span class="dim" style="font-weight:400"> vs </span>
+                    <span style="display:inline-flex;align-items:center;gap:5px;vertical-align:middle">
+                      <?php if (!empty($pick['awayTeamLogo'])): ?><img src="<?= e((string) $pick['awayTeamLogo']) ?>" alt="" width="16" height="16" style="border-radius:3px;object-fit:contain" loading="lazy" onerror="this.style.display='none'"><?php endif; ?>
+                      <?= e((string) ($pick['awayTeam'] ?? '?')) ?>
+                    </span>
+                    <span class="dim" style="display:block;font-size:10px;font-weight:400"><?= e((string) ($pick['competition'] ?? '—')) ?> · <?= e(substr((string) ($pick['kickoff'] ?? ''), 0, 16)) ?></span>
+                  </td>
+                  <td><span class="dim" style="display:block;font-size:10px"><?= e((string) ($pick['market'] ?? '')) ?></span><?= e($heroMarketLabel((string) ($pick['market'] ?? ''), (string) ($pick['selection'] ?? ''))) ?></td>
+                  <td class="num mono"><?= ($pick['marketOdds'] ?? null) !== null ? e(number_format((float) $pick['marketOdds'], 2)) : '—' ?></td>
+                  <td class="num mono">
+                    <?= ($pick['modelProbability'] ?? null) !== null ? e(number_format((float) $pick['modelProbability'] * 100, 1)) . '%' : '—' ?>
+                    <span class="dim" style="display:block;font-size:10px;font-weight:400">fair <?= ($pick['windelsFairOdds'] ?? null) !== null ? e(number_format((float) $pick['windelsFairOdds'], 2)) : '—' ?></span>
+                  </td>
+                  <td class="num"><?= ($pick['confidence'] ?? null) !== null ? e(number_format((float) $pick['confidence'], 0)) . '%' : '—' ?></td>
+                  <td class="num"><?= ($pick['dataQuality'] ?? null) !== null ? (int) $pick['dataQuality'] : '—' ?></td>
+                  <td class="num mono">
+                    <?= ($pick['expectedValue'] ?? null) !== null ? e(number_format((float) $pick['expectedValue'] * 100, 2)) . '%' : '—' ?>
+                    <span class="dim" style="display:block;font-size:10px;font-weight:400"><?= e((string) ($pick['valueLabel'] ?? '')) ?></span>
+                  </td>
+                  <td><span class="badge <?= (string) ($pick['risk']['classification'] ?? '') === 'LOW' ? 'b-green' : ((string) ($pick['risk']['classification'] ?? '') === 'HIGH' ? 'b-red' : 'b-violet') ?>"><?= e((string) ($pick['risk']['classification'] ?? '—')) ?></span></td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
+      </div>
     <?php endif; ?>
     <?php
     // Requirement #13: every rejection auditable — the reason, what was
