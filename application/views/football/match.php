@@ -392,7 +392,16 @@ $windelsModelId = 'Windels Model id: 1520863';
     <div class="panel">
       <h3>Data quality — <?= (int) ($quality['score'] ?? 0) ?>/100</h3>
       <div class="body" style="padding-top:12px">
-        <p style="margin-top:0"><span class="badge <?= $bandClass((string) ($quality['band'] ?? 'REJECTED')) ?>"><?= e((string) ($quality['band'] ?? 'REJECTED')) ?></span> <span class="dim" style="font-size:11px">qualified ≥70 · limited 50–69 · rejected &lt;50</span></p>
+        <p style="margin-top:0"><span class="badge <?= $bandClass((string) ($quality['band'] ?? 'REJECTED')) ?>"><?= e((string) ($quality['band'] ?? 'REJECTED')) ?></span></p>
+        <?php if (!empty($caps['sync'])): ?>
+          <!-- Data-quality bands are internal governance information, not a
+               condition users must satisfy: predictions are generated and
+               shown regardless of band. Shown to operators only. -->
+          <details style="margin-top:4px">
+            <summary class="dim" style="cursor:pointer;font-size:11px">Data-quality bands (admin)</summary>
+            <p class="dim" style="font-size:11px;margin:6px 0 0">qualified ≥70 · limited 50–69 · rejected &lt;50 — governs which predictions publish, not whether the module runs.</p>
+          </details>
+        <?php endif; ?>
         <div class="table-scroll">
           <table class="tbl">
             <thead><tr><th>Component</th><th class="num">Value</th><th class="num">Weight</th><th class="num">Contribution</th></tr></thead>
