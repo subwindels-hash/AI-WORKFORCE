@@ -1523,6 +1523,19 @@ pre.raw {
 .sports-ticket-metric { min-width: 132px; font-variant-numeric: tabular-nums; }
 .sports-ticket-metric > b { font-size: 13px; }
 .live-score-cell { font-weight: 700; font-size: 14px; }
+.sports-run-list { display: grid; gap: 0; margin: 0; }
+.sports-run-list > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.sports-run-list > div:first-child { padding-top: 0; }
+.sports-run-list > div:last-child { padding-bottom: 0; border-bottom: 0; }
+.sports-run-list dt { color: var(--dim); font-size: 11px; line-height: 1.35; }
+.sports-run-list dd { margin: 0; color: var(--text); font-size: 12px; font-weight: 700; text-align: right; white-space: nowrap; }
 .sports-reading-guide dl { display: grid; gap: 10px; margin: 0; }
 .sports-reading-guide dl > div { padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .sports-reading-guide dl > div:last-child { padding-bottom: 0; border-bottom: 0; }

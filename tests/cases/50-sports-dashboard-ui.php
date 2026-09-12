@@ -98,6 +98,9 @@ test('sports UI: dashboard renders the honest DISABLED_NO_PROVIDER state', funct
     assert_contains('Data feed', $html);
     assert_contains('/sports/sync', $html, 'console offers a one-click sync');
     assert_contains('Sync now', $html);
+    assert_contains('<dt>Eligible fixtures</dt><dd class="mono">—</dd>', $html,
+        'a date without a stored run remains unavailable rather than becoming a fabricated zero');
+    assert_contains('No generation run is stored for', $html);
     assert_contains('</html>', $html);
 });
 
@@ -190,6 +193,7 @@ test('sports UI: the feed sections are uniform, numbered and free of inline layo
     fx_ui_today($repo);
     $dash = (new SportsIntelligence($repo, fx_ui_audit()))->dashboard();
     $html = fx_render_sports('index', ['dashboard' => $dash]);
+    $view = (string) file_get_contents(FCPATH . 'application/views/sports/index.php');
 
     // Four numbered steps in the feed, in reading order.
     foreach ([1, 2, 3, 4] as $step) {
@@ -198,7 +202,7 @@ test('sports UI: the feed sections are uniform, numbered and free of inline layo
     }
     // Each section is a landmark with its own accessible name.
     foreach (['sports-overview-heading', 'sports-ticket-heading', 'sports-live-heading', 'sports-performance-heading',
-        'sports-guide-heading', 'sports-system-heading'] as $id) {
+        'sports-run-heading', 'sports-guide-heading', 'sports-system-heading'] as $id) {
         assert_contains('aria-labelledby="' . $id . '"', $html, $id . ' names its section');
         assert_contains('id="' . $id . '"', $html, $id . ' exists on the heading');
     }
@@ -208,17 +212,39 @@ test('sports UI: the feed sections are uniform, numbered and free of inline layo
     assert_true(substr_count($html, 'class="panel sports-section') >= 6, 'the feed and the rail share one section object');
 
     // Every block states what it is before showing numbers.
-    foreach (['Day overview', 'Engine output', 'In play', 'Measured results', 'Reading the numbers', 'Platform state'] as $eyebrow) {
+    foreach (['Day overview', 'Engine output', 'In play', 'Measured results', 'Generation funnel', 'Reading the numbers', 'Platform state'] as $eyebrow) {
         assert_contains($eyebrow, $html, 'the section is introduced as "' . $eyebrow . '"');
     }
+    // The generation summary is a complete sidebar section, not a duplicate
+    // stat grid buried inside the ticket body.
+    $railStart = strpos($view, '<aside class="sports-side');
+    $runStart = strpos($view, 'id="sports-run-summary"');
+    $guideStart = strpos($view, 'sports-reading-guide', (int) $runStart);
+    assert_true($railStart !== false && $runStart !== false && $guideStart !== false && $runStart > $railStart,
+        'the generation-run summary lives in the sports sidebar rail');
+    $runPanel = substr($view, (int) $runStart, (int) $guideStart - (int) $runStart);
+    foreach (['Eligible fixtures', 'Fixtures evaluated', 'Predictions generated', 'Fresh odds',
+        'Stale odds', 'Qualified candidates', 'Selected picks'] as $metric) {
+        assert_contains('>' . $metric . '<', $runPanel, $metric . ' is present in the sidebar generation summary');
+    }
+    foreach (['eligibleFixtures', 'fixturesEvaluated', 'predictionsGenerated', 'fixturesWithFreshOdds',
+        'fixturesRejectedStaleOdds', 'correlationQualifiedCandidates', 'finalQualifiedCandidates'] as $field) {
+        assert_contains("\$runMetrics['" . $field . "']", $runPanel, $field . ' is bound to the stored run summary');
+    }
+    foreach (['Eligible fixtures', 'Fixtures evaluated', 'Predictions generated', 'Fresh odds',
+        'Qualified candidates', 'Selected picks'] as $metric) {
+        assert_contains('<dt>' . $metric . '</dt><dd class="mono">1</dd>', $html,
+            $metric . ' renders the value from the seeded stored run');
+    }
+    assert_contains('<dt>Stale odds</dt><dd class="mono">0</dd>', $html,
+        'a measured zero stale-odds count remains a real zero');
     // Sub-blocks inside a section use one shared sub-heading, not ad-hoc bold text.
-    foreach (['Risk distribution', 'Scheduled fixtures', 'Generation run', 'Selected picks'] as $sub) {
+    foreach (['Risk distribution', 'Scheduled fixtures', 'Selected picks'] as $sub) {
         assert_contains('<h4>' . $sub . '</h4>', $html, $sub . ' is a real sub-heading');
     }
 
     // Spacing comes from the stylesheet. The only inline style left in the view
     // is the risk meter's computed width, which is data, not layout.
-    $view = (string) file_get_contents(FCPATH . 'application/views/sports/index.php');
     $inline = [];
     if (preg_match_all('/style="([^"]*)"/', $view, $m)) $inline = $m[1];
     foreach ($inline as $style) {
