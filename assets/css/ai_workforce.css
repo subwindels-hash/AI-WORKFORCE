@@ -1417,8 +1417,17 @@ pre.raw {
     align-self: start;
   }
 
-  /* Football retains its compact, independently scrollable diagnostics rail. */
-  .football-side, .football-match-side {
+  /* Football uses the same single-feed behavior: the diagnostics rail is
+     never a second scroll container, so only the match feed continues. */
+  .football-side {
+    position: sticky;
+    top: 76px;
+    align-self: start;
+  }
+
+  /* Match detail retains its compact, independently scrollable diagnostics
+     rail because its layout is a separate, denser console. */
+  .football-match-side {
     position: sticky;
     top: 76px;
     max-height: calc(100vh - 92px);
@@ -1429,8 +1438,8 @@ pre.raw {
     scrollbar-color: var(--line2) transparent;
     padding-right: 3px;
   }
-  .football-side::-webkit-scrollbar, .football-match-side::-webkit-scrollbar { width: 5px; }
-  .football-side::-webkit-scrollbar-thumb, .football-match-side::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 999px; }
+  .football-match-side::-webkit-scrollbar { width: 5px; }
+  .football-match-side::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 999px; }
 }
 
 /* ---------- Football intelligence: organized board and all-odds sheets ---------- */
