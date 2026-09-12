@@ -1751,9 +1751,14 @@ pre.raw {
 .football-key-values > div { display: grid; grid-template-columns: 105px 1fr; gap: 10px; }
 .football-key-values dt { color: var(--dim); }
 .football-key-values dd { margin: 0; font-size: 11px; }
+.football-livebar { display: grid; grid-template-columns: 9px minmax(0, 1fr); align-items: start; gap: 8px; color: var(--dim); font-size: 11px; line-height: 1.45; }
+.football-livebar .dot { margin-top: 3px; }
 .football-live-list, .football-check-list, .football-schedule-list { display: grid; gap: 8px; }
 .football-live-list > div { display: flex; flex-direction: column; gap: 2px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel2); font-size: 11px; }
 .football-live-list span { color: var(--dim); }
+.football-live-crest { border-radius: 3px; object-fit: contain; vertical-align: middle; margin-right: 4px; }
+.football-live-updated { animation: football-live-update 2.5s ease-out; }
+@keyframes football-live-update { from { border-color: var(--brand); background: var(--brand-soft); } to { border-color: var(--line); background: var(--panel2); } }
 .football-check-list > div { display: grid; grid-template-columns: 9px 1fr; gap: 8px; align-items: start; }
 .football-check-list b, .football-check-list small { display: block; }
 .football-check-list b { font-size: 11px; }

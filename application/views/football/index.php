@@ -512,32 +512,35 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         </div>
       </section>
 
-      <section class="panel football-section" aria-labelledby="live-heading">
+      <section class="panel football-section" id="football-live-panel" aria-labelledby="live-heading">
         <div class="football-section__heading">
           <div class="football-section__title">
-            <div id="live-heading">
+            <div>
               <p class="football-eyebrow">In play</p>
-              <h3>Live now</h3>
+              <h3 id="live-heading">Live Match</h3>
             </div>
           </div>
-          <a class="btn small" href="/football/live">Refresh live</a>
         </div>
         <div class="body">
+          <div class="football-livebar" aria-live="polite">
+            <span class="dot synth" id="football-live-poll-dot" title="Auto-refresh status"></span>
+            <span id="football-live-poll-note">Auto-refresh on — live match updates appear here automatically, immediately after the provider reports them.</span>
+          </div>
           <?php $liveMatches = is_array($live['matches'] ?? null) ? $live['matches'] : []; ?>
-          <?php if ($liveMatches === []): ?><p class="football-help">No match is in play in the stored data. The live sweep runs only while a fixture is reported live.</p><?php else: ?>
-            <div class="football-live-list">
+          <div class="football-live-list" id="football-live-list">
+            <?php if ($liveMatches === []): ?>
+              <p class="football-help" id="football-live-empty">No match is currently live.</p>
+            <?php else: ?>
               <?php foreach ($liveMatches as $liveMatch): ?>
                 <?php $fx = is_array($liveMatch['fixture'] ?? null) ? $liveMatch['fixture'] : []; $liveState = is_array($liveMatch['live'] ?? null) ? $liveMatch['live'] : []; ?>
-                <div>
-                  <b><?= crest($fx['homeTeamLogo'] ?? null) ?><?= e((string) ($fx['homeTeam'] ?? '—')) ?> <?= isset($liveState['score']['home']) ? (int) $liveState['score']['home'] : '—' ?>–<?= isset($liveState['score']['away']) ? (int) $liveState['score']['away'] : '—' ?> <?= crest($fx['awayTeamLogo'] ?? null) ?><?= e((string) ($fx['awayTeam'] ?? '—')) ?></b>
-                  <span><?= e((string) ($fx['competition'] ?? '—')) ?> · <?= e((string) ($liveState['state'] ?? 'LIVE')) ?><?= isset($liveState['minute']) && $liveState['minute'] !== null ? ' · ' . (int) $liveState['minute'] . "'" : '' ?></span>
+                <div data-football-live-id="<?= (int) ($fx['id'] ?? 0) ?>">
+                  <b><?= crest($fx['homeTeamLogo'] ?? null) ?><?= e((string) ($fx['homeTeam'] ?? '—')) ?> <?= isset($liveState['score']['home']) && is_numeric($liveState['score']['home']) ? (int) $liveState['score']['home'] : '—' ?>–<?= isset($liveState['score']['away']) && is_numeric($liveState['score']['away']) ? (int) $liveState['score']['away'] : '—' ?> <?= crest($fx['awayTeamLogo'] ?? null) ?><?= e((string) ($fx['awayTeam'] ?? '—')) ?></b>
+                  <span><?= e((string) ($fx['competition'] ?? '—')) ?> · <?= e((string) ($liveState['state'] ?? 'LIVE')) ?><?= isset($liveState['minute']) && is_numeric($liveState['minute']) ? ' · ' . (int) $liveState['minute'] . "'" : '' ?></span>
                   <span class="mono">Kickoff <?= e($kickoffStamp($fx['kickoff'] ?? null)) ?></span>
                 </div>
               <?php endforeach; ?>
-            </div>
-            <p class="football-help">The pre-match prediction and live estimate are separate stored rows; the original prediction is never rewritten after kickoff.</p>
-          <?php endif; ?>
-          <?php if (!empty($live['errors'])): ?><p class="football-help">Live refresh: <?= e(implode(' · ', array_slice((array) $live['errors'], 0, 3))) ?></p><?php endif; ?>
+            <?php endif; ?>
+          </div>
         </div>
       </section>
 
@@ -600,3 +603,127 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
     </aside>
   </div>
 </div>
+
+<script id="football-live-js">
+(function(){
+  // The browser reads the stored live board frequently; the provider-aware
+  // football-live scheduler owns the rate-limited provider sweep. This keeps
+  // every viewer current without turning each open page into provider traffic.
+  var list = document.getElementById('football-live-list');
+  if(!list) return;
+  var dot = document.getElementById('football-live-poll-dot');
+  var note = document.getElementById('football-live-poll-note');
+  var timer = null;
+  var snapshots = {};
+  var pollEveryMs = 10000;
+  var ready = false;
+  var liveMessage = 'Auto-refresh on — live match updates appear here automatically, immediately after the provider reports them.';
+
+  function esc(value){
+    return String(value == null ? '' : value).replace(/[&<>"']/g, function(character){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character];
+    });
+  }
+
+  function numberOrDash(value){
+    return value !== null && value !== '' && isFinite(Number(value)) ? String(Math.trunc(Number(value))) : '—';
+  }
+
+  function kickoffStamp(value){
+    var timestamp = value ? Date.parse(value) : NaN;
+    if(isNaN(timestamp)) return 'DATA_UNAVAILABLE';
+    var date = new Date(timestamp);
+    var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var pad = function(number){ return String(number).padStart(2, '0'); };
+    return days[date.getUTCDay()] + ' ' + date.getUTCDate() + ' ' + months[date.getUTCMonth()] + ' ' + date.getUTCFullYear()
+      + ' · ' + pad(date.getUTCHours()) + ':' + pad(date.getUTCMinutes()) + ' UTC';
+  }
+
+  function crest(url){
+    return url ? '<img class="football-live-crest" src="' + esc(url) + '" alt="" width="18" height="18" loading="lazy">' : '';
+  }
+
+  function snapshot(match){
+    var fixture = match.fixture || {};
+    var state = match.live || {};
+    var score = state.score || {};
+    return [numberOrDash(score.home), numberOrDash(score.away), numberOrDash(state.minute), state.state || '',
+      fixture.homeTeam || '', fixture.awayTeam || '', fixture.competition || '', fixture.kickoff || ''].join('|');
+  }
+
+  function cardHtml(match, changed){
+    var fixture = match.fixture || {};
+    var state = match.live || {};
+    var score = state.score || {};
+    var minute = state.minute !== null && state.minute !== undefined && isFinite(Number(state.minute))
+      ? ' · ' + Math.trunc(Number(state.minute)) + "'" : '';
+    return '<div data-football-live-id="' + esc(fixture.id || 0) + '"' + (changed ? ' class="football-live-updated"' : '') + '>'
+      + '<b>' + crest(fixture.homeTeamLogo) + esc(fixture.homeTeam || '—') + ' '
+      + numberOrDash(score.home) + '–' + numberOrDash(score.away) + ' '
+      + crest(fixture.awayTeamLogo) + esc(fixture.awayTeam || '—') + '</b>'
+      + '<span>' + esc(fixture.competition || '—') + ' · ' + esc(state.state || 'LIVE') + minute + '</span>'
+      + '<span class="mono">Kickoff ' + esc(kickoffStamp(fixture.kickoff)) + '</span>'
+      + '</div>';
+  }
+
+  function render(matches){
+    var next = {};
+    var changed = 0;
+    matches.forEach(function(match){
+      var id = String((match.fixture || {}).id || 0);
+      next[id] = snapshot(match);
+      if(ready && snapshots[id] !== undefined && snapshots[id] !== next[id]) changed++;
+      if(ready && snapshots[id] === undefined) changed++;
+    });
+    if(ready){
+      Object.keys(snapshots).forEach(function(id){ if(next[id] === undefined) changed++; });
+    }
+    if(!matches.length){
+      list.innerHTML = '<p class="football-help" id="football-live-empty">No match is currently live.</p>';
+    } else {
+      list.innerHTML = matches.map(function(match){
+        var id = String((match.fixture || {}).id || 0);
+        return cardHtml(match, ready && snapshots[id] !== next[id]);
+      }).join('');
+    }
+    snapshots = next;
+    ready = true;
+    return changed;
+  }
+
+  function setStatus(message, state){
+    if(note) note.textContent = message;
+    if(dot) dot.className = 'dot ' + state;
+  }
+
+  function schedule(){
+    clearTimeout(timer);
+    timer = setTimeout(poll, pollEveryMs);
+  }
+
+  function poll(){
+    if(document.hidden){ schedule(); return; }
+    fetch('/api/football/fixtures/live', {credentials: 'same-origin', cache: 'no-store'})
+      .then(function(response){
+        if(!response.ok) throw new Error('HTTP ' + response.status);
+        return response.json();
+      })
+      .then(function(data){
+        var changed = render(Array.isArray(data.matches) ? data.matches : []);
+        setStatus(liveMessage + (changed ? ' Latest update received.' : ''), 'up');
+      })
+      .catch(function(error){
+        var forbidden = String(error && error.message || '').indexOf('403') >= 0;
+        setStatus(forbidden ? 'Live auto-refresh needs the sports.view permission.' : 'Auto-refresh interrupted — retrying.', 'down');
+      })
+      .then(schedule);
+  }
+
+  document.addEventListener('visibilitychange', function(){
+    if(!document.hidden){ clearTimeout(timer); poll(); }
+  });
+  setStatus(liveMessage, 'synth');
+  poll();
+})();
+</script>
