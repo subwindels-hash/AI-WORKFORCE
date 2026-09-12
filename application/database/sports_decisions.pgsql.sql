@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS "sports_ticket_selections" (
   "home_team" VARCHAR(255) NULL,
   "away_team" VARCHAR(255) NULL,
   "kickoff_time" VARCHAR(32) NULL,
+  "home_team_logo" VARCHAR(500) NULL,
+  "away_team_logo" VARCHAR(500) NULL,
   "market" VARCHAR(96) NOT NULL,
   "selection" VARCHAR(160) NOT NULL,
   "odds" DECIMAL(14,6) NOT NULL,

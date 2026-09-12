@@ -4,6 +4,22 @@ defined('BASEPATH') or exit('No direct script access allowed');
 if (!function_exists('e')) {
     function e(?string $s): string { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
 }
+if (!function_exists('crest')) {
+    /**
+     * A team crest `<img>` tag, or an empty string when no verified logo is
+     * on the row. Every football/sports screen that names a team uses this
+     * one renderer so a crest is either the club's own verified provider
+     * image or nothing — never a placeholder, and never another club's mark.
+     */
+    function crest($url, int $size = 18): string
+    {
+        $url = is_string($url) ? trim($url) : '';
+        if ($url === '') return '';
+        return '<img src="' . e($url) . '" alt="" width="' . $size . '" height="' . $size
+            . '" style="border-radius:3px;object-fit:contain;vertical-align:middle;margin-right:4px" '
+            . 'loading="lazy" onerror="this.style.display=\'none\'">';
+    }
+}
 $status = $status ?? null;
 $mode = $status['tradingMode'] ?? '…';
 $ks = $status['killSwitch'] ?? null;

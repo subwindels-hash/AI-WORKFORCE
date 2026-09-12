@@ -698,6 +698,8 @@ final class PredictionService
             'minute' => $fixture['minute'] ?? null,
             'homeTeam' => (string) ($fixture['home_team'] ?? DataState::UNAVAILABLE),
             'awayTeam' => (string) ($fixture['away_team'] ?? DataState::UNAVAILABLE),
+            'homeTeamLogo' => MatchFeed::fixtureLogo($fixture, 'home'),
+            'awayTeamLogo' => MatchFeed::fixtureLogo($fixture, 'away'),
             'score' => ['home' => $fixture['home_score'] ?? null, 'away' => $fixture['away_score'] ?? null],
             'redCards' => ['home' => $fixture['home_red_cards'] ?? null, 'away' => $fixture['away_red_cards'] ?? null],
             'venue' => $fixture['venue'] ?? null,

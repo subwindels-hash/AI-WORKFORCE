@@ -204,6 +204,7 @@ class TicketOptimizer
         $confidenceFloor = number_format($minConfidence, 0);
         return [
             'status' => 'NO_QUALIFIED_TICKET',
+            'failureCode' => FailureTaxonomy::NO_COMBINABLE_TICKET,
             'reason' => 'no verified candidate combination satisfies the ' . number_format($min, 2) . '–' . number_format($max, 2)
                 . ' odds, ' . $confidenceFloor . '%+ confidence, quality, risk, value, freshness and correlation constraints'
                 . ($fallbackEnabled ? ' — and the fallback tiers (relaxed confidence, relaxed correlation) found none either' : ''),
@@ -401,6 +402,13 @@ class TicketOptimizer
             'correlation' => $c['correlation']['classification'] ?? 'LOW',
             'decision' => $decision,
             'reasons' => array_values(array_unique($reasons)),
+            // Round 3b: the exact machine-readable code for the primary
+            // reason this leg did not make the combined ticket — never a
+            // bare "NOT_SELECTED". A SELECTED leg carries no failure code.
+            'failureCode' => $reasons === [] ? null : FailureTaxonomy::translate($reasons[0]),
+            'retryable' => $reasons === [] ? null : FailureTaxonomy::retryable(FailureTaxonomy::translate($reasons[0])),
+            'provider' => $c['oddsSource'] ?? $c['oddsProvider'] ?? null,
+            'oddsTimestamp' => $c['oddsTimestamp'] ?? null,
         ];
     }
 

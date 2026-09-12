@@ -380,6 +380,8 @@ final class PredictionBoard
             'providerMatchId' => ((string) ($fixture['external_id'] ?? '')) ?: null,
             'homeTeam' => (string) ($fixture['home_team'] ?? DataState::UNAVAILABLE),
             'awayTeam' => (string) ($fixture['away_team'] ?? DataState::UNAVAILABLE),
+            'homeTeamLogo' => MatchFeed::fixtureLogo($fixture, 'home'),
+            'awayTeamLogo' => MatchFeed::fixtureLogo($fixture, 'away'),
             'competition' => (string) ($fixture['competition'] ?? DataState::UNAVAILABLE),
             'league' => (string) ($fixture['competition'] ?? DataState::UNAVAILABLE),
             'country' => $fixture['country'] ?? null,
@@ -464,6 +466,8 @@ final class PredictionBoard
             'minute' => $fixture['minute'] ?? null,
             'homeTeam' => (string) ($fixture['home_team'] ?? DataState::UNAVAILABLE),
             'awayTeam' => (string) ($fixture['away_team'] ?? DataState::UNAVAILABLE),
+            'homeTeamLogo' => MatchFeed::fixtureLogo($fixture, 'home'),
+            'awayTeamLogo' => MatchFeed::fixtureLogo($fixture, 'away'),
             'score' => (isset($fixture['home_score'], $fixture['away_score']) && $fixture['home_score'] !== null)
                 ? ['home' => (int) $fixture['home_score'], 'away' => (int) $fixture['away_score']] : null,
             'band' => $band,

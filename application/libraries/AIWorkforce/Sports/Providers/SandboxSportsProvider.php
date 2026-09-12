@@ -242,6 +242,21 @@ class SandboxSportsProvider implements SportsDataProvider
         return sprintf('sim-%s-%s-%d', substr(hash('crc32', $league), 0, 6), $day, $slot);
     }
 
+    /**
+     * Deterministic placeholder crest for a simulated team — same team name
+     * always yields the same image, so it behaves like a real provider logo
+     * without ever claiming to be one. Uses the team's initials on a fixed
+     * background derived from its name, never a photo of a real club.
+     */
+    private function crestUrl(string $team): string
+    {
+        $initials = strtoupper(preg_replace('/[^A-Za-z]/', '', $team));
+        $initials = substr($initials !== '' ? $initials : 'FC', 0, 2);
+        $bg = substr(hash('crc32', $team), 0, 6);
+        return 'https://ui-avatars.com/api/?name=' . rawurlencode($initials)
+            . '&background=' . $bg . '&color=fff&bold=true&format=png&size=64';
+    }
+
     private function parseExternalId(string $id): ?array
     {
         if (!preg_match('/^sim-([0-9a-f]{6})-(\d{4}-\d{2}-\d{2})-(\d+)$/', $id, $m)) return null;
@@ -280,6 +295,8 @@ class SandboxSportsProvider implements SportsDataProvider
             'status' => $status, 'sport' => 'football',
             'sourceTimestamp' => gmdate('c'), 'provider' => $this->id(),
             'simulated' => true,
+            'homeTeamLogo' => $this->crestUrl($home),
+            'awayTeamLogo' => $this->crestUrl($away),
             'context' => [
                 'recentForm' => [
                     'homeGoalsPerMatch' => $form['homeGoalsPerMatch'],
