@@ -12,6 +12,21 @@ $contract = $prediction['prediction'] ?? null;
 $settlement = $prediction['settlement'] ?? null;
 $liveEstimates = $prediction['liveEstimates'] ?? [];
 $markets = is_array($prediction['markets'] ?? null) ? $prediction['markets'] : [];
+// The catalogue keeps OVER_* and UNDER_* aliases for filtering, but a complete
+// match sheet should show each two-sided bookmaker family/line only once.
+$displayMarkets = [];
+$seenMarketFamilies = [];
+foreach ($markets as $candidateMarket) {
+    $candidatePricing = is_array($candidateMarket['pricing'] ?? null) ? $candidateMarket['pricing'] : [];
+    $family = (string) ($candidatePricing['family'] ?? $candidateMarket['key'] ?? '');
+    $lineKey = isset($candidatePricing['line']) && is_numeric($candidatePricing['line'])
+        ? number_format((float) $candidatePricing['line'], 2, '.', '') : '';
+    $displayKey = $family . '|' . $lineKey;
+    if ($displayKey !== '|' && isset($seenMarketFamilies[$displayKey])) continue;
+    $seenMarketFamilies[$displayKey] = true;
+    $displayMarkets[] = $candidateMarket;
+}
+$markets = $displayMarkets;
 $selectedMarket = is_array($prediction['market'] ?? null) ? $prediction['market'] : [];
 $intel = is_array($prediction['intelligence'] ?? null) ? $prediction['intelligence'] : [];
 $caps = $caps ?? ['sync' => false, 'calibrate' => false, 'approve' => false, 'settle' => false];
@@ -113,34 +128,40 @@ $withheldBlock = is_array($intel['withheld'] ?? null) ? $intel['withheld'] : [];
               ?>
               <section class="football-market-card">
                 <header>
-                  <div><p><?= e((string) ($market['group'] ?? 'Market')) ?></p><h5><?= e((string) ($market['label'] ?? $market['key'] ?? 'Market')) ?></h5></div>
-                  <div class="football-market-card__badges"><span class="badge <?= $providerOnly ? 'b-amber' : 'b-blue' ?>"><?= $providerOnly ? 'Provider price only' : 'WINDELS modelled' ?></span><span class="badge <?= $bandClass((string) ($market['riskLevel'] ?? '')) ?>"><?= e((string) ($market['riskLevel'] ?? 'UNKNOWN')) ?> risk</span></div>
+                  <div><p><?= e((string) ($market['group'] ?? 'Market')) ?></p><h5><?= e((string) ($market['label'] ?? $market['key'] ?? 'Market')) ?></h5><small><?= count($outcomes) ?> selection<?= count($outcomes) === 1 ? '' : 's' ?> · <?= e((string) ($market['basis'] ?? 'stored market data')) ?></small></div>
+                  <div class="football-market-card__badges"><span class="badge <?= $providerOnly ? 'b-amber' : 'b-blue' ?>"><?= $providerOnly ? 'Provider price only' : 'WINDELS modelled' ?></span><span class="badge <?= $bandClass((string) ($pricing['state'] ?? 'DATA_UNAVAILABLE')) ?>"><?= e((string) ($pricing['state'] ?? 'UNPRICED')) ?></span><?php if (!empty($pricing['priceStale'])): ?><span class="badge b-red">STALE PRICE</span><?php endif; ?><span class="badge <?= $bandClass((string) ($market['riskLevel'] ?? '')) ?>"><?= e((string) ($market['riskLevel'] ?? 'UNKNOWN')) ?> risk</span></div>
                 </header>
                 <?php if ($outcomes === []): ?>
                   <div class="empty-state"><p><?= e((string) ($market['reason'] ?? 'DATA_UNAVAILABLE')) ?></p></div>
                 <?php else: ?>
                   <div class="table-scroll">
-                    <table class="tbl football-odds-table">
-                      <thead><tr><th>Selection</th><th class="num">WINDELS probability</th><th class="num">Market odds</th><th class="num">Implied probability</th><th class="num">WINDELS fair odds</th><th class="num">Potential Edge</th><th class="num">Expected return</th><th>Quote information</th></tr></thead>
+                    <table class="tbl football-odds-table football-odds-table--complete">
+                      <thead><tr><th>Selection</th><th>WINDELS estimate</th><th>Bookmaker quote &amp; information</th><th>Margin-free market</th><th>Value, Potential Edge &amp; Expected return</th></tr></thead>
                       <tbody>
                         <?php foreach ($outcomes as $outcome): ?>
-                          <?php $edge = $outcome['edge'] ?? null; $expected = $outcome['expectedValue'] ?? null; ?>
+                          <?php
+                          $expected = $outcome['expectedValue'] ?? null;
+                          $valueClass = (string) ($outcome['valueClass'] ?? 'UNPRICED');
+                          $valueTone = in_array($valueClass, ['STRONG_VALUE', 'POSITIVE_VALUE'], true) ? 'b-green'
+                              : (in_array($valueClass, ['NEGATIVE_VALUE', 'AVOID'], true) ? 'b-red' : 'b-gray');
+                          $hasQuote = is_numeric($outcome['odds'] ?? null);
+                          ?>
                           <tr>
-                            <td><b><?= e((string) ($outcome['label'] ?? $outcome['selection'] ?? '—')) ?></b><?php if (!empty($outcome['note'])): ?><div class="football-cell-note dim"><?= e((string) $outcome['note']) ?></div><?php endif; ?></td>
-                            <td class="num mono"><?= $pct($outcome['probability'] ?? null) ?></td>
-                            <td class="num mono"><?= is_numeric($outcome['odds'] ?? null) ? $odds($outcome['odds']) : 'UNPRICED' ?></td>
-                            <td class="num mono"><?= $pct($outcome['impliedProbability'] ?? null) ?></td>
-                            <td class="num mono"><?= $odds($outcome['windelsFairOdds'] ?? null) ?></td>
-                            <td class="num mono <?= is_numeric($edge) && (float) $edge >= 0 ? 'up' : (is_numeric($edge) ? 'down' : 'dim') ?>"><?= $signedPct($edge) ?></td>
-                            <td class="num mono <?= is_numeric($expected) && (float) $expected >= 0 ? 'up' : (is_numeric($expected) ? 'down' : 'dim') ?>"><?= $signedPct($expected) ?></td>
-                            <td class="football-quote"><span><?= e((string) ($outcome['oddsSource'] ?? '—')) ?></span><small><?= e($stamp($outcome['oddsObservedAt'] ?? null, 'Y-m-d H:i')) ?></small><?php if ((int) ($outcome['quoteCount'] ?? 0) > 1): ?><small><?= (int) $outcome['quoteCount'] ?> quotes · <?= $odds($outcome['oddsLow'] ?? null) ?>–<?= $odds($outcome['oddsHigh'] ?? null) ?></small><?php endif; ?></td>
+                            <td class="football-selection-cell"><b><?= e((string) ($outcome['label'] ?? $outcome['selection'] ?? '—')) ?></b><small class="mono"><?= e((string) ($outcome['selection'] ?? '')) ?></small><?php if (!empty($outcome['note'])): ?><small><?= e((string) $outcome['note']) ?></small><?php endif; ?></td>
+                            <td class="football-odds-metric"><b class="mono"><?= $pct($outcome['probability'] ?? null) ?></b><small>WINDELS probability</small><span class="mono">WINDELS fair odds <?= $odds($outcome['windelsFairOdds'] ?? null) ?></span></td>
+                            <td class="football-quote football-odds-metric">
+                              <?php if ($hasQuote): ?><b class="mono"><?= $odds($outcome['odds']) ?></b><small>Market odds · Implied probability <?= $pct($outcome['impliedProbability'] ?? null) ?></small><span><?= e((string) ($outcome['oddsSource'] ?? 'Source unavailable')) ?></span><small><?= e($stamp($outcome['oddsObservedAt'] ?? null, 'Y-m-d H:i')) ?></small><small><?= max(1, (int) ($outcome['quoteCount'] ?? 1)) ?> quote<?= (int) ($outcome['quoteCount'] ?? 1) === 1 ? '' : 's' ?> · range <?= $odds($outcome['oddsLow'] ?? $outcome['odds']) ?>–<?= $odds($outcome['oddsHigh'] ?? $outcome['odds']) ?></small>
+                              <?php else: ?><span class="badge b-gray">UNPRICED</span><small>No bookmaker quote stored</small><?php endif; ?>
+                            </td>
+                            <td class="football-odds-metric"><?php if (is_numeric($outcome['fairProbability'] ?? null)): ?><b class="mono"><?= $pct($outcome['fairProbability']) ?></b><small>probability after margin removal</small><span class="mono">market fair odds <?= $odds($outcome['fairOdds'] ?? null) ?></span><?php else: ?><b class="mono">—</b><small>Needs a complete price sheet</small><span>Break-even <?= $pct($outcome['breakEvenProbability'] ?? null) ?></span><?php endif; ?></td>
+                            <td class="football-value-cell"><span class="badge <?= $valueTone ?>"><?= e((string) ($outcome['valueLabel'] ?? 'No price to compare')) ?></span><b class="mono <?= is_numeric($expected) && (float) $expected >= 0 ? 'up' : (is_numeric($expected) ? 'down' : 'dim') ?>">Expected return <?= $signedPct($expected) ?></b><small class="mono">Potential Edge vs quote <?= is_numeric($outcome['edgePoints'] ?? null) ? (((float) $outcome['edgePoints'] >= 0 ? '+' : '') . $number($outcome['edgePoints'], 2) . 'pp') : '—' ?></small><small class="mono">Edge after margin <?= is_numeric($outcome['edgeAgainstFairPoints'] ?? null) ? (((float) $outcome['edgeAgainstFairPoints'] >= 0 ? '+' : '') . $number($outcome['edgeAgainstFairPoints'], 2) . 'pp') : '—' ?></small><?php if (!empty($outcome['valueReason'])): ?><details class="football-value-explanation"><summary>Why this rating</summary><p><?= e((string) $outcome['valueReason']) ?></p></details><?php endif; ?></td>
                           </tr>
                         <?php endforeach; ?>
                       </tbody>
                     </table>
                   </div>
                 <?php endif; ?>
-                <footer><span><?= e((string) ($market['basis'] ?? '')) ?></span><span>Pricing: <?= e((string) ($pricing['state'] ?? 'UNPRICED')) ?><?php if (is_numeric($pricing['marginPoints'] ?? null)): ?> · market margin <?= $number($pricing['marginPoints'], 2) ?>pp<?php endif; ?><?php if (!empty($pricing['pricedAt'])): ?> · latest <?= e($stamp($pricing['pricedAt'], 'Y-m-d H:i')) ?><?php endif; ?></span></footer>
+                <footer><span>Coverage <?= $pct($market['coverage'] ?? null) ?> · <?= (int) ($pricing['legsPriced'] ?? 0) ?>/<?= (int) ($pricing['legsExpected'] ?? 0) ?> expected legs priced</span><span><?php if (is_numeric($pricing['overround'] ?? null)): ?>Overround <?= $pct($pricing['overround']) ?> · market margin <?= $number($pricing['marginPoints'] ?? null, 2) ?>pp · <?= e((string) ($pricing['marginMethod'] ?? '')) ?><?php else: ?>Margin removal DATA_UNAVAILABLE<?php endif; ?><?php if (!empty($pricing['pricedAt'])): ?> · latest <?= e($stamp($pricing['pricedAt'], 'Y-m-d H:i')) ?><?php endif; ?></span></footer>
               </section>
             <?php endforeach; ?>
           <?php endif; ?>
@@ -194,7 +215,7 @@ $withheldBlock = is_array($intel['withheld'] ?? null) ? $intel['withheld'] : [];
       </section>
     </div>
 
-    <aside class="stack" aria-label="Match evidence and state">
+    <aside class="football-match-side stack" aria-label="Match evidence and state">
       <section class="panel">
         <h3>Data quality — <?= (int) ($quality['score'] ?? 0) ?>/100</h3>
         <div class="body">

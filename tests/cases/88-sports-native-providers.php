@@ -133,6 +133,49 @@ test('api-football maps odds correctly', function () {
     assert_equals('Bet365', $odds[0]['bookmaker']);
 });
 
+test('api-football preserves specific market families, lines and score selections', function () {
+    $body = json_encode(['response' => [[
+        'fixture' => ['id' => 123],
+        'bookmakers' => [[
+            'name' => 'Complete Book',
+            'bets' => [
+                ['name' => 'Asian Handicap', 'values' => [
+                    ['value' => 'Home -0.75', 'odd' => 2.05],
+                    ['value' => 'Away +0.75', 'odd' => 1.80],
+                ]],
+                ['name' => 'Draw No Bet', 'values' => [
+                    ['value' => 'Home', 'odd' => 1.55],
+                    ['value' => 'Away', 'odd' => 2.45],
+                ]],
+                ['name' => 'Correct Score', 'values' => [
+                    ['value' => '1:0', 'odd' => 7.50],
+                ]],
+                ['name' => 'First Half Winner', 'values' => [
+                    ['value' => 'Draw', 'odd' => 2.10],
+                ]],
+                ['name' => 'Home Team Total Goals', 'values' => [
+                    ['value' => 'Over 1.5', 'odd' => 2.35],
+                ]],
+            ],
+        ]],
+    ]]]);
+    $p = new ApiFootballProvider('k', 'https://api.test', 10, makeTransport(200, $body));
+    $rows = $p->odds('123');
+    $byPrice = [];
+    foreach ($rows as $row) $byPrice[(string) $row['decimalOdds']] = $row;
+
+    assert_equals('ASIAN_HANDICAP', $byPrice['2.05']['market']);
+    assert_equals('HOME_MINUS_0_75', $byPrice['2.05']['selection'], 'signed quarter line survives ingestion');
+    assert_equals('AWAY_PLUS_0_75', $byPrice['1.8']['selection'], 'opposite away line survives ingestion');
+    assert_equals('DRAW_NO_BET', $byPrice['1.55']['market']);
+    assert_equals('HOME', $byPrice['1.55']['selection']);
+    assert_equals('CORRECT_SCORE', $byPrice['7.5']['market']);
+    assert_equals('SCORE_1_0', $byPrice['7.5']['selection']);
+    assert_equals('FIRST_HALF_WINNER', $byPrice['2.1']['market']);
+    assert_equals('DRAW', $byPrice['2.1']['selection']);
+    assert_equals('HOME_TEAM_TOTAL_GOALS', $byPrice['2.35']['market'], 'team total is not collapsed into combined total goals');
+});
+
 test('api-football maps results correctly', function () {
     $body = json_encode(['response' => [
         ['fixture' => ['id' => 123, 'status' => ['short' => 'FT']], 'goals' => ['home' => 2, 'away' => 1],

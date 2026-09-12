@@ -241,6 +241,17 @@ test('football: the football screens own their panels — no duplication, no lef
     assert_contains('never rewritten', $match, 'and says plainly that the frozen prediction is not rewritten');
     assert_contains('Stored as separate LIVE rows', $match, 'with the live estimate kept in its own rows');
     assert_contains('separate stored rows', $console, 'and the board says they are separate rows');
+
+    foreach (['Full odds &amp; fair-price sheet', 'Bookmaker quote &amp; information', 'Margin-free market',
+        'WINDELS probability', 'WINDELS fair odds', 'Break-even', 'Expected return', 'Edge vs quote',
+        'Edge after margin', 'market margin', 'Coverage', 'quote', 'range', 'UNPRICED'] as $label) {
+        assert_contains($label, $console, 'the board odds sheet exposes ' . $label);
+    }
+    foreach (['Bookmaker quote &amp; information', 'Margin-free market', 'Potential Edge', 'Expected return',
+        'Break-even', 'market margin', 'Coverage', 'range', 'UNPRICED'] as $label) {
+        assert_contains($label, $match, 'the match odds sheet exposes ' . $label);
+    }
+    assert_contains('football-match-side stack', $match, 'match evidence uses the sticky context rail');
 });
 
 test('football: the empty states and required wording are the shipped strings', function () {

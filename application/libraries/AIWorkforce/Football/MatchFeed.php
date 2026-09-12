@@ -658,6 +658,10 @@ final class MatchFeed
      */
     public function attachMultipleMarkets(array $entries, ?array $marketKeys = null, bool $pricedOnly = true): array
     {
+        // A null list means the complete sheet: stable catalogue plus any real
+        // provider market/line the catalogue does not enumerate. An explicit
+        // list (used by the legacy compact feed) remains deliberately bounded.
+        $includeProviderExtras = $marketKeys === null;
         $marketKeys = $marketKeys ?? self::MULTI_MARKET_CANDIDATES;
         $ids = [];
         $matchIds = [];
@@ -671,13 +675,16 @@ final class MatchFeed
 
         $out = [];
         foreach ($entries as $entry) {
-            $prediction = $entry['prediction'] ?? null;
-            if (!is_array($prediction)) {
-                $out[] = [];
-                continue;
-            }
+            $storedPrediction = $entry['prediction'] ?? null;
+            $hasPrediction = is_array($storedPrediction);
+            $prediction = $hasPrediction ? $storedPrediction : [];
             $fixtureOdds = $odds[(string) ($entry['matchId'] ?? '')] ?? [];
-            $grid = $grids[(string) ($prediction['id'] ?? '')] ?? [];
+            $grid = $hasPrediction ? ($grids[(string) ($prediction['id'] ?? '')] ?? []) : [];
+            // Without a stored prediction there is no honest model catalogue to
+            // display, but every real provider quote is still useful. In that
+            // state this fixture behaves as priced-only even when the analyzed
+            // rows beside it request their complete model catalogue.
+            $effectivePricedOnly = $pricedOnly || !$hasPrediction;
             $candidates = [];
 
             foreach ($marketKeys as $key) {
@@ -696,15 +703,26 @@ final class MatchFeed
                         break;
                     }
                 }
-                if ($pricedOnly && !$hasOdds) continue;
+                if ($effectivePricedOnly && !$hasOdds) continue;
 
                 $evaluated = $this->markets->evaluate($prediction, $grid, $fixtureOdds, $catalogEntry, $catalogEntry['line'] ?? null);
 
-                if (($evaluated['state'] ?? '') === DataState::UNAVAILABLE && $pricedOnly) continue;
+                if (($evaluated['state'] ?? '') === DataState::UNAVAILABLE && $effectivePricedOnly) continue;
                 if (empty($evaluated['key'])) continue;
-                if ($pricedOnly && !$this->hasQuotedOutcome($evaluated)) continue;
+                if ($effectivePricedOnly && !$this->hasQuotedOutcome($evaluated)) continue;
 
                 $candidates[] = $evaluated;
+            }
+
+            if ($includeProviderExtras) {
+                foreach ($this->markets->additionalProviderMarkets($fixtureOdds) as $providerMarket) {
+                    $evaluated = $this->markets->evaluate($prediction, $grid, $fixtureOdds, $providerMarket,
+                        is_numeric($providerMarket['line'] ?? null) ? (float) $providerMarket['line'] : null);
+                    if (($evaluated['state'] ?? '') === DataState::UNAVAILABLE && $effectivePricedOnly) continue;
+                    if (empty($evaluated['key'])) continue;
+                    if ($effectivePricedOnly && !$this->hasQuotedOutcome($evaluated)) continue;
+                    $candidates[] = $evaluated;
+                }
             }
             $out[] = $candidates;
         }

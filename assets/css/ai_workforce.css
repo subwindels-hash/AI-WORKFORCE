@@ -1352,6 +1352,76 @@ pre.raw {
   .dm-send { flex-direction: column; align-items: stretch; }
 }
 
+/* ---------- Sports intelligence: one moving feed + pinned context ---------- */
+.sports-console { display: flex; flex-direction: column; gap: var(--space-4); }
+.sports-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: var(--space-5);
+  padding: 22px 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: radial-gradient(650px 220px at 0 0, #8b5cf61c, transparent 72%), var(--panel);
+}
+.sports-eyebrow { margin: 0 0 4px; color: var(--violet); font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.sports-hero h2 { margin: 0; font-size: 24px; }
+.sports-hero__copy { max-width: 76ch; margin: 6px 0 0; color: var(--muted); }
+.sports-hero__actions, .sports-actionbar, .sports-actionbar__links, .sports-date-form { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sports-hero__actions { justify-content: flex-end; flex: none; }
+.sports-actionbar { justify-content: space-between; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel2); }
+.sports-actionbar__links { justify-content: flex-end; }
+.sports-date-form label { color: var(--muted); font-size: 11px; font-weight: 700; }
+.sports-date-form .sel { width: auto; min-width: 145px; padding: 7px 9px; }
+.sports-context-note, .sports-section-intro { margin: -6px 2px 0; color: var(--dim); font-size: 11px; line-height: 1.55; }
+.sports-section-intro { margin: 0 0 12px; max-width: 92ch; }
+.sports-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 320px); gap: var(--space-4); align-items: start; }
+.sports-main, .sports-side { min-width: 0; }
+.sports-layout .panel > h3 { display: block; padding: 13px 20px; border-bottom: 1px solid var(--line); background: transparent; }
+.sports-layout .panel .body { padding: 16px 20px 20px; }
+.sports-ticket-panel { border-color: #8b5cf64d; box-shadow: inset 0 2px 0 #8b5cf680, 0 1px 2px #00000026; }
+.sports-ticket-table { min-width: 920px; font-size: 11px; }
+.sports-ticket-table th { padding: 8px; font-size: 9px; }
+.sports-ticket-table td { padding: 10px 8px; vertical-align: top; }
+.sports-ticket-table td > b, .sports-ticket-table td > small { display: block; }
+.sports-ticket-table td > small { margin-top: 2px; color: var(--dim); line-height: 1.35; }
+.sports-ticket-match { min-width: 190px; }
+.sports-ticket-metric { min-width: 132px; font-variant-numeric: tabular-nums; }
+.sports-ticket-metric > b { font-size: 13px; }
+.sports-reading-guide dl { display: grid; gap: 10px; margin: 0; }
+.sports-reading-guide dl > div { padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.sports-reading-guide dl > div:last-child { padding-bottom: 0; border-bottom: 0; }
+.sports-reading-guide dt { color: var(--text); font-size: 11px; font-weight: 700; }
+.sports-reading-guide dd { margin: 2px 0 0; color: var(--dim); font-size: 11px; line-height: 1.45; }
+.sports-diagnostics { margin-top: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #0b121e; }
+.sports-diagnostics > summary { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 12px; cursor: pointer; list-style: none; color: var(--brand); font-size: 11px; font-weight: 700; }
+.sports-diagnostics > summary::-webkit-details-marker { display: none; }
+.sports-diagnostics > summary span:first-child { color: var(--text); }
+.sports-diagnostics > summary small { display: block; margin-top: 1px; color: var(--dim); font-weight: 500; }
+.sports-diagnostics[open] > summary { border-bottom: 1px solid var(--line); background: var(--brand-soft); }
+.sports-diagnostics > :not(summary) { margin-left: 12px; margin-right: 12px; }
+.sports-diagnostics > :last-child { margin-bottom: 12px; }
+
+/* Desktop context rails stay in view while the long match/ticket feed moves.
+   A rail taller than the viewport gets its own small internal scrollbar; its
+   sticky range still ends with the parent layout, so it never overlaps the
+   page footer. */
+@media (min-width: 1181px) {
+  .sports-side, .football-side, .football-match-side {
+    position: sticky;
+    top: 76px;
+    max-height: calc(100vh - 92px);
+    max-height: calc(100dvh - 92px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line2) transparent;
+    padding-right: 3px;
+  }
+  .sports-side::-webkit-scrollbar, .football-side::-webkit-scrollbar, .football-match-side::-webkit-scrollbar { width: 5px; }
+  .sports-side::-webkit-scrollbar-thumb, .football-side::-webkit-scrollbar-thumb, .football-match-side::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 999px; }
+}
+
 /* ---------- Football intelligence: organized board and all-odds sheets ---------- */
 .football-console { display: flex; flex-direction: column; gap: var(--space-4); }
 .football-hero {
@@ -1422,15 +1492,33 @@ pre.raw {
 .football-market-card > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 9px 10px; background: var(--panel2); border-bottom: 1px solid var(--line); }
 .football-market-card > header p { margin: 0; color: var(--dim); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .football-market-card > header h5 { margin: 1px 0 0; color: #fff; font-size: 12px; }
+.football-market-card > header small { display: block; margin-top: 2px; color: var(--dim); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 9px; }
 .football-market-card .table-scroll { margin: 0; border-radius: 0; }
 .football-odds-table { min-width: 760px; font-size: 11px !important; }
+.football-odds-table--complete { min-width: 980px; table-layout: fixed; }
+.football-odds-table--complete th:nth-child(1) { width: 18%; }
+.football-odds-table--complete th:nth-child(2) { width: 16%; }
+.football-odds-table--complete th:nth-child(3) { width: 23%; }
+.football-odds-table--complete th:nth-child(4) { width: 18%; }
+.football-odds-table--complete th:nth-child(5) { width: 25%; }
 .football-odds-table th { padding: 7px 8px; font-size: 9px; }
-.football-odds-table td { padding: 8px; }
+.football-odds-table td { padding: 9px 8px; vertical-align: top; }
 .football-quote { min-width: 132px; }
-.football-quote span, .football-quote small { display: block; }
+.football-quote span, .football-quote small, .football-selection-cell small, .football-odds-metric small, .football-odds-metric span, .football-value-cell > b, .football-value-cell > small { display: block; }
+.football-selection-cell b { display: block; color: #fff; }
+.football-selection-cell small, .football-odds-metric small, .football-value-cell > small { margin-top: 2px; color: var(--dim); font-size: 9px; line-height: 1.35; }
+.football-odds-metric > b { color: #fff; font-size: 13px; }
+.football-odds-metric > span { margin-top: 5px; color: var(--muted); font-size: 10px; }
 .football-quote small { color: var(--dim); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 9px; margin-top: 2px; }
+.football-value-cell .badge { margin-bottom: 5px; }
+.football-value-cell > b { margin-top: 2px; font-size: 11px; }
+.football-value-explanation { margin-top: 6px; color: var(--dim); font-size: 9px; }
+.football-value-explanation summary { cursor: pointer; color: var(--brand); font-weight: 700; }
+.football-value-explanation p { margin: 4px 0 0; padding: 6px 7px; border-left: 2px solid var(--line2); color: var(--muted); line-height: 1.4; }
+.football-odds-status { display: flex; align-items: center; gap: 10px; padding: 10px 11px; border: 1px solid #f5a6233d; border-radius: 7px; background: #f5a6230a; }
+.football-odds-status p { margin: 0; color: var(--muted); font-size: 10px; }
 .football-market-card > footer { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 7px 10px; border-top: 1px solid var(--line); color: var(--dim); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 9px; }
-.football-odds-sheet__note { margin: 0; color: var(--dim); font-size: 10px; line-height: 1.45; }
+.football-odds-sheet__note { margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel2); color: var(--dim); font-size: 10px; line-height: 1.45; }
 .football-fixture__footer { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 12px; color: var(--dim); font-size: 10px; background: var(--panel2); }
 .football-fixture__footer b { color: var(--muted); font-weight: 600; }
 .football-fixture__footer a { margin-left: auto; font-weight: 700; }
@@ -1472,11 +1560,17 @@ pre.raw {
 .football-match-odds .football-market-card { margin-top: 10px; }
 
 @media (max-width: 1180px) {
-  .football-layout, .football-match-layout { grid-template-columns: 1fr; }
-  .football-side { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .sports-layout, .football-layout, .football-match-layout { grid-template-columns: 1fr; }
+  .sports-side, .football-side, .football-match-side { position: static; max-height: none; overflow: visible; padding-right: 0; }
+  .sports-side, .football-side, .football-match-side { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
 }
 @media (max-width: 760px) {
-  .football-hero, .football-match-hero { padding: 17px; flex-direction: column; align-items: stretch; }
+  .sports-hero, .football-hero, .football-match-hero { padding: 17px; flex-direction: column; align-items: stretch; }
+  .sports-hero__actions, .football-hero__actions, .football-match-hero__actions { justify-content: flex-start; }
+  .sports-actionbar, .football-actionbar { align-items: flex-start; flex-direction: column; }
+  .sports-actionbar__links { justify-content: flex-start; }
+  .sports-date-form { align-items: flex-start; }
+  .sports-side, .football-match-side { grid-template-columns: 1fr; }
   .football-hero__actions, .football-match-hero__actions { justify-content: flex-start; }
   .football-actionbar { align-items: flex-start; flex-direction: column; }
   .football-stat-grid, .football-stat-grid--compact { grid-template-columns: 1fr 1fr; }

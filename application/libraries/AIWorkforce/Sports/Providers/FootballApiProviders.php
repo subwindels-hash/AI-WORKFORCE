@@ -271,19 +271,31 @@ trait HttpTransport
     protected static function normalizeMarket(string $raw): string
     {
         $r = strtolower(trim($raw));
+        // Specific families must be resolved before broad words such as
+        // "result", "goals" and "both teams". That keeps every market the
+        // provider supplied available to the football all-odds sheet instead
+        // of silently collapsing first-half or combined prices into 1X2/BTTS.
+        if (preg_match('/asian.?handicap|handicap/', $r)) return 'ASIAN_HANDICAP';
+        if (preg_match('/draw.?no.?bet|\bdnb\b/', $r)) return 'DRAW_NO_BET';
+        if (preg_match('/double.?chance/', $r)) return 'DOUBLE_CHANCE';
+        if (preg_match('/correct.?score|exact.?score/', $r)) return 'CORRECT_SCORE';
+        if (preg_match('/half.?time.?result.*full.?time|half.?time.*full.?time|\bht.?ft\b/', $r)) return 'HALF_TIME_FULL_TIME';
+        if (preg_match('/first.?half|1st.?half|half.?time/', $r) && preg_match('/over|under|goal/', $r)) return 'HALF_TIME_GOALS';
+        if (preg_match('/first.?half|1st.?half|half.?time/', $r) && preg_match('/result|winner|1x2/', $r)) return 'FIRST_HALF_WINNER';
+        if (preg_match('/both.?teams.*over|btts.*over|goal.*goal.*over/', $r)) return 'BTTS_AND_OVER_2_5';
+        if (preg_match('/both.?teams|btts|goal.*goal/', $r)) return 'BTTS';
+        if (preg_match('/corners?/', $r)) return 'CORNERS';
+        if (preg_match('/cards?|booking|booked/', $r)) return 'CARDS';
+        // Team totals are not match totals. Preserve them as separate provider
+        // families so an all-odds sheet can show them without attaching a home
+        // price to the model's combined-goals probability.
+        if (preg_match('/home.?team.*(?:total.?goals|goals.?over|goals.?total)/', $r)) return 'HOME_TEAM_TOTAL_GOALS';
+        if (preg_match('/away.?team.*(?:total.?goals|goals.?over|goals.?total)/', $r)) return 'AWAY_TEAM_TOTAL_GOALS';
         // Total Goals / Over-Under
         if (preg_match('/over.?under|total.?goals|goals.?over|goals.?total/', $r)) return 'TOTAL_GOALS';
         // Match Result / 1X2 / Match Winner
-        if (preg_match('/match.?result|match.?winner|1x2|full.?time.?result|result/', $r)) return 'MATCH_RESULT';
-        // Both Teams to Score
-        if (preg_match('/both.?teams|btts|goal.*goal/', $r)) return 'BTTS';
-        // Double Chance
-        if (preg_match('/double.?chance/', $r)) return 'DOUBLE_CHANCE';
-        // Correct Score
-        if (preg_match('/correct.?score|exact.?score/', $r)) return 'CORRECT_SCORE';
-        // Half Time / HT
-        if (preg_match('/half.?time|ht/', $r) && preg_match('/over|under|goal/', $r)) return 'HALF_TIME_GOALS';
-        // Return as-is but uppercased
+        if (preg_match('/match.?result|match.?winner|1x2|full.?time.?result|\bresult\b/', $r)) return 'MATCH_RESULT';
+        // Preserve any other provider market under an explicit canonical key.
         return strtoupper(preg_replace('/[^A-Za-z0-9_]/', '_', $raw));
     }
 
@@ -314,20 +326,32 @@ trait HttpTransport
                 return 'UNDER_' . str_replace('.', '_', $line);
             }
         }
-        if ($market === 'MATCH_RESULT') {
-            if (preg_match('/home|1$/', $r)) return 'HOME';
-            if (preg_match('/draw|x$/', $r)) return 'DRAW';
-            if (preg_match('/away|2$/', $r)) return 'AWAY';
+        if (in_array($market, ['MATCH_RESULT', 'DRAW_NO_BET', 'FIRST_HALF_WINNER'], true)) {
+            if (preg_match('/home|(^|\s)1(\s|$)/', $r)) return 'HOME';
+            if (preg_match('/draw|(^|\s)x(\s|$)/', $r)) return 'DRAW';
+            if (preg_match('/away|(^|\s)2(\s|$)/', $r)) return 'AWAY';
         }
-        if ($market === 'BTTS') {
-            if (preg_match('/yes|1/', $r)) return 'YES';
-            if (preg_match('/no|0/', $r)) return 'NO';
+        if (in_array($market, ['BTTS', 'BTTS_AND_OVER_2_5'], true)) {
+            if (preg_match('/yes|(^|\s)1(\s|$)/', $r)) return 'YES';
+            if (preg_match('/no|(^|\s)0(\s|$)/', $r)) return 'NO';
         }
         if ($market === 'DOUBLE_CHANCE') {
             $compact = str_replace([' ', '-', '_', '/'], '', strtoupper($raw));
             if (in_array($compact, ['1X', 'HOMEDRAW', 'HOMEORDRAW'], true)) return 'HOME_OR_DRAW';
             if (in_array($compact, ['X2', 'DRAWAWAY', 'DRAWORAWAY', 'AWAYORDRAW'], true)) return 'AWAY_OR_DRAW';
             if (in_array($compact, ['12', 'HOMEAWAY', 'HOMEORAWAY'], true)) return 'HOME_OR_AWAY';
+        }
+        if ($market === 'CORRECT_SCORE' && preg_match('/(\d+)\D+(\d+)/', $r, $m)) {
+            return 'SCORE_' . (int) $m[1] . '_' . (int) $m[2];
+        }
+        if ($market === 'ASIAN_HANDICAP') {
+            $side = preg_match('/home|(^|\s)1(\s|$)/', $r) ? 'HOME'
+                : (preg_match('/away|(^|\s)2(\s|$)/', $r) ? 'AWAY' : null);
+            if ($side !== null && preg_match('/([+-])\s*(\d+(?:[.,]\d+)?)/', $r, $m)) {
+                $direction = $m[1] === '-' ? 'MINUS' : 'PLUS';
+                $line = rtrim(rtrim(number_format((float) str_replace(',', '.', $m[2]), 2, '.', ''), '0'), '.');
+                return $side . '_' . $direction . '_' . str_replace('.', '_', $line);
+            }
         }
         return strtoupper(preg_replace('/[^A-Za-z0-9_.]/', '_', $raw));
     }

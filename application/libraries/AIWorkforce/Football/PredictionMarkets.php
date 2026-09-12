@@ -146,6 +146,84 @@ final class PredictionMarkets
     }
 
     /**
+     * Provider-supplied markets that are not represented by a catalogue slot.
+     *
+     * The fixed catalogue remains the stable model contract, but an odds feed
+     * can legitimately quote another totals/first-half/handicap line or an
+     * entirely provider-only family. Those real prices belong on an all-odds
+     * sheet too. Returned entries have the same shape as catalogue entries, so
+     * callers can evaluate them in the existing batched pass without creating
+     * odds or probabilities the provider/model did not supply.
+     *
+     * @param list<array{market:string,selection:string}> $odds
+     * @return list<array<string,mixed>>
+     */
+    public function additionalProviderMarkets(array $odds): array
+    {
+        $signature = static fn(string $family, ?float $line): string => $family . '|'
+            . ($line === null ? 'NONE' : rtrim(rtrim(number_format($line, 4, '.', ''), '0'), '.'));
+        $represented = [];
+        foreach ($this->catalog() as $market) {
+            $family = self::priceFamily((string) $market['key']);
+            $line = self::familyCarriesLine($family) && is_numeric($market['line'] ?? null)
+                ? (float) $market['line'] : null;
+            $represented[$signature($family, $line)] = true;
+        }
+
+        $groups = [];
+        foreach ($odds as $row) {
+            $rawMarket = trim((string) ($row['market'] ?? ''));
+            if ($rawMarket === '') continue;
+            $normalized = self::normalizeProviderMarket($rawMarket);
+            $family = in_array($normalized, ['TOTAL_GOALS', 'OVER_UNDER'], true) ? 'OVER_UNDER'
+                : ($normalized === 'HALF_TIME_GOALS' ? 'FIRST_HALF_OVER_UNDER' : self::priceFamily($normalized));
+            $line = null;
+            if (self::familyCarriesLine($family)) {
+                $selection = self::normalizeProviderSelection($rawMarket, (string) ($row['selection'] ?? ''));
+                $line = self::lineOf((string) ($row['selection'] ?? ''));
+                // Store Asian lines from the home perspective: Away +0.75 is
+                // the companion leg of Home -0.75.
+                if ($family === 'ASIAN_HANDICAP' && $selection === 'AWAY' && $line !== null) $line *= -1;
+                if ($line === null) continue;
+            }
+            $sig = $signature($family, $line);
+            if (isset($represented[$sig])) continue;
+            $groups[$sig] = ['family' => $family, 'line' => $line, 'rawMarket' => $rawMarket];
+        }
+
+        $out = [];
+        foreach ($groups as $group) {
+            $family = (string) $group['family'];
+            $line = is_numeric($group['line'] ?? null) ? (float) $group['line'] : null;
+            $lineLabel = $line === null ? '' : self::lineLabel($line);
+            if ($family === 'OVER_UNDER') {
+                $out[] = ['key' => 'OVER_' . str_replace(['-', '.'], ['MINUS_', '_'], $lineLabel),
+                    'label' => 'Total Goals — ' . $lineLabel, 'group' => 'Goals', 'derivation' => 'SCORE_GRID',
+                    'line' => $line, 'assumed' => false, 'selections' => ['Over', 'Under']];
+                continue;
+            }
+            if ($family === 'FIRST_HALF_OVER_UNDER') {
+                $out[] = ['key' => 'FIRST_HALF_OVER_UNDER', 'label' => 'First Half Goals — ' . $lineLabel,
+                    'group' => 'First half', 'derivation' => 'SCORE_GRID', 'line' => $line,
+                    'assumed' => true, 'selections' => ['Over', 'Under']];
+                continue;
+            }
+            if ($family === 'ASIAN_HANDICAP') {
+                $out[] = ['key' => 'ASIAN_HANDICAP', 'label' => 'Asian Handicap — Home ' . ($line > 0 ? '+' : '') . $lineLabel,
+                    'group' => 'Handicap', 'derivation' => 'SCORE_GRID', 'line' => $line,
+                    'assumed' => false, 'selections' => ['Home', 'Away']];
+                continue;
+            }
+            $key = self::normalizeProviderMarket((string) $group['rawMarket']);
+            if ($key === '') continue;
+            $out[] = ['key' => $key, 'label' => ucwords(strtolower(str_replace('_', ' ', $key))),
+                'group' => 'Additional provider markets', 'derivation' => 'NOT_MODELLED', 'line' => null,
+                'assumed' => false, 'selections' => []];
+        }
+        return $out;
+    }
+
+    /**
      * Every price the odds feed quoted for the *market* a catalogue key belongs
      * to, not only for the selection being shown.
      *
@@ -174,8 +252,10 @@ final class PredictionMarkets
             // draw price on Draw No Bet, or a scoreline on Correct Score, is
             // counted as ignored rather than folded into an overround.
             if ($expected !== [] && !in_array($selection, $expected, true)) { $ignored++; continue; }
-            $quotedLine = self::lineOf((string) ($row['selection'] ?? ''));
-            if ($lineChecked && ($quotedLine === null || abs($quotedLine - (float) $line) > 1e-9)) { $ignored++; continue; }
+            if ($lineChecked && !self::lineMatches($marketKey, $selection, (string) ($row['selection'] ?? ''), (float) $line)) {
+                $ignored++;
+                continue;
+            }
             $price = is_numeric($row['decimalOdds'] ?? null) ? (float) $row['decimalOdds'] : null;
             // A leg is only evidence when its price is quotable: sub-stake,
             // non-finite and absurd (above the market's plausibility ceiling)
@@ -224,8 +304,8 @@ final class PredictionMarkets
      */
     private static function priceFamily(string $key): string
     {
+        if (str_starts_with($key, 'OVER_') || str_starts_with($key, 'UNDER_')) return 'OVER_UNDER';
         return match ($key) {
-            'OVER_0_5', 'OVER_1_5', 'OVER_2_5', 'OVER_3_5', 'UNDER_1_5', 'UNDER_2_5', 'UNDER_3_5' => 'OVER_UNDER',
             'FIRST_HALF_OVER_UNDER' => 'FIRST_HALF_OVER_UNDER',
             'FIRST_HALF_WINNER' => 'FIRST_HALF_WINNER',
             default => $key,
@@ -289,6 +369,10 @@ final class PredictionMarkets
             return ['level' => self::RISK_HIGH,
                 'factors' => ['The market could not be evaluated from stored data, so no selection is being offered.']];
         }
+        if ($source === self::SOURCE_ODDS && $probability === null) {
+            return ['level' => self::RISK_HIGH,
+                'factors' => ['Provider price only — no WINDELS model probability exists for this selection.']];
+        }
         $factors = [];
         $points = 0;
         if (in_array($band, self::WEAK_BANDS, true)) { $points += 3; $factors[] = 'data quality band ' . $band; }
@@ -325,18 +409,24 @@ final class PredictionMarkets
         $line = $line ?? (isset($market['line']) ? (float) $market['line'] : null);
         [$resolvedGrid, $gridBasis, $coverage] = $this->gridFor($prediction, $grid);
         $rows = $this->outcomes($prediction, $resolvedGrid, $key, $line);
-        // Corners, cards and half-time/full-time are not inputs to the score
-        // model. They are still useful to show when a provider actually priced
-        // them, but they must be clearly marked as a *provider-price-only*
-        // market instead of borrowing a made-up WINDELS probability. Keeping
-        // their quoted selections here is what lets the match page be a true
-        // all-odds sheet rather than quietly dropping these markets.
-        if ($rows === [] && (string) ($market['derivation'] ?? '') === 'NOT_MODELLED') {
+        if ($key === 'CORRECT_SCORE') {
+            $rows = $this->includeQuotedScores($rows, $resolvedGrid, $odds);
+        }
+        // Corners, cards, unknown provider families, and even familiar model
+        // markets on an as-yet unanalyzed fixture still belong on an all-odds
+        // sheet when real quotes exist. Keep those selections with null model
+        // probability rather than hiding the price or inventing an estimate.
+        $providerOnlyFallback = false;
+        if ($rows === []) {
             $rows = $this->providerOnlyOutcomes($odds, $key, $line);
+            $providerOnlyFallback = $rows !== [];
+        } elseif (!array_reduce($rows, static fn(bool $has, array $row): bool => $has || is_numeric($row['probability'] ?? null), false)) {
+            $providerOnlyFallback = true;
         }
         $state = $rows === [] ? self::STATE_UNAVAILABLE : self::STATE_AVAILABLE;
-        $basis = $rows === [] ? null : $this->basis($key, (string) $market['derivation'], $gridBasis);
-        $source = $market['derivation'] === 'NOT_MODELLED' ? self::SOURCE_ODDS
+        $basis = $rows === [] ? null : ($providerOnlyFallback ? 'PROVIDER_QUOTES_ONLY'
+            : $this->basis($key, (string) $market['derivation'], $gridBasis));
+        $source = $providerOnlyFallback || $market['derivation'] === 'NOT_MODELLED' ? self::SOURCE_ODDS
             : ((bool) ($market['assumed'] ?? false) ? self::SOURCE_ASSUMED : self::SOURCE_GRID);
 
         // Odds are attached per selection from the rows the provider actually
@@ -375,11 +465,23 @@ final class PredictionMarkets
                 ? round((float) $row['oddsHigh'] - (float) $row['oddsLow'], 4) : null;
             $value = $this->fairValue()->assess($sheet, (string) $row['selection'], $modelProbability);
             $row['windelsFairOdds'] = $value['windelsFairOdds'];
+            // Keep the complete price comparison on every outcome. The board
+            // and the dedicated match page can now explain a quote without
+            // re-running arithmetic in a template: bookmaker fair probability
+            // and odds (after margin removal), break-even probability, both
+            // edge readings, expected return and the reason for the verdict.
             $row['fairOdds'] = $value['fairOdds'];
             $row['fairProbability'] = $value['fairProbability'];
+            $row['breakEvenProbability'] = $value['breakEvenProbability'];
+            $row['edge'] = $value['edge'];
+            $row['edgePoints'] = $value['edgePoints'];
+            $row['edgeAgainstFair'] = $value['edgeAgainstFair'];
+            $row['edgeAgainstFairPoints'] = $value['edgeAgainstFairPoints'];
             $row['expectedValue'] = $value['expectedValue'];
+            $row['marginMethod'] = $value['marginMethod'];
             $row['valueClass'] = $value['valueClass'];
             $row['valueLabel'] = $value['valueLabel'];
+            $row['valueReason'] = $value['valueReason'];
         }
         unset($row);
 
@@ -488,20 +590,21 @@ final class PredictionMarkets
         }
         if ($grid === []) return [];
 
+        // Totals lines are open-ended in provider feeds. The stable catalogue
+        // advertises the common lines, while additionalProviderMarkets() can
+        // pass any other quoted line through the same score-grid arithmetic.
+        if (str_starts_with($key, 'OVER_')) {
+            $over = $this->totals($grid, static fn(int $total): bool => $total > (float) $line);
+            return $this->combine(['OVER' => ['Over ' . self::lineLabel($line) . ' goals', $over],
+                'UNDER' => ['Under ' . self::lineLabel($line) . ' goals', 1 - $over]]);
+        }
+        if (str_starts_with($key, 'UNDER_')) {
+            $under = $this->totals($grid, static fn(int $total): bool => $total < (float) $line);
+            return $this->combine(['UNDER' => ['Under ' . self::lineLabel($line) . ' goals', $under],
+                'OVER' => ['Over ' . self::lineLabel($line) . ' goals', 1 - $under]]);
+        }
+
         switch ($key) {
-            case 'OVER_0_5':
-            case 'OVER_1_5':
-            case 'OVER_2_5':
-            case 'OVER_3_5':
-                $over = $this->totals($grid, static fn(int $total): bool => $total > (float) $line);
-                return $this->combine(['OVER' => ['Over ' . self::lineLabel($line) . ' goals', $over],
-                    'UNDER' => ['Under ' . self::lineLabel($line) . ' goals', 1 - $over]]);
-            case 'UNDER_1_5':
-            case 'UNDER_2_5':
-            case 'UNDER_3_5':
-                $under = $this->totals($grid, static fn(int $total): bool => $total < (float) $line);
-                return $this->combine(['UNDER' => ['Under ' . self::lineLabel($line) . ' goals', $under],
-                    'OVER' => ['Over ' . self::lineLabel($line) . ' goals', 1 - $under]]);
             case 'BTTS':
                 $yes = $this->totals($grid, null, static fn(int $h, int $a): bool => $h > 0 && $a > 0);
                 return $this->combine(['YES' => ['Both teams score', $yes], 'NO' => ['One side fails to score', 1 - $yes]]);
@@ -555,8 +658,8 @@ final class PredictionMarkets
             // line. The current catalogue's price-only markets are not line
             // based, but keeping this check here makes the shape safe if one is
             // added later.
-            $quotedLine = self::lineOf($rawSelection);
-            if ($line !== null && $quotedLine !== null && abs($quotedLine - $line) > 1e-9) continue;
+            if ($line !== null && self::familyCarriesLine(self::priceFamily($marketKey))
+                && !self::lineMatches($marketKey, $selection, $rawSelection, $line)) continue;
             $observed = (string) ($row['observedAt'] ?? '');
             $existing = $out[$selection] ?? null;
             if ($existing === null || $observed >= (string) ($existing['_observedAt'] ?? '')) {
@@ -616,6 +719,44 @@ final class PredictionMarkets
                 'probability' => round((float) $row['probability'], 6), 'note' => null];
         }
         return $out;
+    }
+
+    /**
+     * Correct-score feeds often quote more scorelines than the six model leaders
+     * used for a compact recommendation. Keep every quoted scoreline on the odds
+     * sheet and attach its score-grid probability when that cell is available.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @param list<array{home:int,away:int,probability:float}> $grid
+     * @param list<array<string,mixed>> $odds
+     * @return list<array<string,mixed>>
+     */
+    private function includeQuotedScores(array $rows, array $grid, array $odds): array
+    {
+        $seen = [];
+        foreach ($rows as $row) $seen[(string) ($row['selection'] ?? '')] = true;
+        $probabilities = [];
+        foreach ($grid as $cell) {
+            $probabilities[(int) $cell['home'] . '-' . (int) $cell['away']] = round((float) $cell['probability'], 6);
+        }
+        foreach ($odds as $quote) {
+            if (!self::providerMarketMatches(self::normalizeProviderMarket((string) ($quote['market'] ?? '')), 'CORRECT_SCORE')) continue;
+            $rawSelection = trim((string) ($quote['selection'] ?? ''));
+            $selection = self::normalizeProviderSelection((string) ($quote['market'] ?? ''), $rawSelection);
+            if ($selection === '' || isset($seen[$selection])) continue;
+            if (preg_match('/^(\d+)-(\d+)$/', $selection, $m)) {
+                $label = (int) $m[1] . '–' . (int) $m[2];
+                $probability = $probabilities[$selection] ?? null;
+                $note = isset($probabilities[$selection]) ? null : 'Provider quoted this scoreline beyond the stored model grid.';
+            } else {
+                $label = $rawSelection !== '' ? $rawSelection : $selection;
+                $probability = null;
+                $note = 'Provider-quoted correct-score category without a corresponding score-grid cell.';
+            }
+            $rows[] = ['selection' => $selection, 'label' => $label, 'probability' => $probability, 'note' => $note];
+            $seen[$selection] = true;
+        }
+        return $rows;
     }
 
     /**
@@ -750,9 +891,9 @@ final class PredictionMarkets
             if ($normalizedSelection !== $selection) continue;
             // A totals market is only the right quote when the line agrees: an
             // "Over 3.5" price is not the price of "Over 2.5".
-            $quotedLine = self::lineOf((string) ($row['selection'] ?? ''));
-            if (str_starts_with($marketKey, 'OVER_') || str_starts_with($marketKey, 'UNDER_')) {
-                if ($quotedLine === null || abs($quotedLine - (float) $line) > 1e-9) continue;
+            if (self::familyCarriesLine(self::priceFamily($marketKey))
+                && !self::lineMatches($marketKey, $normalizedSelection, (string) ($row['selection'] ?? ''), (float) $line)) {
+                continue;
             }
             $price = is_numeric($row['decimalOdds'] ?? null) ? (float) $row['decimalOdds'] : null;
             // Same bar as the price sheet: a sub-stake, non-finite or absurd
@@ -797,10 +938,12 @@ final class PredictionMarkets
         if (preg_match('/btts.?and|both.?teams.*over|goal.*goal.*over/', $r)) return 'BTTS_AND_OVER_2_5';
         if (preg_match('/both.?teams|btts|goal.*goal/', $r)) return 'BTTS';
         if (preg_match('/correct.?score|exact.?score/', $r)) return 'CORRECT_SCORE';
-        if (preg_match('/half.?time.?result|ht.?ft|half.?time.*full.?time/', $r)) return 'HALF_TIME_FULL_TIME';
-        if (preg_match('/over.?under|total.?goals|goals.?over|goals.?total/', $r)) return 'OVER_UNDER';
-        if (preg_match('/first.?half|1st.?half/', $r) && preg_match('/result|winner|1x2/', $r)) return 'FIRST_HALF_WINNER';
+        if (preg_match('/half.?time.?result.*full.?time|half.?time.*full.?time|ht.?ft/', $r)) return 'HALF_TIME_FULL_TIME';
         if (preg_match('/first.?half|1st.?half|half.?time/', $r) && preg_match('/over|under|goal/', $r)) return 'FIRST_HALF_OVER_UNDER';
+        if (preg_match('/first.?half|1st.?half/', $r) && preg_match('/result|winner|1x2/', $r)) return 'FIRST_HALF_WINNER';
+        if (preg_match('/home.?team.*(?:total.?goals|goals.?over|goals.?total)/', $r)) return 'HOME_TEAM_TOTAL_GOALS';
+        if (preg_match('/away.?team.*(?:total.?goals|goals.?over|goals.?total)/', $r)) return 'AWAY_TEAM_TOTAL_GOALS';
+        if (preg_match('/over.?under|total.?goals|goals.?over|goals.?total/', $r)) return 'OVER_UNDER';
         if (preg_match('/corners?/', $r)) return 'CORNERS';
         if (preg_match('/cards?|booking|booked/', $r)) return 'CARDS';
         if (preg_match('/match.?result|match.?winner|1x2|full.?time.?result|result/', $r)) return 'MATCH_WINNER';
@@ -835,11 +978,44 @@ final class PredictionMarkets
         return strtoupper(preg_replace('/[^A-Za-z0-9_.-]/', '_', $raw));
     }
 
-    /** The goal/handicap line named inside a provider's selection string. */
+    /**
+     * The goal/handicap line named inside a provider's selection string.
+     *
+     * Provider adapters persist canonical codes such as OVER_2_5 and
+     * HOME_MINUS_0_75, while direct odds imports often retain "Over 2.5" or
+     * "Home -0.75". Both forms must resolve to the same signed number or a real
+     * quote can be attached to the wrong line.
+     */
     private static function lineOf(string $raw): ?float
     {
-        if (preg_match('/(\d+(?:[.,]\d+)?)/', $raw, $m)) return (float) str_replace(',', '.', $m[1]);
+        $upper = strtoupper(trim($raw));
+        if (preg_match('/(?:^|[^A-Z0-9])(MINUS|PLUS)[ _]?(\d+)(?:[_. ,](\d+))?(?:$|[^0-9])/', $upper, $m)) {
+            $number = (float) ($m[2] . (isset($m[3]) && $m[3] !== '' ? '.' . $m[3] : ''));
+            return $m[1] === 'MINUS' ? -$number : $number;
+        }
+        if (preg_match('/([+-])\s*(\d+)(?:[.,](\d+))?/', $raw, $m)) {
+            $number = (float) ($m[2] . (isset($m[3]) && $m[3] !== '' ? '.' . $m[3] : ''));
+            return $m[1] === '-' ? -$number : $number;
+        }
+        // In canonical totals codes the underscore between digits is the
+        // decimal separator (OVER_2_5), not a separator between two values.
+        if (preg_match('/(?:^|[^0-9])(\d+)(?:[.,_](\d+))?(?:$|[^0-9])/', $raw, $m)) {
+            return (float) ($m[1] . (isset($m[2]) && $m[2] !== '' ? '.' . $m[2] : ''));
+        }
         return null;
+    }
+
+    /**
+     * Compare one quoted line with the catalogue's home-side line. Asian
+     * handicap feeds state the opposite sign on the away leg: Home -0.5 and
+     * Away +0.5 are the same two-way market, not different lines.
+     */
+    private static function lineMatches(string $marketKey, string $selection, string $rawSelection, float $line): bool
+    {
+        $quoted = self::lineOf($rawSelection);
+        if ($quoted === null) return false;
+        $expected = $marketKey === 'ASIAN_HANDICAP' && $selection === 'AWAY' ? -$line : $line;
+        return abs($quoted - $expected) <= 1e-9;
     }
 
     /** @return list<string> */

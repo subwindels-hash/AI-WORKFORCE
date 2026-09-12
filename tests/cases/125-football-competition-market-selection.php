@@ -264,6 +264,16 @@ test('football: asian handicap is settled over the grid, including the push', fu
     $expected = ((float) $lower['outcomes'][0]['probability'] + (float) $upper['outcomes'][0]['probability']) / 2;
     assert_equals(round($expected, 6), round((float) $quarter['outcomes'][0]['probability'], 6),
         'a quarter line is the average of the two half lines it splits across');
+
+    $at = gmdate('c');
+    $priced = $module->markets()->evaluate($row, $grid, [
+        ['market' => 'ASIAN_HANDICAP', 'selection' => 'HOME_MINUS_0_5', 'decimalOdds' => 1.91, 'observedAt' => $at, 'provider' => 'fixture-feed'],
+        ['market' => 'ASIAN_HANDICAP', 'selection' => 'AWAY_PLUS_0_5', 'decimalOdds' => 1.97, 'observedAt' => $at, 'provider' => 'fixture-feed'],
+    ], $module->markets()->market('ASIAN_HANDICAP'), -0.5);
+    $prices = array_column((array) $priced['outcomes'], 'odds', 'selection');
+    assert_equals(1.91, (float) ($prices['HOME'] ?? 0), 'canonical home-minus quote attaches to the signed home line');
+    assert_equals(1.97, (float) ($prices['AWAY'] ?? 0), 'the opposite away-plus quote is recognized as the other leg of that market');
+    assert_equals('COMPLETE', (string) ($priced['pricing']['state'] ?? ''), 'both signed legs form one complete Asian-handicap market');
 });
 
 test('football: a market with no stored input and no price reports DATA_UNAVAILABLE', function () {
@@ -335,6 +345,28 @@ test('football: a quoted price is shown, an unquoted one is not — and the edge
     // The recommended selection is the likelier side, whether or not it is priced.
     assert_true((float) ($bttsMarket['probability'] ?? 0) >= (float) ($yes['probability'] ?? 0),
         'the recommendation is the higher-probability selection, not the shorter price');
+});
+
+test('football: real odds remain visible before a model prediction exists', function () {
+    [$repo, $module, $day] = fx_fb_two_leagues(1, 0);
+    $page = $module->feed()->page($day, 1, 50, false, ['competition' => '39']);
+    $matchId = (string) ($page['matches'][0]['matchId'] ?? '');
+    assert_true($matchId !== '', 'the unanalyzed fixture has a stable match identity');
+    $at = gmdate('c');
+    $repo->marketOdds = [
+        ['matchId' => $matchId, 'market' => 'Match Winner', 'selection' => 'Home', 'decimalOdds' => 2.10, 'observedAt' => $at, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Team to Score First', 'selection' => 'Away', 'decimalOdds' => 2.40, 'observedAt' => $at, 'provider' => 'fixture-feed'],
+    ];
+
+    $board = $module->board()->forDate($day, false, 1, 50, ['competition' => '39']);
+    assert_equals('NOT_ANALYZED', (string) ($board['rows'][0]['predictionStatus'] ?? ''), 'no model result was generated as a side effect');
+    $markets = array_column((array) ($board['rows'][0]['marketCandidates'] ?? []), null, 'key');
+    assert_true(isset($markets['MATCH_WINNER'], $markets['TEAM_TO_SCORE_FIRST']), 'every quoted provider family remains available');
+    $home = (array) ($markets['MATCH_WINNER']['outcomes'][0] ?? []);
+    assert_equals(2.10, (float) ($home['odds'] ?? 0), 'the real bookmaker price is retained');
+    assert_null($home['probability'] ?? null, 'no WINDELS probability is invented before analysis');
+    assert_equals(PredictionMarkets::SOURCE_ODDS, (string) ($markets['MATCH_WINNER']['source'] ?? ''), 'the quote is labelled provider-only');
+    assert_equals(PredictionMarkets::RISK_HIGH, (string) ($markets['MATCH_WINNER']['riskLevel'] ?? ''), 'price-only evidence never receives a misleading low-risk label');
 });
 
 test('football: changing the market never regenerates a match', function () {
@@ -514,6 +546,11 @@ test('football: a match detail exposes every priced market and every priced sele
         ['matchId' => $matchId, 'market' => 'Match Winner', 'selection' => 'Away', 'decimalOdds' => 4.75, 'observedAt' => $now, 'provider' => 'fixture-feed'],
         ['matchId' => $matchId, 'market' => 'Total Goals', 'selection' => 'Over 2.5', 'decimalOdds' => 1.91, 'observedAt' => $now, 'provider' => 'fixture-feed'],
         ['matchId' => $matchId, 'market' => 'Total Goals', 'selection' => 'Under 2.5', 'decimalOdds' => 1.97, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Total Goals', 'selection' => 'Over 4.5', 'decimalOdds' => 3.75, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Total Goals', 'selection' => 'Under 4.5', 'decimalOdds' => 1.28, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Team to Score First', 'selection' => 'Home', 'decimalOdds' => 1.66, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Team to Score First', 'selection' => 'Away', 'decimalOdds' => 2.25, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Correct Score', 'selection' => '6:6', 'decimalOdds' => 99.0, 'observedAt' => $now, 'provider' => 'fixture-feed'],
         ['matchId' => $matchId, 'market' => 'Corners', 'selection' => 'Home', 'decimalOdds' => 1.72, 'observedAt' => $now, 'provider' => 'fixture-feed'],
         ['matchId' => $matchId, 'market' => 'Corners', 'selection' => 'Away', 'decimalOdds' => 2.08, 'observedAt' => $now, 'provider' => 'fixture-feed'],
         ['matchId' => $matchId, 'market' => 'Cards', 'selection' => 'Over 4.5', 'decimalOdds' => 1.88, 'observedAt' => $now, 'provider' => 'fixture-feed'],
@@ -525,16 +562,30 @@ test('football: a match detail exposes every priced market and every priced sele
 
     // The dedicated match response includes the full catalogue, not the old
     // four-market preview. Modelled but unpriced markets remain explicit.
-    assert_equals(count((new PredictionMarkets(new FootballConfiguration([])))->catalog()), count($markets),
-        'the match response carries the full odds catalogue');
-    foreach (['MATCH_WINNER', 'OVER_2_5', 'CORNERS', 'CARDS'] as $key) {
+    $catalogueCount = count((new PredictionMarkets(new FootballConfiguration([])))->catalog());
+    assert_equals($catalogueCount + 2, count($markets),
+        'the match response carries the full catalogue plus every additional provider family and line');
+    foreach (['MATCH_WINNER', 'OVER_2_5', 'OVER_4_5', 'TEAM_TO_SCORE_FIRST', 'CORNERS', 'CARDS'] as $key) {
         assert_true(isset($markets[$key]), 'priced market ' . $key . ' is visible on the sheet');
     }
+    assert_equals(3.75, (float) ($markets['OVER_4_5']['outcomes'][0]['odds'] ?? 0),
+        'a provider totals line outside the fixed catalogue retains its real price');
+    assert_equals(PredictionMarkets::SOURCE_ODDS, (string) $markets['TEAM_TO_SCORE_FIRST']['source'],
+        'an additional provider family is visible without an invented model estimate');
+    $scores = array_column((array) $markets['CORRECT_SCORE']['outcomes'], null, 'selection');
+    assert_equals(99.0, (float) ($scores['6-6']['odds'] ?? 0),
+        'every quoted correct score is retained even when it is outside the six model leaders');
 
     $winner = (array) $markets['MATCH_WINNER'];
     assert_equals(3, count((array) $winner['outcomes']), 'all three 1X2 legs are retained');
     assert_true(array_reduce((array) $winner['outcomes'], static fn(bool $carry, array $outcome): bool => $carry && is_numeric($outcome['odds'] ?? null), true),
         'each 1X2 outcome retains the provider odds');
+    foreach ((array) $winner['outcomes'] as $outcome) {
+        foreach (['windelsFairOdds', 'fairOdds', 'fairProbability', 'breakEvenProbability', 'edgePoints',
+            'edgeAgainstFairPoints', 'expectedValue', 'valueClass', 'valueLabel', 'valueReason'] as $field) {
+            assert_true(array_key_exists($field, $outcome), 'complete odds information includes ' . $field);
+        }
+    }
 
     $corners = (array) $markets['CORNERS'];
     assert_equals(PredictionMarkets::SOURCE_ODDS, (string) $corners['source'], 'corners are correctly labelled provider-price-only');
@@ -551,6 +602,12 @@ test('football: a match detail exposes every priced market and every priced sele
 
     $board = $module->board()->forDate($day);
     $candidateKeys = array_column((array) ($board['rows'][0]['marketCandidates'] ?? []), 'key');
+    assert_equals($catalogueCount + 2, count($candidateKeys),
+        'the board carries the complete catalogue plus each additional provider family and line');
+    assert_true(in_array('OVER_4_5', $candidateKeys, true) && in_array('TEAM_TO_SCORE_FIRST', $candidateKeys, true),
+        'real provider markets outside the fixed catalogue are never silently dropped');
     assert_true(in_array('CORNERS', $candidateKeys, true) && in_array('CARDS', $candidateKeys, true),
-        'the compact board now links through to all additional priced markets');
+        'the board now carries every additional priced market');
+    assert_true(in_array('HALF_TIME_FULL_TIME', $candidateKeys, true),
+        'an unpriced market stays visible rather than being silently omitted');
 });
