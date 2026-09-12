@@ -1605,7 +1605,8 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
             $price = is_numeric($row['decimalOdds'] ?? null) ? (float) $row['decimalOdds'] : null;
             if ($price === null || $price <= 0) continue;
             $out[$key][] = ['market' => (string) ($row['market'] ?? ''), 'selection' => (string) ($row['selection'] ?? ''),
-                'decimalOdds' => $price, 'observedAt' => $row['observedAt'] ?? null];
+                'decimalOdds' => $price, 'observedAt' => $row['observedAt'] ?? null,
+                'provider' => $row['provider'] ?? $row['oddsSource'] ?? null];
         }
         // Newest first, as the database read returns them.
         foreach ($out as &$rows) {

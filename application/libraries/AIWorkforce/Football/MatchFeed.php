@@ -584,11 +584,26 @@ final class MatchFeed
     }
 
     /**
-     * Markets that should be evaluated as multiple candidates per fixture
-     * when provider odds exist. These are the core markets the ticket engine
-     * and the board must surface together, not one at a time.
+     * The full prediction-market catalogue surfaced per fixture when a provider
+     * quoted at least one valid price. The previous four-market shortcut hid
+     * priced goal lines, correct score, first-half, handicap, corner and card
+     * markets from a match even though the odds feed had supplied them. A match
+     * now carries every available market; the detailed outcome sheet keeps all
+     * individual selections, prices, timestamps and model comparisons together.
+     *
+     * The list intentionally mirrors `PredictionMarkets::catalog()` rather than
+     * creating odds: an entry is still rendered only when a verified provider
+     * price exists (or, on a single match page, as an explicitly unpriced model
+     * estimate). Provider-price-only markets remain labelled as such.
      */
-    public const MULTI_MARKET_CANDIDATES = ['MATCH_WINNER', 'OVER_1_5', 'BTTS', 'DOUBLE_CHANCE'];
+    public const MULTI_MARKET_CANDIDATES = [
+        'MATCH_WINNER', 'DOUBLE_CHANCE', 'DRAW_NO_BET',
+        'OVER_0_5', 'OVER_1_5', 'OVER_2_5', 'OVER_3_5',
+        'UNDER_1_5', 'UNDER_2_5', 'UNDER_3_5',
+        'BTTS', 'BTTS_AND_OVER_2_5',
+        'FIRST_HALF_WINNER', 'FIRST_HALF_OVER_UNDER', 'HALF_TIME_FULL_TIME',
+        'CORRECT_SCORE', 'ASIAN_HANDICAP', 'CORNERS', 'CARDS',
+    ];
 
     /**
      * Evaluate the selected market for a whole set of entries in two batched
@@ -632,15 +647,16 @@ final class MatchFeed
     }
 
     /**
-     * Evaluate MULTIPLE markets per fixture where verified provider odds exist.
-     * Returns per-fixture candidates: each candidate is a market evaluation
-     * that came from real provider odds (never invented), with full transparency.
+     * Evaluate multiple markets per fixture in the common score-grid / stored
+     * odds pass. Board rows use `$pricedOnly=true` to stay compact; a match
+     * detail page passes false and receives the whole catalogue, including
+     * explicit UNPRICED / DATA_UNAVAILABLE states for modelled markets.
      *
      * @param list<array{prediction:array<string,mixed>|null,matchId:string}> $entries
-     * @param list<string>|null $marketKeys which markets to evaluate (default: MULTI_MARKET_CANDIDATES)
-     * @return list<list<array<string,mixed>>> per-fixture list of market evaluations (only those with provider odds)
+     * @param list<string>|null $marketKeys which markets to evaluate (default: full catalogue)
+     * @return list<list<array<string,mixed>>> per-fixture market evaluations
      */
-    public function attachMultipleMarkets(array $entries, ?array $marketKeys = null): array
+    public function attachMultipleMarkets(array $entries, ?array $marketKeys = null, bool $pricedOnly = true): array
     {
         $marketKeys = $marketKeys ?? self::MULTI_MARKET_CANDIDATES;
         $ids = [];
@@ -668,7 +684,10 @@ final class MatchFeed
                 $catalogEntry = $this->markets->market($key);
                 if ($catalogEntry === null) continue;
 
-                // Only evaluate markets where verified provider odds exist
+                // The board displays only markets with a provider price. The
+                // per-match odds sheet can opt into the full catalogue so that
+                // an unpriced model estimate is visible as UNPRICED rather than
+                // absent. Either way, no provider price is invented.
                 $hasOdds = false;
                 foreach ($fixtureOdds as $oddsRow) {
                     $normalized = PredictionMarkets::normalizeProviderMarket((string) ($oddsRow['market'] ?? ''));
@@ -677,20 +696,37 @@ final class MatchFeed
                         break;
                     }
                 }
-                if (!$hasOdds) continue;
+                if ($pricedOnly && !$hasOdds) continue;
 
                 $evaluated = $this->markets->evaluate($prediction, $grid, $fixtureOdds, $catalogEntry, $catalogEntry['line'] ?? null);
 
-                // Only keep candidates where odds are from verified provider and market is valid
-                if (($evaluated['state'] ?? '') === DataState::UNAVAILABLE) continue;
-                if (empty($evaluated['odds'])) continue;
-                if (empty($evaluated['key']) || empty($evaluated['selection'])) continue;
+                if (($evaluated['state'] ?? '') === DataState::UNAVAILABLE && $pricedOnly) continue;
+                if (empty($evaluated['key'])) continue;
+                if ($pricedOnly && !$this->hasQuotedOutcome($evaluated)) continue;
 
                 $candidates[] = $evaluated;
             }
             $out[] = $candidates;
         }
         return $out;
+    }
+
+    /**
+     * A market can have a valid quote on a non-favourite outcome (for example a
+     * draw even though the model favours the home side). The old compact-board
+     * check inspected only the model's top outcome and silently hid that priced
+     * market. Inspect every evaluated selection instead.
+     *
+     * @param array<string,mixed> $market
+     */
+    private function hasQuotedOutcome(array $market): bool
+    {
+        foreach ((array) ($market['outcomes'] ?? []) as $outcome) {
+            if (($outcome['oddsState'] ?? '') !== PredictionMarkets::STATE_AVAILABLE) continue;
+            $odds = $outcome['odds'] ?? null;
+            if (is_numeric($odds) && (float) $odds > 1.0 && is_finite((float) $odds)) return true;
+        }
+        return false;
     }
 
     /**

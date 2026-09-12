@@ -501,9 +501,15 @@ final class FootballIntelligence
         }
         $settlement = $preMatch === null ? null : $this->repo->findSettlement((string) ($preMatch['predictionId'] ?? ''));
         $marketNotes = [];
-        $marketBlock = $this->feed()->attachMarkets([['prediction' => $preMatchRow,
-            'matchId' => MatchFeed::matchId($fixture)]],
+        $marketEntry = [['prediction' => $preMatchRow, 'matchId' => MatchFeed::matchId($fixture)]];
+        $marketBlock = $this->feed()->attachMarkets($marketEntry,
             $this->markets()->resolve($this->config->defaultMarket(), $marketNotes)['market'], null)[0] ?? [];
+        // Match detail deliberately receives the full market catalogue. Unlike
+        // the board's compact, priced-only preview, this makes every derivable
+        // market visible and calls out missing provider prices as UNPRICED. It
+        // is still one batched stored-data read — no match is regenerated and
+        // no additional provider request is made.
+        $allMarkets = $this->feed()->attachMultipleMarkets($marketEntry, null, false)[0] ?? [];
         return [
             'status' => $preMatch === null ? 'NO_PREDICTION' : 'OK',
             'fixture' => PredictionService::fixtureSummary($fixture),
@@ -513,10 +519,12 @@ final class FootballIntelligence
             // The intelligence block for this one match, assembled by the same
             // report the board uses — not a second copy of the arithmetic.
             'intelligence' => $this->report()->forMatch($fixture, $preMatchRow, (array) $marketBlock),
-            // The market as the board evaluates it, offered beside the contract so
-            // the match page can print price, fair price and edge without asking
-            // the model again. Null-safe by construction: no odds rows, no block.
+            // The selected market shown in the at-a-glance intelligence block.
             'market' => (array) $marketBlock,
+            // Every market on the dedicated match odds sheet. Modelled but
+            // unpriced markets say so explicitly; provider-price-only markets
+            // never pretend to carry a WINDELS probability.
+            'markets' => array_values((array) $allMarkets),
             'message' => $preMatch === null ? 'No prediction row is stored for this fixture' . ($generate ? ' — it was analyzed and refused (see dataQuality)' : '.') : null,
             'generatedAt' => gmdate('c'),
         ];

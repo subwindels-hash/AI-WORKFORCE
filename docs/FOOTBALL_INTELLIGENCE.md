@@ -294,8 +294,14 @@ at once instead of one league or market at a time:
   spent across the premium leagues only. When no premium league is stored for
   the date, the page is empty and says why — it is never widened to every
   league.
-- **All markets** — no market is pinned; the page shows every fixture in the
-  default odds view (`MATCH_WINNER`).
+- **All markets** — no market is pinned; the compact fixture overview uses
+  `MATCH_WINNER`, while **All available odds** on each fixture exposes every
+  provider-priced market and selection in one sheet. It includes the decimal
+  price, implied probability, WINDELS probability, fair odds, edge, expected
+  return, quote source, timestamp and (when multiple quotes were stored) its
+  price range. A modelled market with no provider price is `UNPRICED`; corners,
+  cards and HT/FT are shown as `Provider price only` and never receive an
+  invented WINDELS probability.
 
 The API spells the premium group as `competition=premium_leagues` (aliases:
 `all_premium`, `premium leagues`, `all premium leagues`).

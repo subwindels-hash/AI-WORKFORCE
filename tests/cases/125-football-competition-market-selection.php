@@ -490,3 +490,67 @@ test('football: premium-all with no premium league stored narrows to nothing and
     $notes = implode(' ', (array) ($page['request']['notes'] ?? []));
     assert_true(str_contains($notes, 'no premium league'), 'and the note says why the page holds nothing');
 });
+
+test('football: a match detail exposes every priced market and every priced selection', function () {
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    [$repo, , $module] = fx_fb_harness([
+        fx_fb_row('fx-all-odds', gmdate('c', strtotime($day . 'T18:00:00+00:00')), 'Manchester City', 'Everton', '10', '20'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+
+    $page = $module->board()->forDate($day);
+    $fixtureId = (int) ($page['rows'][0]['fixtureId'] ?? 0);
+    $matchId = (string) ($page['rows'][0]['matchId'] ?? '');
+    assert_true($fixtureId > 0 && $matchId !== '', 'the stored fixture has both identities');
+
+    // Complete 1X2 plus prices in modelled and provider-price-only markets.
+    // These rows model exactly what a provider supplied; no odds are created by
+    // this test or by the match read.
+    $now = gmdate('c');
+    $repo->marketOdds = [
+        ['matchId' => $matchId, 'market' => 'Match Winner', 'selection' => 'Home', 'decimalOdds' => 1.85, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Match Winner', 'selection' => 'Draw', 'decimalOdds' => 3.60, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Match Winner', 'selection' => 'Away', 'decimalOdds' => 4.75, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Total Goals', 'selection' => 'Over 2.5', 'decimalOdds' => 1.91, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Total Goals', 'selection' => 'Under 2.5', 'decimalOdds' => 1.97, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Corners', 'selection' => 'Home', 'decimalOdds' => 1.72, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Corners', 'selection' => 'Away', 'decimalOdds' => 2.08, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Cards', 'selection' => 'Over 4.5', 'decimalOdds' => 1.88, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+    ];
+
+    $detail = $module->predictionFor($fixtureId);
+    $markets = [];
+    foreach ((array) ($detail['markets'] ?? []) as $market) $markets[(string) ($market['key'] ?? '')] = $market;
+
+    // The dedicated match response includes the full catalogue, not the old
+    // four-market preview. Modelled but unpriced markets remain explicit.
+    assert_equals(count((new PredictionMarkets(new FootballConfiguration([])))->catalog()), count($markets),
+        'the match response carries the full odds catalogue');
+    foreach (['MATCH_WINNER', 'OVER_2_5', 'CORNERS', 'CARDS'] as $key) {
+        assert_true(isset($markets[$key]), 'priced market ' . $key . ' is visible on the sheet');
+    }
+
+    $winner = (array) $markets['MATCH_WINNER'];
+    assert_equals(3, count((array) $winner['outcomes']), 'all three 1X2 legs are retained');
+    assert_true(array_reduce((array) $winner['outcomes'], static fn(bool $carry, array $outcome): bool => $carry && is_numeric($outcome['odds'] ?? null), true),
+        'each 1X2 outcome retains the provider odds');
+
+    $corners = (array) $markets['CORNERS'];
+    assert_equals(PredictionMarkets::SOURCE_ODDS, (string) $corners['source'], 'corners are correctly labelled provider-price-only');
+    assert_equals(2, count((array) $corners['outcomes']), 'every priced corner selection is retained');
+    foreach ($corners['outcomes'] as $outcome) {
+        assert_null($outcome['probability'], 'a provider-price-only selection never gets an invented model probability');
+        assert_true(is_numeric($outcome['odds'] ?? null), 'the real provider price is still visible');
+        assert_equals('fixture-feed', (string) ($outcome['oddsSource'] ?? ''), 'the price keeps its source');
+        assert_equals($now, (string) ($outcome['oddsObservedAt'] ?? ''), 'the price keeps its timestamp');
+        assert_equals(1, (int) ($outcome['quoteCount'] ?? 0), 'a single stored quote says that it is a single quote');
+        assert_equals((float) $outcome['odds'], (float) ($outcome['oddsLow'] ?? 0), 'the stored quote range begins at the quoted price');
+        assert_equals((float) $outcome['odds'], (float) ($outcome['oddsHigh'] ?? 0), 'the stored quote range ends at the quoted price');
+    }
+
+    $board = $module->board()->forDate($day);
+    $candidateKeys = array_column((array) ($board['rows'][0]['marketCandidates'] ?? []), 'key');
+    assert_true(in_array('CORNERS', $candidateKeys, true) && in_array('CARDS', $candidateKeys, true),
+        'the compact board now links through to all additional priced markets');
+});

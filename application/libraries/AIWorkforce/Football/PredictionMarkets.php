@@ -325,6 +325,15 @@ final class PredictionMarkets
         $line = $line ?? (isset($market['line']) ? (float) $market['line'] : null);
         [$resolvedGrid, $gridBasis, $coverage] = $this->gridFor($prediction, $grid);
         $rows = $this->outcomes($prediction, $resolvedGrid, $key, $line);
+        // Corners, cards and half-time/full-time are not inputs to the score
+        // model. They are still useful to show when a provider actually priced
+        // them, but they must be clearly marked as a *provider-price-only*
+        // market instead of borrowing a made-up WINDELS probability. Keeping
+        // their quoted selections here is what lets the match page be a true
+        // all-odds sheet rather than quietly dropping these markets.
+        if ($rows === [] && (string) ($market['derivation'] ?? '') === 'NOT_MODELLED') {
+            $rows = $this->providerOnlyOutcomes($odds, $key, $line);
+        }
         $state = $rows === [] ? self::STATE_UNAVAILABLE : self::STATE_AVAILABLE;
         $basis = $rows === [] ? null : $this->basis($key, (string) $market['derivation'], $gridBasis);
         $source = $market['derivation'] === 'NOT_MODELLED' ? self::SOURCE_ODDS
@@ -344,12 +353,27 @@ final class PredictionMarkets
             $row['odds'] = $quoted['decimalOdds'];
             $row['impliedProbability'] = $quoted['decimalOdds'] !== null && $quoted['decimalOdds'] > 0
                 ? round(1 / $quoted['decimalOdds'], 6) : null;
-            $row['edge'] = $row['impliedProbability'] !== null ? round((float) $row['probability'] - $row['impliedProbability'], 6) : null;
+            // A provider-price-only market deliberately has no model
+            // probability. Its edge and expected value are unknown too — zero
+            // is not an honest substitute for an unavailable comparison.
+            $modelProbability = is_numeric($row['probability'] ?? null) ? (float) $row['probability'] : null;
+            $row['edge'] = $modelProbability !== null && $row['impliedProbability'] !== null
+                ? round($modelProbability - $row['impliedProbability'], 6) : null;
             $row['oddsObservedAt'] = $quoted['observedAt'];
             $row['oddsSource'] = $quoted['provider'];
             $row['oddsState'] = $quoted['decimalOdds'] === null ? self::STATE_UNAVAILABLE : self::STATE_AVAILABLE;
-            $value = $this->fairValue()->assess($sheet, (string) $row['selection'],
-                is_numeric($row['probability'] ?? null) ? (float) $row['probability'] : null);
+            // Keep the complete stored quote reading alongside the chosen
+            // latest price. It tells the reader whether a price is one isolated
+            // quote or a range of quotes without substituting a synthetic best
+            // price for what the provider actually supplied.
+            $quoteMeta = is_array($sheet['quotes'][(string) $row['selection']] ?? null)
+                ? $sheet['quotes'][(string) $row['selection']] : [];
+            $row['quoteCount'] = isset($quoteMeta['quotes']) ? (int) $quoteMeta['quotes'] : ($quoted['decimalOdds'] === null ? 0 : 1);
+            $row['oddsLow'] = is_numeric($quoteMeta['low'] ?? null) ? round((float) $quoteMeta['low'], 4) : $quoted['decimalOdds'];
+            $row['oddsHigh'] = is_numeric($quoteMeta['high'] ?? null) ? round((float) $quoteMeta['high'], 4) : $quoted['decimalOdds'];
+            $row['oddsSpread'] = is_numeric($row['oddsLow']) && is_numeric($row['oddsHigh'])
+                ? round((float) $row['oddsHigh'] - (float) $row['oddsLow'], 4) : null;
+            $value = $this->fairValue()->assess($sheet, (string) $row['selection'], $modelProbability);
             $row['windelsFairOdds'] = $value['windelsFairOdds'];
             $row['fairOdds'] = $value['fairOdds'];
             $row['fairProbability'] = $value['fairProbability'];
@@ -363,6 +387,15 @@ final class PredictionMarkets
         foreach ($rows as $row) {
             if (!is_numeric($row['probability'])) continue;
             if ($best === null || (float) $row['probability'] > (float) $best['probability']) $best = $row;
+        }
+        // Price-only markets do not have a model pick. Keep one of their real
+        // quotes at market level for compact tables while the full `outcomes`
+        // list continues to show every price and selection.
+        if ($best === null && $rows !== []) {
+            foreach ($rows as $row) {
+                if (($row['oddsState'] ?? '') === self::STATE_AVAILABLE) { $best = $row; break; }
+            }
+            $best ??= $rows[0];
         }
         $risk = $this->risk($state, $coverage, (string) ($prediction['data_quality_band'] ?? QualityBand::REJECTED),
             $best['probability'] ?? null, $best['odds'] ?? null, $best['edge'] ?? null, $source);
@@ -493,6 +526,52 @@ final class PredictionMarkets
             default:
                 return [];
         }
+    }
+
+    /**
+     * Provider-price-only outcomes for markets the score model does not answer.
+     *
+     * We preserve every valid selection the provider supplied (using its latest
+     * quote if a selection appears more than once). `probability` is explicitly
+     * null: this is an odds board, not a disguised model prediction for corners,
+     * cards, or HT/FT. The normal quote attachment below supplies the decimal
+     * price, source and timestamp in the same shape as every other market.
+     *
+     * @param list<array{market:string,selection:string,decimalOdds:float,observedAt:?string}> $odds
+     * @return list<array{selection:string,label:string,probability:?float,note:?string}>
+     */
+    private function providerOnlyOutcomes(array $odds, string $marketKey, ?float $line): array
+    {
+        $out = [];
+        foreach ($odds as $row) {
+            $rawMarket = (string) ($row['market'] ?? '');
+            if (!self::providerMarketMatches(self::normalizeProviderMarket($rawMarket), $marketKey)) continue;
+            $rawSelection = trim((string) ($row['selection'] ?? ''));
+            $selection = self::normalizeProviderSelection($rawMarket, $rawSelection);
+            if ($selection === '') continue;
+            $price = is_numeric($row['decimalOdds'] ?? null) ? (float) $row['decimalOdds'] : null;
+            if ($price === null || !OddsBounds::validDecimalOdds($price, $marketKey)) continue;
+            // For a line-based provider-only market, retain only the requested
+            // line. The current catalogue's price-only markets are not line
+            // based, but keeping this check here makes the shape safe if one is
+            // added later.
+            $quotedLine = self::lineOf($rawSelection);
+            if ($line !== null && $quotedLine !== null && abs($quotedLine - $line) > 1e-9) continue;
+            $observed = (string) ($row['observedAt'] ?? '');
+            $existing = $out[$selection] ?? null;
+            if ($existing === null || $observed >= (string) ($existing['_observedAt'] ?? '')) {
+                $out[$selection] = [
+                    'selection' => $selection,
+                    'label' => $rawSelection !== '' ? $rawSelection : $selection,
+                    'probability' => null,
+                    'note' => 'Provider price only — WINDELS does not model this market.',
+                    '_observedAt' => $observed,
+                ];
+            }
+        }
+        foreach ($out as &$row) unset($row['_observedAt']);
+        unset($row);
+        return array_values($out);
     }
 
     /**
