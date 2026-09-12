@@ -73,10 +73,10 @@ $kickoffStamp = static function (mixed $iso): string {
 ?>
 <div class="sports-console">
   <section class="sports-hero" aria-labelledby="sports-heading">
-    <div>
-      <p class="sports-eyebrow">DAILY SPORTS INTELLIGENCE</p>
+    <div class="sports-hero__intro">
+      <p class="sports-eyebrow">Daily sports intelligence</p>
       <h2 id="sports-heading">Sports Intelligence — odds prediction ticket engine</h2>
-      <p class="sports-hero__copy">A clear workflow from stored fixtures to reviewable selections: compare real bookmaker prices with WINDELS probabilities, measure value, confidence, data quality, risk and correlation, then preserve every decision for settlement. No bet is placed from this screen.</p>
+      <p class="sports-hero__copy">One workflow, read top to bottom: the fixtures stored for the selected day, the ticket the engine built from them, the matches in play, and the measured result of everything already settled. Bookmaker prices and WINDELS probabilities are always reported side by side and never mixed. No bet is placed from this screen.</p>
     </div>
     <nav class="sports-hero__actions" aria-label="Sports date navigation">
       <a class="btn small" href="/sports?date=<?= e($viewYesterday) ?>">← Previous day</a>
@@ -104,8 +104,12 @@ $kickoffStamp = static function (mixed $iso): string {
       <a class="btn small" href="/sports/odds-prediction-ticket">Ticket history</a>
     </div>
   </section>
-  <p class="sports-context-note">The selected date controls the fixture overview, prediction run and ticket below. Live scores always report current play. Automatic generation remains active; the ticket panel provides an optional immediate run or clean retry.</p>
-  <?php if (empty($caps['sync'])): ?><p class="sports-context-note">Your account is read-only here. Ask an administrator for the Sports administrator role to sync data or generate a ticket.</p><?php endif; ?>
+
+  <div class="sports-notes">
+    <p class="sports-context-note">The selected date drives the day overview, the prediction run and the ticket below; the live board always reports current play. Automatic daily generation stays active — the ticket section only adds an optional immediate run or a clean retry.</p>
+    <?php if (empty($caps['sync'])): ?><p class="sports-context-note">This account has read-only access. Ask an administrator for the Sports administrator role to sync data or generate a ticket.</p><?php endif; ?>
+  </div>
+
 <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
 <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 <?php if (!empty($sys['isDemoData'])): ?>
@@ -118,8 +122,8 @@ $kickoffStamp = static function (mixed $iso): string {
     <?php if ($operator && $setup): ?>
       <br><b>Next step:</b> <?= e((string) ($setup['nextStep'] ?? '')) ?>
       <?php if (!empty($setup['options'])): ?>
-        <div style="margin-top:6px">Connect any one of these in <a href="/admin/api"><b>Admin → API</b></a> (Service: <span class="mono">sports</span>):
-          <ul style="margin:4px 0 0 18px">
+        <div class="sports-setup-options">Connect any one of these in <a href="/admin/api"><b>Admin → API</b></a> (Service: <span class="mono">sports</span>):
+          <ul>
           <?php foreach ((array) $setup['options'] as $opt): ?>
             <li><b><?= e((string) ($opt['label'] ?? '')) ?></b>
               — <?= e((string) ($opt['note'] ?? '')) ?>
@@ -135,7 +139,7 @@ $kickoffStamp = static function (mixed $iso): string {
   <?php if ($operator): ?>
   <div class="notice err"><b>Prediction engine BLOCKED — 0/<?= (int) ($readiness['total'] ?? 0) ?> sports data providers operational.</b>
     Every configured feed is currently failing (see <i>Data feed</i>). Odds prediction tickets cannot be generated until at least one provider recovers; an empty day in this state is a <b>data outage</b>, not "no qualified games".
-    <?php foreach (array_values((array) ($readiness['providers'] ?? [])) as $i => $pr): ?><br><span class="mono" style="font-size:11px"><?= e($windelsModelId) ?> · feed <?= (int) $i + 1 ?> → <?= e((string) ($pr['status'] ?? 'UNKNOWN')) ?><?php if (!empty($pr['retryAt'])): ?> (retry after <?= e(substr((string) $pr['retryAt'], 0, 16)) ?>Z)<?php endif; ?></span><?php endforeach; ?>
+    <?php foreach (array_values((array) ($readiness['providers'] ?? [])) as $i => $pr): ?><br><span class="mono sports-cell-detail"><?= e($windelsModelId) ?> · feed <?= (int) $i + 1 ?> → <?= e((string) ($pr['status'] ?? 'UNKNOWN')) ?><?php if (!empty($pr['retryAt'])): ?> (retry after <?= e(substr((string) $pr['retryAt'], 0, 16)) ?>Z)<?php endif; ?></span><?php endforeach; ?>
   </div>
   <?php else: ?>
   <div class="notice err"><b>Sports data temporarily unavailable.</b> Odds prediction tickets cannot be generated until the data feed recovers — an empty day in this state is a data outage, not "no qualified games".</div>
@@ -144,9 +148,19 @@ $kickoffStamp = static function (mixed $iso): string {
 
 <div class="sports-layout">
   <div class="sports-main stack">
-    <div class="panel">
-      <h3><?= $viewIsToday ? "Today's intelligence" : 'Intelligence' ?> — <?= e((string) ($today['date'] ?? $viewDateIso)) ?></h3>
-      <div class="body" style="padding-top:12px">
+    <section class="panel sports-section" id="sports-overview" aria-labelledby="sports-overview-heading">
+      <div class="sports-section__heading">
+        <div class="sports-section__title">
+          <span class="sports-step" aria-hidden="true">1</span>
+          <div>
+            <p class="sports-eyebrow">Day overview</p>
+            <h3 id="sports-overview-heading"><?= $viewIsToday ? "Today's intelligence" : 'Intelligence' ?> — <?= e((string) ($today['date'] ?? $viewDateIso)) ?></h3>
+          </div>
+        </div>
+        <span class="sports-section__meta">stored fixtures · UTC</span>
+      </div>
+      <div class="body">
+        <p class="sports-section-intro">What is actually stored for this day before any ticket is built: how many fixtures are scheduled, how many are in play, how many predictions passed or failed the engine's gates, and how the qualified ones are spread across risk bands.</p>
         <div class="stat-grid">
           <div class="stat"><div class="k">Scheduled</div><div class="v"><?= (int) ($today['upcomingCount'] ?? 0) ?></div></div>
           <div class="stat"><div class="k">Live</div><div class="v" id="live-count-stat"><?= count($today['live'] ?? []) ?></div></div>
@@ -155,7 +169,8 @@ $kickoffStamp = static function (mixed $iso): string {
           <div class="stat"><div class="k">Avg confidence</div><div class="v"><?= ($today['averageConfidence'] ?? null) !== null ? e(number_format((float) $today['averageConfidence'], 1)) . '%' : '—' ?></div></div>
         </div>
         <?php $risk = $today['riskDistribution'] ?? []; if (array_sum($risk) > 0): ?>
-          <div style="margin-top:12px;display:grid;gap:6px">
+          <div class="sports-subhead"><h4>Risk distribution</h4><span class="dim">predictions scored for this day</span></div>
+          <div class="sports-meters">
             <?php foreach ([['LOW', 'var(--green)'], ['MEDIUM', 'var(--amber)'], ['HIGH', 'var(--red)'], ['REJECTED', 'var(--muted)']] as [$k, $c]): ?>
               <div class="meter">
                 <div class="row"><span>Risk <?= e($k) ?></span><span class="mono dim"><?= (int) ($risk[$k] ?? 0) ?></span></div>
@@ -165,15 +180,16 @@ $kickoffStamp = static function (mixed $iso): string {
           </div>
         <?php endif; ?>
         <?php if (!empty($today['upcoming'])): ?>
+          <div class="sports-subhead"><h4>Scheduled fixtures</h4><span class="dim"><?= (int) ($today['upcomingCount'] ?? count($today['upcoming'])) ?> stored for this day</span></div>
           <div class="table-scroll">
-            <table class="tbl" style="margin-top:12px">
+            <table class="tbl">
               <thead><tr><th>Kickoff (UTC)</th><th>Match</th><th>Competition</th><th class="num">Data quality</th></tr></thead>
               <tbody>
                 <?php $qByMatch = []; foreach ($today['dataQuality'] ?? [] as $q) $qByMatch[(int) $q['matchId']] = $q; ?>
                 <?php foreach ($today['upcoming'] as $m): $q = $qByMatch[(int) ($m['id'] ?? 0)] ?? null; ?>
                   <tr>
                     <td class="mono dim"><?= e(substr((string) ($m['kickoff_at'] ?? ''), 0, 16)) ?></td>
-                    <td style="font-weight:700"><?= e(($m['home_team'] ?? '?') . ' vs ' . ($m['away_team'] ?? '?')) ?></td>
+                    <td class="sports-cell-strong"><?= e(($m['home_team'] ?? '?') . ' vs ' . ($m['away_team'] ?? '?')) ?></td>
                     <td class="dim"><?= e((string) ($m['competition'] ?? '')) ?></td>
                     <td class="num"><?= $q ? e($q['band'] . ' · ' . (int) $q['score']) : '<span class="dim">not assessed</span>' ?></td>
                   </tr>
@@ -182,34 +198,44 @@ $kickoffStamp = static function (mixed $iso): string {
             </table>
           </div>
         <?php else: ?>
-          <p class="dim" style="margin-top:12px">No scheduled fixtures stored for <?= $viewIsToday ? 'today' : e($viewDateIso) ?>.</p>
+          <p class="sports-empty">No scheduled fixtures stored for <?= $viewIsToday ? 'today' : e($viewDateIso) ?>.</p>
         <?php endif; ?>
       </div>
-    </div>
+    </section>
 
-    <div class="panel sports-ticket-panel">
-      <h3><?= $viewIsToday ? "Today's odds prediction ticket" : 'Odds prediction ticket — ' . e($viewDateIso) ?></h3>
-      <div class="body" style="padding-top:12px">
-        <p class="sports-section-intro">The engine evaluates every supported market and quoted selection for each eligible match, then keeps only independently qualified, low-correlation picks. Each selected row below shows the match, market, real odds and source, implied chance, WINDELS probability and fair odds, value, confidence, data quality and risk.</p>
-        <?php
-          $daily = $engine['today'] ?? null;
-          $generationStatus = is_array($daily) ? (string) ($daily['generation_status'] ?? (!empty($daily['ticket_id']) ? 'GENERATED' : 'PENDING')) : 'PENDING';
-        ?>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
-          <span class="badge <?= $generationStatus === 'GENERATED' ? 'b-violet' : ($generationStatus === 'FAILED' ? 'b-red' : 'b-gray') ?>">generation <?= e($generationStatus) ?></span>
-          <?php if (is_array($daily) && !empty($daily['attempt_count'])): ?><span class="dim mono" style="font-size:11px">attempt <?= (int) $daily['attempt_count'] ?></span><?php endif; ?>
-          <?php if (is_array($daily) && !empty($daily['next_retry_at'])): ?><span class="dim mono" style="font-size:11px">next retry <?= e((string) $daily['next_retry_at']) ?></span><?php endif; ?>
-          <?php if (is_array($daily) && !empty($daily['last_error_code'])): ?><span class="badge b-red"><?= e((string) $daily['last_error_code']) ?></span><?php endif; ?>
+    <?php
+      $daily = $engine['today'] ?? null;
+      $generationStatus = is_array($daily) ? (string) ($daily['generation_status'] ?? (!empty($daily['ticket_id']) ? 'GENERATED' : 'PENDING')) : 'PENDING';
+    ?>
+    <section class="panel sports-section sports-ticket-panel" id="sports-ticket" aria-labelledby="sports-ticket-heading">
+      <div class="sports-section__heading">
+        <div class="sports-section__title">
+          <span class="sports-step" aria-hidden="true">2</span>
+          <div>
+            <p class="sports-eyebrow">Engine output</p>
+            <h3 id="sports-ticket-heading"><?= $viewIsToday ? "Today's odds prediction ticket" : 'Odds prediction ticket — ' . e($viewDateIso) ?></h3>
+          </div>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+        <span class="badge <?= $generationStatus === 'GENERATED' ? 'b-violet' : ($generationStatus === 'FAILED' ? 'b-red' : 'b-gray') ?>">generation <?= e($generationStatus) ?></span>
+      </div>
+      <div class="body">
+        <p class="sports-section-intro">The engine scores every supported market and quoted selection on each eligible match, then keeps only independently qualified, low-correlation picks. Every selected row states the match, the market, the real bookmaker price with its source, the implied chance, the WINDELS probability and fair odds, the value, confidence, data quality and risk.</p>
+        <?php if (is_array($daily) && (!empty($daily['attempt_count']) || !empty($daily['next_retry_at']) || !empty($daily['last_error_code']))): ?>
+          <div class="sports-chips">
+            <?php if (!empty($daily['attempt_count'])): ?><span class="dim mono">attempt <?= (int) $daily['attempt_count'] ?></span><?php endif; ?>
+            <?php if (!empty($daily['next_retry_at'])): ?><span class="dim mono">next retry <?= e((string) $daily['next_retry_at']) ?></span><?php endif; ?>
+            <?php if (!empty($daily['last_error_code'])): ?><span class="badge b-red"><?= e((string) $daily['last_error_code']) ?></span><?php endif; ?>
+          </div>
+        <?php endif; ?>
+        <div class="sports-controls">
           <?php if (!empty($caps['sync'])): ?>
-            <form method="post" action="/sports/generate-ticket" style="display:flex;gap:6px;align-items:center" onsubmit="return confirm('Generate odds prediction ticket for <?= e($viewDateIso) ?> from stored data?')">
+            <form method="post" action="/sports/generate-ticket" class="sports-controls__form" onsubmit="return confirm('Generate odds prediction ticket for <?= e($viewDateIso) ?> from stored data?')">
               <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
               <input type="hidden" name="date" value="<?= e($ticketDateIso) ?>">
-              <button class="btn small" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700">
+              <button class="btn small sports-generate-btn">
                 🎯 Odds Prediction Ticket
               </button>
-              <label class="dim" style="font-size:11px;display:flex;gap:4px;align-items:center;white-space:nowrap" title="First delete this day's active candidates (old pass predictions, the pending ticket, daily slot, unquotable odds), then generate from the current stored pool. Settled/historical records are kept.">
+              <label class="sports-controls__check" title="First delete this day's active candidates (old pass predictions, the pending ticket, daily slot, unquotable odds), then generate from the current stored pool. Settled/historical records are kept.">
                 <input type="checkbox" name="force" value="1"> Force fresh run
               </label>
             </form>
@@ -218,11 +244,11 @@ $kickoffStamp = static function (mixed $iso): string {
               <input type="hidden" name="date" value="<?= e($ticketDateIso) ?>">
               <button class="btn small" title="Delete active (not historical) candidates for the selected date">♻️ Clear</button>
             </form>
-            <span class="mono" style="font-size:12px;font-weight:700" title="Configured-local ticket date <?= e($ticketDateIso) ?>"><?= e($ticketDateShown) ?></span>
-            <span class="dim" style="font-size:11px">optional manual run/retry — automatic daily generation remains active</span>
+            <span class="mono sports-controls__date" title="Configured-local ticket date <?= e($ticketDateIso) ?>"><?= e($ticketDateShown) ?></span>
+            <span class="sports-controls__note">optional manual run/retry — automatic daily generation remains active</span>
           <?php else: ?>
-            <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">🎯 Odds Prediction Ticket</button>
-            <span class="mono" style="font-size:12px;font-weight:700" title="Configured-local ticket date <?= e($ticketDateIso) ?>"><?= e($ticketDateShown) ?></span>
+            <button class="btn small sports-generate-btn" disabled title="Requires the sports.manage permission">🎯 Odds Prediction Ticket</button>
+            <span class="mono sports-controls__date" title="Configured-local ticket date <?= e($ticketDateIso) ?>"><?= e($ticketDateShown) ?></span>
           <?php endif; ?>
         </div>
         <?php
@@ -230,7 +256,8 @@ $kickoffStamp = static function (mixed $iso): string {
               ? $daily['rejection_summary']['_diagnostics'] : [];
         ?>
         <?php if (is_array($daily)): ?>
-          <div class="stat-grid" style="margin-bottom:12px">
+          <div class="sports-subhead"><h4>Generation run</h4><span class="dim">what the engine saw on this day</span></div>
+          <div class="stat-grid">
             <div class="stat"><div class="k">Eligible fixtures</div><div class="v"><?= (int) ($runDiag['eligibleFixtures'] ?? 0) ?></div></div>
             <div class="stat"><div class="k">Fixtures evaluated</div><div class="v"><?= (int) ($runDiag['fixturesEvaluated'] ?? $daily['candidates_evaluated'] ?? 0) ?></div></div>
             <div class="stat"><div class="k">Predictions generated</div><div class="v"><?= (int) ($runDiag['predictionsGenerated'] ?? $daily['predictions_recorded'] ?? 0) ?></div></div>
@@ -241,11 +268,9 @@ $kickoffStamp = static function (mixed $iso): string {
           </div>
         <?php endif; ?>
         <?php if ($daily !== null && (string) ($daily['status'] ?? '') === 'DATA_UNAVAILABLE'): ?>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-            <span class="badge b-red">NO TICKET — DATA_UNAVAILABLE</span>
-          </div>
+          <div class="sports-subhead"><h4>Result</h4><span class="badge b-red">NO TICKET — DATA_UNAVAILABLE</span></div>
           <?php if ($operator): ?>
-          <p class="dim" style="margin:0 0 8px"><b>All configured sports-data providers failed</b> for this run — this is a data outage, not a day without qualifying games. <?= e((string) ($daily['message'] ?? '')) ?></p>
+          <p class="sports-empty"><b>All configured sports-data providers failed</b> for this run — this is a data outage, not a day without qualifying games. <?= e((string) ($daily['message'] ?? '')) ?></p>
           <?php $ledger = is_array($daily['rejection_summary'] ?? null) ? $daily['rejection_summary'] : []; ?>
           <div class="table-scroll">
             <table class="tbl">
@@ -257,12 +282,13 @@ $kickoffStamp = static function (mixed $iso): string {
               </tbody>
             </table>
           </div>
-          <p class="dim" style="font-size:11px;margin-top:8px">Matches evaluated: <?= (int) ($daily['candidates_evaluated'] ?? 0) ?> · Predictions generated: <?= (int) ($daily['predictions_recorded'] ?? 0) ?>. The run stays retryable: once a provider recovers, Sync and generate again.</p>
+          <p class="sports-note">Matches evaluated: <?= (int) ($daily['candidates_evaluated'] ?? 0) ?> · Predictions generated: <?= (int) ($daily['predictions_recorded'] ?? 0) ?>. The run stays retryable: once a provider recovers, Sync and generate again.</p>
           <?php else: ?>
-          <p class="dim" style="margin:0 0 8px"><b>Sports data was unavailable</b> for this run — this is a data outage, not a day without qualifying games. No odds prediction ticket is fabricated; one will be built once the data feed recovers.</p>
+          <p class="sports-empty"><b>Sports data was unavailable</b> for this run — this is a data outage, not a day without qualifying games. No odds prediction ticket is fabricated; one will be built once the data feed recovers.</p>
           <?php endif; ?>
         <?php elseif ($daily === null || $ticket === null): ?>
-          <p class="dim"><?= $daily !== null ? e((string) ($daily['message'] ?? 'No odds prediction ticket for ' . $viewDateIso . '.')) : 'No daily run recorded for ' . e($viewDateIso) . ' yet. Automatic daily generation is pending; the scheduler will sync eligible data and generate without a manual click, while 🎯 remains an optional immediate retry.' ?></p>
+          <div class="sports-subhead"><h4>Result</h4><span class="dim">no ticket for this day</span></div>
+          <p class="sports-empty"><?= $daily !== null ? e((string) ($daily['message'] ?? 'No odds prediction ticket for ' . $viewDateIso . '.')) : 'No daily run recorded for ' . e($viewDateIso) . ' yet. Automatic daily generation is pending; the scheduler will sync eligible data and generate without a manual click, while 🎯 remains an optional immediate retry.' ?></p>
           <?php
             $diag = [];
             if ($daily !== null && is_array($daily['rejection_summary'] ?? null) && is_array($daily['rejection_summary']['_diagnostics'] ?? null)) {
@@ -272,7 +298,7 @@ $kickoffStamp = static function (mixed $iso): string {
           <?php if (!empty($diag['fixturesEvaluated']) && (int) $diag['fixturesEvaluated'] > 0): ?>
             <details class="sports-diagnostics">
               <summary><span><b>Generation funnel &amp; rejection details</b><small><?= (int) ($diag['fixturesEvaluated'] ?? 0) ?> fixtures · <?= (int) ($diag['marketsEvaluated'] ?? 0) ?> market selections evaluated · <?= (int) ($diag['finalQualifiedCandidates'] ?? 0) ?> selected</small></span><span>Open diagnostics</span></summary>
-            <div class="stat-grid" style="margin-top:10px">
+            <div class="stat-grid">
               <div class="stat"><div class="k">Fixtures evaluated</div><div class="v"><?= (int) ($diag['fixturesEvaluated'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Eligible</div><div class="v"><?= (int) ($diag['eligibleFixtures'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Fresh odds</div><div class="v"><?= (int) ($diag['fixturesWithFreshOdds'] ?? 0) ?></div></div>
@@ -310,7 +336,7 @@ $kickoffStamp = static function (mixed $iso): string {
               $gateFailures = array_values(array_filter($gateFixtures, fn($g) => empty($g['passed'])));
             ?>
             <?php if ($gateFailures !== []): ?>
-            <div class="table-scroll" style="margin-top:12px">
+            <div class="table-scroll">
               <table class="tbl">
                 <thead><tr><th>Fixture</th><th>Provider</th><th>Primary blocker</th><th>Missing / failed field</th></tr></thead>
                 <tbody>
@@ -326,19 +352,19 @@ $kickoffStamp = static function (mixed $iso): string {
                     }
                   ?>
                     <tr>
-                      <td style="font-weight:700"><?= e((string) ($g['homeTeam'] ?? '?')) ?> vs <?= e((string) ($g['awayTeam'] ?? '?')) ?><div class="dim" style="font-size:10px"><?= e((string) ($g['competition'] ?? '')) ?></div></td>
+                      <td class="sports-cell-strong"><?= e((string) ($g['homeTeam'] ?? '?')) ?> vs <?= e((string) ($g['awayTeam'] ?? '?')) ?><small class="dim"><?= e((string) ($g['competition'] ?? '')) ?></small></td>
                       <td class="mono"><?= e((string) ($g['provider'] ?? '—')) ?></td>
                       <td class="mono"><?= e((string) ($g['primaryReason'] ?? $failedKey)) ?></td>
-                      <td class="mono" style="font-size:11px"><?= $detail /* pre-escaped above / integers */ ?></td>
+                      <td class="mono sports-cell-detail"><?= $detail /* pre-escaped above / integers */ ?></td>
                     </tr>
                   <?php endforeach; ?>
                 </tbody>
               </table>
-              <?php if ((int) ($diag['sufficientDataGate']['limit'] ?? 0) > 0 && count($gateFailures) > 25): ?><p class="dim" style="font-size:11px;margin:6px 0 0">Showing 25 of <?= count($gateFailures) ?> blocked fixtures; the funnel counts above cover the full pool.</p><?php endif; ?>
+              <?php if ((int) ($diag['sufficientDataGate']['limit'] ?? 0) > 0 && count($gateFailures) > 25): ?><p class="sports-note">Showing 25 of <?= count($gateFailures) ?> blocked fixtures; the funnel counts above cover the full pool.</p><?php endif; ?>
             </div>
             <?php endif; ?>
             <?php $deferredRows = is_array($diag['deferredFixtures']['rows'] ?? null) ? $diag['deferredFixtures']['rows'] : []; if ($deferredRows !== []): ?>
-            <p class="dim" style="font-size:11px;margin:8px 0 0">Deferred past the generation cap (evaluated in later runs; not rejected):
+            <p class="sports-note">Deferred past the generation cap (evaluated in later runs; not rejected):
               <?php
                 $parts = [];
                 foreach (array_slice($deferredRows, 0, 15) as $d) $parts[] = e((string) ($d['provider'] ?? '?')) . ' ' . e((string) ($d['externalId'] ?? '?'));
@@ -350,7 +376,7 @@ $kickoffStamp = static function (mixed $iso): string {
             <?php $reasons = is_array($diag['topRejectionReasons'] ?? null) ? $diag['topRejectionReasons'] : []; ?>
             <?php $byProvider = is_array($diag['rejectionReasonsByProvider'] ?? null) ? $diag['rejectionReasonsByProvider'] : []; ?>
             <?php if ($reasons): ?>
-            <div class="table-scroll" style="margin-top:12px">
+            <div class="table-scroll">
               <table class="tbl">
                 <thead><tr><th>Rejection reason (primary)</th><th class="num">Count</th><th>Caused by</th></tr></thead>
                 <tbody>
@@ -358,7 +384,7 @@ $kickoffStamp = static function (mixed $iso): string {
                     <tr>
                       <td class="mono"><?= e((string) $reason) ?></td>
                       <td class="num mono"><?= (int) $count ?></td>
-                      <td class="mono" style="font-size:11px"><?php
+                      <td class="mono sports-cell-detail"><?php
                         $prov = $byProvider[(string) $reason] ?? [];
                         $provParts = [];
                         foreach ((array) $prov as $p => $n) $provParts[] = e((string) $p) . ' ×' . (int) $n;
@@ -369,26 +395,30 @@ $kickoffStamp = static function (mixed $iso): string {
                 </tbody>
               </table>
             </div>
-            <p class="dim" style="font-size:11px;margin-top:8px">Odds TTL: <?= (int) ($diag['thresholds']['oddsMaxAgeSeconds'] ?? 0) ?>s · refresh attempts: <?= (int) ($diag['oddsRefreshAttempts'] ?? 0) ?> · refreshed fixtures: <?= (int) ($diag['oddsRefreshedFixtures'] ?? 0) ?><?php if (!empty($diag['oddsProviderFailureStatuses'])): ?> · odds provider failures: <?= e(implode(', ', array_map(fn($p, $s) => $p . ' ' . $s, array_keys($diag['oddsProviderFailureStatuses']), $diag['oddsProviderFailureStatuses']))) ?><?php endif; ?></p>
+            <p class="sports-note">Odds TTL: <?= (int) ($diag['thresholds']['oddsMaxAgeSeconds'] ?? 0) ?>s · refresh attempts: <?= (int) ($diag['oddsRefreshAttempts'] ?? 0) ?> · refreshed fixtures: <?= (int) ($diag['oddsRefreshedFixtures'] ?? 0) ?><?php if (!empty($diag['oddsProviderFailureStatuses'])): ?> · odds provider failures: <?= e(implode(', ', array_map(fn($p, $s) => $p . ' ' . $s, array_keys($diag['oddsProviderFailureStatuses']), $diag['oddsProviderFailureStatuses']))) ?><?php endif; ?></p>
             <?php endif; ?>
             </details>
           <?php endif; ?>
         <?php else: ?>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-            <span class="badge <?= (string) ($daily['status'] ?? '') === 'PENDING_USER_APPROVAL' ? 'b-violet' : 'b-green' ?>"><?= e((string) ($daily['status'] ?? '')) ?></span>
-            <span class="badge b-gray">engine <?= e((string) ($engine['configuration']['engine_mode'] ?? '')) ?></span>
+          <div class="sports-subhead">
+            <h4>Ticket</h4>
+            <span class="sports-chips">
+              <span class="badge <?= (string) ($daily['status'] ?? '') === 'PENDING_USER_APPROVAL' ? 'b-violet' : 'b-green' ?>"><?= e((string) ($daily['status'] ?? '')) ?></span>
+              <span class="badge b-gray">engine <?= e((string) ($engine['configuration']['engine_mode'] ?? '')) ?></span>
+            </span>
           </div>
           <div class="stat-grid">
-            <div class="stat"><div class="k">Ticket ID</div><div class="v mono" style="font-size:12px"><?= e((string) ($ticket['id'] ?? '—')) ?></div></div>
-            <div class="stat"><div class="k">Generated at</div><div class="v mono" style="font-size:12px"><?= e((string) ($daily['generated_at'] ?? $ticket['created_at'] ?? '—')) ?></div></div>
+            <div class="stat"><div class="k">Ticket ID</div><div class="v mono v-sm"><?= e((string) ($ticket['id'] ?? '—')) ?></div></div>
+            <div class="stat"><div class="k">Generated at</div><div class="v mono v-sm"><?= e((string) ($daily['generated_at'] ?? $ticket['created_at'] ?? '—')) ?></div></div>
             <div class="stat"><div class="k">Total odds</div><div class="v"><?= e(number_format((float) ($ticket['total_odds'] ?? 0), 2)) ?></div></div>
             <div class="stat"><div class="k">Selections</div><div class="v"><?= (int) ($ticket['selection_count'] ?? 0) ?></div></div>
             <div class="stat"><div class="k">Confidence</div><div class="v"><?= ($ticket['confidence'] ?? null) !== null ? e(number_format((float) $ticket['confidence'], 0)) . '%' : '—' ?></div></div>
             <div class="stat"><div class="k">Stake / unit</div><div class="v"><?= ($ticket['stake'] ?? null) !== null ? e(number_format((float) $ticket['stake'], 2)) : '—' ?></div></div>
           </div>
           <?php if (!empty($engine['ticketSelections'])): ?>
+            <div class="sports-subhead"><h4>Selected picks</h4><span class="dim"><?= count((array) $engine['ticketSelections']) ?> selection(s) · bookmaker price and model number kept in separate columns</span></div>
             <div class="table-scroll">
-              <table class="tbl sports-ticket-table" style="margin-top:12px">
+              <table class="tbl sports-ticket-table">
                 <thead><tr><th>Match · competition · kickoff</th><th>Market · prediction</th><th title="Real bookmaker price, implied probability, source and provider timestamp">Real odds · source</th><th title="WINDELS model probability and fair odds — the model's own numbers, never the bookmaker price">WINDELS probability · fair</th><th>Confidence · quality</th><th>Edge / value</th><th>Risk</th></tr></thead>
                 <tbody>
                   <?php foreach ($engine['ticketSelections'] as $s): ?>
@@ -427,8 +457,9 @@ $kickoffStamp = static function (mixed $iso): string {
             </div>
           <?php endif; ?>
           <?php if ((string) ($ticket['approval_status'] ?? '') === 'PENDING_USER_APPROVAL'): ?>
+            <div class="sports-subhead"><h4>Review</h4><span class="dim">recorded against the acting identity</span></div>
             <?php if (!empty($caps['approve'])): ?>
-              <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+              <div class="sports-actions">
                 <form method="post" action="/sports/<?= e((string) $ticket['id']) ?>/decide">
                   <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
                   <input type="hidden" name="approve" value="1">
@@ -440,55 +471,66 @@ $kickoffStamp = static function (mixed $iso): string {
                   <button class="btn danger small">Reject</button>
                 </form>
               </div>
-              <p class="dim" style="font-size:10px;margin-top:8px">Approval is recorded with the acting identity. There is no external execution connector — approval never places a bet.</p>
+              <p class="sports-note">Approval is recorded with the acting identity. There is no external execution connector — approval never places a bet.</p>
             <?php else: ?>
-              <div style="margin-top:12px">
+              <div class="sports-actions">
                 <button class="btn small" disabled title="Requires the sports.approve permission">Approve / reject (needs sports.approve)</button>
-                <p class="dim" style="font-size:10px;margin-top:6px">Your account cannot approve records — ask an administrator for the <b>sports.approve</b> permission (Sports administrator role).</p>
               </div>
+              <p class="sports-note">Your account cannot approve records — ask an administrator for the <b>sports.approve</b> permission (Sports administrator role).</p>
             <?php endif; ?>
           <?php endif; ?>
           <?php if ((string) ($ticket['settlement_status'] ?? '') === 'PENDING'): ?>
             <?php if (!empty($caps['settle'])): ?>
-              <form method="post" action="/sports/<?= e((string) $ticket['id']) ?>/settle" style="margin-top:12px">
-                <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
-                <button class="btn small">Settle from verified results (sports.settle)</button>
-              </form>
-            <?php else: ?>
-              <div style="margin-top:12px">
-                <button class="btn small" disabled title="Requires the sports.settle permission">Settle (needs sports.settle)</button>
-                <p class="dim" style="font-size:10px;margin-top:6px">Settlement stays with identities holding <b>sports.settle</b>.</p>
+              <div class="sports-actions">
+                <form method="post" action="/sports/<?= e((string) $ticket['id']) ?>/settle">
+                  <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+                  <button class="btn small">Settle from verified results (sports.settle)</button>
+                </form>
               </div>
+            <?php else: ?>
+              <div class="sports-actions">
+                <button class="btn small" disabled title="Requires the sports.settle permission">Settle (needs sports.settle)</button>
+              </div>
+              <p class="sports-note">Settlement stays with identities holding <b>sports.settle</b>.</p>
             <?php endif; ?>
           <?php endif; ?>
         <?php endif; ?>
+        <p class="sports-note"><a href="/sports/odds-prediction-ticket">Odds prediction tickets &amp; history →</a> — every generated ticket, its approval trail and its settlement.</p>
       </div>
-    </div>
+    </section>
 
-    <p style="font-size:11px"><a class="btn small" href="/sports/odds-prediction-ticket">Odds prediction tickets &amp; history →</a></p>
-
-    <div class="panel" id="live-scores-panel">
-      <h3>Live scores — auto-updating</h3>
-      <div class="body" style="padding-top:12px">
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+    <section class="panel sports-section" id="live-scores-panel" aria-labelledby="sports-live-heading">
+      <div class="sports-section__heading">
+        <div class="sports-section__title">
+          <span class="sports-step" aria-hidden="true">3</span>
+          <div>
+            <p class="sports-eyebrow">In play</p>
+            <h3 id="sports-live-heading">Live scores — auto-updating</h3>
+          </div>
+        </div>
+        <span class="sports-section__meta">current play, any date</span>
+      </div>
+      <div class="body">
+        <p class="sports-section-intro">Matches in play right now, refreshed from the provider's live endpoint. This board always reports current play and ignores the viewing date above.</p>
+        <div class="sports-livebar">
           <span class="dot synth" id="live-poll-dot" title="Auto-refresh status"></span>
-          <span class="dim" style="font-size:11px" id="live-poll-note">Auto-refresh on — the goal score updates here automatically, immediately after the provider reports it.</span>
+          <span class="dim" id="live-poll-note">Auto-refresh on — the goal score updates here automatically, immediately after the provider reports it.</span>
           <button class="btn small" type="button" id="live-refresh-toggle">Pause</button>
         </div>
-        <div id="live-goal-flash" style="display:none;background:var(--violet,#6d28d9);color:#fff;border-radius:8px;padding:8px 12px;font-weight:700;margin-bottom:10px"></div>
+        <div id="live-goal-flash" class="sports-goal-flash" hidden></div>
         <div class="table-scroll">
           <table class="tbl">
-            <thead><tr><th style="width:70px">Minute</th><th style="width:118px">Kickoff (UTC)</th><th>Match</th><th>Competition</th><th class="num">Score</th><th style="width:90px">Updated (UTC)</th></tr></thead>
+            <thead><tr><th class="sports-col-minute">Minute</th><th class="sports-col-kickoff">Kickoff (UTC)</th><th>Match</th><th>Competition</th><th class="num">Score</th><th class="sports-col-updated">Updated (UTC)</th></tr></thead>
             <tbody id="live-scores-body">
               <?php $liveRows = $today['live'] ?? []; ?>
               <?php if ($liveRows): foreach ($liveRows as $m): $ls = is_array($m['liveState'] ?? null) ? $m['liveState'] : []; $known = isset($ls['homeScore'], $ls['awayScore']); ?>
                 <tr data-match-id="<?= (int) ($m['id'] ?? 0) ?>">
                   <td class="mono dim"><?= isset($ls['minute']) ? e((string) (int) $ls['minute']) . "'" : '—' ?></td>
                   <td class="mono dim live-kickoff-cell"><?= e($kickoffStamp($m['kickoff_at'] ?? null)) ?></td>
-                  <td style="font-weight:700"><?= e(($m['home_team'] ?? '?') . ' vs ' . ($m['away_team'] ?? '?')) ?><?php if (!empty($m['simulated'])): ?> <span class="badge b-gray">sim</span><?php endif; ?></td>
+                  <td class="sports-cell-strong"><?= e(($m['home_team'] ?? '?') . ' vs ' . ($m['away_team'] ?? '?')) ?><?php if (!empty($m['simulated'])): ?> <span class="badge b-gray">sim</span><?php endif; ?></td>
                   <td class="dim"><?= e((string) ($m['competition'] ?? '')) ?></td>
-                  <td class="num mono live-score-cell" style="font-weight:700;font-size:14px"><?= $known ? e((int) $ls['homeScore'] . ' – ' . (int) $ls['awayScore']) : '—' ?></td>
-                  <td class="mono dim" style="font-size:11px"><?= e(substr((string) ($m['updated_at'] ?? ''), 11, 5)) ?></td>
+                  <td class="num mono live-score-cell"><?= $known ? e((int) $ls['homeScore'] . ' – ' . (int) $ls['awayScore']) : '—' ?></td>
+                  <td class="mono dim sports-cell-detail"><?= e(substr((string) ($m['updated_at'] ?? ''), 11, 5)) ?></td>
                 </tr>
               <?php endforeach; else: ?>
                 <tr><td colspan="6" class="dim" id="live-scores-empty">No matches currently live</td></tr>
@@ -496,13 +538,23 @@ $kickoffStamp = static function (mixed $iso): string {
             </tbody>
           </table>
         </div>
-        <p class="dim" style="font-size:11px;margin-top:8px">Scores come from the provider's live endpoint (one shared, self-gated request — <span class="mono">WINDELS_SPORTS_LIVE_REFRESH_SECONDS</span>, default 60, skipped entirely while nothing is in play). <b>Kickoff (UTC)</b> is the stored match date and time; a match with no stored kickoff shows <b>—</b>, never a guessed one. A match the provider gives no score for shows <b>—</b>, never 0-0. Goal events are audited as <span class="mono">SPORTS_GOAL_SCORED</span>.</p>
+        <p class="sports-note">Scores come from the provider's live endpoint (one shared, self-gated request — <span class="mono">WINDELS_SPORTS_LIVE_REFRESH_SECONDS</span>, default 60, skipped entirely while nothing is in play). <b>Kickoff (UTC)</b> is the stored match date and time; a match with no stored kickoff shows <b>—</b>, never a guessed one. A match the provider gives no score for shows <b>—</b>, never 0-0. Goal events are audited as <span class="mono">SPORTS_GOAL_SCORED</span>.</p>
       </div>
-    </div>
+    </section>
 
-    <div class="panel">
-      <h3>30-day odds prediction ticket performance (stored settlements only)<?= $viewIsToday ? '' : ' — ending ' . e($viewDateIso) ?></h3>
-      <div class="body" style="padding-top:12px">
+    <section class="panel sports-section" id="sports-performance" aria-labelledby="sports-performance-heading">
+      <div class="sports-section__heading">
+        <div class="sports-section__title">
+          <span class="sports-step" aria-hidden="true">4</span>
+          <div>
+            <p class="sports-eyebrow">Measured results</p>
+            <h3 id="sports-performance-heading">30-day odds prediction ticket performance (stored settlements only)<?= $viewIsToday ? '' : ' — ending ' . e($viewDateIso) ?></h3>
+          </div>
+        </div>
+        <span class="sports-section__meta">settled tickets only</span>
+      </div>
+      <div class="body">
+        <p class="sports-section-intro">Outcomes of tickets that have actually been settled from verified results over the 30 days ending on the viewed date. Nothing here is projected: an unsettled ticket contributes no win, no ROI and no profit figure.</p>
         <?php if (!empty($perf['demoBanner'])): ?><div class="notice warnbox"><?= e((string) $perf['demoBanner']) ?></div><?php endif; ?>
         <div class="stat-grid">
           <div class="stat"><div class="k">Settled tickets</div><div class="v"><?= (int) ($perf['settledTickets'] ?? 0) ?></div></div>
@@ -513,17 +565,24 @@ $kickoffStamp = static function (mixed $iso): string {
           <div class="stat"><div class="k">Avg odds</div><div class="v"><?= ($perf['averageOdds'] ?? null) !== null ? e(number_format((float) $perf['averageOdds'], 2)) : '—' ?></div></div>
         </div>
         <?php if (empty($perf['dataAvailable'])): ?>
-          <p class="dim" style="margin-top:12px">No settled records or selections yet — metrics are intentionally unavailable rather than invented.</p>
+          <p class="sports-empty">No settled records or selections yet — metrics are intentionally unavailable rather than invented.</p>
         <?php endif; ?>
-        <p class="dim" style="margin-top:10px;font-size:11px">Prediction accuracy, Brier, ECE and model/calibration state are reported once, on <a href="/football">Football Intelligence</a> and <a href="/football/models">Models &amp; calibration</a>.</p>
+        <p class="sports-note">Prediction accuracy, Brier, ECE and model/calibration state are reported once, on <a href="/football">Football Intelligence</a> and <a href="/football/models">Models &amp; calibration</a>.</p>
       </div>
-    </div>
+    </section>
 
   </div>
 
   <aside class="sports-side stack" aria-label="Sports system and data-feed status">
-    <section class="panel sports-reading-guide">
-      <h3>How to read the odds</h3>
+    <section class="panel sports-section sports-reading-guide" aria-labelledby="sports-guide-heading">
+      <div class="sports-section__heading">
+        <div class="sports-section__title">
+          <div>
+            <p class="sports-eyebrow">Reading the numbers</p>
+            <h3 id="sports-guide-heading">How to read the odds</h3>
+          </div>
+        </div>
+      </div>
       <div class="body">
         <dl>
           <div><dt>Real odds</dt><dd>The decimal bookmaker quote stored with its source and timestamp.</dd></div>
@@ -534,22 +593,30 @@ $kickoffStamp = static function (mixed $iso): string {
       </div>
     </section>
 
-    <div class="panel">
-      <h3>System</h3>
-      <div class="body" style="padding-top:12px">
-        <div class="stat-grid">
+    <section class="panel sports-section" aria-labelledby="sports-system-heading">
+      <div class="sports-section__heading">
+        <div class="sports-section__title">
+          <div>
+            <p class="sports-eyebrow">Platform state</p>
+            <h3 id="sports-system-heading">System</h3>
+          </div>
+        </div>
+      </div>
+      <div class="body">
+        <div class="stat-grid sports-stat-grid--rail">
           <div class="stat"><div class="k">Mode</div><div class="v"><?= e((string) ($sys['mode'] ?? 'SANDBOX')) ?></div></div>
-          <div class="stat"><div class="k">Odds prediction ticket engine</div><div class="v" style="font-size:12px"><?= e((string) ($sys['ticketEngine'] ?? '—')) ?></div></div>
+          <div class="stat"><div class="k">Odds prediction ticket engine</div><div class="v v-sm"><?= e((string) ($sys['ticketEngine'] ?? '—')) ?></div></div>
           <?php if ($operator): ?>
           <div class="stat"><div class="k">Operational providers</div><div class="v"><?= (int) ($readiness['operational'] ?? 0) ?>/<?= (int) ($readiness['total'] ?? 0) ?></div></div>
           <?php else: ?>
-          <div class="stat"><div class="k">Sports data</div><div class="v" style="font-size:12px"><span class="dot <?= ($readiness['engine'] ?? '') === 'READY' ? 'up' : 'down' ?>"></span> <?= ($readiness['engine'] ?? '') === 'READY' ? 'Available' : 'Unavailable' ?></div></div>
+          <div class="stat"><div class="k">Sports data</div><div class="v v-sm"><span class="dot <?= ($readiness['engine'] ?? '') === 'READY' ? 'up' : 'down' ?>"></span> <?= ($readiness['engine'] ?? '') === 'READY' ? 'Available' : 'Unavailable' ?></div></div>
           <?php endif; ?>
-          <div class="stat"><div class="k">Prediction engine</div><div class="v" style="font-size:12px"><span class="dot <?= ($readiness['engine'] ?? '') === 'READY' ? 'up' : 'down' ?>"></span> <?= e((string) ($readiness['engine'] ?? '—')) ?></div></div>
+          <div class="stat"><div class="k">Prediction engine</div><div class="v v-sm"><span class="dot <?= ($readiness['engine'] ?? '') === 'READY' ? 'up' : 'down' ?>"></span> <?= e((string) ($readiness['engine'] ?? '—')) ?></div></div>
         </div>
         <?php if ($operator): ?>
+        <div class="sports-subhead"><h4>Feed health</h4></div>
         <div class="table-scroll">
-          <table class="tbl" style="margin-top:12px">
+          <table class="tbl">
             <thead><tr><th>Feed</th><th>Health</th><th class="num">Reliability</th></tr></thead>
             <tbody>
               <?php if (empty($sys['providers'])): ?>
@@ -557,7 +624,7 @@ $kickoffStamp = static function (mixed $iso): string {
               <?php else: ?>
                 <?php foreach (array_values($sys['providers']) as $i => $p): $st = (string) ($p['derivedStatus'] ?? 'UNKNOWN'); ?>
                   <tr>
-                    <td style="font-weight:700">Feed <?= (int) $i + 1 ?></td>
+                    <td class="sports-cell-strong">Feed <?= (int) $i + 1 ?></td>
                     <td><span class="dot <?= $statusDot($st) ?>"></span> <?= e($statusLabel($st)) ?></td>
                     <td class="num"><?= ($p['reliability'] ?? null) !== null ? e(number_format((float) $p['reliability'], 2)) : '—' ?></td>
                   </tr>
@@ -568,13 +635,14 @@ $kickoffStamp = static function (mixed $iso): string {
         </div>
         <?php endif; ?>
         <?php if (!empty($sys['lastSyncs'])): ?>
+          <div class="sports-subhead"><h4>Last jobs</h4></div>
           <div class="table-scroll">
-            <table class="tbl" style="margin-top:12px">
+            <table class="tbl">
               <thead><tr><th>Job</th><th>Status</th></tr></thead>
               <tbody>
                 <?php foreach ($sys['lastSyncs'] as $j): ?>
                   <tr>
-                    <td class="mono dim" title="<?= e((string) ($j['executionKey'] ?? '')) ?>"><?= e((string) ($j['jobType'] ?? $j['job_type'] ?? '?')) ?><br><span style="font-size:10px"><?= e(substr((string) ($j['started_at'] ?? $j['created_at'] ?? ''), 0, 16)) ?></span></td>
+                    <td class="mono dim" title="<?= e((string) ($j['executionKey'] ?? '')) ?>"><?= e((string) ($j['jobType'] ?? $j['job_type'] ?? '?')) ?><small><?= e(substr((string) ($j['started_at'] ?? $j['created_at'] ?? ''), 0, 16)) ?></small></td>
                     <td><span class="badge b-gray"><?= e((string) ($j['status'] ?? 'RUNNING')) ?></span></td>
                   </tr>
                 <?php endforeach; ?>
@@ -583,26 +651,33 @@ $kickoffStamp = static function (mixed $iso): string {
           </div>
         <?php endif; ?>
       </div>
-    </div>
+    </section>
 
     <?php if ($operator): ?>
-    <div class="panel">
-      <h3>Data feed</h3>
-      <div class="body" style="padding-top:12px">
+    <section class="panel sports-section" aria-labelledby="sports-feed-heading">
+      <div class="sports-section__heading">
+        <div class="sports-section__title">
+          <div>
+            <p class="sports-eyebrow">Data health</p>
+            <h3 id="sports-feed-heading">Data feed</h3>
+          </div>
+        </div>
+      </div>
+      <div class="body">
         <?php $configuredIds = $sys['configuredIds'] ?? []; $live = $sys['liveHealth'] ?? []; ?>
         <?php if (empty($configuredIds)): ?>
-          <p class="dim"><b>No providers registered.</b> Add a provider key (API-Football, TheSportsDB or SportMonks) via Admin → API or the <span class="mono">WINDELS_*_KEY</span> variables in <span class="mono">.env</span>, then press <b>Sync now</b> above.</p>
+          <p class="sports-empty"><b>No providers registered.</b> Add a provider key (API-Football, TheSportsDB or SportMonks) via Admin → API or the <span class="mono">WINDELS_*_KEY</span> variables in <span class="mono">.env</span>, then press <b>Sync now</b> above.</p>
         <?php else: ?>
-          <p class="dim" style="font-size:11px;margin:0 0 8px">Operational providers: <b><?= (int) ($readiness['operational'] ?? 0) ?>/<?= (int) ($readiness['total'] ?? 0) ?></b> · Prediction engine: <b><?= e((string) ($readiness['engine'] ?? '—')) ?></b></p>
+          <p class="sports-note sports-note--lead">Operational providers: <b><?= (int) ($readiness['operational'] ?? 0) ?>/<?= (int) ($readiness['total'] ?? 0) ?></b> · Prediction engine: <b><?= e((string) ($readiness['engine'] ?? '—')) ?></b></p>
           <div class="table-scroll">
             <table class="tbl">
               <thead><tr><th>Model</th><th>Health</th><th>Circuit</th></tr></thead>
               <tbody>
                 <?php foreach (array_values($configuredIds) as $i => $pid): $h = is_array($live[$pid] ?? null) ? $live[$pid] : []; $st = (string) ($h['status'] ?? 'UNKNOWN'); $c = is_array($h['circuit'] ?? null) ? $h['circuit'] : []; ?>
                   <tr>
-                    <td class="mono" style="font-weight:700"><?= e($windelsModelId) ?><br><span class="dim" style="font-size:10px;font-weight:400">feed <?= (int) $i + 1 ?><?php if (isset($h['rateLimitRemaining']) || isset($h['requestsToday'])): ?> · quota <?= isset($h['requestsToday']) ? e((string) $h['requestsToday']) . '/' . e((string) ($h['limitDaily'] ?? '?')) . ' used' : e((string) $h['rateLimitRemaining']) . ' left' ?><?php endif; ?></span></td>
-                    <td><span class="dot <?= $statusDot($st) ?>"></span> <?= e($statusLabel($st)) ?><?php if (!empty($h['detail'])): ?> <span class="dim" style="font-size:10px">provider detail hidden</span><?php endif; ?></td>
-                    <td style="font-size:11px"><?php $cs = (string) ($c['state'] ?? 'CLOSED'); ?><span class="badge <?= $cs === 'OPEN' ? 'b-red' : ($cs === 'HALF_OPEN' ? 'b-gray' : 'b-green') ?>"><?= e($cs) ?></span><?php if ($cs === 'OPEN' && !empty($c['retryAt'])): ?><br><span class="dim" style="font-size:10px">retry <?= e(substr((string) $c['retryAt'], 11, 5)) ?>Z</span><?php endif; ?></td>
+                    <td class="mono sports-cell-strong"><?= e($windelsModelId) ?><small class="dim">feed <?= (int) $i + 1 ?><?php if (isset($h['rateLimitRemaining']) || isset($h['requestsToday'])): ?> · quota <?= isset($h['requestsToday']) ? e((string) $h['requestsToday']) . '/' . e((string) ($h['limitDaily'] ?? '?')) . ' used' : e((string) $h['rateLimitRemaining']) . ' left' ?><?php endif; ?></small></td>
+                    <td><span class="dot <?= $statusDot($st) ?>"></span> <?= e($statusLabel($st)) ?><?php if (!empty($h['detail'])): ?> <small class="dim">provider detail hidden</small><?php endif; ?></td>
+                    <td class="sports-cell-detail"><?php $cs = (string) ($c['state'] ?? 'CLOSED'); ?><span class="badge <?= $cs === 'OPEN' ? 'b-red' : ($cs === 'HALF_OPEN' ? 'b-gray' : 'b-green') ?>"><?= e($cs) ?></span><?php if ($cs === 'OPEN' && !empty($c['retryAt'])): ?><small class="dim">retry <?= e(substr((string) $c['retryAt'], 11, 5)) ?>Z</small><?php endif; ?></td>
                   </tr>
                 <?php endforeach; ?>
               </tbody>
@@ -611,14 +686,15 @@ $kickoffStamp = static function (mixed $iso): string {
         <?php endif; ?>
         <?php $recent = $sys['recentSyncs'] ?? []; ?>
         <?php if (!empty($recent)): ?>
+          <div class="sports-subhead"><h4>Recent syncs</h4></div>
           <div class="table-scroll">
-            <table class="tbl" style="margin-top:12px">
+            <table class="tbl">
               <thead><tr><th>Sync</th><th>Status</th><th class="num">New</th></tr></thead>
               <tbody>
                 <?php foreach ($recent as $s): $errs = is_array($s['errors'] ?? null) ? $s['errors'] : []; ?>
                   <tr>
-                    <td class="mono dim"><?= e((string) ($s['job_type'] ?? '?')) ?><br><span style="font-size:10px"><?= e(substr((string) ($s['started_at'] ?? ''), 0, 16)) ?></span></td>
-                    <td><span class="badge b-gray"><?= e((string) ($s['status'] ?? 'RUNNING')) ?></span><?php if (!empty($errs[0])): ?><br><span class="dim" style="font-size:10px"><?= e(mb_substr((string) $errs[0], 0, 140)) ?></span><?php endif; ?></td>
+                    <td class="mono dim"><?= e((string) ($s['job_type'] ?? '?')) ?><small><?= e(substr((string) ($s['started_at'] ?? ''), 0, 16)) ?></small></td>
+                    <td><span class="badge b-gray"><?= e((string) ($s['status'] ?? 'RUNNING')) ?></span><?php if (!empty($errs[0])): ?><small class="dim"><?= e(mb_substr((string) $errs[0], 0, 140)) ?></small><?php endif; ?></td>
                     <td class="num mono"><?= (int) ($s['records_created'] ?? 0) ?></td>
                   </tr>
                 <?php endforeach; ?>
@@ -626,10 +702,10 @@ $kickoffStamp = static function (mixed $iso): string {
             </table>
           </div>
         <?php elseif (!empty($configuredIds)): ?>
-          <p class="dim" style="margin-top:10px">No sync runs recorded yet — press <b>Sync now</b> to pull the first fixtures.</p>
+          <p class="sports-empty">No sync runs recorded yet — press <b>Sync now</b> to pull the first fixtures.</p>
         <?php endif; ?>
       </div>
-    </div>
+    </section>
     <?php endif; ?>
 
   </aside>
@@ -735,10 +811,10 @@ $kickoffStamp = static function (mixed $iso): string {
     return '<tr data-match-id="' + esc(m.id) + '">'
       + '<td class="mono dim">' + minute + '</td>'
       + '<td class="mono dim live-kickoff-cell">' + esc(kickoffStamp(m.kickoff)) + '</td>'
-      + '<td style="font-weight:700">' + esc(m.homeTeam) + ' vs ' + esc(m.awayTeam) + sim + '</td>'
+      + '<td class="sports-cell-strong">' + esc(m.homeTeam) + ' vs ' + esc(m.awayTeam) + sim + '</td>'
       + '<td class="dim">' + esc(m.competition) + '</td>'
-      + '<td class="num mono live-score-cell" style="font-weight:700;font-size:14px">' + score + '</td>'
-      + '<td class="mono dim" style="font-size:11px">' + esc(updated) + '</td>'
+      + '<td class="num mono live-score-cell">' + score + '</td>'
+      + '<td class="mono dim sports-cell-detail">' + esc(updated) + '</td>'
       + '</tr>';
   }
 
@@ -770,17 +846,16 @@ $kickoffStamp = static function (mixed $iso): string {
         + (ev.minute !== null && ev.minute !== undefined ? " (" + ev.minute + "')" : '') + ' · ' + esc(ev.competition);
     });
     flash.innerHTML = lines.join('<br>');
-    flash.style.display = 'block';
+    flash.hidden = false;
     fresh.forEach(function(ev){
       var row = body.querySelector('tr[data-match-id="' + ev.matchId + '"]');
       if(row){
-        row.style.transition = 'background 1.5s ease';
-        row.style.background = 'rgba(109,40,217,0.18)';
-        setTimeout(function(){ row.style.background = ''; }, 6000);
+        row.classList.add('sports-goal-row');
+        setTimeout(function(){ row.classList.remove('sports-goal-row'); }, 6000);
       }
     });
     clearTimeout(flash._t);
-    flash._t = setTimeout(function(){ flash.style.display = 'none'; }, 8000);
+    flash._t = setTimeout(function(){ flash.hidden = true; }, 8000);
   }
 
   function setNote(text, cls){

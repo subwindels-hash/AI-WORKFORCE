@@ -1353,6 +1353,12 @@ pre.raw {
 }
 
 /* ---------- Sports intelligence: one moving feed + pinned context ---------- */
+/* The console is ONE vertical reading order: hero → controls → numbered feed
+   sections. Every section is the same object — a .panel with a
+   .sports-section__heading (step, eyebrow, title, meta) and a .body — so the
+   page reads as a single, uniform sequence instead of a pile of one-off
+   panels. All spacing comes from these rules; no section carries its own
+   inline style. */
 .sports-console { display: flex; flex-direction: column; gap: var(--space-4); }
 .sports-hero {
   display: flex;
@@ -1364,6 +1370,7 @@ pre.raw {
   border-radius: var(--radius);
   background: radial-gradient(650px 220px at 0 0, #8b5cf61c, transparent 72%), var(--panel);
 }
+.sports-hero__intro { min-width: 0; }
 .sports-eyebrow { margin: 0 0 4px; color: var(--violet); font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .sports-hero h2 { margin: 0; font-size: 24px; }
 .sports-hero__copy { max-width: 76ch; margin: 6px 0 0; color: var(--muted); }
@@ -1373,12 +1380,139 @@ pre.raw {
 .sports-actionbar__links { justify-content: flex-end; }
 .sports-date-form label { color: var(--muted); font-size: 11px; font-weight: 700; }
 .sports-date-form .sel { width: auto; min-width: 145px; padding: 7px 9px; }
-.sports-context-note, .sports-section-intro { margin: -6px 2px 0; color: var(--dim); font-size: 11px; line-height: 1.55; }
-.sports-section-intro { margin: 0 0 12px; max-width: 92ch; }
+.sports-notes { display: grid; gap: 4px; }
+.sports-context-note { margin: 0 2px; color: var(--dim); font-size: 11px; line-height: 1.55; }
+.sports-setup-options { margin-top: 6px; }
+.sports-setup-options ul { margin: 4px 0 0 18px; padding: 0; }
+
+/* One section object, used by every block in the feed and in the rail. */
+.sports-section { margin: 0; display: flex; flex-direction: column; }
+.sports-section__heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 13px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.sports-section__title { display: flex; align-items: flex-start; gap: 11px; min-width: 0; }
+.sports-section__title h3 { margin: 0; }
+.sports-section__title .sports-eyebrow { margin-bottom: 2px; }
+.sports-section__meta { padding-top: 5px; color: var(--dim); font-size: 11px; white-space: nowrap; }
+.sports-step {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-top: 1px;
+  border: 1px solid #8b5cf655;
+  border-radius: 50%;
+  background: #8b5cf61f;
+  color: #c4b5fd;
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+/* Body rhythm: one vertical gap between every child, set once. */
+.sports-section > .body { padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 12px; }
+.sports-section > .body > * { margin: 0; }
+.sports-section-intro { max-width: 92ch; color: var(--dim); font-size: 11px; line-height: 1.55; }
+.sports-subhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+.sports-subhead:first-child { padding-top: 0; border-top: 0; }
+.sports-subhead h4 { margin: 0; color: #fff; font-size: 12px; font-weight: 700; }
+.sports-subhead > span, .sports-subhead .dim { font-size: 11px; }
+.sports-meters { display: grid; gap: 6px; }
+.sports-meters .meter { margin: 0; }
+.sports-note { color: var(--dim); font-size: 11px; line-height: 1.5; }
+.sports-note--lead { margin-bottom: 2px; }
+.sports-empty { color: var(--dim); font-size: 12px; line-height: 1.55; }
+.sports-chips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; }
+.sports-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sports-actions form { margin: 0; }
+.sports-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sports-controls form { display: flex; align-items: center; gap: 6px; margin: 0; }
+.sports-controls__check { display: flex; align-items: center; gap: 4px; color: var(--dim); font-size: 11px; white-space: nowrap; }
+.sports-controls__date { font-size: 12px; font-weight: 700; }
+.sports-controls__note { color: var(--dim); font-size: 11px; }
+.sports-generate-btn { background: var(--violet); border-color: var(--violet); color: #fff; font-weight: 700; }
+.sports-generate-btn:hover:not([disabled]) { background: #7c3aed; border-color: #a78bfa; color: #fff; }
 .sports-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 320px); gap: var(--space-4); align-items: start; }
 .sports-main, .sports-side { min-width: 0; }
+/* Legacy panels inside the layout keep the same heading/body rhythm. */
 .sports-layout .panel > h3 { display: block; padding: 13px 20px; border-bottom: 1px solid var(--line); background: transparent; }
-.sports-layout .panel .body { padding: 16px 20px 20px; }
+.sports-layout .panel > .body { padding: 16px 20px 20px; }
+.sports-layout .stat-grid { grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); }
+.sports-stat-grid--rail { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 8px; }
+.sports-stat-grid--rail .stat { padding: 10px 11px; }
+.sports-layout .stat .v.v-sm { font-size: 12px; }
+.sports-layout .table-scroll { margin: 0; }
+.sports-cell-strong { font-weight: 700; }
+.sports-cell-strong small { display: block; margin-top: 2px; color: var(--dim); font-weight: 400; font-size: 10px; }
+.sports-cell-detail { font-size: 11px; }
+.sports-cell-detail small { display: block; margin-top: 2px; font-size: 10px; }
+/* Scoped to this console: a second line inside a cell stacks under the first
+   instead of running on. Global .tbl rules are left untouched. */
+.sports-layout .tbl td.mono.dim small { display: block; margin-top: 2px; font-size: 10px; }
+.sports-layout .tbl td small.dim { display: block; margin-top: 2px; font-size: 10px; line-height: 1.35; }
+.sports-col-minute { width: 70px; }
+.sports-col-kickoff { width: 118px; }
+.sports-col-updated { width: 90px; }
+.sports-livebar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sports-livebar .dim { font-size: 11px; }
+.sports-goal-flash { padding: 8px 12px; border-radius: var(--radius-sm); background: var(--violet); color: #fff; font-weight: 700; }
+.sports-goal-flash[hidden] { display: none; }
+.sports-goal-row { transition: background 1.5s ease; background: #6d28d92e; }
+/* ---------- Odds prediction ticket screen (/sports/odds-prediction-ticket) ----
+   Same section system as the /sports board: the five numbered records below
+   are .sports-section panels, and the reading guide sits in the pinned rail.
+   Everything here is a class, so the view carries no inline layout style. */
+.sports-section--feature { border-color: #8b5cf64d; box-shadow: inset 0 2px 0 #8b5cf680, 0 1px 2px #00000026; }
+.sports-ticket-btn { background: var(--violet); border-color: var(--violet); color: #fff; font-weight: 700; letter-spacing: .02em; }
+.sports-ticket-btn:hover:not([disabled]) { background: #7c3aed; border-color: #a78bfa; color: #fff; }
+.sports-chip-strong { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; font-weight: 700; }
+.sports-lead { font-weight: 700; }
+.sports-stat-word { font-size: 13px; }
+.sports-inline-form { display: inline; margin: 0; }
+/* Definition lists in the rail: one term per row, answer underneath. */
+.sports-defs { display: grid; gap: 9px; margin: 0; }
+.sports-defs > div { padding-top: 9px; border-top: 1px solid var(--line); }
+.sports-defs > div:first-child { padding-top: 0; border-top: 0; }
+.sports-defs dt { color: #fff; font-size: 12px; font-weight: 700; }
+.sports-defs dd { margin: 2px 0 0; color: var(--dim); font-size: 11px; line-height: 1.5; }
+/* Collapsed detail blocks (distributions, rejection ledger). */
+.sports-details > summary { color: var(--dim); font-size: 12px; cursor: pointer; }
+.sports-details[open] > summary { margin-bottom: 10px; }
+.sports-details > *:not(summary) { margin-top: 10px; }
+.sports-dist-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.sports-dist-label { margin: 0 0 6px; font-size: 11px; font-weight: 700; }
+.sports-dist-policy { margin-top: 10px; }
+/* One distribution row: label, proportional bar, count. */
+.sports-bandrow { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+.sports-bandrow__label { min-width: 132px; font-size: 11px; }
+.sports-bandrow__track { flex: 1; height: 12px; overflow: hidden; border-radius: 3px; background: #7f7f7f26; }
+.sports-bandrow__fill { display: block; height: 12px; background: var(--violet); }
+.sports-bandrow__count { min-width: 34px; font-size: 11px; text-align: right; }
+/* Table cells shared by the selection, pick, history and audit tables. */
+.sports-tbl-sm { font-size: 12px; }
+.sports-tbl-xs { font-size: 11px; }
+.sports-layout .sports-cell-match { font-weight: 700; }
+.sports-layout .sports-cell-id { font-weight: 700; }
+.sports-layout .sports-cell-actions { white-space: nowrap; }
+.sports-layout .sports-cell-note { display: block; margin-top: 2px; font-size: 10px; font-weight: 400; line-height: 1.35; }
+.sports-team { display: inline-flex; align-items: center; gap: 5px; vertical-align: middle; }
+.sports-vs { font-weight: 400; }
+.sports-crest { border-radius: 3px; object-fit: contain; }
+.sports-badge-xs { font-size: 10px; }
+
 .sports-ticket-panel { border-color: #8b5cf64d; box-shadow: inset 0 2px 0 #8b5cf680, 0 1px 2px #00000026; }
 .sports-ticket-table { min-width: 920px; font-size: 11px; }
 .sports-ticket-table th { padding: 8px; font-size: 9px; }
@@ -1388,32 +1522,61 @@ pre.raw {
 .sports-ticket-match { min-width: 190px; }
 .sports-ticket-metric { min-width: 132px; font-variant-numeric: tabular-nums; }
 .sports-ticket-metric > b { font-size: 13px; }
+.live-score-cell { font-weight: 700; font-size: 14px; }
 .sports-reading-guide dl { display: grid; gap: 10px; margin: 0; }
 .sports-reading-guide dl > div { padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .sports-reading-guide dl > div:last-child { padding-bottom: 0; border-bottom: 0; }
 .sports-reading-guide dt { color: var(--text); font-size: 11px; font-weight: 700; }
 .sports-reading-guide dd { margin: 2px 0 0; color: var(--dim); font-size: 11px; line-height: 1.45; }
-.sports-diagnostics { margin-top: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #0b121e; }
+.sports-diagnostics { border: 1px solid var(--line); border-radius: var(--radius-sm); background: #0b121e; }
 .sports-diagnostics > summary { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 12px; cursor: pointer; list-style: none; color: var(--brand); font-size: 11px; font-weight: 700; }
 .sports-diagnostics > summary::-webkit-details-marker { display: none; }
 .sports-diagnostics > summary span:first-child { color: var(--text); }
 .sports-diagnostics > summary small { display: block; margin-top: 1px; color: var(--dim); font-weight: 500; }
 .sports-diagnostics[open] > summary { border-bottom: 1px solid var(--line); background: var(--brand-soft); }
-.sports-diagnostics > :not(summary) { margin-left: 12px; margin-right: 12px; }
+.sports-diagnostics > :not(summary) { margin-left: 12px; margin-right: 12px; margin-top: 12px; }
 .sports-diagnostics > :last-child { margin-bottom: 12px; }
 
-/* Desktop context rails stay in view while the long match/ticket feed moves.
-   A rail taller than the viewport gets its own small internal scrollbar; its
-   sticky range still ends with the parent layout, so it never overlaps the
-   page footer. */
+/* Desktop context rail: PINNED for the whole page — only the feed moves.
+   position: sticky holds the rail under the topbar from the first pixel of
+   scroll all the way to the end of the page. Three things are needed for the
+   pin to actually hold at the END, which is where it used to break:
+
+   1. align-self: start. A grid item defaults to `stretch`: it becomes as tall
+      as the row, and a full-height item has no room to stick, so the pin
+      silently does nothing. The layout sets align-items: start and the item
+      repeats it, so the rail keeps its pin even if a page overrides the
+      container.
+
+   2. The height cap must reserve the page tail. A sticky item can never be
+      painted below its grid area, and the area ends where the feed ends —
+      above the main padding and the footer. A rail capped only against the
+      viewport is therefore ~130px too tall at maximum scroll and gets pushed
+      up off the topbar in the last stretch of the page, which reads as "the
+      rail scrolls away at the end". Capping it against the viewport MINUS the
+      page tail keeps the whole rail inside the area at every scroll position,
+      so it parks and stays put while the feed finishes scrolling under it.
+
+   3. No overscroll-behavior: contain. A rail taller than its cap grows its
+      own scrollbar, but the wheel must not be trapped there — once the rail
+      hits its own end, scrolling has to chain back to the page so the FEED
+      keeps moving. Trapping the wheel over the rail was what made the bottom
+      of the page feel stuck. */
 @media (min-width: 1181px) {
+  .sports-layout, .football-layout, .football-match-layout {
+    /* Space under the sticky topbar, and the untouchable page tail below the
+       feed (.wrap padding-bottom 72px + footer ≈ 56px + breathing room). */
+    --rail-top: 76px;
+    --rail-tail: 136px;
+  }
   .sports-side, .football-side, .football-match-side {
     position: sticky;
-    top: 76px;
-    max-height: calc(100vh - 92px);
-    max-height: calc(100dvh - 92px);
+    top: var(--rail-top);
+    align-self: start;
+    max-height: calc(100vh - var(--rail-top) - var(--rail-tail));
+    max-height: calc(100dvh - var(--rail-top) - var(--rail-tail));
     overflow-y: auto;
-    overscroll-behavior: contain;
+    overscroll-behavior: auto;
     scrollbar-width: thin;
     scrollbar-color: var(--line2) transparent;
     padding-right: 3px;
@@ -1439,22 +1602,53 @@ pre.raw {
 }
 .football-ticket-link { background: var(--violet); border-color: var(--violet); color: #fff; }
 .football-ticket-link:hover { color: #fff; border-color: #a78bfa; background: #7c3aed; }
+.football-hero__intro { min-width: 0; }
 .football-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 340px); gap: var(--space-4); align-items: start; }
 .football-main, .football-side { min-width: 0; }
-.football-section { margin: 0; }
+/* One section object for the whole board: every feed block and every rail
+   block is a .panel + .football-section__heading (step, eyebrow, title, meta)
+   + .body. The feed is a numbered reading order (1 → 4); the rail is
+   unnumbered reference. Spacing lives here, never in an inline style. */
+.football-section { margin: 0; display: flex; flex-direction: column; }
 .football-section__heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 13px 20px; border-bottom: 1px solid var(--line); }
 .panel > .football-section__heading { background: transparent; }
 .football-section__heading h3 { margin: 0; }
 .football-section__heading .football-eyebrow { margin-bottom: 2px; }
-.football-updated { padding-top: 5px; font-size: 11px; white-space: nowrap; }
-.football-section .body { padding: 16px 20px 20px; }
-.football-section__divider { height: 1px; background: var(--line); margin: 16px 0; }
+.football-section__title { display: flex; align-items: flex-start; gap: 11px; min-width: 0; }
+.football-section__meta { padding-top: 5px; color: var(--dim); font-size: 11px; white-space: nowrap; }
+.football-step {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-top: 1px;
+  border: 1px solid #2f6bff55;
+  border-radius: 50%;
+  background: #2f6bff1f;
+  color: #9dbcff;
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.football-step--control { border-color: var(--line2); background: #ffffff0d; color: var(--muted); }
+/* Body rhythm: one vertical gap between every child, declared once. */
+.football-section > .body { padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 12px; }
+.football-section > .body > * { margin: 0; }
+.football-section-intro { max-width: 92ch; color: var(--dim); font-size: 11px; line-height: 1.55; }
+.football-section__divider { height: 1px; background: var(--line); margin: 0; }
+.football-inline-form { display: inline; margin: 0; }
+.football-inline-note { font-size: 11px; }
+.football-cell-label { width: 180px; }
+.football-cell-small { font-size: 11px; }
+.football-cell-actions { white-space: nowrap; }
+.btn.is-disabled { opacity: .45; }
 .football-stat-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
 .football-stat-grid .stat { padding: 10px 11px; }
 .football-stat-grid .stat .v { font-size: 20px; }
 .football-stat-grid .trend { margin-top: 2px; font-size: 10px; color: var(--dim); line-height: 1.25; }
 .football-stat-grid--compact { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.football-help { margin: 10px 0 0; color: var(--dim); font-size: 11px; line-height: 1.5; }
+.football-help { margin: 0; color: var(--dim); font-size: 11px; line-height: 1.5; }
 .football-pager { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; }
 .football-pager > :last-child { justify-self: end; }
 .football-pager__status { display: flex; flex-direction: column; text-align: center; font-size: 12px; }
@@ -1466,7 +1660,7 @@ pre.raw {
 .football-table { font-size: 12px; }
 .football-cell-note { margin-top: 2px; font-size: 10px; line-height: 1.35; }
 .football-match-link { color: var(--text); font-weight: 700; }
-.football-fixture-list { display: grid; gap: 10px; margin-top: 14px; }
+.football-fixture-list { display: grid; gap: 10px; }
 .football-fixture { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #0c1320; }
 .football-fixture__header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 13px 14px 10px; border-bottom: 1px solid var(--line); }
 .football-fixture__identity { min-width: 0; }
@@ -1548,8 +1742,6 @@ pre.raw {
 .football-match-hero p { margin: 5px 0 0; color: var(--muted); }
 .football-match-hero__actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .football-match-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(270px, 340px); gap: var(--space-4); align-items: start; }
-.football-match-page .panel > h3 { display: block; padding: 13px 20px; }
-.football-match-page .panel .body { padding: 16px 20px 20px; }
 .football-outcome-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
 .football-outcome { padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel2); }
 .football-outcome span, .football-outcome small { display: block; }
@@ -1557,10 +1749,12 @@ pre.raw {
 .football-outcome b { display: block; margin-top: 2px; font-size: 16px; }
 .football-outcome small { color: var(--dim); font-size: 10px; margin-top: 2px; }
 .football-match-odds { margin: 0; }
-.football-match-odds .football-market-card { margin-top: 10px; }
+.football-section > .body > .football-market-card { margin: 0; }
 
 @media (max-width: 1180px) {
   .sports-layout, .football-layout, .football-match-layout { grid-template-columns: 1fr; }
+  /* Below the two-column breakpoint the rail has nothing to sit beside: it
+     unpins and becomes the last block of the same single reading order. */
   .sports-side, .football-side, .football-match-side { position: static; max-height: none; overflow: visible; padding-right: 0; }
   .sports-side, .football-side, .football-match-side { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
 }
@@ -1571,6 +1765,14 @@ pre.raw {
   .sports-actionbar__links { justify-content: flex-start; }
   .sports-date-form { align-items: flex-start; }
   .sports-side, .football-match-side { grid-template-columns: 1fr; }
+  /* The section heading stacks so the step + title keep a full line and the
+     meta never squeezes the title into two words per row. */
+  .sports-section__heading, .football-section__heading { flex-direction: column; gap: 6px; padding: 12px 15px; }
+  .sports-section__meta, .football-section__meta { padding-top: 0; white-space: normal; }
+  .sports-section > .body, .football-section > .body { padding: 14px 15px 16px; }
+  .sports-controls, .sports-actions { align-items: stretch; flex-direction: column; }
+  .sports-controls form { flex-wrap: wrap; }
+  .sports-controls .btn, .sports-actions .btn { width: 100%; }
   .football-hero__actions, .football-match-hero__actions { justify-content: flex-start; }
   .football-actionbar { align-items: flex-start; flex-direction: column; }
   .football-stat-grid, .football-stat-grid--compact { grid-template-columns: 1fr 1fr; }

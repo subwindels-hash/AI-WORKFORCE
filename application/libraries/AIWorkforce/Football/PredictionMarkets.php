@@ -18,11 +18,20 @@ use AIWorkforce\Sports\OddsBounds;
  *    the engine already stores in `football_score_probabilities`. Totals,
  *    both-teams-to-score, double chance, draw-no-bet, correct score and Asian
  *    handicap are sums over that grid: arithmetic on stored numbers, not a new
- *    model and not an invented figure.
+ *    model and not an invented figure. The same grid answers the wider sheet —
+ *    odd/even, goal bands, per-team goals, clean sheets, winning margin and
+ *    result-and-BTTS are each a different predicate over the same cells, which
+ *    is why adding them costs no extra model, query or provider call.
  *  - `STORED_1X2` — the 1X2 row stored with the prediction.
- *  - `FIRST_HALF_SHARE` — the same score model run on the configured share of
- *    the match goal expectancy. The share is an assumption, so it is named in
- *    the market's `basis` and configurable, never hidden.
+ *  - `FIRST_HALF_SHARE` / `SECOND_HALF_SHARE` — the same score model run on the
+ *    configured share of the match goal expectancy (and, for the second half,
+ *    on the share the first half does not claim). The share is an assumption,
+ *    so it is named in the market's `basis` and configurable, never hidden.
+ *
+ * Every market added to the catalogue must be *exhaustive*: its legs are
+ * mutually exclusive and cover the whole distribution. That is what lets the
+ * bookmaker margin be removed honestly, and it is asserted per market by the
+ * test suite rather than assumed here.
  *  - `NOT_MODELLED` — corners, cards and half-time/full-time. The module has no
  *    stored input for these, so they are reported as `DATA_UNAVAILABLE` unless
  *    the connected odds provider supplied the price itself.
@@ -58,6 +67,14 @@ final class PredictionMarkets
     private const WEAK_BANDS = [QualityBand::REJECTED];
 
     /**
+     * Correct score lists every scoreline the grid meaningfully reaches. A cell
+     * below this probability is noise rather than a quotable scoreline, but the
+     * leaders are always kept even in a wide-open match.
+     */
+    private const CORRECT_SCORE_MIN_PROBABILITY = 0.001;
+    private const CORRECT_SCORE_MIN_ROWS = 12;
+
+    /**
      * The catalogue. `derivation` says which stored input answers the market,
      * `line` carries the goal line or handicap line where one applies, and
      * `assumed` marks a market that rests on a stated, configurable assumption
@@ -89,6 +106,101 @@ final class PredictionMarkets
             if ($market['key'] === $key) return $market;
         }
         return null;
+    }
+
+    /**
+     * The lines a line-based market is quoted at.
+     *
+     * A bookmaker does not price "the" Asian handicap — it prices a ladder of
+     * them, and "Home -1.5" is a different bet from "Home -0.5" with a
+     * different probability and a different price. The catalogue advertises one
+     * default line per market so that a market *selector* stays short; this is
+     * the full ladder the all-odds sheet walks, so a match shows every line
+     * rather than a single representative one.
+     *
+     * Every line here is priced by the same grid arithmetic as the default one
+     * — a ladder adds coverage, never a new model. Quarter lines are included
+     * for the handicap because `handicap()` settles them by splitting the stake
+     * across the two bounding half lines, which is how they really settle.
+     *
+     * @return list<float>
+     */
+    public function linesFor(string $marketKey): array
+    {
+        return match (self::priceFamily($marketKey)) {
+            'OVER_UNDER' => [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5],
+            'HOME_TEAM_TOTAL_GOALS', 'AWAY_TEAM_TOTAL_GOALS' => [0.5, 1.5, 2.5, 3.5],
+            'FIRST_HALF_OVER_UNDER', 'SECOND_HALF_OVER_UNDER' => [0.5, 1.5, 2.5],
+            'ASIAN_HANDICAP' => [-2.5, -2.0, -1.75, -1.5, -1.25, -1.0, -0.75, -0.5, -0.25, 0.0,
+                0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5],
+            default => [],
+        };
+    }
+
+    /**
+     * The complete per-match sheet: every catalogue market, expanded across
+     * every line it is quoted at.
+     *
+     * Returned entries have the same shape as catalogue entries, so a caller
+     * evaluates them through the existing batched pass. A line-based market
+     * contributes one entry per line on its ladder; every other market
+     * contributes itself unchanged.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function fullSheet(): array
+    {
+        $out = [];
+        $walked = [];
+        foreach ($this->catalog() as $market) {
+            $key = (string) $market['key'];
+            $lines = $this->linesFor($key);
+            if ($lines === []) { $out[] = $market; continue; }
+            // OVER_0_5 … OVER_6_5 and UNDER_1_5 … UNDER_3_5 are ten catalogue
+            // keys describing ONE bookmaker family. The ladder belongs to the
+            // family, so it is walked exactly once — expanding per key would
+            // print every goal line ten times over.
+            $family = self::priceFamily($key);
+            if (isset($walked[$family])) continue;
+            $walked[$family] = true;
+            foreach ($lines as $line) {
+                $entry = $market;
+                $entry['key'] = self::ladderKey($family, $line);
+                $entry['line'] = $line;
+                $entry['label'] = self::lineLabelFor($key, $line);
+                $out[] = $entry;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * The catalogue key of one rung of a ladder.
+     *
+     * Goal lines keep the canonical OVER_<line> spelling so that the rest of
+     * the engine — `outcomes()`, `providerMarketMatches()`, the OddsBounds
+     * ceiling — recognises them exactly as it recognises the fixed catalogue
+     * keys. Every other family carries its line separately and keeps one key.
+     */
+    private static function ladderKey(string $family, float $line): string
+    {
+        if ($family !== 'OVER_UNDER') return $family;
+        return 'OVER_' . str_replace('.', '_', self::lineLabel($line));
+    }
+
+    /** The display label of one rung of a ladder. */
+    private static function lineLabelFor(string $marketKey, float $line): string
+    {
+        $label = self::lineLabel($line);
+        return match (self::priceFamily($marketKey)) {
+            'OVER_UNDER' => 'Total Goals — Over/Under ' . $label,
+            'HOME_TEAM_TOTAL_GOALS' => 'Home Team Total Goals — ' . $label,
+            'AWAY_TEAM_TOTAL_GOALS' => 'Away Team Total Goals — ' . $label,
+            'FIRST_HALF_OVER_UNDER' => 'First Half Goals — ' . $label,
+            'SECOND_HALF_OVER_UNDER' => 'Second Half Goals — ' . $label,
+            'ASIAN_HANDICAP' => 'Asian Handicap — Home ' . self::handicapLabel($line),
+            default => $label,
+        };
     }
 
     /**
@@ -163,7 +275,9 @@ final class PredictionMarkets
         $signature = static fn(string $family, ?float $line): string => $family . '|'
             . ($line === null ? 'NONE' : rtrim(rtrim(number_format($line, 4, '.', ''), '0'), '.'));
         $represented = [];
-        foreach ($this->catalog() as $market) {
+        // Every rung of every ladder counts as represented, so a provider line
+        // the sheet already walks is not reported a second time as an "extra".
+        foreach ($this->fullSheet() as $market) {
             $family = self::priceFamily((string) $market['key']);
             $line = self::familyCarriesLine($family) && is_numeric($market['line'] ?? null)
                 ? (float) $market['line'] : null;
@@ -206,6 +320,19 @@ final class PredictionMarkets
                 $out[] = ['key' => 'FIRST_HALF_OVER_UNDER', 'label' => 'First Half Goals — ' . $lineLabel,
                     'group' => 'First half', 'derivation' => 'SCORE_GRID', 'line' => $line,
                     'assumed' => true, 'selections' => ['Over', 'Under']];
+                continue;
+            }
+            if ($family === 'SECOND_HALF_OVER_UNDER') {
+                $out[] = ['key' => 'SECOND_HALF_OVER_UNDER', 'label' => 'Second Half Goals — ' . $lineLabel,
+                    'group' => 'Second half', 'derivation' => 'SCORE_GRID', 'line' => $line,
+                    'assumed' => true, 'selections' => ['Over', 'Under']];
+                continue;
+            }
+            if ($family === 'HOME_TEAM_TOTAL_GOALS' || $family === 'AWAY_TEAM_TOTAL_GOALS') {
+                $side = $family === 'HOME_TEAM_TOTAL_GOALS' ? 'Home' : 'Away';
+                $out[] = ['key' => $family, 'label' => $side . ' Team Total Goals — ' . $lineLabel,
+                    'group' => 'Team goals', 'derivation' => 'SCORE_GRID', 'line' => $line,
+                    'assumed' => false, 'selections' => ['Over', 'Under']];
                 continue;
             }
             if ($family === 'ASIAN_HANDICAP') {
@@ -305,17 +432,17 @@ final class PredictionMarkets
     private static function priceFamily(string $key): string
     {
         if (str_starts_with($key, 'OVER_') || str_starts_with($key, 'UNDER_')) return 'OVER_UNDER';
-        return match ($key) {
-            'FIRST_HALF_OVER_UNDER' => 'FIRST_HALF_OVER_UNDER',
-            'FIRST_HALF_WINNER' => 'FIRST_HALF_WINNER',
-            default => $key,
-        };
+        // Every other key is its own family: a half market, a team-goals
+        // market and a combination market each price out their own set of
+        // mutually exclusive legs and must never be de-vigged against another.
+        return $key;
     }
 
     /** Markets whose price belongs to a stated line: an "Over 3.5" quote is not an "Over 2.5" quote. */
     private static function familyCarriesLine(string $family): bool
     {
-        return in_array($family, ['OVER_UNDER', 'FIRST_HALF_OVER_UNDER', 'ASIAN_HANDICAP'], true);
+        return in_array($family, ['OVER_UNDER', 'FIRST_HALF_OVER_UNDER', 'SECOND_HALF_OVER_UNDER',
+            'HOME_TEAM_TOTAL_GOALS', 'AWAY_TEAM_TOTAL_GOALS', 'ASIAN_HANDICAP'], true);
     }
 
     /** The catalogue's own line for a market key, when the market states one. */
@@ -341,7 +468,20 @@ final class PredictionMarkets
         'FIRST_HALF_OVER_UNDER' => ['OVER', 'UNDER'],
         'BTTS' => ['YES', 'NO'],
         'BTTS_AND_OVER_2_5' => ['YES', 'NO'],
+        'BTTS_AND_UNDER_2_5' => ['YES', 'NO'],
         'ASIAN_HANDICAP' => ['HOME', 'AWAY'],
+        'TOTAL_GOALS_ODD_EVEN' => ['ODD', 'EVEN'],
+        'TOTAL_GOALS_BAND' => ['BAND_0_1', 'BAND_2_3', 'BAND_4_6', 'BAND_7_PLUS'],
+        'HOME_TEAM_TOTAL_GOALS' => ['OVER', 'UNDER'],
+        'AWAY_TEAM_TOTAL_GOALS' => ['OVER', 'UNDER'],
+        'HOME_CLEAN_SHEET' => ['YES', 'NO'],
+        'AWAY_CLEAN_SHEET' => ['YES', 'NO'],
+        'WINNING_MARGIN' => ['HOME_1', 'HOME_2', 'HOME_3_PLUS', 'DRAW', 'AWAY_1', 'AWAY_2', 'AWAY_3_PLUS'],
+        'RESULT_AND_BTTS' => ['HOME_YES', 'HOME_NO', 'DRAW_YES', 'DRAW_NO', 'AWAY_YES', 'AWAY_NO'],
+        'FIRST_HALF_DOUBLE_CHANCE' => ['HOME_OR_DRAW', 'HOME_OR_AWAY', 'AWAY_OR_DRAW'],
+        'FIRST_HALF_BTTS' => ['YES', 'NO'],
+        'SECOND_HALF_WINNER' => ['HOME', 'DRAW', 'AWAY'],
+        'SECOND_HALF_OVER_UNDER' => ['OVER', 'UNDER'],
     ];
 
     /**
@@ -612,6 +752,70 @@ final class PredictionMarkets
                 $yes = $this->totals($grid, null, static fn(int $h, int $a): bool => $h > 0 && $a > 0 && ($h + $a) > 2.5);
                 return $this->combine(['YES' => ['Both teams score and over 2.5 goals', $yes],
                     'NO' => ['Anything else', 1 - $yes]]);
+            case 'BTTS_AND_UNDER_2_5':
+                // The only scorelines that satisfy both legs are 1–1: any other
+                // both-scored game already has three goals in it.
+                $yes = $this->totals($grid, null, static fn(int $h, int $a): bool => $h > 0 && $a > 0 && ($h + $a) < 2.5);
+                return $this->combine(['YES' => ['Both teams score and under 2.5 goals', $yes],
+                    'NO' => ['Anything else', 1 - $yes]]);
+            case 'TOTAL_GOALS_ODD_EVEN':
+                // 0–0 is an even total: zero goals is an even number of them.
+                $odd = $this->totals($grid, static fn(int $total): bool => $total % 2 === 1);
+                return $this->combine(['ODD' => ['Odd number of goals', $odd],
+                    'EVEN' => ['Even number of goals (0 counts as even)', 1 - $odd]]);
+            case 'TOTAL_GOALS_BAND':
+                // Disjoint, exhaustive goal bands: every grid cell lands in
+                // exactly one of them, so the four probabilities sum to the
+                // grid's coverage rather than overlapping like the Over lines.
+                return $this->combine([
+                    'BAND_0_1' => ['0–1 goals', $this->totals($grid, static fn(int $t): bool => $t <= 1)],
+                    'BAND_2_3' => ['2–3 goals', $this->totals($grid, static fn(int $t): bool => $t === 2 || $t === 3)],
+                    'BAND_4_6' => ['4–6 goals', $this->totals($grid, static fn(int $t): bool => $t >= 4 && $t <= 6)],
+                    'BAND_7_PLUS' => ['7 or more goals', $this->totals($grid, static fn(int $t): bool => $t >= 7)],
+                ]);
+            case 'HOME_TEAM_TOTAL_GOALS':
+                $over = $this->totals($grid, null, static fn(int $h, int $a): bool => $h > (float) $line);
+                return $this->combine([
+                    'OVER' => ['Home over ' . self::lineLabel($line) . ' goals', $over],
+                    'UNDER' => ['Home under ' . self::lineLabel($line) . ' goals', 1 - $over],
+                ]);
+            case 'AWAY_TEAM_TOTAL_GOALS':
+                $over = $this->totals($grid, null, static fn(int $h, int $a): bool => $a > (float) $line);
+                return $this->combine([
+                    'OVER' => ['Away over ' . self::lineLabel($line) . ' goals', $over],
+                    'UNDER' => ['Away under ' . self::lineLabel($line) . ' goals', 1 - $over],
+                ]);
+            case 'HOME_CLEAN_SHEET':
+                // A home clean sheet is the away side failing to score.
+                $yes = $this->totals($grid, null, static fn(int $h, int $a): bool => $a === 0);
+                return $this->combine(['YES' => ['Home keeps a clean sheet', $yes],
+                    'NO' => ['Away scores at least once', 1 - $yes]]);
+            case 'AWAY_CLEAN_SHEET':
+                $yes = $this->totals($grid, null, static fn(int $h, int $a): bool => $h === 0);
+                return $this->combine(['YES' => ['Away keeps a clean sheet', $yes],
+                    'NO' => ['Home scores at least once', 1 - $yes]]);
+            case 'WINNING_MARGIN':
+                // Disjoint margins, with the open-ended 3+ buckets carrying the
+                // tail so the set stays exhaustive over the grid.
+                return $this->combine([
+                    'HOME_1' => ['Home by 1', $this->totals($grid, null, static fn(int $h, int $a): bool => $h - $a === 1)],
+                    'HOME_2' => ['Home by 2', $this->totals($grid, null, static fn(int $h, int $a): bool => $h - $a === 2)],
+                    'HOME_3_PLUS' => ['Home by 3 or more', $this->totals($grid, null, static fn(int $h, int $a): bool => $h - $a >= 3)],
+                    'DRAW' => ['Draw — no winning margin', $this->totals($grid, null, static fn(int $h, int $a): bool => $h === $a)],
+                    'AWAY_1' => ['Away by 1', $this->totals($grid, null, static fn(int $h, int $a): bool => $a - $h === 1)],
+                    'AWAY_2' => ['Away by 2', $this->totals($grid, null, static fn(int $h, int $a): bool => $a - $h === 2)],
+                    'AWAY_3_PLUS' => ['Away by 3 or more', $this->totals($grid, null, static fn(int $h, int $a): bool => $a - $h >= 3)],
+                ]);
+            case 'RESULT_AND_BTTS':
+                $both = static fn(int $h, int $a): bool => $h > 0 && $a > 0;
+                return $this->combine([
+                    'HOME_YES' => ['Home win & both score', $this->totals($grid, null, static fn(int $h, int $a): bool => $h > $a && $both($h, $a))],
+                    'HOME_NO' => ['Home win & not both score', $this->totals($grid, null, static fn(int $h, int $a): bool => $h > $a && !$both($h, $a))],
+                    'DRAW_YES' => ['Draw & both score', $this->totals($grid, null, static fn(int $h, int $a): bool => $h === $a && $both($h, $a))],
+                    'DRAW_NO' => ['Draw & not both score', $this->totals($grid, null, static fn(int $h, int $a): bool => $h === $a && !$both($h, $a))],
+                    'AWAY_YES' => ['Away win & both score', $this->totals($grid, null, static fn(int $h, int $a): bool => $a > $h && $both($h, $a))],
+                    'AWAY_NO' => ['Away win & not both score', $this->totals($grid, null, static fn(int $h, int $a): bool => $a > $h && !$both($h, $a))],
+                ]);
             case 'CORRECT_SCORE':
                 return $this->correctScore($grid);
             case 'ASIAN_HANDICAP':
@@ -626,6 +830,31 @@ final class PredictionMarkets
                 $over = $this->totals($half, static fn(int $total): bool => $total > (float) $line);
                 return $this->combine(['OVER' => ['First half over ' . self::lineLabel($line) . ' goals', $over],
                     'UNDER' => ['First half under ' . self::lineLabel($line) . ' goals', 1 - $over]]);
+            case 'FIRST_HALF_DOUBLE_CHANCE':
+                $half = $this->halfGrid($prediction);
+                if ($half === []) return [];
+                $p = $this->gridTriple($half, 'Home', 'Draw', 'Away');
+                return $this->combine([
+                    'HOME_OR_DRAW' => ['Home or Draw at half time', $this->sum($p, ['HOME', 'DRAW'])],
+                    'HOME_OR_AWAY' => ['Home or Away at half time', $this->sum($p, ['HOME', 'AWAY'])],
+                    'AWAY_OR_DRAW' => ['Draw or Away at half time', $this->sum($p, ['AWAY', 'DRAW'])],
+                ]);
+            case 'FIRST_HALF_BTTS':
+                $half = $this->halfGrid($prediction);
+                if ($half === []) return [];
+                $yes = $this->totals($half, null, static fn(int $h, int $a): bool => $h > 0 && $a > 0);
+                return $this->combine(['YES' => ['Both teams score in the first half', $yes],
+                    'NO' => ['One side fails to score in the first half', 1 - $yes]]);
+            case 'SECOND_HALF_WINNER':
+                $second = $this->secondHalfGrid($prediction);
+                if ($second === []) return [];
+                return $this->gridTriple($second, 'Home', 'Draw', 'Away');
+            case 'SECOND_HALF_OVER_UNDER':
+                $second = $this->secondHalfGrid($prediction);
+                if ($second === []) return [];
+                $over = $this->totals($second, static fn(int $total): bool => $total > (float) $line);
+                return $this->combine(['OVER' => ['Second half over ' . self::lineLabel($line) . ' goals', $over],
+                    'UNDER' => ['Second half under ' . self::lineLabel($line) . ' goals', 1 - $over]]);
             default:
                 return [];
         }
@@ -707,16 +936,27 @@ final class PredictionMarkets
         return $this->combine(['HOME' => [$homeLabel, $home], 'DRAW' => [$drawLabel, $draw], 'AWAY' => [$awayLabel, $away]]);
     }
 
-    /** The top scorelines of the grid — correct score is a grid market, not a guess. */
+    /**
+     * The scorelines of the grid — correct score is a grid market, not a guess.
+     *
+     * A bookmaker prices a whole correct-score board, so the sheet lists every
+     * scoreline the grid actually reaches, ordered most-likely first. Cells with
+     * no meaningful mass are dropped rather than printed as a wall of zeroes:
+     * they are not scorelines anyone prices, and listing them would bury the
+     * ones that matter. `includeQuotedScores()` still adds any further scoreline
+     * the provider quoted, so a real price is never hidden by this threshold.
+     */
     private function correctScore(array $grid): array
     {
         $rows = $grid;
         usort($rows, static fn(array $a, array $b) => (float) $b['probability'] <=> (float) $a['probability']);
         $out = [];
-        foreach (array_slice($rows, 0, 6) as $row) {
+        foreach ($rows as $row) {
+            $probability = round((float) $row['probability'], 6);
+            if ($probability < self::CORRECT_SCORE_MIN_PROBABILITY && count($out) >= self::CORRECT_SCORE_MIN_ROWS) continue;
             $label = (int) $row['home'] . '–' . (int) $row['away'];
             $out[] = ['selection' => (int) $row['home'] . '-' . (int) $row['away'], 'label' => $label,
-                'probability' => round((float) $row['probability'], 6), 'note' => null];
+                'probability' => $probability, 'note' => null];
         }
         return $out;
     }
@@ -810,13 +1050,37 @@ final class PredictionMarkets
      */
     private function halfGrid(array $prediction): array
     {
+        return $this->shareGrid($prediction, $this->config->firstHalfGoalShare());
+    }
+
+    /**
+     * The second-half grid: the same score model run on the share of the goal
+     * expectancy the first half does not claim. It rests on exactly the same
+     * stated assumption as the first-half markets — one share splits the match
+     * — so these markets are marked `assumed` and carry the share in their
+     * basis rather than pretending to be a stored per-half input.
+     *
+     * @return list<array{home:int,away:int,probability:float}>
+     */
+    private function secondHalfGrid(array $prediction): array
+    {
+        return $this->shareGrid($prediction, 1.0 - $this->config->firstHalfGoalShare());
+    }
+
+    /**
+     * The score model run on a stated share of the match goal expectancy.
+     *
+     * @return list<array{home:int,away:int,probability:float}>
+     */
+    private function shareGrid(array $prediction, float $share): array
+    {
         $snapshot = is_array($prediction['feature_snapshot'] ?? null) ? $prediction['feature_snapshot']
             : json_decode((string) ($prediction['feature_snapshot'] ?? '{}'), true);
         $expected = is_array($snapshot['expectedGoals'] ?? null) ? $snapshot['expectedGoals'] : [];
         $home = is_numeric($expected['home'] ?? null) ? (float) $expected['home'] : null;
         $away = is_numeric($expected['away'] ?? null) ? (float) $expected['away'] : null;
         if ($home === null || $away === null || $home < 0 || $away < 0) return [];
-        $share = $this->config->firstHalfGoalShare();
+        if ($share <= 0.0) return [];
         $grid = (new ScoreProbabilityModel($this->config))->fullGrid($home * $share, $away * $share);
         $rows = [];
         foreach ((array) ($grid['rows'] ?? []) as $row) {
@@ -932,15 +1196,33 @@ final class PredictionMarkets
     {
         $r = strtolower(trim($raw));
         if ($r === '') return '';
+        // Order matters. A qualified name ("First Half Both Teams To Score")
+        // contains the unqualified one, so every half-specific and combination
+        // market is matched BEFORE the plain family it would otherwise be
+        // filed under.
+        if (preg_match('/half.?time.?result.*full.?time|half.?time.*full.?time|ht.?ft/', $r)) return 'HALF_TIME_FULL_TIME';
+        $firstHalf = (bool) preg_match('/first.?half|1st.?half|half.?time|^1h|\b1h\b/', $r);
+        $secondHalf = (bool) preg_match('/second.?half|2nd.?half|^2h|\b2h\b/', $r);
+        if ($firstHalf || $secondHalf) {
+            $prefix = $firstHalf ? 'FIRST_HALF' : 'SECOND_HALF';
+            if (preg_match('/both.?teams|btts|goal.*goal|\bgg\b/', $r)) return $prefix . '_BTTS';
+            if (preg_match('/double.?chance/', $r)) return $prefix . '_DOUBLE_CHANCE';
+            if (preg_match('/over|under|total|goal/', $r)) return $prefix . '_OVER_UNDER';
+            if (preg_match('/result|winner|1x2/', $r)) return $prefix . '_WINNER';
+        }
         if (preg_match('/asian.?handicap|handicap/', $r)) return 'ASIAN_HANDICAP';
         if (preg_match('/draw.?no.?bet|dnb/', $r)) return 'DRAW_NO_BET';
-        if (preg_match('/double.?chance/', $r)) return 'DOUBLE_CHANCE';
+        if (preg_match('/\bodd\b.{0,6}\beven\b|\beven\b.{0,6}\bodd\b/', $r)) return 'TOTAL_GOALS_ODD_EVEN';
+        if (preg_match('/goal.?range|total.?goals.?band|goals.?band/', $r)) return 'TOTAL_GOALS_BAND';
+        if (preg_match('/winning.?margin|margin.?of.?victory/', $r)) return 'WINNING_MARGIN';
+        if (preg_match('/home.*clean.?sheet|clean.?sheet.*home/', $r)) return 'HOME_CLEAN_SHEET';
+        if (preg_match('/away.*clean.?sheet|clean.?sheet.*away/', $r)) return 'AWAY_CLEAN_SHEET';
+        if (preg_match('/(?:result|match.?winner|1x2).*(?:both.?teams|btts)|(?:both.?teams|btts).*(?:result|match.?winner|1x2)/', $r)) return 'RESULT_AND_BTTS';
+        if (preg_match('/(?:btts|both.?teams|goal.*goal).*under/', $r)) return 'BTTS_AND_UNDER_2_5';
         if (preg_match('/btts.?and|both.?teams.*over|goal.*goal.*over/', $r)) return 'BTTS_AND_OVER_2_5';
         if (preg_match('/both.?teams|btts|goal.*goal/', $r)) return 'BTTS';
+        if (preg_match('/double.?chance/', $r)) return 'DOUBLE_CHANCE';
         if (preg_match('/correct.?score|exact.?score/', $r)) return 'CORRECT_SCORE';
-        if (preg_match('/half.?time.?result.*full.?time|half.?time.*full.?time|ht.?ft/', $r)) return 'HALF_TIME_FULL_TIME';
-        if (preg_match('/first.?half|1st.?half|half.?time/', $r) && preg_match('/over|under|goal/', $r)) return 'FIRST_HALF_OVER_UNDER';
-        if (preg_match('/first.?half|1st.?half/', $r) && preg_match('/result|winner|1x2/', $r)) return 'FIRST_HALF_WINNER';
         if (preg_match('/home.?team.*(?:total.?goals|goals.?over|goals.?total)/', $r)) return 'HOME_TEAM_TOTAL_GOALS';
         if (preg_match('/away.?team.*(?:total.?goals|goals.?over|goals.?total)/', $r)) return 'AWAY_TEAM_TOTAL_GOALS';
         if (preg_match('/over.?under|total.?goals|goals.?over|goals.?total/', $r)) return 'OVER_UNDER';
@@ -955,20 +1237,55 @@ final class PredictionMarkets
     {
         $code = self::normalizeProviderMarket($market);
         $r = strtolower(trim($raw));
-        if (in_array($code, ['OVER_UNDER', 'FIRST_HALF_OVER_UNDER'], true)) {
+        if (in_array($code, ['OVER_UNDER', 'FIRST_HALF_OVER_UNDER', 'SECOND_HALF_OVER_UNDER',
+            'HOME_TEAM_TOTAL_GOALS', 'AWAY_TEAM_TOTAL_GOALS'], true)) {
             if (preg_match('/over/', $r)) return 'OVER';
             if (preg_match('/under/', $r)) return 'UNDER';
         }
-        if ($code === 'MATCH_WINNER' || $code === 'FIRST_HALF_WINNER' || $code === 'DRAW_NO_BET' || $code === 'ASIAN_HANDICAP') {
+        if ($code === 'TOTAL_GOALS_ODD_EVEN') {
+            if (preg_match('/odd/', $r)) return 'ODD';
+            if (preg_match('/even/', $r)) return 'EVEN';
+        }
+        if ($code === 'TOTAL_GOALS_BAND') {
+            // Providers write these bands as "0-1", "0 to 1", "2-3", "7+".
+            // Only the digits matter, and an open-ended band is the tail.
+            $digits = preg_replace('/[^0-9+]/', '', $r);
+            if (str_contains($digits, '+') || $digits === '7') return 'BAND_7_PLUS';
+            if ($digits === '01') return 'BAND_0_1';
+            if ($digits === '23') return 'BAND_2_3';
+            if ($digits === '46') return 'BAND_4_6';
+        }
+        if ($code === 'WINNING_MARGIN') {
+            if (preg_match('/draw|\bx\b|level|no.?winner/', $r)) return 'DRAW';
+            $side = preg_match('/home/', $r) ? 'HOME' : (preg_match('/away/', $r) ? 'AWAY' : null);
+            // "Home by 3+", "Home by 3 or more" and anything above 2 are the
+            // same open-ended bucket; 1 and 2 are exact margins.
+            if ($side !== null && preg_match('/(\d+)/', $r, $m)) {
+                $by = (int) $m[1];
+                $open = (bool) preg_match('/\+|or more|plus/', $r);
+                if ($by >= 3 || ($open && $by >= 3)) return $side . '_3_PLUS';
+                if (!$open && ($by === 1 || $by === 2)) return $side . '_' . $by;
+            }
+        }
+        if ($code === 'RESULT_AND_BTTS') {
+            $side = preg_match('/home|\b1\b/', $r) ? 'HOME' : (preg_match('/away|\b2\b/', $r) ? 'AWAY' : (preg_match('/draw|\bx\b/', $r) ? 'DRAW' : null));
+            if ($side !== null) {
+                if (preg_match('/\bno\b|not|\bng\b/', $r)) return $side . '_NO';
+                if (preg_match('/yes|\bgg\b|both/', $r)) return $side . '_YES';
+            }
+        }
+        if ($code === 'MATCH_WINNER' || $code === 'FIRST_HALF_WINNER' || $code === 'SECOND_HALF_WINNER'
+            || $code === 'DRAW_NO_BET' || $code === 'ASIAN_HANDICAP') {
             if (preg_match('/^home|\bhome\b|\b1\b|^1$/', $r)) return 'HOME';
             if (preg_match('/draw|\bx\b/', $r)) return 'DRAW';
             if (preg_match('/away|\b2\b/', $r)) return 'AWAY';
         }
-        if ($code === 'BTTS' || $code === 'BTTS_AND_OVER_2_5') {
+        if (in_array($code, ['BTTS', 'BTTS_AND_OVER_2_5', 'BTTS_AND_UNDER_2_5', 'FIRST_HALF_BTTS',
+            'HOME_CLEAN_SHEET', 'AWAY_CLEAN_SHEET'], true)) {
             if (preg_match('/yes|\b1\b/', $r)) return 'YES';
             if (preg_match('/no|\b0\b/', $r)) return 'NO';
         }
-        if ($code === 'DOUBLE_CHANCE') {
+        if ($code === 'DOUBLE_CHANCE' || $code === 'FIRST_HALF_DOUBLE_CHANCE') {
             $compact = str_replace([' ', '-', '_', '/'], '', strtoupper($raw));
             if (in_array($compact, ['1X', 'HOMEDRAW', 'HOMEORDRAW'], true)) return 'HOME_OR_DRAW';
             if (in_array($compact, ['X2', 'DRAWAWAY', 'DRAWORAWAY', 'AWAYORDRAW'], true)) return 'AWAY_OR_DRAW';
@@ -1022,10 +1339,15 @@ final class PredictionMarkets
     private function selectionLabels(string $key): array
     {
         return match ($key) {
-            'MATCH_WINNER', 'FIRST_HALF_WINNER' => ['Home', 'Draw', 'Away'],
-            'DOUBLE_CHANCE' => ['Home or Draw', 'Home or Away', 'Draw or Away'],
+            'MATCH_WINNER', 'FIRST_HALF_WINNER', 'SECOND_HALF_WINNER' => ['Home', 'Draw', 'Away'],
+            'DOUBLE_CHANCE', 'FIRST_HALF_DOUBLE_CHANCE' => ['Home or Draw', 'Home or Away', 'Draw or Away'],
             'DRAW_NO_BET' => ['Home', 'Away'],
-            'BTTS', 'BTTS_AND_OVER_2_5' => ['Yes', 'No'],
+            'BTTS', 'BTTS_AND_OVER_2_5', 'BTTS_AND_UNDER_2_5', 'FIRST_HALF_BTTS',
+            'HOME_CLEAN_SHEET', 'AWAY_CLEAN_SHEET' => ['Yes', 'No'],
+            'TOTAL_GOALS_ODD_EVEN' => ['Odd', 'Even'],
+            'TOTAL_GOALS_BAND' => ['0-1', '2-3', '4-6', '7+'],
+            'WINNING_MARGIN' => ['Home by 1', 'Home by 2', 'Home by 3+', 'Draw', 'Away by 1', 'Away by 2', 'Away by 3+'],
+            'RESULT_AND_BTTS' => ['Home & Yes', 'Home & No', 'Draw & Yes', 'Draw & No', 'Away & Yes', 'Away & No'],
             'CORRECT_SCORE' => ['Top scorelines'],
             'ASIAN_HANDICAP' => ['Home', 'Away'],
             default => ['Over', 'Under'],
@@ -1035,8 +1357,11 @@ final class PredictionMarkets
     private function basis(string $key, string $derivation, string $gridBasis): string
     {
         if ($derivation === 'STORED_1X2') return 'STORED_1X2';
-        if ($key === 'FIRST_HALF_WINNER' || $key === 'FIRST_HALF_OVER_UNDER') {
+        if (str_starts_with($key, 'FIRST_HALF_')) {
             return 'FIRST_HALF_SHARE_' . $this->config->firstHalfGoalShare();
+        }
+        if (str_starts_with($key, 'SECOND_HALF_')) {
+            return 'SECOND_HALF_SHARE_' . round(1.0 - $this->config->firstHalfGoalShare(), 4);
         }
         return $gridBasis;
     }
@@ -1141,10 +1466,32 @@ final class PredictionMarkets
         ['key' => 'UNDER_1_5', 'label' => 'Under 1.5 Goals', 'group' => 'Goals', 'derivation' => 'SCORE_GRID', 'line' => 1.5],
         ['key' => 'UNDER_2_5', 'label' => 'Under 2.5 Goals', 'group' => 'Goals', 'derivation' => 'SCORE_GRID', 'line' => 2.5],
         ['key' => 'UNDER_3_5', 'label' => 'Under 3.5 Goals', 'group' => 'Goals', 'derivation' => 'SCORE_GRID', 'line' => 3.5],
+        ['key' => 'OVER_4_5', 'label' => 'Over 4.5 Goals', 'group' => 'Goals', 'derivation' => 'SCORE_GRID', 'line' => 4.5],
+        ['key' => 'OVER_5_5', 'label' => 'Over 5.5 Goals', 'group' => 'Goals', 'derivation' => 'SCORE_GRID', 'line' => 5.5],
+        ['key' => 'OVER_6_5', 'label' => 'Over 6.5 Goals', 'group' => 'Goals', 'derivation' => 'SCORE_GRID', 'line' => 6.5],
         ['key' => 'BTTS', 'label' => 'Both Teams To Score — BTTS', 'group' => 'Goals', 'derivation' => 'SCORE_GRID'],
         ['key' => 'BTTS_AND_OVER_2_5', 'label' => 'BTTS + Over 2.5', 'group' => 'Goals', 'derivation' => 'SCORE_GRID'],
+        ['key' => 'BTTS_AND_UNDER_2_5', 'label' => 'BTTS + Under 2.5', 'group' => 'Goals', 'derivation' => 'SCORE_GRID'],
+        ['key' => 'TOTAL_GOALS_ODD_EVEN', 'label' => 'Total Goals — Odd or Even', 'group' => 'Goals', 'derivation' => 'SCORE_GRID'],
+        ['key' => 'TOTAL_GOALS_BAND', 'label' => 'Total Goals — Band', 'group' => 'Goals', 'derivation' => 'SCORE_GRID'],
+        ['key' => 'HOME_TEAM_TOTAL_GOALS', 'label' => 'Home Team Total Goals — 1.5', 'group' => 'Team goals',
+            'derivation' => 'SCORE_GRID', 'line' => 1.5],
+        ['key' => 'AWAY_TEAM_TOTAL_GOALS', 'label' => 'Away Team Total Goals — 1.5', 'group' => 'Team goals',
+            'derivation' => 'SCORE_GRID', 'line' => 1.5],
+        ['key' => 'HOME_CLEAN_SHEET', 'label' => 'Home Clean Sheet', 'group' => 'Team goals', 'derivation' => 'SCORE_GRID'],
+        ['key' => 'AWAY_CLEAN_SHEET', 'label' => 'Away Clean Sheet', 'group' => 'Team goals', 'derivation' => 'SCORE_GRID'],
+        ['key' => 'WINNING_MARGIN', 'label' => 'Winning Margin', 'group' => 'Result', 'derivation' => 'SCORE_GRID'],
+        ['key' => 'RESULT_AND_BTTS', 'label' => 'Result + Both Teams To Score', 'group' => 'Result', 'derivation' => 'SCORE_GRID'],
         ['key' => 'FIRST_HALF_WINNER', 'label' => 'First Half Winner', 'group' => 'First half', 'derivation' => 'SCORE_GRID', 'assumed' => true],
         ['key' => 'FIRST_HALF_OVER_UNDER', 'label' => 'First Half Over/Under 1.5', 'group' => 'First half',
+            'derivation' => 'SCORE_GRID', 'line' => 1.5, 'assumed' => true],
+        ['key' => 'FIRST_HALF_DOUBLE_CHANCE', 'label' => 'First Half Double Chance', 'group' => 'First half',
+            'derivation' => 'SCORE_GRID', 'assumed' => true],
+        ['key' => 'FIRST_HALF_BTTS', 'label' => 'First Half Both Teams To Score', 'group' => 'First half',
+            'derivation' => 'SCORE_GRID', 'assumed' => true],
+        ['key' => 'SECOND_HALF_WINNER', 'label' => 'Second Half Winner', 'group' => 'Second half',
+            'derivation' => 'SCORE_GRID', 'assumed' => true],
+        ['key' => 'SECOND_HALF_OVER_UNDER', 'label' => 'Second Half Over/Under 1.5', 'group' => 'Second half',
             'derivation' => 'SCORE_GRID', 'line' => 1.5, 'assumed' => true],
         ['key' => 'HALF_TIME_FULL_TIME', 'label' => 'Half Time / Full Time', 'group' => 'First half', 'derivation' => 'NOT_MODELLED'],
         ['key' => 'CORRECT_SCORE', 'label' => 'Correct Score', 'group' => 'Score', 'derivation' => 'SCORE_GRID'],
@@ -1166,6 +1513,17 @@ final class PredictionMarkets
         '1H_WINNER' => 'FIRST_HALF_WINNER', '1H_OVER_UNDER' => 'FIRST_HALF_OVER_UNDER',
         'AH' => 'ASIAN_HANDICAP', 'HANDICAP' => 'ASIAN_HANDICAP',
         'EXACT_SCORE' => 'CORRECT_SCORE',
+        'BTTS_UNDER_2_5' => 'BTTS_AND_UNDER_2_5', 'GG_UNDER_2_5' => 'BTTS_AND_UNDER_2_5',
+        'ODD_EVEN' => 'TOTAL_GOALS_ODD_EVEN', 'GOALS_ODD_EVEN' => 'TOTAL_GOALS_ODD_EVEN',
+        'GOAL_RANGE' => 'TOTAL_GOALS_BAND', 'TOTAL_GOALS_RANGE' => 'TOTAL_GOALS_BAND',
+        'HOME_GOALS' => 'HOME_TEAM_TOTAL_GOALS', 'TEAM_TOTAL_HOME' => 'HOME_TEAM_TOTAL_GOALS',
+        'AWAY_GOALS' => 'AWAY_TEAM_TOTAL_GOALS', 'TEAM_TOTAL_AWAY' => 'AWAY_TEAM_TOTAL_GOALS',
+        'CLEAN_SHEET_HOME' => 'HOME_CLEAN_SHEET', 'CLEAN_SHEET_AWAY' => 'AWAY_CLEAN_SHEET',
+        'MARGIN' => 'WINNING_MARGIN', 'WINNING_MARGINS' => 'WINNING_MARGIN',
+        'RESULT_BTTS' => 'RESULT_AND_BTTS', 'WIN_TO_NIL_COMBO' => 'RESULT_AND_BTTS',
+        '1H_DC' => 'FIRST_HALF_DOUBLE_CHANCE', '1H_BTTS' => 'FIRST_HALF_BTTS', '1H_GG' => 'FIRST_HALF_BTTS',
+        '2H_WINNER' => 'SECOND_HALF_WINNER', '2H_OVER_UNDER' => 'SECOND_HALF_OVER_UNDER',
+        'SECOND_HALF_GOALS' => 'SECOND_HALF_OVER_UNDER',
     ];
 
     public function __construct(private FootballConfiguration $config, private ?OddsIntelligence $fairValue = null)

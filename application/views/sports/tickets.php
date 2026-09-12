@@ -7,31 +7,44 @@ $caps = $caps ?? ['sync' => false, 'approve' => false, 'settle' => false];
 $ticketDateIso = (string) ($todayIso ?? gmdate('Y-m-d'));
 $ticketDateShown = gmdate('m/d/Y', (int) strtotime($ticketDateIso . ' 00:00:00 UTC'));
 ?>
-<div class="page-head">
-  <div>
-    <h2>Odds prediction tickets</h2>
-    <p>Generated odds prediction tickets, approval state and stored settlements. Each ticket records the offered odds, model probability, expected value, confidence, risk and result; approve, reject and settle stay permission-gated. This deployment is odds analysis only and has no external bookmaker.</p>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px">
-      <?php if (!empty($caps['sync'])): ?>
-        <form method="post" action="/sports/generate-ticket" style="display:flex;gap:6px;align-items:center" onsubmit="return confirm('Generate odds prediction ticket for today from stored fixtures & odds?')">
-          <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
-          <input type="date" name="date" value="<?= e($ticketDateIso) ?>" aria-label="<?= e($ticketDateShown) ?>" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px" title="Ticket date (UTC) <?= e($ticketDateShown) ?>">
-          <span class="mono" style="font-size:12px;font-weight:700"><?= e($ticketDateShown) ?></span>
-          <button class="btn small" style="background:var(--violet,#6d28d9);color:#fff;border-color:var(--violet,#6d28d9);font-weight:700;letter-spacing:0.02em">
-            🎯 Odds Prediction Ticket
-          </button>
-        </form>
-        <a class="btn small" href="/sports">Sports Intelligence →</a>
-      <?php else: ?>
-        <span class="mono" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px;font-weight:700" title="Ticket date (UTC)"><?= e($ticketDateShown) ?></span>
-        <button class="btn small" disabled title="Requires the sports.manage permission" style="font-weight:700">🎯 Odds Prediction Ticket</button>
-        <a class="btn small" href="/sports">Sports Intelligence →</a>
-      <?php endif; ?>
+<div class="sports-console">
+  <section class="sports-hero" aria-labelledby="tickets-heading">
+    <div class="sports-hero__intro">
+      <p class="sports-eyebrow">Odds prediction tickets</p>
+      <h2 id="tickets-heading">Odds prediction tickets</h2>
+      <p class="sports-hero__copy">
+        Read top to bottom: today&rsquo;s ticket and the matches it was built from, how the run that produced it went, then every ticket and every daily run already stored. Each record keeps the offered odds, model probability, expected value, confidence, risk and result. Approve, reject and settle stay permission-gated. This deployment is odds analysis only and has no external bookmaker.
+      </p>
     </div>
-  </div>
-</div>
-<?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
-<?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
+    <nav class="sports-hero__actions" aria-label="Related consoles">
+      <a class="btn small" href="/sports">Sports Intelligence →</a>
+      <a class="btn small" href="/football">Football Intelligence →</a>
+    </nav>
+  </section>
+
+  <section class="sports-actionbar" aria-label="Ticket generation controls">
+    <?php if (!empty($caps['sync'])): ?>
+      <form method="post" action="/sports/generate-ticket" class="sports-date-form" onsubmit="return confirm('Generate odds prediction ticket for today from stored fixtures &amp; odds?')">
+        <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+        <label for="ticket-generate-date">Ticket date (UTC)</label>
+        <input class="sel" type="date" id="ticket-generate-date" name="date" value="<?= e($ticketDateIso) ?>" title="Ticket date (UTC) <?= e($ticketDateShown) ?>">
+        <span class="mono sports-chip-strong"><?= e($ticketDateShown) ?></span>
+        <button class="btn small sports-ticket-btn">🎯 Odds Prediction Ticket</button>
+      </form>
+    <?php else: ?>
+      <div class="sports-date-form">
+        <span class="dim">Ticket date (UTC)</span>
+        <span class="mono sports-chip-strong" title="Ticket date (UTC)"><?= e($ticketDateShown) ?></span>
+        <button class="btn small" disabled title="Requires the sports.manage permission">🎯 Odds Prediction Ticket</button>
+      </div>
+    <?php endif; ?>
+    <div class="sports-actionbar__links">
+      <span class="sports-note">Analysis only — no real-money bet is placed from this screen.</span>
+    </div>
+  </section>
+
+  <?php if (!empty($notice)): ?><div class="notice ok"><?= e($notice) ?></div><?php endif; ?>
+  <?php if (!empty($error)): ?><div class="notice err"><?= e($error) ?></div><?php endif; ?>
 
 <?php
 // Today's AI ticket hero — the focused daily view: status, headline numbers,
@@ -125,25 +138,38 @@ $heroMarketLabel = function (string $market, string $selection): string {
     return $labels[$market . ':' . $selection] ?? ($market . ' / ' . $selection);
 };
 ?>
-<div class="panel" style="margin-bottom:16px;border-color:var(--violet,#6d28d9)">
-  <h3>AI Daily Ticket <span class="dim mono" style="font-weight:400;font-size:12px"><?= e((string) $heroDate) ?></span></h3>
-  <div class="body" style="padding-top:12px">
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-      <span style="font-size:12px" class="dim">Status:</span>
-      <span class="badge <?= $heroBadge ?>" style="font-size:13px"><?= e($heroStatus) ?></span>
-      <?php if ($heroTicket !== null): ?>
-        <span class="dim mono" style="font-size:12px">Ticket ID: <b><?= e((string) ($heroTicket['id'] ?? '—')) ?></b></span>
-        <span class="dim mono" style="font-size:12px">Total Odds: <b><?= e(number_format((float) ($heroTicket['total_odds'] ?? 0), 2)) ?></b></span>
-        <span class="dim mono" style="font-size:12px">Selections: <b><?= (int) ($heroTicket['selection_count'] ?? count($heroSelections)) ?></b></span>
-        <span class="dim mono" style="font-size:12px">Overall Confidence: <b><?= ($heroTicket['confidence'] ?? null) !== null ? e(number_format((float) $heroTicket['confidence'], 0)) . '%' : '—' ?></b></span>
-        <span class="dim mono" style="font-size:12px">Risk: <b><?= e((string) ($heroTicket['risk'] ?? '—')) ?></b></span>
-        <span class="dim mono" style="font-size:12px">Generated: <b><?= e((string) ($heroRun['generated_at'] ?? $heroTicket['created_at'] ?? '—')) ?></b></span>
-        <span class="dim mono" style="font-size:12px">Approval: <b><?= e((string) ($heroTicket['approval_status'] ?? '—')) ?></b></span>
-      <?php endif; ?>
-    </div>
+  <div class="sports-layout">
+    <div class="sports-main stack">
+      <section class="panel sports-section sports-section--feature" id="ticket-today" aria-labelledby="ticket-today-heading">
+        <div class="sports-section__heading">
+          <div class="sports-section__title">
+            <span class="sports-step" aria-hidden="true">1</span>
+            <div>
+              <p class="sports-eyebrow">Today&rsquo;s ticket</p>
+              <h3 id="ticket-today-heading">AI Daily Ticket</h3>
+            </div>
+          </div>
+          <span class="sports-section__meta"><?= e((string) $heroDate) ?></span>
+        </div>
+        <div class="body">
+          <p class="sports-section-intro">The one combined ticket built for this date, if the engine could assemble a legal one. Every figure below is read from the stored run — nothing on this screen recalculates a price or a probability.</p>
+          <div class="sports-chips">
+            <span class="dim">Status:</span>
+            <span class="badge <?= $heroBadge ?>"><?= e($heroStatus) ?></span>
+            <?php if ($heroTicket !== null): ?>
+              <span class="dim mono">Ticket ID: <b><?= e((string) ($heroTicket['id'] ?? '—')) ?></b></span>
+              <span class="dim mono">Total Odds: <b><?= e(number_format((float) ($heroTicket['total_odds'] ?? 0), 2)) ?></b></span>
+              <span class="dim mono">Selections: <b><?= (int) ($heroTicket['selection_count'] ?? count($heroSelections)) ?></b></span>
+              <span class="dim mono">Overall Confidence: <b><?= ($heroTicket['confidence'] ?? null) !== null ? e(number_format((float) $heroTicket['confidence'], 0)) . '%' : '—' ?></b></span>
+              <span class="dim mono">Risk: <b><?= e((string) ($heroTicket['risk'] ?? '—')) ?></b></span>
+              <span class="dim mono">Generated: <b><?= e((string) ($heroRun['generated_at'] ?? $heroTicket['created_at'] ?? '—')) ?></b></span>
+              <span class="dim mono">Approval: <b><?= e((string) ($heroTicket['approval_status'] ?? '—')) ?></b></span>
+            <?php endif; ?>
+          </div>
     <?php if (is_array($heroRun) && !empty($caps['sync'])): ?>
-      <div class="stat-grid" style="margin-bottom:12px">
-        <div class="stat"><div class="k">Generation status</div><div class="v" style="font-size:13px"><?= e($heroGenerationStatus) ?></div></div>
+      <div class="sports-subhead"><h4>Generation run</h4><span class="dim">operator view · how today&rsquo;s result was reached</span></div>
+      <div class="stat-grid">
+        <div class="stat"><div class="k">Generation status</div><div class="v sports-stat-word"><?= e($heroGenerationStatus) ?></div></div>
         <div class="stat"><div class="k">Eligible fixtures</div><div class="v"><?= (int) ($heroDiag['eligibleFixtures'] ?? 0) ?></div></div>
         <div class="stat"><div class="k">Candidates evaluated</div><div class="v"><?= (int) ($heroDiag['marketsEvaluated'] ?? $heroRun['candidates_evaluated'] ?? 0) ?></div></div>
         <div class="stat"><div class="k">Predictions generated</div><div class="v"><?= (int) ($heroDiag['predictionsGenerated'] ?? $heroRun['predictions_recorded'] ?? 0) ?></div></div>
@@ -151,7 +177,7 @@ $heroMarketLabel = function (string $market, string $selection): string {
         <div class="stat"><div class="k">Stale odds</div><div class="v"><?= (int) ($heroDiag['fixturesRejectedStaleOdds'] ?? 0) ?></div></div>
         <div class="stat"><div class="k">Qualified candidates</div><div class="v"><?= (int) ($heroDiag['correlationQualifiedCandidates'] ?? 0) ?></div></div>
         <div class="stat"><div class="k">Selected picks</div><div class="v"><?= (int) ($heroDiag['finalQualifiedCandidates'] ?? count($heroSelections)) ?></div></div>
-        <div class="stat" title="The mean of the confidences actually measured today. Unavailable when nothing could be scored — never shown as zero."><div class="k">Average confidence</div><div class="v"><?= ($heroDiag['averageConfidence'] ?? null) !== null ? e(number_format((float) $heroDiag['averageConfidence'], 1)) . '%' : '<span class="dim" style="font-size:13px">Unavailable</span>' ?></div></div>
+        <div class="stat" title="The mean of the confidences actually measured today. Unavailable when nothing could be scored — never shown as zero."><div class="k">Average confidence</div><div class="v"><?= ($heroDiag['averageConfidence'] ?? null) !== null ? e(number_format((float) $heroDiag['averageConfidence'], 1)) . '%' : '<span class="dim sports-stat-word">Unavailable</span>' ?></div></div>
       </div>
       <?php
       // Requirement #14: the day's real spread of confidence and data quality,
@@ -163,39 +189,40 @@ $heroMarketLabel = function (string $market, string $selection): string {
       $heroBandBar = function (array $bands): string {
           $total = 0;
           foreach ($bands as $count) $total += (int) $count;
-          if ($total <= 0) return '<span class="dim" style="font-size:12px">No candidate was scored.</span>';
+          if ($total <= 0) return '<span class="dim">No candidate was scored.</span>';
           $out = '';
           foreach ($bands as $label => $count) {
               $count = (int) $count;
               if ($label === 'unmeasured' && $count === 0) continue;
               $pct = (int) round(100 * $count / $total);
-              $out .= '<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">'
-                  . '<span class="mono dim" style="min-width:132px;font-size:11px">' . e((string) $label) . '</span>'
-                  . '<span style="flex:1;background:rgba(127,127,127,.15);border-radius:3px;height:12px;overflow:hidden">'
-                  . '<span style="display:block;height:12px;width:' . $pct . '%;background:var(--violet,#6d28d9)"></span></span>'
-                  . '<span class="mono" style="min-width:34px;text-align:right;font-size:11px">' . $count . '</span></div>';
+              $out .= '<div class="sports-bandrow">'
+                  . '<span class="mono dim sports-bandrow__label">' . e((string) $label) . '</span>'
+                  . '<span class="sports-bandrow__track">'
+                  . '<span class="sports-bandrow__fill" style="width:' . $pct . '%"></span></span>'
+                  . '<span class="mono sports-bandrow__count">' . $count . '</span></div>';
           }
           return $out;
       };
       ?>
       <?php if ($heroConfidenceBands !== [] || $heroQualityBands !== []): ?>
-        <details style="margin-bottom:12px">
-          <summary class="dim" style="cursor:pointer;font-size:12px">Confidence &amp; data-quality distribution<?= $heroPolicyTiers !== [] ? ' · adaptive thresholds' : '' ?></summary>
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:10px">
+        <details class="sports-details">
+          <summary>Confidence &amp; data-quality distribution<?= $heroPolicyTiers !== [] ? ' · adaptive thresholds' : '' ?></summary>
+          <div class="sports-dist-grid">
             <div>
-              <div style="font-size:11px;font-weight:700;margin-bottom:6px">Confidence (evaluated candidates)</div>
+              <p class="sports-dist-label">Confidence (evaluated candidates)</p>
               <?= $heroBandBar($heroConfidenceBands) ?>
             </div>
             <div>
-              <div style="font-size:11px;font-weight:700;margin-bottom:6px">Data quality (evaluated candidates)</div>
+              <p class="sports-dist-label">Data quality (evaluated candidates)</p>
               <?= $heroBandBar($heroQualityBands) ?>
             </div>
           </div>
           <?php if ($heroPolicyTiers !== []): ?>
-            <div style="margin-top:10px">
-              <div style="font-size:11px;font-weight:700;margin-bottom:4px">Adaptive confidence policy in force</div>
-              <p class="dim" style="margin:0 0 6px;font-size:11px">The confidence a prediction must reach depends on the verified data behind it. Displayed confidence is always the measured value — it is never adjusted to clear a threshold.</p>
-              <table class="tbl" style="font-size:11px">
+            <div class="sports-dist-policy">
+              <p class="sports-dist-label">Adaptive confidence policy in force</p>
+              <p class="sports-note">The confidence a prediction must reach depends on the verified data behind it. Displayed confidence is always the measured value — it is never adjusted to clear a threshold.</p>
+              <div class="table-scroll">
+              <table class="tbl sports-tbl-xs">
                 <thead><tr><th>Tier</th><th class="num">Data quality</th><th class="num">Confidence required</th><th>Markets</th></tr></thead>
                 <tbody>
                   <?php foreach ($heroPolicyTiers as $tier): ?>
@@ -213,12 +240,13 @@ $heroMarketLabel = function (string $market, string $selection): string {
                   </tr>
                 </tbody>
               </table>
+              </div>
             </div>
           <?php endif; ?>
         </details>
       <?php endif; ?>
       <?php if ($heroTicket === null && in_array($heroGenerationStatus, ['FAILED', 'RETRYING'], true)): ?>
-        <div class="notice err" style="margin-bottom:12px"><b>Reason:</b> <?= e((string) ($heroRun['last_error_code'] ?? $heroRun['status'] ?? 'GENERATION_FAILED')) ?><br><b>Retry:</b> <?= !empty($heroRun['next_retry_at']) ? 'SCHEDULED — ' . e((string) $heroRun['next_retry_at']) : 'AVAILABLE' ?></div>
+        <div class="notice err"><b>Reason:</b> <?= e((string) ($heroRun['last_error_code'] ?? $heroRun['status'] ?? 'GENERATION_FAILED')) ?><br><b>Retry:</b> <?= !empty($heroRun['next_retry_at']) ? 'SCHEDULED — ' . e((string) $heroRun['next_retry_at']) : 'AVAILABLE' ?></div>
       <?php endif; ?>
     <?php elseif (is_array($heroRun) && $heroTicket === null): ?>
       <?php
@@ -229,31 +257,32 @@ $heroMarketLabel = function (string $market, string $selection): string {
           $heroSimpleMsg = 'Prediction unavailable — insufficient verified odds or match data for a combined ticket today. Individual predictions below may still be available.';
       }
       ?>
-      <div class="notice" style="margin-bottom:12px"><?= e($heroSimpleMsg) ?></div>
+      <div class="notice"><?= e($heroSimpleMsg) ?></div>
     <?php endif; ?>
     <?php if ($heroTicket !== null && !empty($heroSelections)): ?>
+      <div class="sports-subhead"><h4>Selections on this ticket</h4><span class="dim">model estimate and bookmaker price, side by side</span></div>
       <div class="table-scroll">
         <table class="tbl">
           <thead><tr><th>Match · competition · kickoff</th><th>Market · prediction</th><th class="num" title="Real bookmaker price from the named odds source, with the time it was last updated">Real market odds · source</th><th title="How the market moved since this price opened — shortening (money arriving), drifting, or stable. Market reaction, not a model output; measured against the opening price and only when two or more observations exist.">Movement</th><th class="num" title="WINDELS model probability and fair odds — derived by the model, never the bookmaker price">WINDELS probability · fair</th><th class="num">Confidence</th><th class="num">Data quality</th><th class="num">Value / edge</th><th>Risk</th></tr></thead>
           <tbody>
             <?php foreach ($heroSelections as $sel): ?>
               <tr>
-                <td style="font-weight:700">
-                  <span style="display:inline-flex;align-items:center;gap:5px;vertical-align:middle">
-                    <?php if (!empty($sel['home_team_logo'])): ?><img src="<?= e((string) $sel['home_team_logo']) ?>" alt="" width="18" height="18" style="border-radius:3px;object-fit:contain" loading="lazy" onerror="this.style.display='none'"><?php endif; ?>
+                <td class="sports-cell-match">
+                  <span class="sports-team">
+                    <?php if (!empty($sel['home_team_logo'])): ?><img src="<?= e((string) $sel['home_team_logo']) ?>" alt="" width="18" height="18" class="sports-crest" loading="lazy" onerror="this.style.display='none'"><?php endif; ?>
                     <?= e((string) ($sel['home_team'] ?? '')) ?>
                   </span>
-                  <span class="dim" style="font-weight:400"> vs </span>
-                  <span style="display:inline-flex;align-items:center;gap:5px;vertical-align:middle">
-                    <?php if (!empty($sel['away_team_logo'])): ?><img src="<?= e((string) $sel['away_team_logo']) ?>" alt="" width="18" height="18" style="border-radius:3px;object-fit:contain" loading="lazy" onerror="this.style.display='none'"><?php endif; ?>
+                  <span class="dim sports-vs"> vs </span>
+                  <span class="sports-team">
+                    <?php if (!empty($sel['away_team_logo'])): ?><img src="<?= e((string) $sel['away_team_logo']) ?>" alt="" width="18" height="18" class="sports-crest" loading="lazy" onerror="this.style.display='none'"><?php endif; ?>
                     <?= e((string) ($sel['away_team'] ?? '')) ?>
                   </span>
-                  <span class="dim" style="display:block;font-size:10px;font-weight:400"><?= e((string) ($sel['competition'] ?? '—')) ?> · <?= e((string) ($sel['kickoff_time'] ?? '—')) ?></span>
+                  <span class="dim sports-cell-note"><?= e((string) ($sel['competition'] ?? '—')) ?> · <?= e((string) ($sel['kickoff_time'] ?? '—')) ?></span>
                 </td>
-                <td><span class="dim" style="display:block;font-size:10px"><?= e((string) ($sel['market'] ?? '')) ?></span><?= e($heroMarketLabel((string) ($sel['market'] ?? ''), (string) ($sel['selection'] ?? ''))) ?></td>
+                <td><span class="dim sports-cell-note"><?= e((string) ($sel['market'] ?? '')) ?></span><?= e($heroMarketLabel((string) ($sel['market'] ?? ''), (string) ($sel['selection'] ?? ''))) ?></td>
                 <td class="num mono">
                   <?= e(number_format((float) ($sel['odds'] ?? 0), 2)) ?>
-                  <span class="dim" style="display:block;font-size:10px;font-weight:400" title="Odds source and the provider's last-update timestamp (UTC)">
+                  <span class="dim sports-cell-note" title="Odds source and the provider's last-update timestamp (UTC)">
                     <?= e((string) ($sel['odds_source'] ?? '—')) ?> · <?= e(substr((string) ($sel['odds_timestamp'] ?? ''), 0, 16)) ?>
                   </span>
                 </td>
@@ -261,14 +290,14 @@ $heroMarketLabel = function (string $market, string $selection): string {
                 <td title="<?= e($mv['title']) ?>">
                   <span class="badge <?= e($mv['cls']) ?>"><?= e($mv['arrow']) ?> <?= e($mv['label']) ?></span>
                   <?php if ($mv['pct'] !== null): ?>
-                    <span class="dim mono" style="display:block;font-size:10px;font-weight:400">
+                    <span class="dim mono sports-cell-note">
                       <?= e(($mv['pct'] > 0 ? '+' : '') . number_format((float) $mv['pct'], 2)) ?>% vs open
                     </span>
                   <?php endif; ?>
                 </td>
                 <td class="num mono">
                   <?= ($sel['calibrated_probability'] ?? null) !== null ? e(number_format((float) $sel['calibrated_probability'] * 100, 1)) . '%' : '—' ?>
-                  <span class="dim" style="display:block;font-size:10px;font-weight:400" title="WINDELS fair odds (1 ÷ model probability), not the bookmaker price">
+                  <span class="dim sports-cell-note" title="WINDELS fair odds (1 ÷ model probability), not the bookmaker price">
                     fair <?= ($sel['fair_odds'] ?? null) !== null ? e(number_format((float) $sel['fair_odds'], 2)) : '—' ?>
                   </span>
                 </td>
@@ -276,7 +305,7 @@ $heroMarketLabel = function (string $market, string $selection): string {
                 <td class="num"><?= ($sel['data_quality'] ?? null) !== null ? e(number_format((float) $sel['data_quality'], 0)) : '—' ?></td>
                 <td class="num mono">
                   <?= ($sel['expected_value'] ?? null) !== null ? e(number_format((float) $sel['expected_value'] * 100, 2)) . '%' : '—' ?>
-                  <span class="dim" style="display:block;font-size:10px;font-weight:400">model edge / EV</span>
+                  <span class="dim sports-cell-note">model edge / EV</span>
                 </td>
                 <td><span class="badge <?= (string) ($sel['risk'] ?? '') === 'LOW' ? 'b-green' : ((string) ($sel['risk'] ?? '') === 'HIGH' ? 'b-red' : 'b-violet') ?>"><?= e((string) ($sel['risk'] ?? '—')) ?></span></td>
               </tr>
@@ -284,28 +313,28 @@ $heroMarketLabel = function (string $market, string $selection): string {
           </tbody>
         </table>
       </div>
-      <p class="dim" style="font-size:11px;margin:6px 0 0">Bookmaker odds are the provider's real quoted price with its source and last-update time. Movement is the market's own reaction since that price opened — shortening means money arrived — and reads &ldquo;not measured&rdquo; rather than &ldquo;stable&rdquo; when fewer than two observations exist. WINDELS probability/fair odds are the model's own numbers, kept in separate columns; expected value compares the two.</p>
+      <p class="sports-note">Bookmaker odds are the provider's real quoted price with its source and last-update time. Movement is the market's own reaction since that price opened — shortening means money arrived — and reads &ldquo;not measured&rdquo; rather than &ldquo;stable&rdquo; when fewer than two observations exist. WINDELS probability/fair odds are the model's own numbers, kept in separate columns; expected value compares the two.</p>
       <?php if ((string) ($heroTicket['approval_status'] ?? '') === 'PENDING_USER_APPROVAL'): ?>
-        <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+        <div class="sports-actions">
           <?php if (!empty($caps['approve'])): ?>
-            <form method="post" action="/sports/<?= e((string) $heroTicket['id']) ?>/decide" style="display:inline">
+            <form method="post" action="/sports/<?= e((string) $heroTicket['id']) ?>/decide" class="sports-inline-form">
               <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><input type="hidden" name="approve" value="1"><button class="btn small primary">Approve ticket</button>
             </form>
-            <form method="post" action="/sports/<?= e((string) $heroTicket['id']) ?>/decide" style="display:inline" onsubmit="return confirm('Reject this record?')">
+            <form method="post" action="/sports/<?= e((string) $heroTicket['id']) ?>/decide" class="sports-inline-form" onsubmit="return confirm('Reject this record?')">
               <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><input type="hidden" name="approve" value="0"><button class="btn small danger">Reject</button>
             </form>
           <?php else: ?>
-            <span class="dim" style="font-size:11px">Approval requires the sports.approve permission. Analysis only — no real-money bets are placed.</span>
+            <span class="sports-note">Approval requires the sports.approve permission. Analysis only — no real-money bets are placed.</span>
           <?php endif; ?>
         </div>
       <?php endif; ?>
     <?php elseif ($heroStatus === 'NO_QUALIFIED_TICKET'): ?>
-      <p style="margin:0 0 6px;font-weight:700">NO_QUALIFIED_TICKET — no COMBINED ticket could be safely assembled from today&apos;s matches (the odds-range, correlation and selection-count rules a multi-leg ticket must obey were not all satisfiable together).</p>
+      <p class="sports-lead">NO_QUALIFIED_TICKET — no COMBINED ticket could be safely assembled from today&apos;s matches (the odds-range, correlation and selection-count rules a multi-leg ticket must obey were not all satisfiable together).</p>
       <?php if (is_array($heroRun) && trim((string) ($heroRun['message'] ?? '')) !== ''): ?>
-        <p class="dim" style="margin:0;font-size:12px"><?= e((string) $heroRun['message']) ?></p>
+        <p class="sports-note"><?= e((string) $heroRun['message']) ?></p>
       <?php endif; ?>
     <?php else: ?>
-      <p class="dim" style="margin:0">Automatic daily generation is pending. When Odds Prediction is enabled, the scheduler syncs eligible fixtures, refreshes stale odds in controlled batches, evaluates the safety gates and persists today&apos;s result. The button above is an optional manual retry.</p>
+      <p class="sports-note">Automatic daily generation is pending. When Odds Prediction is enabled, the scheduler syncs eligible fixtures, refreshes stale odds in controlled batches, evaluates the safety gates and persists today&apos;s result. The button above is an optional manual retry.</p>
     <?php endif; ?>
     <?php
     // A COMBINED ticket (one accumulator across several matches) and an
@@ -320,53 +349,67 @@ $heroMarketLabel = function (string $market, string $selection): string {
     // combination failure.
     $heroTopPicks = is_array($heroDiag['topPicks'] ?? null) ? $heroDiag['topPicks'] : [];
     ?>
-    <?php if ($heroTopPicks !== []): ?>
-      <div style="margin-top:16px">
-        <h4 style="margin:0 0 6px">Individual match predictions<?= $heroTicket === null ? ' — no combined ticket today' : '' ?></h4>
-        <p class="dim" style="margin:0 0 8px;font-size:11px">
-          <?= $heroTicket === null
-              ? 'A combined multi-match ticket could not be assembled today (see the reason above), but the matches below were individually predicted and qualified on their own evidence. Each is a real prediction from verified odds — approve/use them individually.'
-              : 'Every match the model qualified today, whether or not it was selected into the combined ticket above.' ?>
-          <?= e((string) ($heroDiag['topPicksDisclaimer'] ?? '')) ?>
-        </p>
+        </div>
+      </section>
+
+      <?php if ($heroTopPicks !== []): ?>
+      <section class="panel sports-section" id="ticket-picks" aria-labelledby="ticket-picks-heading">
+        <div class="sports-section__heading">
+          <div class="sports-section__title">
+            <span class="sports-step" aria-hidden="true">2</span>
+            <div>
+              <p class="sports-eyebrow">Per-match predictions</p>
+              <h3 id="ticket-picks-heading">Individual match predictions<?= $heroTicket === null ? ' — no combined ticket today' : '' ?></h3>
+            </div>
+          </div>
+          <span class="sports-section__meta"><?= count($heroTopPicks) ?> qualified</span>
+        </div>
+        <div class="body">
+          <p class="sports-section-intro">
+            <?= $heroTicket === null
+              ? 'A combined multi-match ticket could not be assembled today (see section 1), but the matches below were individually predicted and qualified on their own evidence. Each is a real prediction from verified odds — approve or use them individually. A combination failure never hides a usable single prediction.'
+              : 'Every match the model qualified today, whether or not it was selected into the combined ticket in section 1.' ?>
+            <?= e((string) ($heroDiag['topPicksDisclaimer'] ?? '')) ?>
+          </p>
         <div class="table-scroll">
-          <table class="tbl" style="font-size:12px">
+          <table class="tbl sports-tbl-sm">
             <thead><tr><th>Match · competition · kickoff</th><th>Market · prediction</th><th class="num">Real odds</th><th class="num">WINDELS probability · fair</th><th class="num">Confidence</th><th class="num">Data quality</th><th class="num">Value / edge</th><th>Risk</th></tr></thead>
             <tbody>
               <?php foreach ($heroTopPicks as $pick): ?>
                 <tr>
-                  <td style="font-weight:700">
-                    <span style="display:inline-flex;align-items:center;gap:5px;vertical-align:middle">
-                      <?php if (!empty($pick['homeTeamLogo'])): ?><img src="<?= e((string) $pick['homeTeamLogo']) ?>" alt="" width="16" height="16" style="border-radius:3px;object-fit:contain" loading="lazy" onerror="this.style.display='none'"><?php endif; ?>
+                  <td class="sports-cell-match">
+                    <span class="sports-team">
+                      <?php if (!empty($pick['homeTeamLogo'])): ?><img src="<?= e((string) $pick['homeTeamLogo']) ?>" alt="" width="16" height="16" class="sports-crest" loading="lazy" onerror="this.style.display='none'"><?php endif; ?>
                       <?= e((string) ($pick['homeTeam'] ?? '?')) ?>
                     </span>
-                    <span class="dim" style="font-weight:400"> vs </span>
-                    <span style="display:inline-flex;align-items:center;gap:5px;vertical-align:middle">
-                      <?php if (!empty($pick['awayTeamLogo'])): ?><img src="<?= e((string) $pick['awayTeamLogo']) ?>" alt="" width="16" height="16" style="border-radius:3px;object-fit:contain" loading="lazy" onerror="this.style.display='none'"><?php endif; ?>
+                    <span class="dim sports-vs"> vs </span>
+                    <span class="sports-team">
+                      <?php if (!empty($pick['awayTeamLogo'])): ?><img src="<?= e((string) $pick['awayTeamLogo']) ?>" alt="" width="16" height="16" class="sports-crest" loading="lazy" onerror="this.style.display='none'"><?php endif; ?>
                       <?= e((string) ($pick['awayTeam'] ?? '?')) ?>
                     </span>
-                    <span class="dim" style="display:block;font-size:10px;font-weight:400"><?= e((string) ($pick['competition'] ?? '—')) ?> · <?= e(substr((string) ($pick['kickoff'] ?? ''), 0, 16)) ?></span>
+                    <span class="dim sports-cell-note"><?= e((string) ($pick['competition'] ?? '—')) ?> · <?= e(substr((string) ($pick['kickoff'] ?? ''), 0, 16)) ?></span>
                   </td>
-                  <td><span class="dim" style="display:block;font-size:10px"><?= e((string) ($pick['market'] ?? '')) ?></span><?= e($heroMarketLabel((string) ($pick['market'] ?? ''), (string) ($pick['selection'] ?? ''))) ?></td>
+                  <td><span class="dim sports-cell-note"><?= e((string) ($pick['market'] ?? '')) ?></span><?= e($heroMarketLabel((string) ($pick['market'] ?? ''), (string) ($pick['selection'] ?? ''))) ?></td>
                   <td class="num mono"><?= ($pick['marketOdds'] ?? null) !== null ? e(number_format((float) $pick['marketOdds'], 2)) : '—' ?></td>
                   <td class="num mono">
                     <?= ($pick['modelProbability'] ?? null) !== null ? e(number_format((float) $pick['modelProbability'] * 100, 1)) . '%' : '—' ?>
-                    <span class="dim" style="display:block;font-size:10px;font-weight:400">fair <?= ($pick['windelsFairOdds'] ?? null) !== null ? e(number_format((float) $pick['windelsFairOdds'], 2)) : '—' ?></span>
+                    <span class="dim sports-cell-note">fair <?= ($pick['windelsFairOdds'] ?? null) !== null ? e(number_format((float) $pick['windelsFairOdds'], 2)) : '—' ?></span>
                   </td>
                   <td class="num"><?= ($pick['confidence'] ?? null) !== null ? e(number_format((float) $pick['confidence'], 0)) . '%' : '—' ?></td>
                   <td class="num"><?= ($pick['dataQuality'] ?? null) !== null ? (int) $pick['dataQuality'] : '—' ?></td>
                   <td class="num mono">
                     <?= ($pick['expectedValue'] ?? null) !== null ? e(number_format((float) $pick['expectedValue'] * 100, 2)) . '%' : '—' ?>
-                    <span class="dim" style="display:block;font-size:10px;font-weight:400"><?= e((string) ($pick['valueLabel'] ?? '')) ?></span>
+                    <span class="dim sports-cell-note"><?= e((string) ($pick['valueLabel'] ?? '')) ?></span>
                   </td>
                   <td><span class="badge <?= (string) ($pick['risk']['classification'] ?? '') === 'LOW' ? 'b-green' : ((string) ($pick['risk']['classification'] ?? '') === 'HIGH' ? 'b-red' : 'b-violet') ?>"><?= e((string) ($pick['risk']['classification'] ?? '—')) ?></span></td>
                 </tr>
               <?php endforeach; ?>
             </tbody>
           </table>
+          </div>
         </div>
-      </div>
-    <?php endif; ?>
+      </section>
+      <?php endif; ?>
     <?php
     // Requirement #13: every rejection auditable — the reason, what was
     // missing, what WAS available, the data quality and the minimum it was
@@ -375,21 +418,34 @@ $heroMarketLabel = function (string $market, string $selection): string {
     $heroRejections = is_array($heroDiag['rejectionAudit']['rows'] ?? null) ? $heroDiag['rejectionAudit']['rows'] : [];
     ?>
     <?php if ($heroRejections !== [] && !empty($caps['sync'])): ?>
-      <details style="margin-top:12px">
-        <summary class="dim" style="cursor:pointer;font-size:12px">Why <?= count($heroRejections) ?> candidate<?= count($heroRejections) === 1 ? ' was' : 's were' ?> rejected</summary>
-        <div class="table-scroll" style="margin-top:10px">
-          <table class="tbl" style="font-size:11px">
+      <section class="panel sports-section" id="ticket-rejections" aria-labelledby="ticket-rejections-heading">
+        <div class="sports-section__heading">
+          <div class="sports-section__title">
+            <span class="sports-step" aria-hidden="true">3</span>
+            <div>
+              <p class="sports-eyebrow">Audit trail</p>
+              <h3 id="ticket-rejections-heading">Why candidates were rejected</h3>
+            </div>
+          </div>
+          <span class="sports-section__meta"><?= count($heroRejections) ?> rejected</span>
+        </div>
+        <div class="body">
+          <p class="sports-section-intro">Every candidate the engine refused, with the stage it failed at, what was missing, what was available and the minimum it was judged against. Shown whatever the outcome — a rejected market on a day that still produced a ticket is exactly as worth diagnosing.</p>
+        <details class="sports-details">
+          <summary>Why <?= count($heroRejections) ?> candidate<?= count($heroRejections) === 1 ? ' was' : 's were' ?> rejected</summary>
+          <div class="table-scroll">
+          <table class="tbl sports-tbl-xs">
             <thead><tr><th>Match · market</th><th>Failure code · stage</th><th>Reason</th><th>Missing</th><th>Available</th><th class="num">Data quality</th><th class="num">Minimum allowed</th><th>Retryable · fallback</th></tr></thead>
             <tbody>
               <?php foreach ($heroRejections as $rej): ?>
                 <tr>
                   <td>
                     <?= e((string) ($rej['fixture'] ?? '?')) ?>
-                    <span class="dim" style="display:block;font-size:10px"><?= e(trim((string) ($rej['market'] ?? '') . ' / ' . (string) ($rej['selection'] ?? ''), ' /')) ?></span>
+                    <span class="dim sports-cell-note"><?= e(trim((string) ($rej['market'] ?? '') . ' / ' . (string) ($rej['selection'] ?? ''), ' /')) ?></span>
                   </td>
                   <td>
-                    <span class="badge b-red mono" style="font-size:10px"><?= e((string) ($rej['failureCode'] ?? '—')) ?></span>
-                    <?php if (!empty($rej['failedStage'])): ?><span class="dim" style="display:block;font-size:10px">stage: <?= e((string) $rej['failedStage']) ?></span><?php endif; ?>
+                    <span class="badge b-red mono sports-badge-xs"><?= e((string) ($rej['failureCode'] ?? '—')) ?></span>
+                    <?php if (!empty($rej['failedStage'])): ?><span class="dim sports-cell-note">stage: <?= e((string) $rej['failedStage']) ?></span><?php endif; ?>
                   </td>
                   <td class="dim"><?= e((string) ($rej['failureReason'] ?? $rej['reason'] ?? '—')) ?></td>
                   <td class="dim"><?= ($rej['missing'] ?? []) === [] ? '<span class="dim">Nothing required was missing</span>' : e(implode(', ', (array) $rej['missing'])) ?></td>
@@ -397,11 +453,11 @@ $heroMarketLabel = function (string $market, string $selection): string {
                   <td class="num mono"><?= ($rej['dataQuality'] ?? null) === null ? 'Unavailable' : (int) $rej['dataQuality'] ?></td>
                   <td class="num mono">
                     <?= ($rej['minDataQuality'] ?? null) === null ? 'Unavailable' : (int) $rej['minDataQuality'] ?>
-                    <?php if (!empty($rej['dataTier'])): ?><span class="dim" style="display:block;font-size:10px"><?= e((string) $rej['dataTier']) ?> tier<?= ($rej['minConfidence'] ?? null) !== null ? ' · ' . e(number_format((float) $rej['minConfidence'], 0)) . '% conf' : '' ?></span><?php endif; ?>
+                    <?php if (!empty($rej['dataTier'])): ?><span class="dim sports-cell-note"><?= e((string) $rej['dataTier']) ?> tier<?= ($rej['minConfidence'] ?? null) !== null ? ' · ' . e(number_format((float) $rej['minConfidence'], 0)) . '% conf' : '' ?></span><?php endif; ?>
                   </td>
                   <td>
-                    <span class="badge <?= !empty($rej['retryable']) ? 'b-green' : 'b-gray' ?>" style="font-size:10px"><?= !empty($rej['retryable']) ? 'RETRYABLE' : 'TERMINAL' ?></span>
-                    <?php if (!empty($rej['fallbackAttempted'])): ?><span class="dim" style="display:block;font-size:10px">fallback: <?= e((string) ($rej['fallbackResult'] ?? 'attempted')) ?></span><?php endif; ?>
+                    <span class="badge <?= !empty($rej['retryable']) ? 'b-green' : 'b-gray' ?> sports-badge-xs"><?= !empty($rej['retryable']) ? 'RETRYABLE' : 'TERMINAL' ?></span>
+                    <?php if (!empty($rej['fallbackAttempted'])): ?><span class="dim sports-cell-note">fallback: <?= e((string) ($rej['fallbackResult'] ?? 'attempted')) ?></span><?php endif; ?>
                   </td>
                 </tr>
               <?php endforeach; ?>
@@ -409,29 +465,37 @@ $heroMarketLabel = function (string $market, string $selection): string {
 
           </table>
         </div>
+        </details>
         <?php if (!empty($heroDiag['rejectionAudit']['truncated'])): ?>
-          <p class="dim" style="margin:6px 0 0;font-size:11px">More rejections occurred than this ledger keeps; the counts in the funnel above are complete.</p>
+          <p class="sports-note">More rejections occurred than this ledger keeps; the counts in the generation run above are complete.</p>
         <?php endif; ?>
-      </details>
+        </div>
+      </section>
     <?php endif; ?>
-  </div>
-</div>
 
-<div class="stack">
-    <p class="dim" style="margin:0 0 12px;font-size:12px">Ticket P/L is below; prediction accuracy, Brier, ECE and the 30-day settlement window are reported once, on <a href="/football">Football Intelligence</a>.<?php if (!empty($perf['demoBanner'])): ?> <b><?= e((string) $perf['demoBanner']) ?></b><?php endif; ?></p>
-  <div class="panel">
-    <h3>Odds prediction tickets</h3>
-    <div class="body scroll" style="padding-top:12px">
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-        <?php if (!empty($caps['sync'])): ?>
-          <form method="post" action="/sports/generate-ticket" style="display:flex;gap:6px;align-items:center" onsubmit="return confirm('Generate odds prediction ticket now?')">
+      <section class="panel sports-section" id="ticket-history" aria-labelledby="ticket-history-heading">
+        <div class="sports-section__heading">
+          <div class="sports-section__title">
+            <span class="sports-step" aria-hidden="true">4</span>
+            <div>
+              <p class="sports-eyebrow">Stored records</p>
+              <h3 id="ticket-history-heading">Odds prediction tickets</h3>
+            </div>
+          </div>
+          <span class="sports-section__meta"><?= count((array) $tickets) ?> stored</span>
+        </div>
+        <div class="body scroll">
+          <p class="sports-section-intro">Every ticket persisted so far, with its approval state, settlement state and profit/loss. Prediction accuracy, Brier, ECE and the 30-day settlement window are reported once, on <a href="/football">Football Intelligence</a> — they are not repeated here.<?php if (!empty($perf['demoBanner'])): ?> <b><?= e((string) $perf['demoBanner']) ?></b><?php endif; ?></p>
+      <?php if (!empty($caps['sync'])): ?>
+        <div class="sports-actions">
+          <form method="post" action="/sports/generate-ticket" onsubmit="return confirm('Generate odds prediction ticket now?')">
             <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
             <input type="hidden" name="date" value="<?= e(gmdate('Y-m-d')) ?>">
-            <button class="btn small primary" style="font-weight:700">🎯 Odds Prediction Ticket</button>
+            <button class="btn small primary sports-ticket-btn">🎯 Odds Prediction Ticket</button>
           </form>
-          <span class="dim" style="font-size:11px">Optional manual run/retry. Existing tickets are returned; missing tickets are generated without duplicates.</span>
-        <?php endif; ?>
-      </div>
+          <span class="sports-note">Optional manual run/retry. Existing tickets are returned; missing tickets are generated without duplicates.</span>
+        </div>
+      <?php endif; ?>
       <?php if (empty($tickets)): ?>
         <p class="dim">No odds prediction tickets have been persisted yet. Automatic generation runs whenever the configured system is enabled; the button above is an optional immediate retry.</p>
       <?php else: ?>
@@ -441,7 +505,7 @@ $heroMarketLabel = function (string $market, string $selection): string {
             <tbody>
               <?php foreach ($tickets as $t): $pnl = $t['pnl'] ?? null; ?>
                 <tr>
-                  <td class="mono" style="font-weight:700"><?= e((string) ($t['id'] ?? '')) ?></td>
+                  <td class="mono sports-cell-id"><?= e((string) ($t['id'] ?? '')) ?></td>
                   <td class="mono dim"><?= e(substr((string) ($t['created_at'] ?? ''), 0, 16)) ?></td>
                   <td class="num mono"><?= e(number_format((float) ($t['total_odds'] ?? 0), 2)) ?></td>
                   <td class="num"><?= (int) ($t['selection_count'] ?? 0) ?></td>
@@ -450,26 +514,26 @@ $heroMarketLabel = function (string $market, string $selection): string {
                   <td><span class="badge b-gray"><?= e((string) ($t['approval_status'] ?? '—')) ?></span></td>
                   <td><span class="badge <?= in_array(($t['settlement_status'] ?? ''), ['WON'], true) ? 'b-green' : (in_array(($t['settlement_status'] ?? ''), ['LOST'], true) ? 'b-red' : 'b-gray') ?>"><?= e((string) ($t['settlement_status'] ?? 'PENDING')) ?></span></td>
                   <td class="num mono <?= $pnl !== null && (float) $pnl >= 0 ? 'up' : 'down' ?>"><?= $pnl !== null ? e(number_format((float) $pnl, 2)) : '—' ?></td>
-                  <td class="num" style="white-space:nowrap">
+                  <td class="num sports-cell-actions">
                     <?php if ((string) ($t['approval_status'] ?? '') === 'PENDING_USER_APPROVAL'): ?>
                       <?php if (!empty($caps['approve'])): ?>
-                        <form method="post" action="/sports/<?= e((string) $t['id']) ?>/decide" style="display:inline">
+                        <form method="post" action="/sports/<?= e((string) $t['id']) ?>/decide" class="sports-inline-form">
                           <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><input type="hidden" name="approve" value="1"><button class="btn small primary">approve</button>
                         </form>
-                        <form method="post" action="/sports/<?= e((string) $t['id']) ?>/decide" style="display:inline" onsubmit="return confirm('Reject this record?')">
+                        <form method="post" action="/sports/<?= e((string) $t['id']) ?>/decide" class="sports-inline-form" onsubmit="return confirm('Reject this record?')">
                           <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><input type="hidden" name="approve" value="0"><button class="btn small danger">reject</button>
                         </form>
                       <?php else: ?>
-                        <span class="dim" style="font-size:10px" title="Requires the sports.approve permission">needs sports.approve</span>
+                        <span class="dim sports-cell-note" title="Requires the sports.approve permission">needs sports.approve</span>
                       <?php endif; ?>
                     <?php endif; ?>
                     <?php if ((string) ($t['settlement_status'] ?? '') === 'PENDING'): ?>
                       <?php if (!empty($caps['settle'])): ?>
-                        <form method="post" action="/sports/<?= e((string) $t['id']) ?>/settle" style="display:inline">
+                        <form method="post" action="/sports/<?= e((string) $t['id']) ?>/settle" class="sports-inline-form">
                           <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><button class="btn small">settle</button>
                         </form>
                       <?php else: ?>
-                        <span class="dim" style="font-size:10px" title="Requires the sports.settle permission">needs sports.settle</span>
+                        <span class="dim sports-cell-note" title="Requires the sports.settle permission">needs sports.settle</span>
                       <?php endif; ?>
                     <?php endif; ?>
                   </td>
@@ -479,12 +543,22 @@ $heroMarketLabel = function (string $market, string $selection): string {
           </table>
         </div>
       <?php endif; ?>
-    </div>
-  </div>
+        </div>
+      </section>
 
-  <div class="panel">
-    <h3>Daily odds prediction ticket runs</h3>
-    <div class="body scroll" style="padding-top:12px">
+      <section class="panel sports-section" id="ticket-runs" aria-labelledby="ticket-runs-heading">
+        <div class="sports-section__heading">
+          <div class="sports-section__title">
+            <span class="sports-step" aria-hidden="true">5</span>
+            <div>
+              <p class="sports-eyebrow">Run history</p>
+              <h3 id="ticket-runs-heading">Daily odds prediction ticket runs</h3>
+            </div>
+          </div>
+          <span class="sports-section__meta"><?= count((array) $dailyRuns) ?> days</span>
+        </div>
+        <div class="body scroll">
+          <p class="sports-section-intro">One row per day the engine ran, whether or not it produced a ticket. A day with no ticket still records what it evaluated and why it stopped, so an empty day is explained rather than simply absent.</p>
       <?php if (empty($dailyRuns)): ?>
         <p class="dim">No daily runs recorded yet.</p>
       <?php else: ?>
@@ -493,7 +567,7 @@ $heroMarketLabel = function (string $market, string $selection): string {
           <tbody>
             <?php foreach ($dailyRuns as $r): ?>
               <tr>
-                <td class="mono" style="font-weight:700"><?= e((string) ($r['date'] ?? '')) ?></td>
+                <td class="mono sports-cell-id"><?= e((string) ($r['date'] ?? '')) ?></td>
                 <td><span class="badge <?= (string) ($r['generation_status'] ?? '') === 'GENERATED' ? 'b-violet' : ((string) ($r['generation_status'] ?? '') === 'FAILED' ? 'b-red' : 'b-gray') ?>"><?= e((string) ($r['generation_status'] ?? (!empty($r['ticket_id']) ? 'GENERATED' : 'PENDING'))) ?></span></td>
                 <td><span class="badge <?= in_array(($r['status'] ?? ''), ['PENDING_USER_APPROVAL', 'APPROVED'], true) ? 'b-violet' : 'b-gray' ?>"><?= e((string) ($r['status'] ?? '')) ?></span></td>
                 <td class="mono dim"><?= $r['ticket_id'] ? e((string) $r['ticket_id']) : '—' ?></td>
@@ -506,7 +580,52 @@ $heroMarketLabel = function (string $market, string $selection): string {
           </tbody>
         </table>
       <?php endif; ?>
+        </div>
+      </section>
     </div>
+
+    <aside class="sports-side stack" aria-label="Ticket reading guide and engine context">
+      <section class="panel sports-section" aria-labelledby="ticket-guide-heading">
+        <div class="sports-section__heading">
+          <div class="sports-section__title">
+            <div>
+              <p class="sports-eyebrow">Reading the numbers</p>
+              <h3 id="ticket-guide-heading">What each column means</h3>
+            </div>
+          </div>
+        </div>
+        <div class="body">
+          <p class="sports-section-intro">Model output and market price are separate readings and are never blended into one number.</p>
+          <dl class="sports-defs">
+            <div><dt>Real market odds</dt><dd>The bookmaker&rsquo;s own quoted price, with the source that supplied it and the time it was last updated.</dd></div>
+            <div><dt>Movement</dt><dd>The market&rsquo;s reaction since that price opened. Shortening means money arrived. Reads &ldquo;not measured&rdquo; — never &ldquo;stable&rdquo; — when fewer than two observations exist.</dd></div>
+            <div><dt>WINDELS probability · fair</dt><dd>The model&rsquo;s own estimate, and 1 ÷ that probability. Fair odds are not a bookmaker offer.</dd></div>
+            <div><dt>Value / edge</dt><dd>The comparison between the two. A positive edge is an analytical reading, not a guarantee and not an instruction to bet.</dd></div>
+            <div><dt>Confidence · data quality</dt><dd>How certain the model is, and how much verified evidence stood behind it. They are reported separately because they answer different questions.</dd></div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="panel sports-section" aria-labelledby="ticket-states-heading">
+        <div class="sports-section__heading">
+          <div class="sports-section__title">
+            <div>
+              <p class="sports-eyebrow">Lifecycle</p>
+              <h3 id="ticket-states-heading">How a ticket moves</h3>
+            </div>
+          </div>
+        </div>
+        <div class="body">
+          <dl class="sports-defs">
+            <div><dt>GENERATED</dt><dd>The engine assembled and stored a ticket from verified fixtures and odds.</dd></div>
+            <div><dt>NO_QUALIFIED_TICKET</dt><dd>No legal combination existed — the odds-range, correlation and selection-count rules could not all be satisfied together. It says nothing about individual predictions, which are listed in section 2.</dd></div>
+            <div><dt>PENDING_USER_APPROVAL</dt><dd>Stored and awaiting an operator decision. Approval needs <span class="mono">sports.approve</span>.</dd></div>
+            <div><dt>Settlement</dt><dd>Recorded against the real result once the matches finish. Settling needs <span class="mono">sports.settle</span>.</dd></div>
+          </dl>
+          <p class="sports-note">Analysis and simulation only — no real-money bet is placed from this screen, and this deployment has no external bookmaker.</p>
+        </div>
+      </section>
+    </aside>
   </div>
 </div>
 

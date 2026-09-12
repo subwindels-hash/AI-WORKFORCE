@@ -26,6 +26,7 @@ require_once TESTSPATH . 'football_support.php';
 use AIWorkforce\Football\DataState;
 use AIWorkforce\Football\FootballConfiguration;
 use AIWorkforce\Football\MatchFeed;
+use AIWorkforce\Football\OddsIntelligence;
 use AIWorkforce\Football\PredictionMarkets;
 use AIWorkforce\Football\QualityBand;
 
@@ -164,8 +165,37 @@ test('football: the odds prediction dropdown carries every documented market', f
     $keys = array_column($markets->catalog(), 'key');
     foreach (['MATCH_WINNER', 'DOUBLE_CHANCE', 'DRAW_NO_BET', 'OVER_0_5', 'OVER_1_5', 'OVER_2_5', 'OVER_3_5',
         'UNDER_1_5', 'UNDER_2_5', 'UNDER_3_5', 'BTTS', 'BTTS_AND_OVER_2_5', 'FIRST_HALF_WINNER',
-        'FIRST_HALF_OVER_UNDER', 'HALF_TIME_FULL_TIME', 'CORRECT_SCORE', 'ASIAN_HANDICAP', 'CORNERS', 'CARDS'] as $key) {
+        'FIRST_HALF_OVER_UNDER', 'HALF_TIME_FULL_TIME', 'CORRECT_SCORE', 'ASIAN_HANDICAP', 'CORNERS', 'CARDS',
+        // The wider per-match sheet: more goal lines, team goals, combination
+        // and second-half markets — every one of them grid-derived.
+        'OVER_4_5', 'OVER_5_5', 'OVER_6_5', 'BTTS_AND_UNDER_2_5', 'TOTAL_GOALS_ODD_EVEN', 'TOTAL_GOALS_BAND',
+        'HOME_TEAM_TOTAL_GOALS', 'AWAY_TEAM_TOTAL_GOALS', 'HOME_CLEAN_SHEET', 'AWAY_CLEAN_SHEET',
+        'WINNING_MARGIN', 'RESULT_AND_BTTS', 'FIRST_HALF_DOUBLE_CHANCE', 'FIRST_HALF_BTTS',
+        'SECOND_HALF_WINNER', 'SECOND_HALF_OVER_UNDER'] as $key) {
         assert_true(in_array($key, $keys, true), 'the catalogue offers ' . $key);
+    }
+    // Provider spellings for the wider sheet resolve to their own market and
+    // are never absorbed by the shorter name they contain.
+    $spellings = [
+        'First Half Both Teams To Score' => 'FIRST_HALF_BTTS',
+        'First Half Double Chance' => 'FIRST_HALF_DOUBLE_CHANCE',
+        'Second Half Winner' => 'SECOND_HALF_WINNER',
+        '2nd Half Goals' => 'SECOND_HALF_OVER_UNDER',
+        'Goals Odd/Even' => 'TOTAL_GOALS_ODD_EVEN',
+        'Goal Range' => 'TOTAL_GOALS_BAND',
+        'Winning Margin' => 'WINNING_MARGIN',
+        'Result and Both Teams To Score' => 'RESULT_AND_BTTS',
+        'BTTS and Under 2.5' => 'BTTS_AND_UNDER_2_5',
+        'Home Clean Sheet' => 'HOME_CLEAN_SHEET',
+        'Home Team Total Goals' => 'HOME_TEAM_TOTAL_GOALS',
+        // Regression: the unqualified families must still map to themselves.
+        'Both Teams To Score' => 'BTTS', 'Double Chance' => 'DOUBLE_CHANCE',
+        'Match Winner' => 'MATCH_WINNER', 'Total Goals' => 'OVER_UNDER',
+        'Half Time / Full Time' => 'HALF_TIME_FULL_TIME', 'Correct Score' => 'CORRECT_SCORE',
+    ];
+    foreach ($spellings as $raw => $expected) {
+        assert_equals($expected, PredictionMarkets::normalizeProviderMarket($raw),
+            '"' . $raw . '" is recognised as ' . $expected);
     }
     // A market the engine does not offer is answered with the default and a note.
     $notes = [];
@@ -562,19 +592,22 @@ test('football: a match detail exposes every priced market and every priced sele
 
     // The dedicated match response includes the full catalogue, not the old
     // four-market preview. Modelled but unpriced markets remain explicit.
-    $catalogueCount = count((new PredictionMarkets(new FootballConfiguration([])))->catalog());
-    assert_equals($catalogueCount + 2, count($markets),
-        'the match response carries the full catalogue plus every additional provider family and line');
+    // The match sheet is the EXPANDED sheet: every market, walked across every
+    // line of its ladder. The only family these quotes add beyond it is Team to
+    // Score First — every goal line they quote is already a rung.
+    $sheetCount = count((new PredictionMarkets(new FootballConfiguration([])))->fullSheet());
+    assert_equals($sheetCount + 1, count($markets),
+        'the match response carries every market and line, plus each additional provider family');
     foreach (['MATCH_WINNER', 'OVER_2_5', 'OVER_4_5', 'TEAM_TO_SCORE_FIRST', 'CORNERS', 'CARDS'] as $key) {
         assert_true(isset($markets[$key]), 'priced market ' . $key . ' is visible on the sheet');
     }
     assert_equals(3.75, (float) ($markets['OVER_4_5']['outcomes'][0]['odds'] ?? 0),
-        'a provider totals line outside the fixed catalogue retains its real price');
+        'the 4.5 goal line retains its real provider price');
     assert_equals(PredictionMarkets::SOURCE_ODDS, (string) $markets['TEAM_TO_SCORE_FIRST']['source'],
         'an additional provider family is visible without an invented model estimate');
     $scores = array_column((array) $markets['CORRECT_SCORE']['outcomes'], null, 'selection');
     assert_equals(99.0, (float) ($scores['6-6']['odds'] ?? 0),
-        'every quoted correct score is retained even when it is outside the six model leaders');
+        'every quoted correct score is retained even when it is outside the grid the model lists');
 
     $winner = (array) $markets['MATCH_WINNER'];
     assert_equals(3, count((array) $winner['outcomes']), 'all three 1X2 legs are retained');
@@ -602,12 +635,399 @@ test('football: a match detail exposes every priced market and every priced sele
 
     $board = $module->board()->forDate($day);
     $candidateKeys = array_column((array) ($board['rows'][0]['marketCandidates'] ?? []), 'key');
-    assert_equals($catalogueCount + 2, count($candidateKeys),
-        'the board carries the complete catalogue plus each additional provider family and line');
+    assert_equals($sheetCount + 1, count($candidateKeys),
+        'the board carries every market and line, plus each additional provider family');
     assert_true(in_array('OVER_4_5', $candidateKeys, true) && in_array('TEAM_TO_SCORE_FIRST', $candidateKeys, true),
         'real provider markets outside the fixed catalogue are never silently dropped');
     assert_true(in_array('CORNERS', $candidateKeys, true) && in_array('CARDS', $candidateKeys, true),
         'the board now carries every additional priced market');
     assert_true(in_array('HALF_TIME_FULL_TIME', $candidateKeys, true),
         'an unpriced market stays visible rather than being silently omitted');
+});
+
+test('football: every added market is summed from the score grid and is exhaustive', function () {
+    [$repo, $module, $day] = fx_fb_two_leagues(2, 0);
+    $module->predictions()->predictDay($day);
+    $page = $module->feed()->page($day, 1, 50, false, ['competition' => '39']);
+    $predictionId = (string) ($page['matches'][0]['prediction']['predictionId'] ?? '');
+    assert_true($predictionId !== '', 'the page holds a stored prediction');
+    $grid = [];
+    foreach ($module->repository()->listScoreProbabilities($predictionId, 200) as $gridRow) {
+        $grid[] = ['home' => (int) $gridRow['home_goals'], 'away' => (int) $gridRow['away_goals'],
+            'probability' => (float) $gridRow['probability']];
+    }
+    $markets = $module->markets();
+    $row = $repo->findPrediction($predictionId);
+
+    // Each added market prices a set of MUTUALLY EXCLUSIVE outcomes. That is
+    // the property that makes an overround removable, so it is asserted
+    // directly: the legs of one market sum to the whole distribution.
+    // The full-match markets are summed straight off the stored grid, so they
+    // are always answerable. The half markets additionally need the expected
+    // goals stored with the prediction; where those exist they must obey the
+    // same law, and where they do not the market must be EMPTY rather than
+    // partially derived.
+    $fullMatch = ['BTTS_AND_UNDER_2_5', 'TOTAL_GOALS_ODD_EVEN', 'TOTAL_GOALS_BAND',
+        'HOME_TEAM_TOTAL_GOALS', 'AWAY_TEAM_TOTAL_GOALS', 'HOME_CLEAN_SHEET', 'AWAY_CLEAN_SHEET',
+        'WINNING_MARGIN', 'RESULT_AND_BTTS', 'OVER_4_5', 'OVER_5_5', 'OVER_6_5'];
+    $halfBased = ['FIRST_HALF_DOUBLE_CHANCE', 'FIRST_HALF_BTTS', 'SECOND_HALF_WINNER', 'SECOND_HALF_OVER_UNDER'];
+    foreach (array_merge($fullMatch, $halfBased) as $key) {
+        $market = $markets->market($key);
+        assert_not_null($market, $key . ' is in the catalogue');
+        $evaluated = $markets->evaluate($row, $grid, [], $market);
+        if (in_array($key, $halfBased, true) && (array) $evaluated['outcomes'] === []) {
+            assert_equals(PredictionMarkets::STATE_UNAVAILABLE, (string) $evaluated['state'],
+                $key . ' says so plainly when the half grid cannot be built');
+            continue;
+        }
+        assert_equals(PredictionMarkets::STATE_AVAILABLE, (string) $evaluated['state'], $key . ' is answerable from stored data');
+        $probabilities = array_column((array) $evaluated['outcomes'], 'probability');
+        assert_true(count($probabilities) >= 2, $key . ' prices more than one selection');
+        $total = 0.0;
+        foreach ($probabilities as $probability) {
+            assert_true(is_numeric($probability), $key . ' derives a real probability for every leg');
+            assert_true((float) $probability >= 0.0 && (float) $probability <= 1.0, $key . ' stays inside [0,1]');
+            $total += (float) $probability;
+        }
+        assert_true(abs($total - 1.0) < 0.001, $key . ' legs sum to one distribution, got ' . round($total, 6));
+        // Derived, never invented: no price exists in this call, so no price
+        // may appear on any leg.
+        foreach ((array) $evaluated['outcomes'] as $outcome) {
+            assert_null($outcome['odds'] ?? null, $key . ' invents no price when the feed quoted none');
+            assert_equals(PredictionMarkets::STATE_UNAVAILABLE, (string) ($outcome['oddsState'] ?? ''), $key . ' reports the missing price');
+        }
+    }
+
+    // Cross-market agreement: the added markets must not contradict the ones
+    // that were already trusted, because they read the same grid.
+    $at = static function (array $evaluated, string $selection): float {
+        foreach ((array) $evaluated['outcomes'] as $outcome) {
+            if ((string) $outcome['selection'] === $selection) return (float) $outcome['probability'];
+        }
+        return -1.0;
+    };
+    $btts = $markets->evaluate($row, $grid, [], $markets->market('BTTS'));
+    $bttsOver = $markets->evaluate($row, $grid, [], $markets->market('BTTS_AND_OVER_2_5'));
+    $bttsUnder = $markets->evaluate($row, $grid, [], $markets->market('BTTS_AND_UNDER_2_5'));
+    assert_true(abs($at($bttsOver, 'YES') + $at($bttsUnder, 'YES') - $at($btts, 'YES')) < 0.001,
+        'BTTS splits exactly into its over-2.5 and under-2.5 halves');
+
+    $margin = $markets->evaluate($row, $grid, [], $markets->market('WINNING_MARGIN'));
+    $resultBtts = $markets->evaluate($row, $grid, [], $markets->market('RESULT_AND_BTTS'));
+    $homeWin = (float) $row['probability_home'];
+    assert_true(abs($at($margin, 'HOME_1') + $at($margin, 'HOME_2') + $at($margin, 'HOME_3_PLUS') - $homeWin) < 0.01,
+        'the home winning margins add back up to the home win probability');
+    assert_true(abs($at($resultBtts, 'HOME_YES') + $at($resultBtts, 'HOME_NO') - $homeWin) < 0.01,
+        'result-and-BTTS splits the home win without changing it');
+
+    // A home clean sheet is exactly "the away side does not score", which is
+    // also the under-0.5 side of away team goals. Both are read off the same
+    // grid, so they must agree to the last decimal.
+    $cleanSheet = $markets->evaluate($row, $grid, [], $markets->market('HOME_CLEAN_SHEET'));
+    $awayGoals = $markets->evaluate($row, $grid, [], $markets->market('AWAY_TEAM_TOTAL_GOALS'), 0.5);
+    assert_true(abs($at($cleanSheet, 'YES') - $at($awayGoals, 'UNDER')) < 0.000001,
+        'a home clean sheet is the away side under 0.5 goals, read from the same grid');
+
+    // A second-half market states its assumption rather than posing as a
+    // stored per-half input.
+    $secondHalf = $markets->evaluate($row, $grid, [], $markets->market('SECOND_HALF_OVER_UNDER'));
+    if ((array) $secondHalf['outcomes'] !== []) {
+        assert_true(str_contains((string) $secondHalf['basis'], 'SECOND_HALF_SHARE'),
+            'the second-half basis names the goal share it assumed');
+        assert_equals(PredictionMarkets::SOURCE_ASSUMED, (string) $secondHalf['source'],
+            'and it is labelled as resting on an assumption, not on a stored half-time input');
+    }
+
+    // Unmodelled families are still never given a probability.
+    foreach (['CORNERS', 'CARDS', 'HALF_TIME_FULL_TIME'] as $key) {
+        $evaluated = $markets->evaluate($row, $grid, [], $markets->market($key));
+        assert_equals([], (array) $evaluated['outcomes'], $key . ' invents nothing without a provider price');
+    }
+});
+
+test('football: an added market carries its complete odds information when priced', function () {
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    [$repo, , $module] = fx_fb_harness([
+        fx_fb_row('fx-wide-odds', gmdate('c', strtotime($day . 'T18:00:00+00:00')), 'Arsenal', 'Brentford', '10', '20'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $page = $module->board()->forDate($day);
+    $matchId = (string) ($page['rows'][0]['matchId'] ?? '');
+    $fixtureId = (int) ($page['rows'][0]['fixtureId'] ?? 0);
+    assert_true($matchId !== '' && $fixtureId > 0, 'the stored fixture has both identities');
+
+    // Both legs of two added markets are quoted, so each market is a COMPLETE
+    // priced set and its margin can honestly be removed.
+    $now = gmdate('c');
+    $repo->marketOdds = [
+        ['matchId' => $matchId, 'market' => 'Goals Odd/Even', 'selection' => 'Odd', 'decimalOdds' => 1.95, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Goals Odd/Even', 'selection' => 'Even', 'decimalOdds' => 1.90, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Home Clean Sheet', 'selection' => 'Yes', 'decimalOdds' => 2.60, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Home Clean Sheet', 'selection' => 'No', 'decimalOdds' => 1.48, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Second Half Winner', 'selection' => 'Home', 'decimalOdds' => 2.20, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+    ];
+
+    $detail = $module->predictionFor($fixtureId);
+    $markets = [];
+    foreach ((array) ($detail['markets'] ?? []) as $market) $markets[(string) ($market['key'] ?? '')] = $market;
+
+    foreach (['TOTAL_GOALS_ODD_EVEN', 'HOME_CLEAN_SHEET'] as $key) {
+        $market = (array) $markets[$key];
+        assert_equals(PredictionMarkets::SOURCE_GRID, (string) $market['source'], $key . ' is a modelled market, not a price passthrough');
+        assert_equals(OddsIntelligence::PRICE_COMPLETE, (string) ($market['pricing']['state'] ?? ''), $key . ' has both of its legs priced');
+        foreach ((array) $market['outcomes'] as $outcome) {
+            foreach (['odds', 'impliedProbability', 'probability', 'edge', 'edgePoints', 'oddsObservedAt', 'oddsSource',
+                'windelsFairOdds', 'fairOdds', 'fairProbability', 'breakEvenProbability', 'expectedValue',
+                'quoteCount', 'oddsLow', 'oddsHigh', 'oddsSpread', 'valueClass', 'valueLabel', 'valueReason'] as $field) {
+                assert_true(array_key_exists($field, $outcome), $key . ' reports ' . $field);
+            }
+            assert_true(is_numeric($outcome['odds'] ?? null), $key . ' shows the real quoted price');
+            assert_true(is_numeric($outcome['probability'] ?? null), $key . ' shows its model probability beside the price');
+            assert_equals('fixture-feed', (string) ($outcome['oddsSource'] ?? ''), $key . ' keeps the price source');
+            assert_equals($now, (string) ($outcome['oddsObservedAt'] ?? ''), $key . ' keeps the observation time');
+        }
+    }
+
+    // A half-priced market is reported as partial and never de-vigged.
+    $secondHalf = (array) $markets['SECOND_HALF_WINNER'];
+    assert_equals(OddsIntelligence::PRICE_PARTIAL, (string) ($secondHalf['pricing']['state'] ?? ''),
+        'one quoted leg of a three-way market is a partial price, not a complete one');
+    $bySelection = array_column((array) $secondHalf['outcomes'], null, 'selection');
+    assert_equals(2.20, (float) ($bySelection['HOME']['odds'] ?? 0), 'the quoted leg keeps its price');
+    assert_null($bySelection['DRAW']['odds'] ?? null, 'the unquoted legs stay unpriced rather than being filled in');
+
+    // An unpriced added market is still visible, as an explicit UNPRICED row.
+    $margin = (array) $markets['WINNING_MARGIN'];
+    assert_equals(7, count((array) $margin['outcomes']), 'every winning-margin bucket is listed');
+    foreach ((array) $margin['outcomes'] as $outcome) {
+        assert_null($outcome['odds'] ?? null, 'no price is invented for an unquoted market');
+        assert_true(is_numeric($outcome['probability'] ?? null), 'but the model probability is still published');
+    }
+});
+
+test('football: every line of every line-based market is on the match sheet', function () {
+    $markets = new PredictionMarkets(new FootballConfiguration([]));
+    $sheet = $markets->fullSheet();
+
+    // One entry per market per line, and never the same family/line twice.
+    $signatures = [];
+    foreach ($sheet as $entry) {
+        $line = is_numeric($entry['line'] ?? null) ? number_format((float) $entry['line'], 2, '.', '') : 'NONE';
+        $signature = (string) $entry['key'] . '|' . $line;
+        assert_true(!isset($signatures[$signature]), 'the sheet lists ' . $signature . ' exactly once');
+        $signatures[$signature] = true;
+    }
+
+    $linesOf = static function (array $sheet, string $key): array {
+        $lines = [];
+        foreach ($sheet as $entry) {
+            if ((string) $entry['key'] !== $key) continue;
+            if (is_numeric($entry['line'] ?? null)) $lines[] = (float) $entry['line'];
+        }
+        sort($lines);
+        return $lines;
+    };
+
+    // The goal ladder keeps the canonical OVER_<line> spelling, so the rest of
+    // the engine recognises a rung exactly as it recognises a catalogue key.
+    foreach ([0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5] as $line) {
+        $key = 'OVER_' . str_replace('.', '_', rtrim(rtrim(number_format($line, 2), '0'), '.'));
+        assert_true(isset($signatures[$key . '|' . number_format($line, 2, '.', '')]),
+            'the goal ladder offers ' . $key);
+    }
+    // And the family is walked ONCE: OVER_2_5 and UNDER_2_5 are two catalogue
+    // keys for one bookmaker market, so the ladder must not be printed twice.
+    $goalRungs = 0;
+    foreach ($sheet as $entry) {
+        if (str_starts_with((string) $entry['key'], 'OVER_') || str_starts_with((string) $entry['key'], 'UNDER_')) $goalRungs++;
+    }
+    assert_equals(7, $goalRungs, 'the goal family contributes one rung per line, not one per catalogue alias');
+
+    // A real bookmaker prices a handicap ladder, quarter lines included.
+    $handicap = $linesOf($sheet, 'ASIAN_HANDICAP');
+    assert_equals(19, count($handicap), 'the handicap ladder is a real ladder, not one representative line');
+    foreach ([-1.5, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 1.5] as $line) {
+        assert_true(in_array($line, $handicap, true), 'the handicap ladder offers ' . $line);
+    }
+    assert_equals([0.5, 1.5, 2.5, 3.5], $linesOf($sheet, 'HOME_TEAM_TOTAL_GOALS'), 'home team goals are quoted across their ladder');
+    assert_equals([0.5, 1.5, 2.5], $linesOf($sheet, 'FIRST_HALF_OVER_UNDER'), 'first-half goals are quoted across their ladder');
+    assert_equals([0.5, 1.5, 2.5], $linesOf($sheet, 'SECOND_HALF_OVER_UNDER'), 'second-half goals are quoted across their ladder');
+
+    // Markets without a line appear exactly once and keep no line.
+    foreach (['MATCH_WINNER', 'BTTS', 'WINNING_MARGIN', 'CORRECT_SCORE', 'CORNERS'] as $key) {
+        assert_true(isset($signatures[$key . '|NONE']), $key . ' appears once, without a line');
+    }
+    assert_true(count($sheet) > count($markets->catalog()),
+        'the expanded sheet is strictly larger than the one-line-per-market catalogue');
+});
+
+test('football: each line of a ladder is priced and settled on its own terms', function () {
+    [$repo, $module, $day] = fx_fb_two_leagues(2, 0);
+    $module->predictions()->predictDay($day);
+    $page = $module->feed()->page($day, 1, 50, false, ['competition' => '39']);
+    $predictionId = (string) ($page['matches'][0]['prediction']['predictionId'] ?? '');
+    $grid = [];
+    foreach ($module->repository()->listScoreProbabilities($predictionId, 200) as $gridRow) {
+        $grid[] = ['home' => (int) $gridRow['home_goals'], 'away' => (int) $gridRow['away_goals'],
+            'probability' => (float) $gridRow['probability']];
+    }
+    $markets = $module->markets();
+    $row = $repo->findPrediction($predictionId);
+    $at = static function (array $evaluated, string $selection): float {
+        foreach ((array) $evaluated['outcomes'] as $outcome) {
+            if ((string) $outcome['selection'] === $selection) return (float) $outcome['probability'];
+        }
+        return -1.0;
+    };
+
+    // A ladder is only worth showing if each rung is a DIFFERENT bet. Over 0.5
+    // must be likelier than Over 1.5, and so on down the ladder.
+    $previous = 1.1;
+    foreach ([0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5] as $line) {
+        $key = 'OVER_' . str_replace('.', '_', rtrim(rtrim(number_format($line, 2), '0'), '.'));
+        $evaluated = $markets->evaluate($row, $grid, [], $markets->market($key), $line);
+        $over = $at($evaluated, 'OVER');
+        assert_true($over >= 0.0 && $over <= 1.0, $key . ' is a real probability');
+        assert_true($over < $previous, $key . ' is strictly less likely than the line below it');
+        assert_true(abs($over + $at($evaluated, 'UNDER') - 1.0) < 0.000001, $key . ' and its under leg are one distribution');
+        $previous = $over;
+    }
+
+    // The handicap ladder must be monotonic too: a bigger head start can only
+    // help the home side. Quarter lines settle by splitting the stake, so they
+    // sit strictly between their two bounding half lines.
+    $homeAt = [];
+    foreach ([-1.5, -1.25, -1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5] as $line) {
+        $evaluated = $markets->evaluate($row, $grid, [], $markets->market('ASIAN_HANDICAP'), $line);
+        assert_equals(2, count((array) $evaluated['outcomes']), 'a handicap line is a two-way market');
+        $homeAt[(string) $line] = $at($evaluated, 'HOME');
+    }
+    $ordered = array_values($homeAt);
+    for ($i = 0; $i < count($ordered) - 1; $i++) {
+        assert_true($ordered[$i] <= $ordered[$i + 1] + 0.000001,
+            'the home side never gets less likely as its handicap improves');
+    }
+    assert_true($homeAt['-0.75'] > $homeAt['-1'] && $homeAt['-0.75'] < $homeAt['-0.5'],
+        'a quarter line sits between the two half lines its stake is split across');
+
+    // Correct score now lists a real board rather than six leaders, and it is
+    // still a set of disjoint grid cells that never exceeds certainty.
+    $score = $markets->evaluate($row, $grid, [], $markets->market('CORRECT_SCORE'));
+    $rows = (array) $score['outcomes'];
+    assert_true(count($rows) > 6, 'the correct-score board is wider than the old six-row preview, got ' . count($rows));
+    $total = 0.0;
+    $seen = [];
+    foreach ($rows as $outcome) {
+        $selection = (string) $outcome['selection'];
+        assert_true(!isset($seen[$selection]), 'each scoreline is listed once: ' . $selection);
+        $seen[$selection] = true;
+        if (is_numeric($outcome['probability'] ?? null)) $total += (float) $outcome['probability'];
+    }
+    assert_true($total <= 1.000001, 'disjoint scorelines never sum past certainty, got ' . round($total, 6));
+    $ordering = array_values(array_filter(array_column($rows, 'probability'), 'is_numeric'));
+    for ($i = 0; $i < count($ordering) - 1; $i++) {
+        assert_true((float) $ordering[$i] >= (float) $ordering[$i + 1] - 0.000001,
+            'the correct-score board is ordered most likely first');
+    }
+});
+
+test('football: the API feed returns the same complete sheet the board and match page show', function () {
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    [$repo, , $module] = fx_fb_harness([
+        fx_fb_row('fx-feed-sheet', gmdate('c', strtotime($day . 'T18:00:00+00:00')), 'Chelsea', 'Fulham', '10', '20'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $board = $module->board()->forDate($day);
+    $matchId = (string) ($board['rows'][0]['matchId'] ?? '');
+    $fixtureId = (int) ($board['rows'][0]['fixtureId'] ?? 0);
+    assert_true($matchId !== '' && $fixtureId > 0, 'the stored fixture has both identities');
+
+    // Quotes spread across SEVERAL RUNGS of two ladders. Before the feed was
+    // widened it answered with one line per market, so the 4.5 goal line and
+    // the -1.5 handicap below were simply absent from the API response even
+    // though the provider had priced them.
+    $now = gmdate('c');
+    $repo->marketOdds = [
+        ['matchId' => $matchId, 'market' => 'Total Goals', 'selection' => 'Over 1.5', 'decimalOdds' => 1.28, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Total Goals', 'selection' => 'Under 1.5', 'decimalOdds' => 3.60, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Total Goals', 'selection' => 'Over 4.5', 'decimalOdds' => 6.50, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Total Goals', 'selection' => 'Under 4.5', 'decimalOdds' => 1.11, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Asian Handicap', 'selection' => 'Home -1.5', 'decimalOdds' => 2.85, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+        ['matchId' => $matchId, 'market' => 'Asian Handicap', 'selection' => 'Away +1.5', 'decimalOdds' => 1.42, 'observedAt' => $now, 'provider' => 'fixture-feed'],
+    ];
+
+    $page = $module->feed()->page($day, 1, 50, false);
+    $candidates = (array) ($page['matches'][0]['marketCandidates'] ?? []);
+    assert_true($candidates !== [], 'the feed carries a market sheet for the match');
+
+    // A rung is identified by market AND line, so the sheet must distinguish
+    // "Over 1.5" from "Over 4.5" instead of collapsing them into one market.
+    $byRung = [];
+    foreach ($candidates as $candidate) {
+        $line = is_numeric($candidate['line'] ?? null) ? number_format((float) $candidate['line'], 2, '.', '') : 'NONE';
+        $byRung[(string) $candidate['key'] . '|' . $line] = $candidate;
+    }
+    assert_true(isset($byRung['OVER_1_5|1.50']), 'the feed exposes the 1.5 goal line');
+    assert_true(isset($byRung['OVER_4_5|4.50']), 'and the 4.5 goal line the provider also priced');
+    assert_true(isset($byRung['ASIAN_HANDICAP|-1.50']), 'and the -1.5 handicap, not only the default -0.5 line');
+
+    // Each rung carries its OWN price — the whole point of quoting per line.
+    $priceOf = static function (array $market, string $selection): ?float {
+        foreach ((array) $market['outcomes'] as $outcome) {
+            if ((string) $outcome['selection'] === $selection) return is_numeric($outcome['odds'] ?? null) ? (float) $outcome['odds'] : null;
+        }
+        return null;
+    };
+    assert_equals(1.28, $priceOf($byRung['OVER_1_5|1.50'], 'OVER'), 'the 1.5 rung keeps its own price');
+    assert_equals(6.50, $priceOf($byRung['OVER_4_5|4.50'], 'OVER'), 'the 4.5 rung keeps its own, different price');
+    assert_equals(2.85, $priceOf($byRung['ASIAN_HANDICAP|-1.50'], 'HOME'), 'the -1.5 handicap keeps its own price');
+    assert_true($priceOf($byRung['OVER_1_5|1.50'], 'OVER') !== $priceOf($byRung['OVER_4_5|4.50'], 'OVER'),
+        'two rungs of one ladder are never served the same price');
+
+    // And each priced rung carries the COMPLETE odds information, not just a
+    // number: this is the contract an API consumer depends on.
+    foreach (['OVER_1_5|1.50', 'OVER_4_5|4.50', 'ASIAN_HANDICAP|-1.50'] as $rung) {
+        foreach ((array) $byRung[$rung]['outcomes'] as $outcome) {
+            foreach (['selection', 'label', 'probability', 'odds', 'impliedProbability', 'edge', 'edgePoints',
+                'oddsObservedAt', 'oddsSource', 'oddsState', 'quoteCount', 'oddsLow', 'oddsHigh', 'oddsSpread',
+                'windelsFairOdds', 'fairOdds', 'fairProbability', 'breakEvenProbability', 'expectedValue',
+                'marginMethod', 'valueClass', 'valueLabel', 'valueReason'] as $field) {
+                assert_true(array_key_exists($field, $outcome), $rung . ' reports ' . $field);
+            }
+        }
+        assert_true(is_array($byRung[$rung]['pricing'] ?? null), $rung . ' carries its price-sheet state');
+        assert_equals('fixture-feed', (string) ($byRung[$rung]['outcomes'][0]['oddsSource'] ?? ''), $rung . ' keeps the price source');
+    }
+
+    // The paged feed stays priced-only (a compact list of what is actually
+    // quoted) while the board and match page also publish unpriced model
+    // estimates. That is a deliberate difference in VERBOSITY, not in the
+    // underlying sheet: every rung the feed returns must be a real rung of the
+    // full sheet, and every quoted rung must be present rather than dropped.
+    $fresh = $module->board()->forDate($day);
+    $boardRungs = [];
+    foreach ((array) ($fresh['rows'][0]['marketCandidates'] ?? []) as $candidate) {
+        $line = is_numeric($candidate['line'] ?? null) ? number_format((float) $candidate['line'], 2, '.', '') : 'NONE';
+        $boardRungs[(string) $candidate['key'] . '|' . $line] = true;
+    }
+    foreach (array_keys($byRung) as $rung) {
+        assert_true(isset($boardRungs[$rung]), 'the feed rung ' . $rung . ' is a real rung of the full sheet');
+    }
+    assert_true(count($boardRungs) >= count($byRung),
+        'the board publishes at least what the priced-only feed does');
+    // Every rung the provider priced reaches the feed — none is silently lost.
+    foreach (['OVER_1_5|1.50', 'OVER_4_5|4.50', 'ASIAN_HANDICAP|-1.50'] as $rung) {
+        assert_true(isset($byRung[$rung]), 'the priced rung ' . $rung . ' reaches the feed');
+    }
+    $detail = $module->predictionFor($fixtureId);
+    $detailRungs = [];
+    foreach ((array) ($detail['markets'] ?? []) as $candidate) {
+        $line = is_numeric($candidate['line'] ?? null) ? number_format((float) $candidate['line'], 2, '.', '') : 'NONE';
+        $detailRungs[(string) $candidate['key'] . '|' . $line] = true;
+    }
+    foreach (array_keys($byRung) as $rung) {
+        assert_true(isset($detailRungs[$rung]), 'and the match page carries the same rung ' . $rung);
+    }
 });

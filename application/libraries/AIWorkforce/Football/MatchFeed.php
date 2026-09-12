@@ -332,10 +332,11 @@ final class MatchFeed
         // batched reads — the score grids and the quoted prices — so choosing a
         // market costs two queries for the page, not one query per match.
         $markets = $this->attachMarkets($entries, $market['market'], $line);
-        // Multiple markets per fixture where verified provider odds exist
-        // (1X2, Over 1.5, BTTS, Double Chance) — each candidate must have
-        // real provider odds, never invented.
-        $multiMarkets = $this->attachMultipleMarkets($entries, self::MULTI_MARKET_CANDIDATES);
+        // Every market at every line per fixture, so the feed answers with the
+        // same complete sheet the board and the match page show rather than a
+        // bounded preview of it. `null` selects the expanded sheet; each
+        // candidate must still carry real provider odds, never invented ones.
+        $multiMarkets = $this->attachMultipleMarkets($entries, null);
         // Provenance is a third batched read: which provider (or providers)
         // this match came from is part of the prediction result, and it is
         // answered for the whole page in one query.
@@ -595,13 +596,22 @@ final class MatchFeed
      * creating odds: an entry is still rendered only when a verified provider
      * price exists (or, on a single match page, as an explicitly unpriced model
      * estimate). Provider-price-only markets remain labelled as such.
+     *
+     * This is the BOUNDED fallback — one entry per market, at the market's
+     * default line. Every real caller (the feed, the board, the match page)
+     * passes `null` to `attachMultipleMarkets()` instead and receives
+     * `PredictionMarkets::fullSheet()`: the same markets walked across every
+     * line of their ladder. Keep this list in step with the catalogue so a
+     * caller that opts into the bounded view still sees each family once.
      */
     public const MULTI_MARKET_CANDIDATES = [
-        'MATCH_WINNER', 'DOUBLE_CHANCE', 'DRAW_NO_BET',
-        'OVER_0_5', 'OVER_1_5', 'OVER_2_5', 'OVER_3_5',
+        'MATCH_WINNER', 'DOUBLE_CHANCE', 'DRAW_NO_BET', 'WINNING_MARGIN', 'RESULT_AND_BTTS',
+        'OVER_0_5', 'OVER_1_5', 'OVER_2_5', 'OVER_3_5', 'OVER_4_5', 'OVER_5_5', 'OVER_6_5',
         'UNDER_1_5', 'UNDER_2_5', 'UNDER_3_5',
-        'BTTS', 'BTTS_AND_OVER_2_5',
-        'FIRST_HALF_WINNER', 'FIRST_HALF_OVER_UNDER', 'HALF_TIME_FULL_TIME',
+        'BTTS', 'BTTS_AND_OVER_2_5', 'BTTS_AND_UNDER_2_5', 'TOTAL_GOALS_ODD_EVEN', 'TOTAL_GOALS_BAND',
+        'HOME_TEAM_TOTAL_GOALS', 'AWAY_TEAM_TOTAL_GOALS', 'HOME_CLEAN_SHEET', 'AWAY_CLEAN_SHEET',
+        'FIRST_HALF_WINNER', 'FIRST_HALF_OVER_UNDER', 'FIRST_HALF_DOUBLE_CHANCE', 'FIRST_HALF_BTTS',
+        'SECOND_HALF_WINNER', 'SECOND_HALF_OVER_UNDER', 'HALF_TIME_FULL_TIME',
         'CORRECT_SCORE', 'ASIAN_HANDICAP', 'CORNERS', 'CARDS',
     ];
 
@@ -662,6 +672,11 @@ final class MatchFeed
         // provider market/line the catalogue does not enumerate. An explicit
         // list (used by the legacy compact feed) remains deliberately bounded.
         $includeProviderExtras = $marketKeys === null;
+        // The complete sheet walks every LINE of every line-based market, not
+        // one representative line per market: "Over 3.5" and "Over 1.5" are
+        // different bets with different probabilities and different prices, and
+        // a match sheet that shows only one of them is hiding the rest.
+        $sheet = $includeProviderExtras ? $this->markets->fullSheet() : null;
         $marketKeys = $marketKeys ?? self::MULTI_MARKET_CANDIDATES;
         $ids = [];
         $matchIds = [];
@@ -687,9 +702,20 @@ final class MatchFeed
             $effectivePricedOnly = $pricedOnly || !$hasPrediction;
             $candidates = [];
 
-            foreach ($marketKeys as $key) {
-                $catalogEntry = $this->markets->market($key);
-                if ($catalogEntry === null) continue;
+            // Either the expanded sheet (one entry per market per line) or the
+            // bounded key list the legacy compact feed asks for.
+            $sheetEntries = [];
+            if ($sheet !== null) {
+                $sheetEntries = $sheet;
+            } else {
+                foreach ($marketKeys as $key) {
+                    $catalogEntry = $this->markets->market($key);
+                    if ($catalogEntry !== null) $sheetEntries[] = $catalogEntry;
+                }
+            }
+
+            foreach ($sheetEntries as $catalogEntry) {
+                $key = (string) $catalogEntry['key'];
 
                 // The board displays only markets with a provider price. The
                 // per-match odds sheet can opt into the full catalogue so that

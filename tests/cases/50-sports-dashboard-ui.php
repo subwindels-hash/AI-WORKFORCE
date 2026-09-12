@@ -130,8 +130,110 @@ test('sports UI: dashboard renders today odds prediction ticket with gated actio
     $css = file_get_contents(FCPATH . 'assets/css/ai_workforce.css');
     assert_contains('.sports-side, .football-side, .football-match-side', $css, 'the local context rails share one sticky contract');
     assert_contains('position: sticky', $css);
-    assert_contains('max-height: calc(100dvh - 92px)', $css, 'an over-height rail stays bounded to the viewport');
+    assert_contains('max-height: calc(100dvh - var(--rail-top) - var(--rail-tail))', $css, 'an over-height rail stays bounded to the viewport');
     assert_contains('overflow-y: auto', $css, 'and can expose all of its own context without moving the content feed');
+});
+
+/**
+ * The rail must stay pinned to the END of the page, with only the feed moving.
+ *
+ * A sticky item can never paint outside its own grid area, and that area ends
+ * where the feed ends — above the page's bottom padding and the footer. A rail
+ * capped only against the viewport height is therefore taller than the space
+ * left at maximum scroll: in the last stretch of the page it gets pushed up off
+ * its `top` offset and visibly scrolls away, which is exactly the "sidebar does
+ * not stay pinned at the end" report. Reserving the page tail in the cap keeps
+ * the whole rail inside its area at every scroll position.
+ *
+ * The wheel must also never be trapped over the rail — `overscroll-behavior:
+ * contain` stops the page (the feed) from scrolling once the rail bottoms out.
+ */
+test('sports UI: the context rail stays pinned at the end of the page and never traps the feed', function () {
+    $css = (string) file_get_contents(FCPATH . 'assets/css/ai_workforce.css');
+    $start = strpos($css, '@media (min-width: 1181px)');
+    assert_true($start !== false, 'the desktop rail contract exists');
+    $rail = substr($css, (int) $start, 1600);
+
+    assert_contains('--rail-top: 76px', $rail, 'the rail parks under the sticky topbar');
+    assert_contains('--rail-tail: 136px', $rail, 'and reserves the page tail (main padding + footer)');
+    assert_contains('top: var(--rail-top)', $rail, 'the pin offset and the cap read the same value');
+    assert_contains('align-self: start', $rail,
+        'a stretched grid item fills its row and has no room to stick — the pin needs a start-aligned item');
+    assert_contains('overscroll-behavior: auto', $rail,
+        'scrolling chains back to the page so the feed keeps moving when the rail bottoms out');
+    assert_true(!str_contains($rail, 'overscroll-behavior: contain'),
+        'the wheel must never be trapped inside the rail');
+
+    // The cap must subtract BOTH the top offset and the page tail; a bare
+    // viewport height (the old 100dvh - 92px) is the regression this pins.
+    assert_true((bool) preg_match('/max-height:\s*calc\(100dvh\s*-\s*var\(--rail-top\)\s*-\s*var\(--rail-tail\)\)/', $rail),
+        'the cap subtracts the top offset and the untouchable page tail');
+    assert_true(!str_contains($rail, 'calc(100dvh - 92px)'),
+        'the viewport-only cap let the rail run past its grid area at maximum scroll');
+
+    // Below the two-column breakpoint the rail is part of the single reading
+    // order and must drop every pinning property.
+    $mobile = substr($css, (int) strpos($css, '@media (max-width: 1180px)'), 600);
+    assert_contains('position: static', $mobile, 'the rail unpins when it no longer sits beside the feed');
+    assert_contains('max-height: none', $mobile);
+    assert_contains('overflow: visible', $mobile, 'and never keeps a private scrollbar in one-column mode');
+});
+
+/**
+ * Every block in the feed is the SAME object: one .sports-section panel with a
+ * numbered heading and a body. That uniformity is what makes the page readable
+ * top to bottom, so it is pinned here rather than left to drift back into a
+ * pile of one-off panels with inline styles.
+ */
+test('sports UI: the feed sections are uniform, numbered and free of inline layout styles', function () {
+    $repo = new SportsRepositoryStub();
+    fx_ui_today($repo);
+    $dash = (new SportsIntelligence($repo, fx_ui_audit()))->dashboard();
+    $html = fx_render_sports('index', ['dashboard' => $dash]);
+
+    // Four numbered steps in the feed, in reading order.
+    foreach ([1, 2, 3, 4] as $step) {
+        assert_contains('<span class="sports-step" aria-hidden="true">' . $step . '</span>', $html,
+            'the feed numbers step ' . $step);
+    }
+    // Each section is a landmark with its own accessible name.
+    foreach (['sports-overview-heading', 'sports-ticket-heading', 'sports-live-heading', 'sports-performance-heading',
+        'sports-guide-heading', 'sports-system-heading'] as $id) {
+        assert_contains('aria-labelledby="' . $id . '"', $html, $id . ' names its section');
+        assert_contains('id="' . $id . '"', $html, $id . ' exists on the heading');
+    }
+    // One heading object everywhere: eyebrow + title, never a bare <h3>.
+    assert_equals(substr_count($html, 'class="sports-section__heading"'), substr_count($html, 'class="sports-section__title"'),
+        'every section heading carries the same title block');
+    assert_true(substr_count($html, 'class="panel sports-section') >= 6, 'the feed and the rail share one section object');
+
+    // Every block states what it is before showing numbers.
+    foreach (['Day overview', 'Engine output', 'In play', 'Measured results', 'Reading the numbers', 'Platform state'] as $eyebrow) {
+        assert_contains($eyebrow, $html, 'the section is introduced as "' . $eyebrow . '"');
+    }
+    // Sub-blocks inside a section use one shared sub-heading, not ad-hoc bold text.
+    foreach (['Risk distribution', 'Scheduled fixtures', 'Generation run', 'Selected picks'] as $sub) {
+        assert_contains('<h4>' . $sub . '</h4>', $html, $sub . ' is a real sub-heading');
+    }
+
+    // Spacing comes from the stylesheet. The only inline style left in the view
+    // is the risk meter's computed width, which is data, not layout.
+    $view = (string) file_get_contents(FCPATH . 'application/views/sports/index.php');
+    $inline = [];
+    if (preg_match_all('/style="([^"]*)"/', $view, $m)) $inline = $m[1];
+    foreach ($inline as $style) {
+        assert_true(str_contains($style, 'width:<?='),
+            'layout must live in the stylesheet, found inline style: ' . $style);
+    }
+    foreach (['padding-top:12px', 'margin-top:12px', 'display:flex;gap:8px', 'font-size:11px'] as $gone) {
+        assert_true(!str_contains($view, $gone), 'the ad-hoc spacing "' . $gone . '" was replaced by the section rhythm');
+    }
+
+    $css = (string) file_get_contents(FCPATH . 'assets/css/ai_workforce.css');
+    assert_contains('.sports-section > .body { padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 12px; }', $css,
+        'one gap rule gives every section the same internal rhythm');
+    assert_contains('.sports-section__heading', $css);
+    assert_contains('.sports-step', $css);
 });
 
 test('sports UI: the live scores board shows the match date and time', function () {
@@ -291,4 +393,97 @@ test('sports UI: provider identities and diagnostics are hidden from read-only u
     // And the JSON provider endpoint requires the same operator permission.
     $api = file_get_contents(FCPATH . 'application/controllers/Api_sports.php');
     assert_true((bool) preg_match("/function providers\(\)\s*\{[^}]*requirePermission\('sports\.manage'/s", (string) $api), 'GET providers is gated by sports.manage');
+});
+
+/**
+ * The ticket screen (/sports/odds-prediction-ticket) is the same reading
+ * system as the board it belongs to.
+ *
+ * Before this contract it was the odd one out: a bare `page-head`, four
+ * unlabelled `.panel`s stacked in one column with no context rail, and about
+ * a hundred inline `style="..."` attributes carrying every bit of its spacing,
+ * font size and colour. Two screens that show the same data in the same
+ * product should not be built two different ways, so the page now uses the
+ * hero + actionbar + numbered `.sports-section` feed + pinned rail that
+ * /sports uses, and its layout lives in the stylesheet.
+ */
+test('sports UI: the ticket screen is one numbered feed beside a pinned rail', function () {
+    $repo = new SportsRepositoryStub();
+    fx_ui_today($repo);
+    $intel = new SportsIntelligence($repo, fx_ui_audit());
+    $html = fx_render_sports('tickets', [
+        'tickets' => $repo->listTickets([], 100),
+        'dailyRuns' => $repo->listDailyTickets(30),
+        'performance' => $intel->performanceReport([]),
+    ]);
+    $view = (string) file_get_contents(FCPATH . 'application/views/sports/tickets.php');
+
+    // 1. The shell: the same three objects the board opens with.
+    assert_contains('class="sports-console"', $view, 'the screen is a sports console, not a bare page-head');
+    assert_contains('class="sports-hero"', $view, 'with the standard hero');
+    assert_contains('class="sports-actionbar"', $view, 'and the controls in their own bar, not crammed into the hero');
+    assert_true(!str_contains($view, 'class="page-head"'), 'the generic page-head shell is gone');
+    assert_contains('<div class="sports-layout">', $view, 'the feed and the rail share the two-column grid');
+    assert_contains('<aside class="sports-side stack"', $view, 'the rail is a real landmark');
+
+    // 2. Five numbered records, in reading order.
+    foreach ([1, 2, 3, 4, 5] as $step) {
+        assert_contains('<span class="sports-step" aria-hidden="true">' . $step . '</span>', $view,
+            'the feed numbers step ' . $step);
+    }
+    assert_equals(5, substr_count($view, 'class="sports-step"'), 'the rail stays unnumbered reference');
+
+    // 3. Every section is a named landmark whose label resolves.
+    foreach (['ticket-today-heading', 'ticket-picks-heading', 'ticket-rejections-heading',
+        'ticket-history-heading', 'ticket-runs-heading', 'ticket-guide-heading', 'ticket-states-heading'] as $id) {
+        assert_contains('aria-labelledby="' . $id . '"', $view, $id . ' names its section');
+        assert_contains('id="' . $id . '"', $view, $id . ' exists on the heading');
+    }
+    preg_match_all('/aria-labelledby="([^"]+)"/', $view, $labelled);
+    preg_match_all('/id="([^"]+)"/', $view, $ids);
+    foreach (array_unique($labelled[1] ?? []) as $reference) {
+        assert_true(in_array($reference, $ids[1] ?? [], true), $reference . ' must exist as an id');
+    }
+
+    // 4. One heading object everywhere, each opening with an eyebrow.
+    assert_equals(substr_count($view, 'class="sports-section__heading"'), substr_count($view, 'class="sports-section__title"'),
+        'every section heading carries the same title block');
+    foreach (['Today&rsquo;s ticket', 'Per-match predictions', 'Audit trail', 'Stored records', 'Run history',
+        'Reading the numbers', 'Lifecycle'] as $eyebrow) {
+        assert_contains('sports-eyebrow">' . $eyebrow . '</p>', $view, 'a section is introduced as "' . $eyebrow . '"');
+    }
+    assert_true(substr_count($view, 'class="panel sports-section') >= 7, 'feed and rail share one section object');
+
+    // 5. Every section opens with a plain-language write-up.
+    foreach (['The one combined ticket built for this date',
+        'Every ticket persisted so far',
+        'One row per day the engine ran'] as $writeUp) {
+        assert_contains($writeUp, $view, 'the screen explains its section: ' . $writeUp);
+    }
+
+    // 6. Layout is in the stylesheet. The only inline style left is the
+    // distribution bar's computed width, which is data, not layout.
+    $inline = [];
+    if (preg_match_all('/style="([^"]*)"/', $view, $m)) $inline = $m[1];
+    foreach ($inline as $style) {
+        assert_true(str_contains($style, "width:' . \$pct"),
+            'layout must live in the stylesheet, found inline style: ' . $style);
+    }
+    foreach (['font-size:10px', 'font-size:11px', 'font-size:12px', 'margin-bottom:12px', 'padding-top:12px',
+        'display:inline-flex', 'display:inline', 'font-weight:700'] as $gone) {
+        assert_true(!str_contains($view, $gone), 'the ad-hoc rule "' . $gone . '" was replaced by a class');
+    }
+
+    // 7. It renders, and the reading guide reaches the page.
+    assert_contains('What each column means', $html, 'the rail explains the columns');
+    assert_contains('How a ticket moves', $html, 'and the ticket lifecycle');
+    assert_contains('not measured', $html, 'the movement honesty rule survives the restructure');
+    assert_true(!str_contains($html, 'Undefined array key'), 'no PHP warnings');
+    assert_true(!str_contains($html, 'Fatal error'), 'no render error');
+
+    // 8. The rail obeys the same pin contract as every other console rail.
+    $css = (string) file_get_contents(FCPATH . 'assets/css/ai_workforce.css');
+    $rail = substr($css, (int) strpos($css, '@media (min-width: 1181px)'), 1600);
+    assert_contains('.sports-side', $rail, 'the ticket rail is covered by the sticky contract');
+    assert_contains('--rail-tail: 136px', $rail, 'so it stays pinned at the end of the page, not just mid-scroll');
 });
