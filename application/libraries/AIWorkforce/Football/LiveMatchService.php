@@ -30,18 +30,27 @@ final class LiveMatchService
         private ?FixtureSyncService $sync = null,
         private ?AuditRepository $audit = null,
         private ?FootballConfiguration $config = null,
+        private ?RefreshPolicy $policy = null,
     ) {}
 
     /**
      * The live board: every fixture the module currently believes is in play,
      * with its frozen pre-match prediction beside the live estimate.
      *
+     * `$autoSweep` is what makes an open page self-sufficient: the read first
+     * asks the provider for the current live snapshot **when that sweep is due**
+     * (see `sweepIfDue()`), so a goal reaches the panel on the module's own live
+     * cadence instead of waiting for an external scheduler that may not be
+     * installed at all. It is deliberately separate from `$refresh`: `$refresh`
+     * is the heavy operator view that also recomputes every live estimate.
+     *
      * @return array{status:string, state:string, matches:list<array>, errors:list<string>, refreshed:?array, refreshIntervalSeconds:int, staleThresholdSeconds:int}
      */
-    public function board(bool $refresh = true): array
+    public function board(bool $refresh = true, bool $autoSweep = false): array
     {
         $errors = [];
         $refreshed = null;
+        $sweep = null;
         if ($refresh && $this->sync !== null) {
             try {
                 $refreshed = $this->sync->syncLive('live:' . gmdate('Ymd\TH:i'));
@@ -51,7 +60,20 @@ final class LiveMatchService
             } catch (\Throwable $e) {
                 $errors[] = 'live sync: ' . mb_substr($e->getMessage(), 0, 160);
             }
+        } elseif ($autoSweep) {
+            $sweep = $this->sweepIfDue();
+            if (!empty($sweep['ran'])) {
+                $refreshed = ['status' => $sweep['status'], 'processed' => $sweep['processed'] ?? 0,
+                    'requests' => $sweep['requests'] ?? 0, 'expiredLive' => $sweep['expiredLive'] ?? 0];
+            }
+            // A sweep that could not speak to the provider is reported, not
+            // hidden: the rows below are then the last confirmed ones, and the
+            // page must be able to say so rather than implying they are current.
+            foreach ((array) ($sweep['errors'] ?? []) as $error) {
+                $errors[] = 'live sync: ' . (string) $error;
+            }
         }
+        $sweep ??= $this->sweepState();
         $fixtures = $this->currentLiveFixtures(200);
         if ($fixtures === []) {
             return [
@@ -63,6 +85,7 @@ final class LiveMatchService
                 'refreshIntervalSeconds' => $this->refreshIntervalSeconds(),
                 'staleThresholdSeconds' => $this->staleThresholdSeconds(),
                 'provider' => $this->providerFreshness(),
+                'sweep' => $sweep,
                 'generatedAt' => gmdate('c'),
             ];
         }
@@ -95,7 +118,105 @@ final class LiveMatchService
             'refreshIntervalSeconds' => $this->refreshIntervalSeconds(),
             'staleThresholdSeconds' => $this->staleThresholdSeconds(),
             'provider' => $this->providerFreshness(),
+            'sweep' => $sweep,
             'generatedAt' => gmdate('c'),
+        ];
+    }
+
+    /**
+     * Pull the provider's live snapshot **if the live cadence says it is due**,
+     * and report what happened either way.
+     *
+     * This is the piece that makes "updates appear immediately after the
+     * provider reports them" true for a page that is simply open. Before this
+     * existed the browser polled an endpoint that only re-read stored rows, so
+     * a goal was invisible until the external `football-live` cron ticked — and
+     * on a host where that cron was never installed, invisible for good.
+     *
+     * Cost is bounded by exactly the same gates the scheduled job uses, so a
+     * page open in fifty tabs cannot turn into fifty provider requests:
+     *
+     *  - RefreshPolicy decides due/not-due (live interval, provider backoff,
+     *    deferral from the last run, whether any match can even be in play, and
+     *    the request budget). A not-due read is a few indexed lookups;
+     *  - the sweep claims an execution key bucketed to the live interval, and
+     *    that key is UNIQUE, so of all the readers arriving in the same window
+     *    exactly one performs the provider call and the rest are told
+     *    DUPLICATE_SKIPPED by the database itself — no lock, no race;
+     *  - a provider error is reported, never thrown at the reader.
+     *
+     * @return array{ran:bool, status:string, reason:string, ...}
+     */
+    public function sweepIfDue(): array
+    {
+        $state = $this->sweepState();
+        if ($this->sync === null) return $state + ['ran' => false, 'status' => 'UNAVAILABLE', 'reason' => 'NO_SYNC_SERVICE'];
+        if ($this->policy === null) return $state + ['ran' => false, 'status' => 'SKIPPED', 'reason' => 'NO_REFRESH_POLICY'];
+        // Cheap cadence gate first. The browser polls the stored board every few
+        // seconds, and the full policy evaluation counts live and soon-to-start
+        // fixtures; running that on every poll would be real work to answer a
+        // question one indexed lookup already settles. Only when the live window
+        // has actually elapsed is the full evaluation (backoff, deferral, work,
+        // budget) worth doing.
+        $freshness = $this->providerFreshness();
+        $age = $freshness['ageSeconds'];
+        if (is_int($age) && $age < max(30, $this->refreshIntervalSeconds())) {
+            return $state + ['ran' => false, 'status' => 'SKIPPED', 'reason' => 'CADENCE',
+                'lastSweepAt' => $freshness['lastSweepAt']];
+        }
+        try {
+            $evaluation = $this->policy->evaluate('football-live');
+        } catch (\Throwable $e) {
+            return $state + ['ran' => false, 'status' => 'SKIPPED', 'reason' => 'POLICY_ERROR',
+                'errors' => [mb_substr($e->getMessage(), 0, 160)]];
+        }
+        if (empty($evaluation['due'])) {
+            return $state + ['ran' => false, 'status' => 'SKIPPED', 'reason' => (string) ($evaluation['reason'] ?? 'NOT_DUE'),
+                'nextRunAt' => $evaluation['nextRunAt'] ?? null];
+        }
+        // One key per live window. Identical to the scheduled job's key shape
+        // (FootballCronService::run), so a browser-driven sweep and a cron tick
+        // inside the same window dedupe against each other instead of doubling
+        // the provider spend.
+        $interval = max(30, $this->refreshIntervalSeconds());
+        $key = 'live:' . intdiv(time(), $interval);
+        try {
+            $result = $this->sync->syncLive($key);
+        } catch (\Throwable $e) {
+            // A provider failure must never break the page that is reading the
+            // board: the stored rows below are still served, with the error.
+            return $this->sweepState() + ['ran' => false, 'status' => 'FAILED', 'reason' => 'SYNC_THREW',
+                'errors' => [mb_substr($e->getMessage(), 0, 160)]];
+        }
+        $status = (string) ($result['status'] ?? 'UNKNOWN');
+        return $this->sweepState() + [
+            // DUPLICATE_SKIPPED means another reader (or the cron) already did
+            // this window's work — the rows are current, this reader just did
+            // not pay for them.
+            'ran' => $status !== 'DUPLICATE_SKIPPED',
+            'status' => $status,
+            'reason' => $status === 'DUPLICATE_SKIPPED' ? 'ALREADY_SWEPT_THIS_WINDOW' : 'DUE',
+            'processed' => (int) ($result['processed'] ?? 0),
+            'requests' => (int) ($result['requests'] ?? 0),
+            'expiredLive' => (int) ($result['expiredLive'] ?? 0),
+            'errors' => array_values((array) ($result['errors'] ?? [])),
+        ];
+    }
+
+    /**
+     * How the live sweep is being driven, so the page can explain itself.
+     *
+     * `mode` answers the question a reader actually has when a panel says it is
+     * automatic: is anything actually fetching? PAGE means this request will
+     * pull when due; SCHEDULER means only the external job does.
+     *
+     * @return array{mode:string, intervalSeconds:int}
+     */
+    private function sweepState(): array
+    {
+        return [
+            'mode' => ($this->sync !== null && $this->policy !== null) ? 'PAGE' : 'SCHEDULER',
+            'intervalSeconds' => $this->refreshIntervalSeconds(),
         ];
     }
 

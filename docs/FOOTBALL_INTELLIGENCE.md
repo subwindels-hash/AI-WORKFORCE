@@ -795,6 +795,43 @@ The live board payload also carries `provider.state` (`CURRENT`, `BEHIND` or
 "nothing is being played" from "the sweep behind this panel stopped running" and
 say which one it is instead of implying an empty schedule.
 
+### The Live now panel refreshes itself
+
+`GET /api/football/fixtures/live` — the endpoint the console's **Live now** panel
+polls — **performs the provider live sweep itself when the live cadence is due**,
+then returns the stored rows. That is what makes the panel's promise ("updates
+appear immediately after the provider reports them") true for a page that is
+merely open.
+
+It used to only re-read stored rows, which meant the panel showed a goal only
+after the scheduled `football-live` job happened to run; on a deployment where
+the platform cron was never installed (the documented "no CLI access" case) the
+panel polled forever and never changed.
+
+The read is not a second, ungoverned source of provider traffic. It passes the
+same gates as the scheduled job, in this order:
+
+1. a single indexed lookup on the last `LIVE` sweep — inside the live interval
+   the read does no further work at all;
+2. `RefreshPolicy::evaluate('football-live')` — interval, provider backoff,
+   deferral from the last run, whether any match can be in play, request budget;
+3. the sweep's execution key, bucketed to the live interval (`live:<n>`) and
+   `UNIQUE` in the database. Of all readers arriving in one window exactly one
+   performs the provider call; everyone else gets `DUPLICATE_SKIPPED`. A cron
+   tick in the same window shares that key, so the two drivers never double-spend.
+
+A provider error is reported in the payload, never thrown at the reader: the
+last confirmed rows stay on screen. The payload's `sweep` block says how the
+panel is being driven (`mode`: `PAGE` or `SCHEDULER`), whether this read swept
+(`ran`), and why not when it did not (`CADENCE`, `PROVIDER_BACKOFF`,
+`PROVIDER_NOT_CONFIGURED`, `NO_WORK`…), so the page can name the reason instead
+of showing an empty panel that implies no football is being played anywhere.
+
+The live job's "is there work" test also looks **backwards** from now, not only
+forwards. A match that kicked off minutes ago is still stored `SCHEDULED` until a
+live snapshot promotes it, and the live sweep is the only job that can do that —
+a forward-only window refused to run it for exactly the fixture that needed it.
+
 Mutations require the native session plus the CSRF token (header or body field),
 then the capability named. They take a JSON body:
 

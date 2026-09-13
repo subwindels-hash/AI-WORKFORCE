@@ -87,17 +87,28 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
     $href = static function (int $target) use ($viewDate, $carry): string {
         return '/football?' . http_build_query(array_merge(['date' => $viewDate, 'page' => $target], $carry));
     };
+    // Inactive edges render as a real disabled button rather than a styled
+    // span: a span keeps the .btn `cursor: pointer` affordance, so it looks
+    // clickable while doing nothing. A native disabled button is announced as
+    // unavailable, is skipped by tab order and shows `not-allowed` on hover.
     $previous = !empty($pagination['hasPrevious'])
-        ? '<a class="btn small" href="' . e($href((int) $pagination['previousPage'])) . '">&larr; Previous</a>'
-        : '<span class="btn small is-disabled" aria-disabled="true">&larr; Previous</span>';
+        ? '<a class="btn small" href="' . e($href((int) $pagination['previousPage'])) . '" rel="prev">&larr; Previous</a>'
+        : '<button class="btn small" type="button" disabled title="You are on the first page">&larr; Previous</button>';
     $next = !empty($pagination['hasNext'])
-        ? '<a class="btn small" href="' . e($href((int) $pagination['nextPage'])) . '">Next &rarr;</a>'
-        : '<span class="btn small is-disabled" aria-disabled="true">Next &rarr;</span>';
+        ? '<a class="btn small" href="' . e($href((int) $pagination['nextPage'])) . '" rel="next">Next &rarr;</a>'
+        : '<button class="btn small" type="button" disabled title="You are on the last page">Next &rarr;</button>';
+    // Past the last page the board holds nothing, so say that plainly and
+    // offer a one-click way back to real content. "Page 9 of 2" with an empty
+    // table reads as a broken screen.
+    $status = $page > $pages
+        ? '<b>Page ' . $page . ' is past the last page (' . $pages . ')</b><span>No matches on this page · '
+            . $total . ' matches across ' . $pages . ' page' . ($pages === 1 ? '' : 's') . '</span>'
+        : '<b>Page ' . $page . ' of ' . $pages . '</b><span>'
+            . (int) ($pagination['from'] ?? 0) . '–' . (int) ($pagination['to'] ?? 0) . ' of ' . $total
+            . ' matches · ' . (int) ($pagination['pageSize'] ?? 50) . ' matches per page</span>';
     return '<nav class="football-pager" aria-label="Match pages">'
         . '<div>' . $previous . '</div>'
-        . '<div class="football-pager__status"><b>Page ' . $page . ' of ' . $pages . '</b><span>'
-        . (int) ($pagination['from'] ?? 0) . '–' . (int) ($pagination['to'] ?? 0) . ' of ' . $total
-        . ' matches · ' . (int) ($pagination['pageSize'] ?? 50) . ' matches per page</span></div>'
+        . '<div class="football-pager__status">' . $status . '</div>'
         . '<div>' . $next . '</div></nav>';
 };
 ?>
@@ -813,7 +824,14 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         var changed = render(matches);
         backoffMs = pollEveryMs;
         var provider = data.provider || {};
-        if(provider.state === 'BEHIND' || provider.state === 'NEVER_RUN'){
+        var sweep = data.sweep || {};
+        if(sweep.reason === 'PROVIDER_NOT_CONFIGURED' || sweep.reason === 'MODULE_DISABLED'){
+          // Nothing is fetching and nothing can: say which, rather than leaving
+          // an empty panel implying no football is being played anywhere.
+          setStatus(sweep.reason === 'MODULE_DISABLED'
+            ? 'Live updates are off — the football module is disabled.'
+            : 'Live updates are unavailable — no football data provider is connected.', 'down');
+        } else if(provider.state === 'BEHIND' || provider.state === 'NEVER_RUN'){
           // The rows are current as stored, but the sweep that writes them is
           // not running. Saying "nothing is live" here would be a guess, so the
           // panel reports the feed state instead of implying an empty schedule.

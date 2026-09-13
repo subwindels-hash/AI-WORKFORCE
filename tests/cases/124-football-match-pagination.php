@@ -510,3 +510,39 @@ test('football: a card below the lowest confidence tier is still reported, not d
     $keys = array_column((array) $board['categories'], 'key');
     assert_in_array('limitedData', $keys, 'and the Limited Data category still exists for thinner evidence');
 });
+
+test('football: "← Previous" from a page past the end returns to real matches in one click', function () {
+    // Reported as "the Previous button is not clicking": on an out-of-range
+    // page the link pointed at $page - 1, which is ALSO past the end. The
+    // button navigated perfectly well — every page it reached was simply
+    // empty, so nothing appeared to happen no matter how often it was clicked.
+    [, , $module, $day] = fx_fb_paged_day(120);   // 3 pages of 50
+    $feed = $module->feed();
+
+    $past = $feed->page($day, 9);
+    assert_equals(0, count($past['matches']), 'a page past the end holds nothing');
+    assert_equals(3, (int) $past['pagination']['totalPages']);
+    assert_true((bool) $past['pagination']['hasPrevious'], 'there is somewhere to go back to');
+    assert_equals(3, (int) $past['pagination']['previousPage'],
+        'previous must land on the LAST page that holds matches, not on page 8');
+    assert_false((bool) $past['pagination']['hasNext'], 'there is nothing ahead');
+
+    // One click from the dead end must actually show matches.
+    $recovered = $feed->page($day, (int) $past['pagination']['previousPage']);
+    assert_true(count($recovered['matches']) > 0, 'the page it returns to really has matches');
+    assert_equals(20, count($recovered['matches']), 'and it is the short last page');
+
+    // A page just past the end behaves the same way.
+    $justPast = $feed->page($day, 4);
+    assert_equals(3, (int) $justPast['pagination']['previousPage'], 'page 4 steps back to page 3');
+});
+
+test('football: the prediction board recovers from a past-the-end page the same way', function () {
+    [, , $module, $day] = fx_fb_paged_day(120);
+    $board = $module->board()->forDate($day, false, 9, 50);
+
+    assert_equals(3, (int) $board['pagination']['totalPages']);
+    assert_equals(3, (int) $board['pagination']['previousPage'],
+        'the board must not send the operator to another empty page either');
+    assert_true((bool) $board['pagination']['hasPrevious']);
+});

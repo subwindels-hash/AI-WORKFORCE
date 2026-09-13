@@ -35,12 +35,26 @@ $runMetrics = $daily === null ? [
     'finalQualifiedCandidates' => $dashboardRunMetrics['finalQualifiedCandidates'] ?? (int) ($runDiag['finalQualifiedCandidates'] ?? count((array) ($engine['ticketSelections'] ?? []))),
 ];
 $runCount = static fn(mixed $value): string => is_numeric($value) ? number_format((int) $value) : '—';
-$generationStages = [
-    'Checking provider', 'Loading fixtures', 'Checking fixture eligibility',
-    'Loading current odds', 'Checking odds freshness', 'Calculating predictions',
-    'Checking confidence', 'Checking data quality', 'Checking expected value',
-    'Checking risk', 'Checking correlation', 'Selecting qualified candidates',
-    'Optimizing ticket', 'Saving prediction ticket',
+// Spec §4: the stage list has ONE definition. Duplicating the labels here is
+// how the panel silently drifted from the pipeline it claims to describe.
+$generationStages = array_values(\AIWorkforce\Sports\GenerationResult::STAGES);
+$generationStageKeys = array_keys(\AIWorkforce\Sports\GenerationResult::STAGES);
+// The ledger the LAST recorded run actually produced, if any. Absent keys stay
+// WAITING — the panel never colours a stage the service did not report.
+$generationLedger = [];
+foreach ((array) ($runDiag['stageLedger'] ?? []) as $ledgerKey => $ledgerEntry) {
+    if (!is_string($ledgerKey)) continue;
+    $generationLedger[$ledgerKey] = is_array($ledgerEntry)
+        ? ['state' => (string) ($ledgerEntry['state'] ?? 'WAITING'), 'detail' => isset($ledgerEntry['detail']) ? (string) $ledgerEntry['detail'] : null]
+        : ['state' => (string) $ledgerEntry, 'detail' => null];
+}
+$generationStageLabel = [
+    'WAITING' => 'Pending', 'RUNNING' => 'Running', 'COMPLETE' => 'Complete',
+    'FAILED' => 'Failed', 'SKIPPED' => 'Skipped',
+];
+$generationStageMarker = [
+    'WAITING' => '○', 'RUNNING' => '●', 'COMPLETE' => '✓',
+    'FAILED' => '✕', 'SKIPPED' => '–',
 ];
 // A synchronous POST cannot stream intermediate HTTP responses. The browser
 // therefore shows the first stage while the request is running, and the
@@ -140,10 +154,10 @@ $kickoffStamp = static function (mixed $iso): string {
       <?php if (!empty($caps['sync'])): ?>
         <form method="post" action="/sports/sync" onsubmit="return confirm('Pull fresh fixtures, odds and results from the configured providers now?')">
           <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
-          <button class="btn primary small">Sync now</button>
+          <button class="btn primary small" type="submit">Sync now</button>
         </form>
       <?php else: ?>
-        <button class="btn small" disabled title="Requires the sports.manage permission">Sync now</button>
+        <button class="btn small" type="button" disabled aria-disabled="true" title="Requires the sports.manage permission">Sync now</button>
       <?php endif; ?>
       <?php // Keep the primary generation action visible in the dashboard toolbar.
             // It used to live only in the Engine output panel, which made it
@@ -284,7 +298,16 @@ $kickoffStamp = static function (mixed $iso): string {
           <div class="sports-subhead"><h4>Generation status</h4><span class="dim">No estimated percentages — stages report persisted pipeline progress only.</span></div>
           <ol class="generation-stages">
             <?php foreach ($generationStages as $stageIndex => $stage): ?>
-              <li data-generation-stage="<?= $stageIndex ?>"><span class="generation-stage__marker" aria-hidden="true">○</span><span><?= e($stage) ?></span><b class="generation-stage__state">Pending</b></li>
+              <?php
+                $stageKey = $generationStageKeys[$stageIndex] ?? '';
+                $stageState = (string) ($generationLedger[$stageKey]['state'] ?? 'WAITING');
+                $stageDetail = $generationLedger[$stageKey]['detail'] ?? null;
+              ?>
+              <li data-generation-stage="<?= $stageIndex ?>" data-generation-stage-key="<?= e($stageKey) ?>" data-state="<?= e($stageState) ?>">
+                <span class="generation-stage__marker" aria-hidden="true"><?= e($generationStageMarker[$stageState] ?? '○') ?></span>
+                <span><?= e($stage) ?><?php if ($stageDetail !== null && $stageDetail !== ''): ?> <span class="dim mono generation-stage__detail"><?= e($stageDetail) ?></span><?php endif; ?></span>
+                <b class="generation-stage__state"><?= e($generationStageLabel[$stageState] ?? 'Pending') ?></b>
+              </li>
             <?php endforeach; ?>
           </ol>
         </section>
@@ -293,7 +316,7 @@ $kickoffStamp = static function (mixed $iso): string {
             <form method="post" action="/sports/generate-ticket" class="sports-controls__form" onsubmit="return confirm('Generate odds prediction ticket for <?= e($viewDateIso) ?> from stored data?')">
               <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
               <input type="hidden" name="date" value="<?= e($ticketDateIso) ?>">
-              <button class="btn small sports-generate-btn">
+              <button class="btn small sports-generate-btn" type="submit">
                 🎯 Generate Odds Predictions
               </button>
               <label class="sports-controls__check" title="First delete this day's active candidates (old pass predictions, the pending ticket, daily slot, unquotable odds), then generate from the current stored pool. Settled/historical records are kept.">
@@ -303,12 +326,12 @@ $kickoffStamp = static function (mixed $iso): string {
             <form method="post" action="/sports/reset-candidates" onsubmit="return confirm('Clear the ACTIVE candidate state for <?= e($viewDateIso) ?>? Settled/historical records are preserved.')">
               <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
               <input type="hidden" name="date" value="<?= e($ticketDateIso) ?>">
-              <button class="btn small" title="Delete active (not historical) candidates for the selected date">♻️ Clear</button>
+              <button class="btn small" type="submit" title="Delete active (not historical) candidates for the selected date">♻️ Clear</button>
             </form>
             <span class="mono sports-controls__date" title="Configured-local ticket date <?= e($ticketDateIso) ?>"><?= e($ticketDateShown) ?></span>
             <span class="sports-controls__note">optional manual run/retry — automatic daily generation remains active</span>
           <?php else: ?>
-            <button class="btn small sports-generate-btn" disabled title="Requires the sports.manage permission">🎯 Odds Prediction Ticket</button>
+            <button class="btn small sports-generate-btn" type="button" disabled aria-disabled="true" title="Requires the sports.manage permission">🎯 Odds Prediction Ticket</button>
             <span class="mono sports-controls__date" title="Configured-local ticket date <?= e($ticketDateIso) ?>"><?= e($ticketDateShown) ?></span>
           <?php endif; ?>
         </div>
@@ -509,18 +532,18 @@ $kickoffStamp = static function (mixed $iso): string {
                 <form method="post" action="/sports/<?= e((string) $ticket['id']) ?>/decide">
                   <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
                   <input type="hidden" name="approve" value="1">
-                  <button class="btn primary small">Approve (sports.approve)</button>
+                  <button class="btn primary small" type="submit">Approve (sports.approve)</button>
                 </form>
                 <form method="post" action="/sports/<?= e((string) $ticket['id']) ?>/decide" onsubmit="return confirm('Reject this record?')">
                   <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
                   <input type="hidden" name="approve" value="0">
-                  <button class="btn danger small">Reject</button>
+                  <button class="btn danger small" type="submit">Reject</button>
                 </form>
               </div>
               <p class="sports-note">Approval is recorded with the acting identity. There is no external execution connector — approval never places a bet.</p>
             <?php else: ?>
               <div class="sports-actions">
-                <button class="btn small" disabled title="Requires the sports.approve permission">Approve / reject (needs sports.approve)</button>
+                <button class="btn small" type="button" disabled aria-disabled="true" title="Requires the sports.approve permission">Approve / reject (needs sports.approve)</button>
               </div>
               <p class="sports-note">Your account cannot approve records — ask an administrator for the <b>sports.approve</b> permission (Sports administrator role).</p>
             <?php endif; ?>
@@ -530,12 +553,12 @@ $kickoffStamp = static function (mixed $iso): string {
               <div class="sports-actions">
                 <form method="post" action="/sports/<?= e((string) $ticket['id']) ?>/settle">
                   <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
-                  <button class="btn small">Settle from verified results (sports.settle)</button>
+                  <button class="btn small" type="submit">Settle from verified results (sports.settle)</button>
                 </form>
               </div>
             <?php else: ?>
               <div class="sports-actions">
-                <button class="btn small" disabled title="Requires the sports.settle permission">Settle (needs sports.settle)</button>
+                <button class="btn small" type="button" disabled aria-disabled="true" title="Requires the sports.settle permission">Settle (needs sports.settle)</button>
               </div>
               <p class="sports-note">Settlement stays with identities holding <b>sports.settle</b>.</p>
             <?php endif; ?>
@@ -790,30 +813,67 @@ $kickoffStamp = static function (mixed $iso): string {
   // a stage on a timer or displays a fabricated percentage.
   var generationPanel = document.getElementById('odds-generation-status');
   var stages = generationPanel ? Array.prototype.slice.call(generationPanel.querySelectorAll('[data-generation-stage]')) : [];
+  // The ONLY stage vocabulary, mirroring GenerationResult's server-side
+  // constants. Rendering is a pure function of the state the service reported.
+  var STAGE_TEXT = {
+    WAITING: 'Pending', RUNNING: 'Running', COMPLETE: 'Complete',
+    FAILED: 'Failed', SKIPPED: 'Not reached'
+  };
+  var STAGE_MARK = {
+    WAITING: '○', RUNNING: '⟳', COMPLETE: '✓', FAILED: '✕', SKIPPED: '–'
+  };
+  function paintStage(row, state, detail) {
+    var text = STAGE_TEXT[state] || STAGE_TEXT.WAITING;
+    var mark = STAGE_MARK[state] || STAGE_MARK.WAITING;
+    row.dataset.state = state;
+    row.classList.toggle('is-active', state === 'RUNNING');
+    row.classList.toggle('is-complete', state === 'COMPLETE');
+    row.classList.toggle('is-failed', state === 'FAILED');
+    var stateEl = row.querySelector('.generation-stage__state');
+    var markEl = row.querySelector('.generation-stage__marker');
+    if (stateEl) stateEl.textContent = text;
+    if (markEl) markEl.textContent = mark;
+    if (detail !== undefined && detail !== null && detail !== '') {
+      var detailEl = row.querySelector('.generation-stage__detail');
+      if (!detailEl) {
+        detailEl = document.createElement('span');
+        detailEl.className = 'dim mono generation-stage__detail';
+        var label = row.querySelector('span:not(.generation-stage__marker)');
+        if (label) label.appendChild(document.createTextNode(' ')), label.appendChild(detailEl);
+      }
+      detailEl.textContent = detail;
+    }
+  }
+  /**
+   * Show the panel for a request that is IN FLIGHT. A synchronous POST cannot
+   * stream progress, so only the first stage is marked RUNNING and the rest
+   * stay Pending. Nothing is advanced on a timer and no percentage is shown --
+   * the real per-stage result is rendered by the server on the response.
+   */
   function showGenerationPanel(activeIndex) {
     if (!generationPanel) return;
     generationPanel.hidden = false;
     stages.forEach(function(row, index) {
-      row.classList.toggle('is-active', index === activeIndex);
-      row.classList.remove('is-complete', 'is-failed');
-      var state = row.querySelector('.generation-stage__state');
-      var marker = row.querySelector('.generation-stage__marker');
-      if (state) state.textContent = index === activeIndex ? 'Running' : 'Pending';
-      if (marker) marker.textContent = index === activeIndex ? '⟳' : '○';
+      paintStage(row, index === activeIndex ? 'RUNNING' : 'WAITING');
     });
   }
+  /** Render the ledger a completed run actually returned (API path). */
+  function renderGenerationStages(reported) {
+    if (!generationPanel || !Array.isArray(reported)) return;
+    generationPanel.hidden = false;
+    var byKey = {};
+    reported.forEach(function(entry){ if (entry && entry.key) byKey[entry.key] = entry; });
+    stages.forEach(function(row) {
+      var entry = byKey[row.dataset.generationStageKey];
+      // A stage the service did not report stays WAITING: absence of evidence
+      // is never rendered as success.
+      paintStage(row, entry ? String(entry.state || 'WAITING') : 'WAITING', entry ? entry.detail : null);
+    });
+  }
+  // The server already rendered the persisted ledger into data-state, so a
+  // completed run needs no client-side repainting -- it only needs revealing.
   if (generationPanel && generationPanel.dataset.generationStatus) {
     generationPanel.hidden = false;
-    var unavailable = generationPanel.dataset.generationResult === 'DATA_UNAVAILABLE';
-    stages.forEach(function(row, index) {
-      var state = row.querySelector('.generation-stage__state');
-      var marker = row.querySelector('.generation-stage__marker');
-      var complete = !unavailable;
-      row.classList.toggle('is-complete', complete);
-      row.classList.toggle('is-failed', unavailable && index === 0);
-      if (state) state.textContent = complete ? 'Complete' : (index === 0 ? 'Failed' : 'Not reached');
-      if (marker) marker.textContent = complete ? '✓' : (index === 0 ? '×' : '○');
-    });
   }
   document.querySelectorAll('form[action$="/generate-ticket"], form[action$="/sports/generate-ticket"]').forEach(function(form){
     form.addEventListener('submit', function(event){
@@ -846,9 +906,12 @@ $kickoffStamp = static function (mixed $iso): string {
           body: JSON.stringify({date: date})
         });
         var data = await res.json();
+        // Paint the REAL stage ledger the engine returned, for both outcomes.
+        renderGenerationStages(data.stages);
         if(res.ok){
           alert('Odds prediction ticket engine: ' + (data.status||'') + (data.ticketId ? '  — ticket ' + data.ticketId : '') + '\n' + (data.message||''));
-          location.href = '/sports/odds-prediction-ticket';
+          // Spec §21: never drop the date the operator asked for.
+          location.href = '/sports/odds-prediction-ticket?date=' + encodeURIComponent(date);
         } else {
           alert('Generate failed: ' + (data.message||data.error||res.status));
           apiBtn.disabled = false;

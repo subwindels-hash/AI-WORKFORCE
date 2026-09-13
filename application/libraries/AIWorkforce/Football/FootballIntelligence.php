@@ -134,7 +134,12 @@ final class FootballIntelligence
 
     public function live(): LiveMatchService
     {
-        return $this->live ??= new LiveMatchService($this->repo, $this->features(), $this->predictor(), $this->models(), $this->predictions(), $this->fixtures(), $this->audit, $this->config);
+        // RefreshPolicy is passed in so the live board can pull the provider on
+        // its own cadence when a reader is watching (board(autoSweep: true)),
+        // under exactly the same due/backoff/budget gates the scheduled job
+        // uses — the panel stays current on a host with no cron installed,
+        // without ever becoming a second, ungoverned source of provider traffic.
+        return $this->live ??= new LiveMatchService($this->repo, $this->features(), $this->predictor(), $this->models(), $this->predictions(), $this->fixtures(), $this->audit, $this->config, $this->refresh());
     }
 
     public function settlements(): SettlementService

@@ -498,17 +498,39 @@ class Api_sports extends Api_controller
         $body = $this->jsonBody();
         $cfg = $this->platform->sports->configuration->active();
         $today = \AIWorkforce\Sports\DailyTicketDate::today((string) ($cfg['system_timezone'] ?? 'UTC'));
-        $date = isset($body['date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $body['date']) ? (string) $body['date'] : $today;
+        // Spec §21: the selected date is mandatory and must NEVER silently
+        // become today. Omitting it is allowed (the caller means the current
+        // local day); sending a malformed one is an error, because generating
+        // for the wrong date is worse than refusing to generate.
+        if (isset($body['date']) && !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $body['date'])) {
+            $this->jsonError('invalid date: expected YYYY-MM-DD, got "' . mb_substr((string) $body['date'], 0, 40) . '"', 422);
+            return;
+        }
+        $date = isset($body['date']) ? (string) $body['date'] : $today;
+        // A well-formed but non-existent date (2026-02-31) must not be quietly
+        // normalised into a different day either.
+        [$dateY, $dateM, $dateD] = array_map('intval', explode('-', $date));
+        if (!checkdate($dateM, $dateD, $dateY)) {
+            $this->jsonError('invalid date: ' . $date . ' is not a real calendar date', 422);
+            return;
+        }
         // force: invalidate the day's ACTIVE candidate state (old pass odds,
         // stale pending ticket/daily slot) before regenerating from fresh
         // provider data. Settled/historical records are preserved.
-        $options = !empty($body['force']) ? ['force' => true] : [];
-        $result = $this->platform->sports->dailyTickets->runDaily($date, null, $options);
+        // Spec §1/§5: the SAME DailyTicketService the browser POST uses, and
+        // the run is attributed to the API caller, never a blanket 'system'.
+        $options = ['actor' => (string) ($user['id'] ?? 'api')];
+        if (!empty($body['force'])) $options['force'] = true;
+        // Spec §26: projected through the one shared contract, so the API and
+        // the browser return an identical field set for an identical run.
+        $result = \AIWorkforce\Sports\GenerationResult::fromRunDaily(
+            $this->platform->sports->dailyTickets->runDaily($date, null, $options)
+        );
         if (($result['status'] ?? '') === 'RESET_FAILED') { $this->jsonError($result['message'], 500); return; }
-        // DATA_UNAVAILABLE (every provider failed) is a dependency outage:
-        // 503 tells a caller "retry later", while NO_QUALIFIED_TICKET stays a
-        // normal 200 outcome. The body carries the per-provider status codes.
-        if (($result['status'] ?? '') === 'DATA_UNAVAILABLE') {
+        // A dependency outage tells a caller "retry later" (503), while
+        // NO_QUALIFIED_TICKET / NO_FIXTURES stay normal 200 outcomes: the day
+        // was assessed honestly and simply produced no ticket.
+        if (in_array((string) ($result['status'] ?? ''), ['DATA_UNAVAILABLE', 'NO_PROVIDER'], true)) {
             $result['readiness'] = $this->platform->sports->providers->readiness();
             $this->json($result, 503);
             return;

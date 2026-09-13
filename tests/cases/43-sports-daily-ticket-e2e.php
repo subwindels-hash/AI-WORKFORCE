@@ -289,14 +289,20 @@ test('daily ticket E2E: stored fixtures and fresh odds work without another prov
     assert_equals(1, count($repo->tickets));
 });
 
-test('daily ticket E2E: no provider configured → DISABLED_NO_PROVIDER, nothing fabricated', function () {
+test('daily ticket E2E: no provider configured → NO_PROVIDER, nothing fabricated', function () {
     $repo = new SportsRepositoryStub();
     $audit = fx_daily_audit();
     $providers = new SportsProviderManager();
     $service = new DailyTicketService($repo, $audit, $providers, new ConfigurationService($repo, $audit), new DataQualityEngine(), new PredictionPipeline(), new TicketOptimizer(), new TicketGovernance($repo, $audit), new DecisionRecorder($repo, $audit));
     $run = $service->runDaily(gmdate('Y-m-d'));
-    assert_equals('NO_QUALIFIED_TICKET', $run['status']);
-    assert_contains('DISABLED_NO_PROVIDER', $run['message']);
+    // Spec §8: an absent provider is an infrastructure state, never the
+    // prediction outcome "no qualifying games". This assertion previously
+    // pinned NO_QUALIFIED_TICKET, which is the conflation the spec forbids.
+    assert_equals('NO_PROVIDER', $run['status']);
+    assert_equals('NO_PROVIDER', $run['dataState']);
+    assert_contains('NO SPORTS DATA PROVIDER CONFIGURED', $run['message']);
+    assert_not_contains('NO VALUE TICKET TODAY', $run['message'],
+        'the no-value copy is reserved for a day that was actually assessed');
     assert_equals(0, count($repo->matches));
     assert_equals(0, count($repo->tickets));
 });
@@ -318,7 +324,8 @@ test('daily ticket E2E: provider failure is DATA_UNAVAILABLE, never "no qualifie
     $run = $service->runDaily($date);
     assert_equals('DATA_UNAVAILABLE', $run['status'], 'a provider outage is not a prediction outcome');
     assert_equals('DATA_UNAVAILABLE', $run['dataState']);
-    assert_contains('all configured sports-data providers failed', $run['message']);
+    assert_contains('SPORTS DATA UNAVAILABLE', $run['message']);
+    assert_contains('every configured provider failed', $run['message']);
     assert_equals(['broken' => 'OFFLINE'], $run['providerStatuses'], 'per-provider status codes are returned');
     assert_equals(0, $run['evaluated']);
     assert_equals(0, count($repo->tickets));
@@ -494,7 +501,11 @@ test('daily ticket E2E: engine mode VIEW_ONLY never generates tickets', function
     [$repo, $audit, $service] = fx_daily_stack();
     (new ConfigurationService($repo, $audit))->update(['engine_mode' => 'VIEW_ONLY'], 'admin', 'view only');
     $run = $service->runDaily(gmdate('Y-m-d', strtotime('+1 day')));
-    assert_equals('NO_QUALIFIED_TICKET', $run['status']);
+    // Spec §8: a mode that does not generate is a configuration state.
+    // Reporting NO_QUALIFIED_TICKET claimed the fixtures had been assessed
+    // and rejected, when the engine never looked at them at all.
+    assert_equals('DISABLED', $run['status']);
+    assert_equals('DISABLED', $run['dataState']);
     assert_contains('VIEW_ONLY', $run['message']);
     assert_equals(0, count($repo->tickets));
 });

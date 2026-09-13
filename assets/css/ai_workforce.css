@@ -556,6 +556,9 @@ p, h1, h2, h3, h4, h5, h6, span, a, div, td, th, label, li, small, strong, em, b
 .btn.ghost { background: transparent; }
 .btn.small { padding: 5px 10px; font-size: 12px; min-height: 30px; }
 .btn[disabled], .btn:disabled { opacity: .5; cursor: not-allowed; }
+/* :hover still matches a disabled button, so suppress the brand highlight that
+   would otherwise suggest the control is actionable. */
+.btn[disabled]:hover, .btn:disabled:hover { border-color: var(--line2); color: var(--text); }
 
 button svg, a.btn svg, .notice svg { max-width: 18px; max-height: 18px; flex: none; }
 
@@ -1702,7 +1705,27 @@ pre.raw {
 .football-cell-label { width: 180px; }
 .football-cell-small { font-size: 11px; }
 .football-cell-actions { white-space: nowrap; }
-.btn.is-disabled { opacity: .45; }
+/* Mirror the native [disabled] treatment: dimming alone left these elements
+   inheriting `cursor: pointer` from .btn, so an inert control still looked
+   clickable. Kill the pointer affordance and the hover highlight too. */
+.btn.is-disabled,
+.btn[aria-disabled="true"] {
+  opacity: .5;
+  cursor: not-allowed;
+}
+/* Links/spans are not form controls, so nothing stops them being activated —
+   neutralise them. Real <button disabled> keeps pointer events so the browser
+   still shows its `title` (which explains *why* the action is unavailable). */
+a.btn.is-disabled,
+span.btn.is-disabled,
+a.btn[aria-disabled="true"] {
+  pointer-events: none;
+}
+.btn.is-disabled:hover,
+.btn[aria-disabled="true"]:hover {
+  border-color: var(--line2);
+  color: var(--text);
+}
 .football-stat-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
 .football-stat-grid .stat { padding: 10px 11px; }
 .football-stat-grid .stat .v { font-size: 20px; }

@@ -28,15 +28,20 @@ class ConfigurationService
     /**
      * The lowest confidence an operator may configure as the eligibility floor.
      *
-     * A measured 25% read on verified data is a real signal and may be
-     * considered; the engine reports it as 25% and ranks it accordingly. This
-     * is a bound on what is CONFIGURABLE, not a promise about any prediction:
-     * the shipped default is 30 (see defaults()), confidence is never
-     * inflated to clear a floor, and the data-quality gate is unchanged — a
-     * fixture below the quality floor is still rejected outright whatever its
-     * confidence happens to be.
+     * The confidence hard gate: a candidate must legitimately measure >= 30%.
+     * 29.99% fails, 30.00% passes. This is a bound on what is CONFIGURABLE and
+     * on what can qualify — never a promise about any prediction. Confidence is
+     * never inflated or rounded up to clear it, and the data-quality gate is
+     * independent: a fixture below the quality floor is rejected outright
+     * whatever its confidence happens to be.
      */
     public const MIN_CONFIDENCE_FLOOR = 30.0;
+
+    /**
+     * The hard data-quality gate (§7): 74.99 is rejected, 75 passes. Distinct
+     * from the confidence gate above; the two are never conflated.
+     */
+    public const MIN_DATA_QUALITY_FLOOR = 75;
 
     public function __construct(private SportsRepository $repo, private AuditRepository $audit) {}
 
@@ -93,7 +98,7 @@ class ConfigurationService
             'min_confidence' => 30.0,
             'min_expected_value' => 0.02,
             'max_correlation' => 'LOW',
-            'min_data_quality' => 80,
+            'min_data_quality' => 75,
             // Adaptive confidence policy (requirements #1/#8). NULL means the
             // tiers are DERIVED from the two floors above: with the stock
             // 30 / 80 that is data quality >=85 → 30% confidence required,
@@ -226,7 +231,9 @@ class ConfigurationService
         }
         if ((float) $c['min_expected_value'] < 0) return 'min_expected_value must be >= 0';
         $dq = (int) $c['min_data_quality'];
-        if ($dq < 50 || $dq > 100) return 'min_data_quality must be within [50, 100]';
+        if ($dq < self::MIN_DATA_QUALITY_FLOOR || $dq > 100) {
+            return 'min_data_quality must be within [' . self::MIN_DATA_QUALITY_FLOOR . ', 100]';
+        }
         // An explicit adaptive policy must be readable, or the engine would
         // silently fall back to the derived ladder and the operator would
         // believe tiers are in force that are not.

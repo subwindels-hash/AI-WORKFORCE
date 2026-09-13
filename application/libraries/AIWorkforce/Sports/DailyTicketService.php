@@ -101,6 +101,15 @@ class DailyTicketService
     private ?\AIWorkforce\Football\FootballConfiguration $fairConfig = null;
 
     /** @var array<string,array> provider id → health, cached per run (one health probe per provider, not per fixture) */
+    /**
+     * Per-stage progress for the current run (spec §4). A stage is only marked
+     * COMPLETE after the operation it names has actually finished; nothing here
+     * advances on a timer and no percentage is ever estimated.
+     *
+     * @var array<string,array{state:string,detail:?string}>
+     */
+    private array $stageLedger = [];
+
     private array $healthCache = [];
     /** @var array<int,string> provider row id → provider code, cached per run */
     private array $providerCodes = [];
@@ -156,11 +165,10 @@ class DailyTicketService
         if (!empty($options['scheduled']) && is_array($dailyBeforeClaim) && !empty($dailyBeforeClaim['next_retry_at'])) {
             $retryAt = strtotime((string) $dailyBeforeClaim['next_retry_at']);
             if ($retryAt !== false && $retryAt > time()) {
-                return [
-                    'status' => 'RETRY_SCHEDULED', 'generationStatus' => (string) ($dailyBeforeClaim['generation_status'] ?? 'RETRYING'),
-                    'ticketId' => null, 'date' => $date, 'nextRetryAt' => gmdate('c', $retryAt),
-                    'message' => 'Daily ticket retry is scheduled for ' . gmdate('c', $retryAt), 'errors' => [],
-                ];
+                return $this->earlyExit($date, 'RETRY_SCHEDULED',
+                    (string) ($dailyBeforeClaim['generation_status'] ?? 'RETRYING'),
+                    'Daily ticket retry is scheduled for ' . gmdate('c', $retryAt),
+                    ['nextRetryAt' => gmdate('c', $retryAt), 'attempt' => (int) ($dailyBeforeClaim['attempt_count'] ?? 0)]);
             }
         }
 
@@ -179,11 +187,21 @@ class DailyTicketService
                     ['from' => $date, 'to' => $windowTo, 'invalidated' => $invalidated]);
             } catch (\Throwable $e) {
                 // Never silently half-reset: surface the failure and stop.
-                return ['status' => 'RESET_FAILED', 'generationStatus' => 'FAILED', 'date' => $date, 'message' => 'candidate reset failed: ' . mb_substr($e->getMessage(), 0, 300), 'invalidated' => null];
+                return $this->earlyExit($date, 'RESET_FAILED', 'FAILED',
+                    'candidate reset failed: ' . mb_substr($e->getMessage(), 0, 300),
+                    ['invalidated' => null, 'errorCode' => 'RESET_FAILED', 'errors' => [$e->getMessage()]]);
             }
         }
 
         $runId = Backtester::uuid();
+        // Spec §4/§5: real stage tracking and real run timing.
+        $this->resetStages();
+        $generationStartedAt = gmdate('c');
+        $generationStartedMicro = microtime(true);
+        // Spec §5: the acting administrator, never a blanket 'system'.
+        $actor = isset($options['actor']) && trim((string) $options['actor']) !== ''
+            ? mb_substr(trim((string) $options['actor']), 0, 120)
+            : 'system:daily-ticket';
         // Job rows are attempt telemetry, not the idempotency authority. Create
         // the parent row before claiming the daily slot: production dumps may
         // retain fk_sports_daily_run(run_id), and a child row cannot reference
@@ -219,7 +237,10 @@ class DailyTicketService
             if ($dailyBeforeClaim !== null) {
                 $this->repo->updateDailyTicket($date, ['generation_status' => 'RETRYING', 'next_retry_at' => $nextRetryAt, 'last_error_code' => 'JOB_CLAIM_CONFLICT']);
             }
-            return ['status' => 'GENERATION_IN_PROGRESS', 'generationStatus' => 'RETRYING', 'ticketId' => null, 'date' => $date, 'nextRetryAt' => $nextRetryAt, 'message' => 'Generation telemetry is already being recorded; retry scheduled', 'errors' => []];
+            return $this->earlyExit($date, 'GENERATION_IN_PROGRESS', 'RETRYING',
+                'Generation telemetry is already being recorded; retry scheduled',
+                ['nextRetryAt' => $nextRetryAt, 'errorCode' => 'JOB_CLAIM_CONFLICT', 'runId' => $runId, 'actor' => $actor,
+                 'generationStartedAt' => $generationStartedAt]);
         }
 
         $claim = $this->repo->claimDailyTicketGeneration(
@@ -234,11 +255,10 @@ class DailyTicketService
             try { $this->repo->releaseJobRun($runId); } catch (\Throwable $e) { /* telemetry cleanup is best effort */ }
             $winner = $this->existingTicketResult($date);
             if ($winner !== null) return $winner;
-            return [
-                'status' => 'GENERATION_IN_PROGRESS', 'generationStatus' => 'RUNNING',
-                'ticketId' => null, 'date' => $date,
-                'message' => 'Another worker is generating this daily ticket', 'invalidated' => $invalidated, 'errors' => [],
-            ];
+            return $this->earlyExit($date, 'GENERATION_IN_PROGRESS', 'RUNNING',
+                'Another worker is generating this daily ticket',
+                ['invalidated' => $invalidated, 'runId' => $runId, 'actor' => $actor,
+                 'generationStartedAt' => $generationStartedAt]);
         }
         $attemptCount = max(1, (int) (($claim['row']['attempt_count'] ?? $attemptCount)));
         $this->healthCache = [];
@@ -273,14 +293,19 @@ class DailyTicketService
         $funnel['batchOffset'] = (int) ($options['batchOffset'] ?? 0);
 
         try {
+            // Spec §8: an administratively disabled engine is a configuration
+            // state, never "no qualifying games". $status must say so too.
             if (!(bool) $config['module_enabled']) {
-                $message = 'Sports Intelligence module is disabled';
+                $status = 'DISABLED';
+                $message = 'Sports Intelligence module is disabled — no fixtures were assessed';
                 $dataState = 'DISABLED';
             } elseif (!(bool) $config['ticket_engine_enabled']) {
-                $message = 'AI Ticket Engine is disabled';
+                $status = 'DISABLED';
+                $message = 'AI Ticket Engine is disabled — no fixtures were assessed';
                 $dataState = 'DISABLED';
             } elseif (!in_array($config['engine_mode'], ['AI_TICKET_GENERATION', 'USER_APPROVAL_REQUIRED', 'AUTOMATED_EXECUTION'], true)) {
-                $message = 'engine mode ' . $config['engine_mode'] . ' does not generate tickets';
+                $status = 'DISABLED';
+                $message = 'engine mode ' . $config['engine_mode'] . ' does not generate tickets — no fixtures were assessed';
                 $dataState = 'DISABLED';
             } else {
                 // Stored fixtures and their persisted provider identity are a
@@ -292,6 +317,7 @@ class DailyTicketService
                 // provider behaves exactly as before; with several, the same
                 // real match arriving under several ids is merged below and
                 // evaluated once through its most complete row.
+                $this->stageRunning('provider');
                 $sources = $this->fetchFixtureSources($date, $timezone, $errors, $options);
                 $funnel['fixtureInput'] = (string) ($sources['input'] ?? 'PROVIDER');
                 $funnel['fixturePageFull'] = !empty($sources['pageFull']);
@@ -299,8 +325,16 @@ class DailyTicketService
                 if (!$sources['ok']) {
                     $funnel['providersConfigured'] = count($this->providers->all());
                     if (!$this->providers->configured()) {
-                        $message = 'NO VALUE TICKET TODAY — no stored eligible fixtures and no sports provider configured (DISABLED_NO_PROVIDER); nothing is fabricated';
+                        // Spec §8: a missing provider is an infrastructure
+                        // state, NOT a prediction outcome. Leaving $status at
+                        // its NO_QUALIFIED_TICKET default recorded "no
+                        // qualifying games" for a day nothing ever looked at,
+                        // and "NO VALUE TICKET TODAY" is reserved (§15) for a
+                        // day that was genuinely assessed.
+                        $status = 'NO_PROVIDER';
+                        $message = 'NO SPORTS DATA PROVIDER CONFIGURED — no stored eligible fixtures and no provider to fetch them; no fixtures were assessed and nothing was fabricated';
                         $dataState = 'NO_PROVIDER';
+                        $this->stageFailed('provider', 'SPORTS DATA PROVIDER NOT CONFIGURED');
                     } else {
                         // Every provider failed. This is a DATA outage, not a
                         // prediction outcome: report it as such, keep the
@@ -308,14 +342,23 @@ class DailyTicketService
                         // qualified games" for a day nobody could look at.
                         $status = 'DATA_UNAVAILABLE';
                         $dataState = 'DATA_UNAVAILABLE';
+                        $this->stageFailed('provider', 'every configured provider failed');
                         $providerFailures = $sources['failures'];
                         $providerStatuses = $sources['failureStatuses'] ?? [];
-                        $message = 'NO VALUE TICKET TODAY — all configured sports-data providers failed; no data was fabricated — ' . ($sources['summary'] ?: SportsProviderManager::summarize('fixtures', $providerStatuses));
+                        $message = 'SPORTS DATA UNAVAILABLE — every configured provider failed, so no fixture could be assessed; no data was fabricated — ' . ($sources['summary'] ?: SportsProviderManager::summarize('fixtures', $providerStatuses));
                         $errors[] = 'provider failure: ' . json_encode($sources['failures']);
                     }
                 } else {
                     $sourceCodes = array_map(fn(array $s): string => $s['provider'], $sources['sources']);
                     $provider = count($sourceCodes) === 1 ? $sourceCodes[0] : implode(',', $sourceCodes);
+                    // The provider answered: that stage is genuinely complete,
+                    // and fixture intake has therefore run.
+                    $this->stageComplete('provider', $provider);
+                    $intakeCount = 0;
+                    foreach ((array) $sources['sources'] as $intakeSource) {
+                        $intakeCount += count((array) ($intakeSource['fixtures'] ?? []));
+                    }
+                    $this->stageComplete('fixtures', $intakeCount . ' fixtures read');
                     $funnel['providersConfigured'] = count($this->providers->all());
                     $funnel['fixtureProviders'] = $sourceCodes;
                     $runtimeNow = time();
@@ -849,6 +892,18 @@ class DailyTicketService
                     }
                     $funnel['fixturesDeferred'] = $fixturesDeferred + (int) ($funnel['fixtureBatchDeferred'] ?? 0);
 
+                    // Every per-fixture stage above has now actually run for
+                    // the whole intake, so each is reported complete with the
+                    // count the pipeline itself recorded (spec §4).
+                    $this->stageComplete('eligibility', (int) $funnel['eligibleFixtures'] . ' eligible');
+                    $this->stageComplete('odds', (int) $funnel['fixturesWithSupportedOdds'] . ' with supported odds');
+                    $this->stageComplete('oddsFreshness', (int) $funnel['fixturesWithFreshOdds'] . ' fresh / ' . (int) $funnel['fixturesRejectedStaleOdds'] . ' stale');
+                    $this->stageComplete('predictions', (int) $funnel['predictionsGenerated'] . ' generated');
+                    $this->stageComplete('confidence', (int) $funnel['confidenceQualifiedCandidates'] . ' cleared confidence');
+                    $this->stageComplete('dataQuality', (int) $funnel['sufficientDataFixtures'] . ' cleared data quality');
+                    $this->stageComplete('expectedValue', (int) $funnel['positiveValueCandidates'] . ' positive value');
+                    $this->stageComplete('risk', (int) $funnel['riskQualifiedCandidates'] . ' risk approved');
+
                     // ── Stage 11: correlation → final ticket ────────────────
                     if (count($candidates) > 0) {
                         $optimized = $this->optimizer->optimize($candidates, [
@@ -874,7 +929,16 @@ class DailyTicketService
                             // odds range — declared as fallback, never faked.
                             'allowFallback' => true,
                         ]);
+                        // Spec §13: QUALIFIED CANDIDATES counts candidates that
+                        // cleared EVERY required gate — which is exactly the
+                        // optimizer's eligible pool. It is not a fixture,
+                        // prediction or odds-row count, and (spec §14) it is
+                        // not the number the optimizer finally selected.
                         $funnel['correlationQualifiedCandidates'] = (int) ($optimized['poolSize'] ?? 0);
+                        $funnel['finalQualifiedCandidates'] = (int) ($optimized['poolSize'] ?? 0);
+                        $this->stageComplete('correlation', (int) ($optimized['poolSize'] ?? 0) . ' non-correlated');
+                        $this->stageComplete('qualified', (int) ($optimized['poolSize'] ?? 0) . ' qualified candidates');
+                        $this->stageComplete('optimizer', (string) ($optimized['status'] ?? 'evaluated'));
                         // Requirement #14: the per-candidate decision trace
                         // (fixture → market → model probability → confidence →
                         // data quality → odds → value → risk → correlation →
@@ -897,7 +961,11 @@ class DailyTicketService
                             if (($rec['status'] ?? '') !== 'NO_QUALIFIED_TICKET') {
                                 $status = $rec['status'] === 'APPROVED_NOT_EXECUTED' ? 'APPROVED' : 'PENDING_USER_APPROVAL';
                                 $ticketId = $rec['ticketId'];
-                                $funnel['finalQualifiedCandidates'] = (int) ($optimized['selectionCount'] ?? 0);
+                                // Spec §14: selected picks are what the
+                                // optimizer put on the ticket, tracked apart
+                                // from the qualified pool above.
+                                $funnel['selectedPicks'] = (int) ($optimized['selectionCount'] ?? 0);
+                                $this->stageComplete('persistence', 'ticket ' . (string) $ticketId);
                                 $message = $status === 'APPROVED' ? 'ticket generated and auto-approved (AUTOMATED_EXECUTION); no external execution' : 'odds prediction ticket generated; awaiting user approval';
                                 // Fallback mode is always declared: a ticket
                                 // that did not clear every preferred criterion
@@ -1108,6 +1176,20 @@ class DailyTicketService
         if ($dataState === 'DATA_UNAVAILABLE') {
             foreach ($providerStatuses as $pid => $st) $storedSummary['PROVIDER:' . $pid] = $st;
         }
+        // Spec §4/§5: persist the REAL stage ledger and run timing with the daily
+        // row, so reloading /sports re-renders exactly what the run did instead
+        // of a panel that guesses. finalizeStages() marks anything still
+        // WAITING after a terminal outcome as SKIPPED rather than complete, and
+        // is computed here — once — so the stored row, the audit record and the
+        // returned contract cannot disagree about what ran.
+        $generationCompletedAt = gmdate('c');
+        $durationSeconds = round(microtime(true) - $generationStartedMicro, 3);
+        $stageLedger = $this->finalizeStages($ticketId !== null);
+        $diagnostics['stageLedger'] = $stageLedger;
+        $diagnostics['generationStartedAt'] = $generationStartedAt;
+        $diagnostics['generationCompletedAt'] = $generationCompletedAt;
+        $diagnostics['durationSeconds'] = $durationSeconds;
+        $diagnostics['actor'] = $actor;
         $storedSummary['_diagnostics'] = $diagnostics;
         $this->repo->saveDailyTicket([
             'date' => $date, 'ticket_type' => self::TICKET_TYPE,
@@ -1130,14 +1212,27 @@ class DailyTicketService
         if ($ticketId === null) {
             try { $this->repo->releaseJobRun($runId); } catch (\Throwable $e) { $errors[] = 'job release failed: ' . mb_substr($e->getMessage(), 0, 120); }
         }
+        // Spec §24: one audit record that can reconstruct the whole run, and
+        // (spec §5) attributed to the administrator who actually ran it.
+        $auditId = $runId;
         $this->audit->emit($ticketId === null ? 'SPORTS_DAILY_TICKET_BLOCKED' : 'SPORTS_DAILY_TICKET_RUN', 'Daily ticket run ' . $date . ' → ' . $generationStatus . ' / ' . $status, [
+            'auditId' => $auditId, 'runId' => $runId, 'actor' => $actor,
             'date' => $date, 'ticketType' => self::TICKET_TYPE, 'status' => $status, 'generationStatus' => $generationStatus,
             'dataState' => $dataState, 'ticketId' => $ticketId, 'evaluated' => $evaluated,
+            'eligibleFixtures' => (int) ($diagnostics['eligibleFixtures'] ?? 0),
+            'predictionsGenerated' => (int) ($diagnostics['predictionsGenerated'] ?? $recorded),
+            'freshOdds' => (int) ($diagnostics['fixturesWithFreshOdds'] ?? 0),
+            'staleOdds' => (int) ($diagnostics['fixturesRejectedStaleOdds'] ?? 0),
+            'qualifiedCandidates' => (int) ($diagnostics['finalQualifiedCandidates'] ?? 0),
+            'selectedPicks' => (int) ($diagnostics['selectedPicks'] ?? 0),
+            'configurationVersion' => (int) $config['version'], 'modelVersion' => $modelVersionId,
+            'generationStartedAt' => $generationStartedAt, 'generationCompletedAt' => $generationCompletedAt,
+            'duration' => $durationSeconds, 'stages' => $stageLedger,
             'rejections' => $rejections, 'rejectionSummary' => $rejectionSummary, 'diagnostics' => $diagnostics,
             'message' => $message, 'provider' => $provider, 'attempt' => $attemptCount,
             'nextRetryAt' => $nextRetryAt, 'errorCode' => $errorCode,
             'providerFailures' => $providerFailures, 'providerStatuses' => $providerStatuses, 'errors' => $errors,
-        ]);
+        ], $actor);
         return [
             'status' => $status, 'generationStatus' => $generationStatus, 'outcomeStatus' => $status,
             'dataState' => $dataState, 'ticketId' => $ticketId, 'date' => $date, 'ticketType' => self::TICKET_TYPE,
@@ -1147,13 +1242,25 @@ class DailyTicketService
             // Canonical response fields shared by browser and API callers.
             'fixturesEvaluated' => $evaluated,
             'predictionsGenerated' => (int) ($diagnostics['predictionsGenerated'] ?? $recorded),
-            'qualifiedCandidates' => (int) ($diagnostics['correlationQualifiedCandidates'] ?? 0),
+            // Spec §13/§14: the SAME counters the audit record uses, so the
+            // stored run, the audit trail and the API answer can never disagree.
+            'qualifiedCandidates' => (int) ($diagnostics['finalQualifiedCandidates'] ?? 0),
             'selectedPicks' => $ticketId !== null ? count($this->repo->ticketSelections((string) $ticketId)) : 0,
             'freshOdds' => (int) ($diagnostics['fixturesWithFreshOdds'] ?? 0),
             'staleOdds' => (int) ($diagnostics['fixturesRejectedStaleOdds'] ?? 0),
             'diagnostics' => $diagnostics, 'invalidated' => $invalidated,
             'provider' => $provider, 'providerFailures' => $providerFailures, 'providerStatuses' => $providerStatuses,
             'runId' => $runId, 'executionKey' => $key, 'errors' => $errors,
+            // Canonical contract completions (spec §1/§5/§24).
+            'eligibleFixtures' => (int) ($diagnostics['eligibleFixtures'] ?? 0),
+            'modelVersion' => $modelVersionId,
+            'configurationVersion' => (int) $config['version'],
+            'generationStartedAt' => $generationStartedAt,
+            'generationCompletedAt' => $generationCompletedAt,
+            'duration' => $durationSeconds,
+            'auditId' => $auditId,
+            'actor' => $actor,
+            'stageLedger' => $stageLedger,
         ];
     }
 
@@ -1239,11 +1346,122 @@ class DailyTicketService
             'selectedPicks' => count($selections),
             'freshOdds' => (int) (($summary['_diagnostics']['fixturesWithFreshOdds'] ?? 0)),
             'staleOdds' => (int) (($summary['_diagnostics']['fixturesRejectedStaleOdds'] ?? 0)),
+            'eligibleFixtures' => (int) (($summary['_diagnostics']['eligibleFixtures'] ?? 0)),
             'diagnostics' => (array) ($summary['_diagnostics'] ?? []),
+            'rejectionSummary' => array_filter($summary, static fn($k): bool => is_string($k) && $k !== '' && $k[0] !== '_', ARRAY_FILTER_USE_KEY),
             'message' => 'TICKET ALREADY GENERATED: existing persisted daily ticket returned; no duplicate was created',
             'runId' => $daily['run_id'] ?? null, 'provider' => $daily['provider'] ?? null,
             'providerStatuses' => [], 'errors' => [],
+            // Spec §1/§26: a duplicate answer carries the same canonical
+            // fields as a fresh run — read back from the recorded run, never
+            // recomputed and never invented.
+            'configurationVersion' => isset($daily['configuration_version']) ? (int) $daily['configuration_version'] : null,
+            'modelVersion' => $ticket['model_version_id'] ?? null,
+            'generationStartedAt' => $daily['generation_started_at'] ?? null,
+            'generationCompletedAt' => $generatedAt,
+            'duration' => isset($summary['_diagnostics']['durationSeconds']) ? (float) $summary['_diagnostics']['durationSeconds'] : null,
+            'auditId' => $daily['run_id'] ?? null,
+            'actor' => $daily['generated_by'] ?? null,
+            // Spec §4: this request executed no stage — the earlier run did.
+            // Reporting them COMPLETE here would credit work this call skipped.
+            'stageLedger' => array_map(
+                static fn(): array => ['state' => GenerationResult::STAGE_SKIPPED, 'detail' => 'already generated'],
+                GenerationResult::STAGES
+            ),
         ];
+    }
+
+    /**
+     * Spec §1/§26: the canonical envelope for a run that ended before the
+     * pipeline started (backoff, lock contention, reset failure). Every count
+     * is a real zero — the stage never ran — and every stage is WAITING rather
+     * than silently absent, so the UI can render the panel from any outcome.
+     *
+     * @param array<string,mixed> $extra
+     * @return array<string,mixed>
+     */
+    private function earlyExit(string $date, string $status, string $generationStatus, string $message, array $extra = []): array
+    {
+        return array_merge([
+            'status' => $status, 'generationStatus' => $generationStatus, 'outcomeStatus' => $status,
+            'ticketId' => null, 'date' => $date, 'ticketType' => self::TICKET_TYPE,
+            'message' => $message, 'existing' => false,
+            'dataState' => 'OK', 'provider' => null, 'providerStatuses' => [],
+            'fixturesEvaluated' => 0, 'evaluated' => 0, 'eligibleFixtures' => 0,
+            'predictionsGenerated' => 0, 'predictionsRecorded' => 0,
+            'freshOdds' => 0, 'staleOdds' => 0,
+            'qualifiedCandidates' => 0, 'selectedPicks' => 0,
+            'rejections' => 0, 'rejectionSummary' => [], 'diagnostics' => [],
+            'modelVersion' => null, 'configurationVersion' => null,
+            'generationStartedAt' => null, 'generationCompletedAt' => null, 'duration' => null,
+            'auditId' => null, 'actor' => null, 'runId' => null,
+            'nextRetryAt' => null, 'errorCode' => null, 'errors' => [],
+            'stageLedger' => array_map(
+                static fn(): array => ['state' => GenerationResult::STAGE_WAITING, 'detail' => null],
+                GenerationResult::STAGES
+            ),
+        ], $extra);
+    }
+
+    // ── Stage ledger (spec §4) ────────────────────────────────────────────
+    // The pipeline reports where it actually got to. Stages start WAITING, are
+    // marked RUNNING when entered and COMPLETE only once the underlying
+    // operation returned. A stage the run never reached stays WAITING and is
+    // reported as SKIPPED when the run ends early — it is never shown complete.
+
+    private function resetStages(): void
+    {
+        $this->stageLedger = [];
+        foreach (array_keys(GenerationResult::STAGES) as $key) {
+            $this->stageLedger[$key] = ['state' => GenerationResult::STAGE_WAITING, 'detail' => null];
+        }
+    }
+
+    private function stageRunning(string $key, ?string $detail = null): void
+    {
+        if (!isset($this->stageLedger[$key])) return;
+        $this->stageLedger[$key] = ['state' => GenerationResult::STAGE_RUNNING, 'detail' => $detail];
+    }
+
+    private function stageComplete(string $key, ?string $detail = null): void
+    {
+        if (!isset($this->stageLedger[$key])) return;
+        $this->stageLedger[$key] = ['state' => GenerationResult::STAGE_COMPLETE, 'detail' => $detail];
+    }
+
+    private function stageFailed(string $key, ?string $detail = null): void
+    {
+        if (!isset($this->stageLedger[$key])) return;
+        $this->stageLedger[$key] = ['state' => GenerationResult::STAGE_FAILED, 'detail' => $detail];
+    }
+
+    private function stageSkipped(string $key, ?string $detail = null): void
+    {
+        if (!isset($this->stageLedger[$key])) return;
+        $this->stageLedger[$key] = ['state' => GenerationResult::STAGE_SKIPPED, 'detail' => $detail];
+    }
+
+    /**
+     * Close the ledger at the end of a run: anything still WAITING or RUNNING
+     * was not completed, so it is reported honestly rather than as done.
+     */
+    private function finalizeStages(bool $ok): array
+    {
+        foreach ($this->stageLedger as $key => $entry) {
+            $state = $entry['state'] ?? GenerationResult::STAGE_WAITING;
+            if ($state === GenerationResult::STAGE_RUNNING) {
+                $this->stageLedger[$key] = [
+                    'state' => $ok ? GenerationResult::STAGE_COMPLETE : GenerationResult::STAGE_FAILED,
+                    'detail' => $entry['detail'] ?? null,
+                ];
+            } elseif ($state === GenerationResult::STAGE_WAITING) {
+                $this->stageLedger[$key] = [
+                    'state' => GenerationResult::STAGE_SKIPPED,
+                    'detail' => $entry['detail'] ?? 'not reached',
+                ];
+            }
+        }
+        return $this->stageLedger;
     }
 
     /** Stable, dashboard-safe reason code for retry diagnostics. */
@@ -1614,7 +1832,10 @@ class DailyTicketService
             'minEdgeMetCandidates' => 0,
             'riskQualifiedCandidates' => 0,
             'correlationQualifiedCandidates' => 0,
+            // Spec §13: cleared every required gate (the optimizer's eligible pool).
             'finalQualifiedCandidates' => 0,
+            // Spec §14: what the optimizer actually placed on the ticket.
+            'selectedPicks' => 0,
             // Final-selection transparency (requirements #10 and #14).
             'eligiblePoolSize' => 0,
             'preferredPoolSize' => 0,

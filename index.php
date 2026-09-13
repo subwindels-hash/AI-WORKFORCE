@@ -126,6 +126,17 @@ if (!empty($_SERVER['HTTP_X_AI_WORKFORCE_ORIG_URI'])) {
     if (getenv('AI_WORKFORCE_SESSION_DRIVER') === false) {
         putenv('AI_WORKFORCE_SESSION_DRIVER=database');
     }
+    // DEV BRIDGE ONLY: the deterministic SANDBOX sports provider. The WASM
+    // runtime cannot inherit host env per request, so the bridge forwards the
+    // explicit opt-in here. It is a marked simulation feed (every record it
+    // emits carries simulated: true) used to exercise the generation workflow
+    // offline; production never receives this header, and the provider itself
+    // still refuses to run outside SANDBOX mode.
+    $sandboxSports = (string) ($_SERVER['HTTP_X_AI_WORKFORCE_SPORTS_SANDBOX'] ?? '');
+    if ($sandboxSports === '1') {
+        putenv('WINDELS_SPORTS_MODE=SANDBOX');
+        putenv('WINDELS_SPORTS_SANDBOX=1');
+    }
     // Dev bridge only: the bridge advertises the demo operator it bootstrapped
     // so the preview's login page can display those credentials. Strict shape
     // check — display-only values, production never receives this header.

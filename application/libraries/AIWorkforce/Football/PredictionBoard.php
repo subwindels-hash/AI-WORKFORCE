@@ -307,7 +307,11 @@ final class PredictionBoard
                 'to' => count($fixtures) === 0 ? 0 : $first + count($fixtures) - 1,
                 'hasPrevious' => $page > 1 && $totalFixtures > 0,
                 'hasNext' => $page < $totalPages,
-                'previousPage' => $page > 1 ? $page - 1 : null,
+                // Past the last page, step back to the last page that
+                // actually HOLDS matches — not to $page - 1, which is also
+                // empty. Otherwise "← Previous" appears to do nothing: it
+                // navigates, but every page it reaches is still blank.
+                'previousPage' => $page > 1 ? min($page - 1, $totalPages) : null,
                 'nextPage' => $page < $totalPages ? $page + 1 : null,
                 'firstPage' => 1,
                 'lastPage' => $totalPages,
