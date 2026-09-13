@@ -194,6 +194,22 @@ test('football: the football screens own their panels — no duplication, no lef
     // §10/§11: the board and its card vocabulary live here, once.
     assert_equals(1, substr_count($console, "TODAY'S FOOTBALL PREDICTIONS"), 'the board heading appears once');
     assert_equals(1, substr_count($console, '<h3>30-day performance'), 'the 30-day panel appears once');
+    $railStart = strpos($console, '<aside class="football-side');
+    $performanceStart = strpos($console, 'id="football-performance"');
+    assert_true($railStart !== false && $performanceStart !== false && $performanceStart > $railStart,
+        'the complete performance panel lives in the sidebar rail');
+    foreach (['Predictions evaluated', 'Correct results', 'Result accuracy', 'Correct exact scores',
+        'Correct-score accuracy', 'Avg confidence', 'Brier score', 'Log loss', 'ECE',
+        'Avg data quality', 'Avg goal error', 'Approved calibrations'] as $metric) {
+        assert_equals(1, substr_count($console, '>' . $metric . '<'), $metric . ' appears once in the sidebar performance panel');
+    }
+    foreach (['evaluatedPredictions', 'correctResults', 'resultAccuracy', 'correctScores',
+        'exactScoreAccuracy', 'averageConfidence', 'brier', 'logLoss', 'ece',
+        'averageDataQuality', 'averageGoalError'] as $field) {
+        assert_contains("\$perf['" . $field . "']", $console, $field . ' is bound to the stored performance report');
+    }
+    assert_contains("\$models['approvedCalibrationCount']", $console,
+        'approved calibrations are bound to the stored model summary');
     assert_contains('$board[\'categories\']', $console, 'the view iterates the confidence categories the board produced');
     // The categories themselves are a data contract, so they are checked where
     // they are produced.
@@ -240,7 +256,10 @@ test('football: the football screens own their panels — no duplication, no lef
     assert_contains('csrf_token', $match, 'guarded by the CSRF token');
     assert_contains('never rewritten', $match, 'and says plainly that the frozen prediction is not rewritten');
     assert_contains('Stored as separate LIVE rows', $match, 'with the live estimate kept in its own rows');
-    assert_contains('separate stored rows', $console, 'and the board says they are separate rows');
+    // The compact board rail is deliberately live-match-only; prediction-row
+    // provenance remains on the full match screen instead of cluttering it.
+    assert_true(!str_contains($console, 'The pre-match prediction and live estimate are separate stored rows'),
+        'the compact live panel no longer repeats match-analysis guidance');
 
     foreach (['Full odds &amp; fair-price sheet', 'Bookmaker quote &amp; information', 'Margin-free market',
         'WINDELS probability', 'WINDELS fair odds', 'Break-even', 'Expected return', 'Edge vs quote',
@@ -481,10 +500,35 @@ test('football: every schema source declares the same tables and columns', funct
 
 test('football: a live match card carries the match date and time from the stored kickoff', function () {
     $console = fx_fb_source('application/views/football/index.php');
-    assert_contains('<h3>Live now</h3>', $console, 'the live panel is on the football console');
+    assert_contains('<h3 id="live-heading">Live Match</h3>', $console, 'the live-match-only panel is on the football console');
     assert_contains("\$kickoffStamp(\$fx['kickoff']", $console, 'every live card prints its kickoff');
     assert_contains("gmdate('D j M Y · H:i'", $console, 'as the match date and the UTC time together');
     assert_contains("'DATA_UNAVAILABLE'", $console, 'and a fixture with no stored kickoff says so instead of printing a guessed one');
+
+    $panelStart = strpos($console, 'id="football-live-panel"');
+    $nextPanel = strpos($console, 'aria-labelledby="feed-heading"', (int) $panelStart);
+    assert_true($panelStart !== false && $nextPanel !== false, 'the live panel can be isolated from the rest of the rail');
+    $livePanel = substr($console, (int) $panelStart, (int) $nextPanel - (int) $panelStart);
+    assert_contains('Auto-refresh on — live match updates appear here automatically, immediately after the provider reports them.', $livePanel,
+        'the panel tells the reader that provider updates appear automatically');
+    assert_contains('id="football-live-list"', $livePanel, 'the live-only list is the poll target');
+    assert_true(!str_contains($livePanel, 'Refresh live'), 'there is no manual refresh control inside an always-on panel');
+    assert_true(!str_contains($livePanel, 'pre-match prediction'), 'the compact panel displays only the live-match state');
+    assert_contains('href="#football-live-panel">Live match</a>', $console,
+        'the action-bar shortcut scrolls to the automatic panel instead of triggering a provider refresh');
+    assert_true(!str_contains($console, 'href="/football/live"'),
+        'the console offers no GET action that spends a provider request');
+    $controller = fx_fb_source('application/controllers/Football.php');
+    $legacyStart = strpos($controller, 'public function live()');
+    $legacyEnd = strpos($controller, 'public function match(', (int) $legacyStart);
+    $legacyLive = substr($controller, (int) $legacyStart, (int) $legacyEnd - (int) $legacyStart);
+    assert_contains("redirect('/football#football-live-panel')", $legacyLive,
+        'old live-view bookmarks land on the automatic panel');
+    assert_true(!str_contains($legacyLive, 'syncLive'),
+        'opening the legacy live-view URL never calls the provider');
+    assert_contains("fetch('/api/football/fixtures/live'", $console, 'the live panel polls the stored football-live endpoint');
+    assert_contains('kickoffStamp(fixture.kickoff)', $console, 'polled cards preserve the stored kickoff date and time');
+    assert_contains('document.hidden', $console, 'polling pauses while the page is hidden');
 
     // The card renders the fixture summary the live board already returns, so
     // the printed date and time are the stored kickoff row — never the moment
@@ -545,20 +589,21 @@ test('football UI: every section on every football screen is the same numbered, 
         'models' => fx_fb_source('application/views/football/models.php'),
     ];
 
-    // 1. Reading order. The board and both sub-screens number their feed.
-    foreach ([1, 2, 3, 4] as $step) {
+    // 1. Reading order. Each screen numbers its feed; the board's performance
+    // report is now part of the sidebar rail and therefore stays unnumbered.
+    foreach ([1, 2, 3] as $step) {
         assert_contains('<span class="football-step" aria-hidden="true">' . $step . '</span>', $views['board'],
             'the board numbers feed step ' . $step);
-        assert_contains('<span class="football-step" aria-hidden="true">' . $step . '</span>', $views['match'],
-            'the match page numbers step ' . $step);
-    }
-    foreach ([1, 2, 3] as $step) {
         assert_contains('<span class="football-step" aria-hidden="true">' . $step . '</span>', $views['models'],
             'the models page numbers step ' . $step);
     }
+    foreach ([1, 2, 3, 4] as $step) {
+        assert_contains('<span class="football-step" aria-hidden="true">' . $step . '</span>', $views['match'],
+            'the match page numbers step ' . $step);
+    }
     // The rail is reference material, never part of the numbered order, so the
     // step count equals the number of feed sections and no more.
-    assert_equals(4, substr_count($views['board'], 'class="football-step"'), 'the board numbers its feed and only its feed');
+    assert_equals(3, substr_count($views['board'], 'class="football-step"'), 'the board numbers its feed and only its feed');
 
     // 2. Every aria-labelledby resolves. `live-heading` and
     // `performance-heading` used to point at nothing at all.
@@ -629,7 +674,7 @@ test('football UI: every section on every football screen is the same numbered, 
     // 6. The write-ups themselves: a reader is told what each section is for.
     foreach (['The counts below describe saved rows for this date only',
         'The strongest comparisons drawn from the fixtures in section 3',
-        'Outcome of predictions that have already been settled'] as $writeUp) {
+        'Measured from stored settlements only'] as $writeUp) {
         assert_contains($writeUp, $views['board'], 'the board explains its section: ' . $writeUp);
     }
     foreach (['Day overview', 'Ranked reading', 'Fixture odds board', 'Measured results',

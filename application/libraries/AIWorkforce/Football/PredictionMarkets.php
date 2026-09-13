@@ -28,10 +28,12 @@ use AIWorkforce\Sports\OddsBounds;
  *    on the share the first half does not claim). The share is an assumption,
  *    so it is named in the market's `basis` and configurable, never hidden.
  *
- * Every market added to the catalogue must be *exhaustive*: its legs are
- * mutually exclusive and cover the whole distribution. That is what lets the
- * bookmaker margin be removed honestly, and it is asserted per market by the
- * test suite rather than assumed here.
+ * Every market that claims to be exhaustive has mutually exclusive legs which
+ * cover the whole distribution. That is what lets the bookmaker margin be
+ * removed honestly, and it is asserted per market by the test suite rather than
+ * assumed here. Double Chance is the deliberate exception: its three selections
+ * overlap and sum to two, so their prices are shown but never proportionally
+ * de-vigged as though they formed a one-probability distribution.
  *  - `NOT_MODELLED` — corners, cards and half-time/full-time. The module has no
  *    stored input for these, so they are reported as `DATA_UNAVAILABLE` unless
  *    the connected odds provider supplied the price itself.
@@ -456,13 +458,16 @@ final class PredictionMarkets
 
     /**
      * The legs that make one market exhaustive. A family missing from this map
-     * is one whose full set WINDELS cannot know (Correct Score, Corners, Cards),
-     * and such a market is never de-vigged.
+     * either has an unknowable full set (Correct Score, Corners, Cards) or has
+     * intentionally overlapping selections (Double Chance); neither kind is
+     * de-vigged as though its probabilities formed one exclusive distribution.
      */
     private const FAMILY_SELECTIONS = [
         'MATCH_WINNER' => ['HOME', 'DRAW', 'AWAY'],
         'FIRST_HALF_WINNER' => ['HOME', 'DRAW', 'AWAY'],
-        'DOUBLE_CHANCE' => ['HOME_OR_DRAW', 'HOME_OR_AWAY', 'AWAY_OR_DRAW'],
+        // Double Chance is intentionally absent: each match result belongs to
+        // two selections, so the three implied probabilities are not a
+        // mutually exclusive distribution and must not be normalized to one.
         'DRAW_NO_BET' => ['HOME', 'AWAY'],
         'OVER_UNDER' => ['OVER', 'UNDER'],
         'FIRST_HALF_OVER_UNDER' => ['OVER', 'UNDER'],
@@ -478,7 +483,6 @@ final class PredictionMarkets
         'AWAY_CLEAN_SHEET' => ['YES', 'NO'],
         'WINNING_MARGIN' => ['HOME_1', 'HOME_2', 'HOME_3_PLUS', 'DRAW', 'AWAY_1', 'AWAY_2', 'AWAY_3_PLUS'],
         'RESULT_AND_BTTS' => ['HOME_YES', 'HOME_NO', 'DRAW_YES', 'DRAW_NO', 'AWAY_YES', 'AWAY_NO'],
-        'FIRST_HALF_DOUBLE_CHANCE' => ['HOME_OR_DRAW', 'HOME_OR_AWAY', 'AWAY_OR_DRAW'],
         'FIRST_HALF_BTTS' => ['YES', 'NO'],
         'SECOND_HALF_WINNER' => ['HOME', 'DRAW', 'AWAY'],
         'SECOND_HALF_OVER_UNDER' => ['OVER', 'UNDER'],
@@ -775,15 +779,17 @@ final class PredictionMarkets
                 ]);
             case 'HOME_TEAM_TOTAL_GOALS':
                 $over = $this->totals($grid, null, static fn(int $h, int $a): bool => $h > (float) $line);
+                $under = $this->totals($grid, null, static fn(int $h, int $a): bool => $h < (float) $line);
                 return $this->combine([
                     'OVER' => ['Home over ' . self::lineLabel($line) . ' goals', $over],
-                    'UNDER' => ['Home under ' . self::lineLabel($line) . ' goals', 1 - $over],
+                    'UNDER' => ['Home under ' . self::lineLabel($line) . ' goals', $under],
                 ]);
             case 'AWAY_TEAM_TOTAL_GOALS':
                 $over = $this->totals($grid, null, static fn(int $h, int $a): bool => $a > (float) $line);
+                $under = $this->totals($grid, null, static fn(int $h, int $a): bool => $a < (float) $line);
                 return $this->combine([
                     'OVER' => ['Away over ' . self::lineLabel($line) . ' goals', $over],
-                    'UNDER' => ['Away under ' . self::lineLabel($line) . ' goals', 1 - $over],
+                    'UNDER' => ['Away under ' . self::lineLabel($line) . ' goals', $under],
                 ]);
             case 'HOME_CLEAN_SHEET':
                 // A home clean sheet is the away side failing to score.

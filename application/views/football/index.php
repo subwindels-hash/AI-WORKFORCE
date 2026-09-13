@@ -48,6 +48,10 @@ if ($providerRequestedRaw !== '') $carry['provider'] = $providerRequestedRaw;
 
 $dash = static fn(mixed $value, int $places = 1): string => is_numeric($value) ? number_format((float) $value, $places) : '—';
 $pct = static fn(mixed $value, int $places = 1): string => is_numeric($value) ? number_format((float) $value * 100, $places) . '%' : '—';
+$count = static fn(mixed $value): string => is_numeric($value) ? number_format((int) $value) : '—';
+$percentPoints = static fn(mixed $value, int $places = 1): string => is_numeric($value) ? number_format((float) $value, $places) . '%' : '—';
+$qualityScore = static fn(mixed $value): string => is_numeric($value) ? number_format((float) $value, 1) . '/100' : '—';
+$goalError = static fn(mixed $value): string => is_numeric($value) ? number_format((float) $value, 2) . ' goals' : '—';
 $odds = static fn(mixed $value): string => is_numeric($value) ? number_format((float) $value, 2) : '—';
 $signedPct = static fn(mixed $value): string => is_numeric($value) ? ((float) $value >= 0 ? '+' : '') . number_format((float) $value * 100, 1) . '%' : '—';
 $bandClass = static fn(string $band): string => match (strtoupper($band)) {
@@ -131,7 +135,7 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
       </form>
     </div>
     <div class="football-actionbar__group">
-      <a class="btn small" href="/football/live">Live view</a>
+      <a class="btn small" href="#football-live-panel">Live match</a>
       <a class="btn small" href="/football/models">Models &amp; calibration</a>
       <a class="btn small football-ticket-link" href="/sports">🎯 Odds prediction tickets</a>
     </div>
@@ -157,7 +161,7 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
             <span class="badge <?= strtoupper($providerMode) === 'MANUAL' ? 'b-amber' : 'b-green' ?>"><?= e($providerMode) ?> · <?= strtoupper($providerMode) === 'MANUAL' ? 'operator selection' : 'admin managed' ?></span>
           </div>
           <div class="body">
-            <p class="football-section-intro">These controls change what the four sections below display. They only reorganize saved fixtures and stored odds — no provider request is spent and no prediction is created.</p>
+            <p class="football-section-intro">These controls change what the three board sections below display. They only reorganize saved fixtures and stored odds — no provider request is spent and no prediction is created.</p>
             <form method="get" action="/football" class="football-filter-form">
               <input type="hidden" name="page" value="1">
               <label class="fld">Data provider
@@ -454,34 +458,40 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         </div>
       </section>
 
-      <section class="panel football-section" id="football-performance" aria-labelledby="performance-heading">
+    </div>
+
+    <aside class="football-side stack" aria-label="Football performance and operational context">
+      <section class="panel football-section football-performance-panel" id="football-performance" aria-labelledby="performance-heading">
         <div class="football-section__heading">
           <div class="football-section__title">
-            <span class="football-step" aria-hidden="true">4</span>
             <div id="performance-heading">
               <p class="football-eyebrow">Measured results</p>
               <h3>30-day performance (settled predictions)</h3>
             </div>
           </div>
-          <span class="football-section__meta">settled predictions only</span>
+          <span class="football-section__meta">30 days</span>
         </div>
         <div class="body">
-          <p class="football-section-intro">Outcome of predictions that have already been settled against a final result. Nothing here is projected: an unsettled match contributes no figure, so an empty history stays empty rather than being filled in.</p>
-          <div class="stat-grid football-stat-grid football-stat-grid--compact">
-            <div class="stat"><div class="k">Evaluated</div><div class="v"><?= (int) ($perf['evaluatedPredictions'] ?? 0) ?></div></div>
-            <div class="stat"><div class="k">Result accuracy</div><div class="v"><?= $pct($perf['resultAccuracy'] ?? null) ?></div></div>
-            <div class="stat"><div class="k">Exact-score accuracy</div><div class="v"><?= $pct($perf['exactScoreAccuracy'] ?? null, 2) ?></div></div>
-            <div class="stat"><div class="k">Brier score</div><div class="v mono"><?= $dash($perf['brier'] ?? null, 4) ?></div></div>
-            <div class="stat"><div class="k">Avg. confidence</div><div class="v"><?= $dash($perf['averageConfidence'] ?? null) ?>%</div></div>
-            <div class="stat"><div class="k">Avg. data quality</div><div class="v"><?= $dash($perf['averageDataQuality'] ?? null) ?>/100</div></div>
-          </div>
-          <?php if (($perf['state'] ?? '') !== 'MEASURED'): ?><p class="football-help">No settled predictions yet. Historical accuracy and calibration metrics will appear after predicted matches complete.</p><?php endif; ?>
+          <p class="football-section-intro">Measured from stored settlements only. Unsettled predictions are excluded, and unavailable measurements remain blank rather than being estimated.</p>
+          <dl class="football-performance-list">
+            <div><dt>Predictions evaluated</dt><dd class="mono"><?= $count($perf['evaluatedPredictions'] ?? null) ?></dd></div>
+            <div><dt>Correct results</dt><dd class="mono"><?= $count($perf['correctResults'] ?? null) ?></dd></div>
+            <div><dt>Result accuracy</dt><dd class="mono"><?= $pct($perf['resultAccuracy'] ?? null) ?></dd></div>
+            <div><dt>Correct exact scores</dt><dd class="mono"><?= $count($perf['correctScores'] ?? null) ?></dd></div>
+            <div><dt>Correct-score accuracy</dt><dd class="mono"><?= $pct($perf['exactScoreAccuracy'] ?? null, 2) ?></dd></div>
+            <div><dt>Avg confidence</dt><dd class="mono"><?= $percentPoints($perf['averageConfidence'] ?? null) ?></dd></div>
+            <div><dt>Brier score</dt><dd class="mono"><?= $dash($perf['brier'] ?? null, 4) ?></dd></div>
+            <div><dt>Log loss</dt><dd class="mono"><?= $dash($perf['logLoss'] ?? null, 4) ?></dd></div>
+            <div><dt>ECE</dt><dd class="mono"><?= $dash($perf['ece'] ?? null, 4) ?></dd></div>
+            <div><dt>Avg data quality</dt><dd class="mono"><?= $qualityScore($perf['averageDataQuality'] ?? null) ?></dd></div>
+            <div><dt>Avg goal error</dt><dd class="mono"><?= $goalError($perf['averageGoalError'] ?? null) ?></dd></div>
+            <div><dt>Approved calibrations</dt><dd class="mono"><?= $count($models['approvedCalibrationCount'] ?? null) ?></dd></div>
+          </dl>
+          <?php if (($perf['state'] ?? '') !== 'MEASURED'): ?><p class="football-help"><?= e((string) ($perf['message'] ?? 'No settled predictions yet. Historical performance metrics will appear after predicted matches have completed.')) ?></p><?php endif; ?>
           <?php if (!empty($perf['note'])): ?><p class="football-help"><?= e((string) $perf['note']) ?></p><?php endif; ?>
         </div>
       </section>
-    </div>
 
-    <aside class="football-side stack" aria-label="Football operational context">
       <section class="panel football-section football-reading-guide" aria-labelledby="football-guide-heading">
         <div class="football-section__heading">
           <div class="football-section__title">
@@ -502,32 +512,35 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         </div>
       </section>
 
-      <section class="panel football-section" aria-labelledby="live-heading">
+      <section class="panel football-section" id="football-live-panel" aria-labelledby="live-heading">
         <div class="football-section__heading">
           <div class="football-section__title">
-            <div id="live-heading">
+            <div>
               <p class="football-eyebrow">In play</p>
-              <h3>Live now</h3>
+              <h3 id="live-heading">Live Match</h3>
             </div>
           </div>
-          <a class="btn small" href="/football/live">Refresh live</a>
         </div>
         <div class="body">
+          <div class="football-livebar" aria-live="polite">
+            <span class="dot synth" id="football-live-poll-dot" title="Auto-refresh status"></span>
+            <span id="football-live-poll-note">Auto-refresh on — live match updates appear here automatically, immediately after the provider reports them.</span>
+          </div>
           <?php $liveMatches = is_array($live['matches'] ?? null) ? $live['matches'] : []; ?>
-          <?php if ($liveMatches === []): ?><p class="football-help">No match is in play in the stored data. The live sweep runs only while a fixture is reported live.</p><?php else: ?>
-            <div class="football-live-list">
+          <div class="football-live-list" id="football-live-list">
+            <?php if ($liveMatches === []): ?>
+              <p class="football-help" id="football-live-empty">No match is currently live.</p>
+            <?php else: ?>
               <?php foreach ($liveMatches as $liveMatch): ?>
                 <?php $fx = is_array($liveMatch['fixture'] ?? null) ? $liveMatch['fixture'] : []; $liveState = is_array($liveMatch['live'] ?? null) ? $liveMatch['live'] : []; ?>
-                <div>
-                  <b><?= crest($fx['homeTeamLogo'] ?? null) ?><?= e((string) ($fx['homeTeam'] ?? '—')) ?> <?= isset($liveState['score']['home']) ? (int) $liveState['score']['home'] : '—' ?>–<?= isset($liveState['score']['away']) ? (int) $liveState['score']['away'] : '—' ?> <?= crest($fx['awayTeamLogo'] ?? null) ?><?= e((string) ($fx['awayTeam'] ?? '—')) ?></b>
-                  <span><?= e((string) ($fx['competition'] ?? '—')) ?> · <?= e((string) ($liveState['state'] ?? 'LIVE')) ?><?= isset($liveState['minute']) && $liveState['minute'] !== null ? ' · ' . (int) $liveState['minute'] . "'" : '' ?></span>
+                <div data-football-live-id="<?= (int) ($fx['id'] ?? 0) ?>">
+                  <b><?= crest($fx['homeTeamLogo'] ?? null) ?><?= e((string) ($fx['homeTeam'] ?? '—')) ?> <?= isset($liveState['score']['home']) && is_numeric($liveState['score']['home']) ? (int) $liveState['score']['home'] : '—' ?>–<?= isset($liveState['score']['away']) && is_numeric($liveState['score']['away']) ? (int) $liveState['score']['away'] : '—' ?> <?= crest($fx['awayTeamLogo'] ?? null) ?><?= e((string) ($fx['awayTeam'] ?? '—')) ?></b>
+                  <span><?= e((string) ($fx['competition'] ?? '—')) ?> · <?= e((string) ($liveState['state'] ?? 'LIVE')) ?><?= isset($liveState['minute']) && is_numeric($liveState['minute']) ? ' · ' . (int) $liveState['minute'] . "'" : '' ?></span>
                   <span class="mono">Kickoff <?= e($kickoffStamp($fx['kickoff'] ?? null)) ?></span>
                 </div>
               <?php endforeach; ?>
-            </div>
-            <p class="football-help">The pre-match prediction and live estimate are separate stored rows; the original prediction is never rewritten after kickoff.</p>
-          <?php endif; ?>
-          <?php if (!empty($live['errors'])): ?><p class="football-help">Live refresh: <?= e(implode(' · ', array_slice((array) $live['errors'], 0, 3))) ?></p><?php endif; ?>
+            <?php endif; ?>
+          </div>
         </div>
       </section>
 
@@ -590,3 +603,127 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
     </aside>
   </div>
 </div>
+
+<script id="football-live-js">
+(function(){
+  // The browser reads the stored live board frequently; the provider-aware
+  // football-live scheduler owns the rate-limited provider sweep. This keeps
+  // every viewer current without turning each open page into provider traffic.
+  var list = document.getElementById('football-live-list');
+  if(!list) return;
+  var dot = document.getElementById('football-live-poll-dot');
+  var note = document.getElementById('football-live-poll-note');
+  var timer = null;
+  var snapshots = {};
+  var pollEveryMs = 10000;
+  var ready = false;
+  var liveMessage = 'Auto-refresh on — live match updates appear here automatically, immediately after the provider reports them.';
+
+  function esc(value){
+    return String(value == null ? '' : value).replace(/[&<>"']/g, function(character){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character];
+    });
+  }
+
+  function numberOrDash(value){
+    return value !== null && value !== '' && isFinite(Number(value)) ? String(Math.trunc(Number(value))) : '—';
+  }
+
+  function kickoffStamp(value){
+    var timestamp = value ? Date.parse(value) : NaN;
+    if(isNaN(timestamp)) return 'DATA_UNAVAILABLE';
+    var date = new Date(timestamp);
+    var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var pad = function(number){ return String(number).padStart(2, '0'); };
+    return days[date.getUTCDay()] + ' ' + date.getUTCDate() + ' ' + months[date.getUTCMonth()] + ' ' + date.getUTCFullYear()
+      + ' · ' + pad(date.getUTCHours()) + ':' + pad(date.getUTCMinutes()) + ' UTC';
+  }
+
+  function crest(url){
+    return url ? '<img class="football-live-crest" src="' + esc(url) + '" alt="" width="18" height="18" loading="lazy">' : '';
+  }
+
+  function snapshot(match){
+    var fixture = match.fixture || {};
+    var state = match.live || {};
+    var score = state.score || {};
+    return [numberOrDash(score.home), numberOrDash(score.away), numberOrDash(state.minute), state.state || '',
+      fixture.homeTeam || '', fixture.awayTeam || '', fixture.competition || '', fixture.kickoff || ''].join('|');
+  }
+
+  function cardHtml(match, changed){
+    var fixture = match.fixture || {};
+    var state = match.live || {};
+    var score = state.score || {};
+    var minute = state.minute !== null && state.minute !== undefined && isFinite(Number(state.minute))
+      ? ' · ' + Math.trunc(Number(state.minute)) + "'" : '';
+    return '<div data-football-live-id="' + esc(fixture.id || 0) + '"' + (changed ? ' class="football-live-updated"' : '') + '>'
+      + '<b>' + crest(fixture.homeTeamLogo) + esc(fixture.homeTeam || '—') + ' '
+      + numberOrDash(score.home) + '–' + numberOrDash(score.away) + ' '
+      + crest(fixture.awayTeamLogo) + esc(fixture.awayTeam || '—') + '</b>'
+      + '<span>' + esc(fixture.competition || '—') + ' · ' + esc(state.state || 'LIVE') + minute + '</span>'
+      + '<span class="mono">Kickoff ' + esc(kickoffStamp(fixture.kickoff)) + '</span>'
+      + '</div>';
+  }
+
+  function render(matches){
+    var next = {};
+    var changed = 0;
+    matches.forEach(function(match){
+      var id = String((match.fixture || {}).id || 0);
+      next[id] = snapshot(match);
+      if(ready && snapshots[id] !== undefined && snapshots[id] !== next[id]) changed++;
+      if(ready && snapshots[id] === undefined) changed++;
+    });
+    if(ready){
+      Object.keys(snapshots).forEach(function(id){ if(next[id] === undefined) changed++; });
+    }
+    if(!matches.length){
+      list.innerHTML = '<p class="football-help" id="football-live-empty">No match is currently live.</p>';
+    } else {
+      list.innerHTML = matches.map(function(match){
+        var id = String((match.fixture || {}).id || 0);
+        return cardHtml(match, ready && snapshots[id] !== next[id]);
+      }).join('');
+    }
+    snapshots = next;
+    ready = true;
+    return changed;
+  }
+
+  function setStatus(message, state){
+    if(note) note.textContent = message;
+    if(dot) dot.className = 'dot ' + state;
+  }
+
+  function schedule(){
+    clearTimeout(timer);
+    timer = setTimeout(poll, pollEveryMs);
+  }
+
+  function poll(){
+    if(document.hidden){ schedule(); return; }
+    fetch('/api/football/fixtures/live', {credentials: 'same-origin', cache: 'no-store'})
+      .then(function(response){
+        if(!response.ok) throw new Error('HTTP ' + response.status);
+        return response.json();
+      })
+      .then(function(data){
+        var changed = render(Array.isArray(data.matches) ? data.matches : []);
+        setStatus(liveMessage + (changed ? ' Latest update received.' : ''), 'up');
+      })
+      .catch(function(error){
+        var forbidden = String(error && error.message || '').indexOf('403') >= 0;
+        setStatus(forbidden ? 'Live auto-refresh needs the sports.view permission.' : 'Auto-refresh interrupted — retrying.', 'down');
+      })
+      .then(schedule);
+  }
+
+  document.addEventListener('visibilitychange', function(){
+    if(!document.hidden){ clearTimeout(timer); poll(); }
+  });
+  setStatus(liveMessage, 'synth');
+  poll();
+})();
+</script>

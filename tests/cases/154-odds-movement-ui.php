@@ -99,7 +99,9 @@ test('movement UI: a drifting price is distinguished from a shortening one', fun
     $html = fx154_render($movement);
     assert_contains('Drifting', $html);
     assert_contains('+11.11%', $html, 'a drift is signed positive against the opening');
-    assert_true(!str_contains($html, 'Shortening'), 'the two directions are never conflated');
+    // Explanatory copy can define "shortening" elsewhere on the page; only the
+    // row badge must not claim this drifting quote shortened.
+    assert_true(!str_contains($html, '>▼ Shortening<'), 'the two direction badges are never conflated');
 });
 
 test('movement UI: a single observation reads "not measured", never "stable"', function () {

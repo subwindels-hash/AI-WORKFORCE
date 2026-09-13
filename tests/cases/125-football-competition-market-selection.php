@@ -588,7 +588,13 @@ test('football: a match detail exposes every priced market and every priced sele
 
     $detail = $module->predictionFor($fixtureId);
     $markets = [];
-    foreach ((array) ($detail['markets'] ?? []) as $market) $markets[(string) ($market['key'] ?? '')] = $market;
+    $marketRungs = [];
+    foreach ((array) ($detail['markets'] ?? []) as $market) {
+        $key = (string) ($market['key'] ?? '');
+        $line = is_numeric($market['line'] ?? null) ? number_format((float) $market['line'], 4, '.', '') : 'NONE';
+        $marketRungs[$key . '|' . $line] = $market;
+        $markets[$key] ??= $market;
+    }
 
     // The dedicated match response includes the full catalogue, not the old
     // four-market preview. Modelled but unpriced markets remain explicit.
@@ -596,7 +602,7 @@ test('football: a match detail exposes every priced market and every priced sele
     // line of its ladder. The only family these quotes add beyond it is Team to
     // Score First — every goal line they quote is already a rung.
     $sheetCount = count((new PredictionMarkets(new FootballConfiguration([])))->fullSheet());
-    assert_equals($sheetCount + 1, count($markets),
+    assert_equals($sheetCount + 1, count($marketRungs),
         'the match response carries every market and line, plus each additional provider family');
     foreach (['MATCH_WINNER', 'OVER_2_5', 'OVER_4_5', 'TEAM_TO_SCORE_FIRST', 'CORNERS', 'CARDS'] as $key) {
         assert_true(isset($markets[$key]), 'priced market ' . $key . ' is visible on the sheet');
@@ -659,18 +665,19 @@ test('football: every added market is summed from the score grid and is exhausti
     $markets = $module->markets();
     $row = $repo->findPrediction($predictionId);
 
-    // Each added market prices a set of MUTUALLY EXCLUSIVE outcomes. That is
+    // Each market below prices a set of MUTUALLY EXCLUSIVE outcomes. That is
     // the property that makes an overround removable, so it is asserted
     // directly: the legs of one market sum to the whole distribution.
     // The full-match markets are summed straight off the stored grid, so they
     // are always answerable. The half markets additionally need the expected
     // goals stored with the prediction; where those exist they must obey the
     // same law, and where they do not the market must be EMPTY rather than
-    // partially derived.
+    // partially derived. Double Chance is checked separately below because its
+    // three overlapping selections correctly sum to two, not one.
     $fullMatch = ['BTTS_AND_UNDER_2_5', 'TOTAL_GOALS_ODD_EVEN', 'TOTAL_GOALS_BAND',
         'HOME_TEAM_TOTAL_GOALS', 'AWAY_TEAM_TOTAL_GOALS', 'HOME_CLEAN_SHEET', 'AWAY_CLEAN_SHEET',
         'WINNING_MARGIN', 'RESULT_AND_BTTS', 'OVER_4_5', 'OVER_5_5', 'OVER_6_5'];
-    $halfBased = ['FIRST_HALF_DOUBLE_CHANCE', 'FIRST_HALF_BTTS', 'SECOND_HALF_WINNER', 'SECOND_HALF_OVER_UNDER'];
+    $halfBased = ['FIRST_HALF_BTTS', 'SECOND_HALF_WINNER', 'SECOND_HALF_OVER_UNDER'];
     foreach (array_merge($fullMatch, $halfBased) as $key) {
         $market = $markets->market($key);
         assert_not_null($market, $key . ' is in the catalogue');
@@ -695,6 +702,27 @@ test('football: every added market is summed from the score grid and is exhausti
         foreach ((array) $evaluated['outcomes'] as $outcome) {
             assert_null($outcome['odds'] ?? null, $key . ' invents no price when the feed quoted none');
             assert_equals(PredictionMarkets::STATE_UNAVAILABLE, (string) ($outcome['oddsState'] ?? ''), $key . ' reports the missing price');
+        }
+    }
+
+    // Double Chance is intentionally overlapping: every underlying 1X2 result
+    // wins two of its three selections. Its probabilities therefore sum to two,
+    // and even a fully quoted set must not be normalized as an exclusive market.
+    $doubleChance = $markets->evaluate($row, $grid, [], $markets->market('FIRST_HALF_DOUBLE_CHANCE'));
+    if ((array) $doubleChance['outcomes'] !== []) {
+        $doubleChanceTotal = array_sum(array_map('floatval', array_column($doubleChance['outcomes'], 'probability')));
+        assert_true(abs($doubleChanceTotal - 2.0) < 0.001,
+            'first-half Double Chance keeps the correct overlapping probabilities');
+        $pricedDoubleChance = $markets->evaluate($row, $grid, [
+            ['market' => 'First Half Double Chance', 'selection' => 'Home or Draw', 'decimalOdds' => 1.30, 'observedAt' => gmdate('c')],
+            ['market' => 'First Half Double Chance', 'selection' => 'Home or Away', 'decimalOdds' => 1.35, 'observedAt' => gmdate('c')],
+            ['market' => 'First Half Double Chance', 'selection' => 'Draw or Away', 'decimalOdds' => 1.75, 'observedAt' => gmdate('c')],
+        ], $markets->market('FIRST_HALF_DOUBLE_CHANCE'));
+        assert_equals(OddsIntelligence::PRICE_NOT_EXHAUSTIVE, (string) ($pricedDoubleChance['pricing']['state'] ?? ''),
+            'overlapping Double Chance prices are never passed through one-distribution de-vigging');
+        foreach ((array) $pricedDoubleChance['outcomes'] as $outcome) {
+            assert_null($outcome['fairProbability'] ?? null,
+                'an overlapping Double Chance selection has no fabricated margin-free probability');
         }
     }
 

@@ -7,6 +7,32 @@ $engine = $d['ticketEngine'] ?? [];
 $perf = $d['performance'] ?? [];
 $models = $d['models'] ?? [];
 $ticket = $engine['ticket'] ?? null;
+$daily = is_array($engine['today'] ?? null) ? $engine['today'] : null;
+$generationStatus = $daily !== null
+    ? (string) ($daily['generation_status'] ?? (!empty($daily['ticket_id']) ? 'GENERATED' : 'PENDING'))
+    : 'PENDING';
+$runDiag = $daily !== null && is_array($daily['rejection_summary']['_diagnostics'] ?? null)
+    ? $daily['rejection_summary']['_diagnostics'] : [];
+// The rail reports the latest stored generation funnel for the viewed date.
+// A missing run remains unavailable; a recorded run with no rows is truthfully 0.
+$runMetrics = $daily === null ? [
+    'eligibleFixtures' => null,
+    'fixturesEvaluated' => null,
+    'predictionsGenerated' => null,
+    'fixturesWithFreshOdds' => null,
+    'fixturesRejectedStaleOdds' => null,
+    'correlationQualifiedCandidates' => null,
+    'finalQualifiedCandidates' => null,
+] : [
+    'eligibleFixtures' => (int) ($runDiag['eligibleFixtures'] ?? 0),
+    'fixturesEvaluated' => (int) ($runDiag['fixturesEvaluated'] ?? $daily['candidates_evaluated'] ?? 0),
+    'predictionsGenerated' => (int) ($runDiag['predictionsGenerated'] ?? $daily['predictions_recorded'] ?? 0),
+    'fixturesWithFreshOdds' => (int) ($runDiag['fixturesWithFreshOdds'] ?? 0),
+    'fixturesRejectedStaleOdds' => (int) ($runDiag['fixturesRejectedStaleOdds'] ?? 0),
+    'correlationQualifiedCandidates' => (int) ($runDiag['correlationQualifiedCandidates'] ?? 0),
+    'finalQualifiedCandidates' => (int) ($runDiag['finalQualifiedCandidates'] ?? count((array) ($engine['ticketSelections'] ?? []))),
+];
+$runCount = static fn(mixed $value): string => is_numeric($value) ? number_format((int) $value) : '—';
 $windelsModelId = 'Windels Model id: 1520863';
 $selByName = [];
 foreach (array_merge($today['upcoming'] ?? [], $today['live'] ?? []) as $m) {
@@ -203,10 +229,6 @@ $kickoffStamp = static function (mixed $iso): string {
       </div>
     </section>
 
-    <?php
-      $daily = $engine['today'] ?? null;
-      $generationStatus = is_array($daily) ? (string) ($daily['generation_status'] ?? (!empty($daily['ticket_id']) ? 'GENERATED' : 'PENDING')) : 'PENDING';
-    ?>
     <section class="panel sports-section sports-ticket-panel" id="sports-ticket" aria-labelledby="sports-ticket-heading">
       <div class="sports-section__heading">
         <div class="sports-section__title">
@@ -251,22 +273,6 @@ $kickoffStamp = static function (mixed $iso): string {
             <span class="mono sports-controls__date" title="Configured-local ticket date <?= e($ticketDateIso) ?>"><?= e($ticketDateShown) ?></span>
           <?php endif; ?>
         </div>
-        <?php
-          $runDiag = is_array($daily) && is_array($daily['rejection_summary']['_diagnostics'] ?? null)
-              ? $daily['rejection_summary']['_diagnostics'] : [];
-        ?>
-        <?php if (is_array($daily)): ?>
-          <div class="sports-subhead"><h4>Generation run</h4><span class="dim">what the engine saw on this day</span></div>
-          <div class="stat-grid">
-            <div class="stat"><div class="k">Eligible fixtures</div><div class="v"><?= (int) ($runDiag['eligibleFixtures'] ?? 0) ?></div></div>
-            <div class="stat"><div class="k">Fixtures evaluated</div><div class="v"><?= (int) ($runDiag['fixturesEvaluated'] ?? $daily['candidates_evaluated'] ?? 0) ?></div></div>
-            <div class="stat"><div class="k">Predictions generated</div><div class="v"><?= (int) ($runDiag['predictionsGenerated'] ?? $daily['predictions_recorded'] ?? 0) ?></div></div>
-            <div class="stat"><div class="k">Fresh odds</div><div class="v"><?= (int) ($runDiag['fixturesWithFreshOdds'] ?? 0) ?></div></div>
-            <div class="stat"><div class="k">Stale odds</div><div class="v"><?= (int) ($runDiag['fixturesRejectedStaleOdds'] ?? 0) ?></div></div>
-            <div class="stat"><div class="k">Qualified candidates</div><div class="v"><?= (int) ($runDiag['correlationQualifiedCandidates'] ?? 0) ?></div></div>
-            <div class="stat"><div class="k">Selected picks</div><div class="v"><?= (int) ($runDiag['finalQualifiedCandidates'] ?? 0) ?></div></div>
-          </div>
-        <?php endif; ?>
         <?php if ($daily !== null && (string) ($daily['status'] ?? '') === 'DATA_UNAVAILABLE'): ?>
           <div class="sports-subhead"><h4>Result</h4><span class="badge b-red">NO TICKET — DATA_UNAVAILABLE</span></div>
           <?php if ($operator): ?>
@@ -573,7 +579,32 @@ $kickoffStamp = static function (mixed $iso): string {
 
   </div>
 
-  <aside class="sports-side stack" aria-label="Sports system and data-feed status">
+  <aside class="sports-side stack" aria-label="Sports generation, system and data-feed status">
+    <section class="panel sports-section sports-run-panel" id="sports-run-summary" aria-labelledby="sports-run-heading">
+      <div class="sports-section__heading">
+        <div class="sports-section__title">
+          <div>
+            <p class="sports-eyebrow">Generation funnel</p>
+            <h3 id="sports-run-heading">Generation run</h3>
+          </div>
+        </div>
+        <span class="sports-section__meta"><?= e($viewDateIso) ?></span>
+      </div>
+      <div class="body">
+        <p class="sports-section-intro">What the latest stored ticket run saw for this date, from eligible fixtures through the final selected picks. A date with no recorded run remains unavailable rather than being reported as zero.</p>
+        <dl class="sports-run-list">
+          <div><dt>Eligible fixtures</dt><dd class="mono"><?= $runCount($runMetrics['eligibleFixtures']) ?></dd></div>
+          <div><dt>Fixtures evaluated</dt><dd class="mono"><?= $runCount($runMetrics['fixturesEvaluated']) ?></dd></div>
+          <div><dt>Predictions generated</dt><dd class="mono"><?= $runCount($runMetrics['predictionsGenerated']) ?></dd></div>
+          <div><dt>Fresh odds</dt><dd class="mono"><?= $runCount($runMetrics['fixturesWithFreshOdds']) ?></dd></div>
+          <div><dt>Stale odds</dt><dd class="mono"><?= $runCount($runMetrics['fixturesRejectedStaleOdds']) ?></dd></div>
+          <div><dt>Qualified candidates</dt><dd class="mono"><?= $runCount($runMetrics['correlationQualifiedCandidates']) ?></dd></div>
+          <div><dt>Selected picks</dt><dd class="mono"><?= $runCount($runMetrics['finalQualifiedCandidates']) ?></dd></div>
+        </dl>
+        <?php if ($daily === null): ?><p class="sports-empty">No generation run is stored for <?= e($viewDateIso) ?> yet.</p><?php endif; ?>
+      </div>
+    </section>
+
     <section class="panel sports-section sports-reading-guide" aria-labelledby="sports-guide-heading">
       <div class="sports-section__heading">
         <div class="sports-section__title">
