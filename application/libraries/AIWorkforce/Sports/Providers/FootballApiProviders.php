@@ -1208,8 +1208,16 @@ class TheSportsDbProvider implements SportsDataProvider
         while ($day <= $to && $guard++ < 62) {
             $daysTried++;
             try {
-                // Documented v1 schedule call: eventsday.php?d=YYYY-MM-DD&s=Soccer
-                $resp = $this->doRequest('/eventsday.php?d=' . rawurlencode($day) . '&s=Soccer');
+                // Documented v1 schedule call. Some TheSportsDB edge nodes
+                // reject the optional sport filter with HTTP 400 even though
+                // it is shown in older examples. Retry the canonical date-only
+                // form before treating the provider as unavailable.
+                try {
+                    $resp = $this->doRequest('/eventsday.php?d=' . rawurlencode($day) . '&s=Soccer');
+                } catch (ProviderException $e) {
+                    if ($e->status !== ProviderException::BAD_REQUEST) throw $e;
+                    $resp = $this->doRequest('/eventsday.php?d=' . rawurlencode($day));
+                }
                 $json = $this->decodeJson($resp);
                 $events = $json['events'] ?? [];
                 if (is_array($events)) $all = array_merge($all, $events);
