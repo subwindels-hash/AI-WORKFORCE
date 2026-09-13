@@ -92,11 +92,15 @@ test('adaptive policy: an explicitly authored policy overrides the derived ladde
     assert_null(ConfidencePolicy::normalizePolicy('not json'));
     assert_null(ConfidencePolicy::normalizePolicy([['minDataQuality' => 'high', 'minConfidence' => 70]]));
     assert_null(ConfidencePolicy::normalizePolicy([['minDataQuality' => 80, 'minConfidence' => 140]]), 'a >100% requirement is not a policy');
+    assert_null(ConfidencePolicy::normalizePolicy([['minDataQuality' => 80, 'minConfidence' => 29.99]]), 'an authored tier cannot undercut the 30% confidence gate');
+    assert_null(ConfidencePolicy::normalizePolicy([['minDataQuality' => 90, 'minConfidence' => 72], ['minDataQuality' => 80, 'minConfidence' => 29.99]], true), 'a mixed policy cannot hide a sub-30 tier behind a valid one');
     // …and a configuration carrying one is refused rather than ignored.
     $repo = new SportsRepositoryStub();
     $audit = fx145_audit();
     $svc = new ConfigurationService($repo, $audit);
     assert_false($svc->update(['confidence_policy' => 'not json'], 'admin')['ok'], 'an unreadable policy is rejected, never silently dropped');
+    assert_false($svc->update(['confidence_policy' => [['minDataQuality' => 80, 'minConfidence' => 29.99]]], 'admin')['ok'], 'a sub-30 authored policy is rejected');
+    assert_false($svc->update(['confidence_policy' => [['minDataQuality' => 90, 'minConfidence' => 72], ['minDataQuality' => 80, 'minConfidence' => 29.99]]], 'admin')['ok'], 'a mixed authored policy with a sub-30 tier is rejected');
     assert_true($svc->update(['confidence_policy' => [['minDataQuality' => 80, 'minConfidence' => 72]]], 'admin', 'house policy')['ok']);
 });
 

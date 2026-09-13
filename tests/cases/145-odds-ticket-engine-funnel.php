@@ -386,6 +386,15 @@ test('funnel regression: fallback never invents a leg and never relaxes a hard i
     ], $config);
     assert_equals('NO_QUALIFIED_TICKET', $highRisk['status'], 'unapproved risk is never relaxed');
 
+    // A candidate below the hard 30% confidence gate is not rescued by the
+    // relaxed-confidence fallback. Fallback may relax only stricter thresholds
+    // above the platform floor.
+    $subConfidence = (new TicketOptimizer())->optimize([
+        fx145_candidate(3, 'L3', 'TOTAL_GOALS', 'OVER_1_5', 6.0, 0.20, 29.99),
+    ], $config);
+    assert_equals('NO_QUALIFIED_TICKET', $subConfidence['status'], 'fallback cannot select confidence below 30%');
+    assert_equals(0, (int) ($subConfidence['attempts'][1]['poolSize'] ?? -1), 'sub-30 confidence is outside the fallback pool too');
+
     // A genuinely empty pool produces no ticket at all.
     $empty = (new TicketOptimizer())->optimize([], $config);
     assert_equals('NO_QUALIFIED_TICKET', $empty['status'], 'no candidates means no ticket — never a fabricated one');

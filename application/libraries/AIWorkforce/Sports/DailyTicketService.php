@@ -921,12 +921,13 @@ class DailyTicketService
                             'maxCorrelation' => $config['max_correlation'],
                             'allowedMarkets' => $config['allowed_markets'],
                             'allowedLeagues' => $config['allowed_leagues'],
-                            // Requirement #1/#10: one missed threshold must
-                            // never cost the whole day. When nothing clears
-                            // every preferred criterion the optimizer ranks
-                            // the real candidates and takes the strongest
-                            // non-correlated combination inside the configured
-                            // odds range — declared as fallback, never faked.
+                            // Requirement #1/#10: one stricter threshold above
+                            // the hard 30% confidence gate must not cost the
+                            // whole day. When nothing clears every preferred
+                            // criterion the optimizer ranks the real candidates
+                            // and takes the strongest non-correlated combination
+                            // inside the configured odds range — declared as
+                            // fallback, never faked.
                             'allowFallback' => true,
                         ]);
                         // Spec §13: QUALIFIED CANDIDATES counts candidates that

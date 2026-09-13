@@ -289,9 +289,9 @@ final class SchemaInstaller
             }
         }
 
-        // Raise the built-in sports ticket floors to the qualified-ticket
-        // policy — 75% confidence, quality 80, LOW correlation, at most 5
-        // selections. Only the untouched system default row is amended;
+        // Repair the built-in sports ticket policy — 30%+ confidence,
+        // quality 80, LOW correlation, at most 5 selections. Only the
+        // untouched system default row is amended;
         // operator-authored configuration versions remain append-only and
         // under admin control.
         try {
