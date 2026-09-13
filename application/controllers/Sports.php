@@ -544,7 +544,15 @@ class Sports extends MY_Controller
             'csrfToken' => (string) $this->session->userdata('csrf_token'),
             'caps' => $this->sportsCaps(),
             'status' => ['tradingMode' => $state['tradingMode'], 'killSwitch' => $state['killSwitch'],
-                'providers' => $this->platform->providers->getAllHealth()],
+                // Deliberately NOT calling providers->getAllHealth() here: it
+                // probes every trading provider (Binance, Kraken, Alpaca, OANDA
+                // ...) over the network on each render, ~5s of blocking TTFB on
+                // this page alone. The layout header only reads tradingMode and
+                // killSwitch, and the sports feed-health table is fed by
+                // $sys['providers'] from dashboard()'s systemStatus (stored
+                // provider health), so nothing on screen loses data.
+                // Live trading-provider health stays at /api/market-data/*.
+                'providers' => []],
             'notice' => $this->flashGet('notice'), 'error' => $this->flashGet('error'),
         ];
     }
