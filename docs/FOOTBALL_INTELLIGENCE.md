@@ -774,6 +774,27 @@ successful live-provider snapshot no longer includes a fixture, the row is moved
 to `STALE_LIVE` and removed from the panel immediately; its last in-play score is
 cleared so settlement waits for the results endpoint to confirm the final score.
 
+**"Recently confirmed" means `football_fixtures.live_confirmed_at`, and nothing
+else.** That column is stamped only by a sweep that actually received the fixture
+from a provider with an in-play status; `saveFixture()` refuses the stamp on any
+other status, so no ordinary write can forge one. Freshness is never taken from
+`updated_at`, because that column moves for reasons unrelated to play (an odds
+refresh, a statistics pass, the read path caching a row) and a finished match
+would otherwise keep renewing its own place on the panel. Three rules follow:
+
+- A sweep that hits an unusable row still performs the takedown. Rows the
+  provider *did* list are protected by the raw id it sent, so one malformed
+  entry can no longer pin every finished match to the panel.
+- Reading the board is a backstop: a card whose confirmation has aged out is
+  withheld *and* expired, so an abandoned live job cannot leave stale cards up.
+- Backoff is judged per capability across every provider that can serve it.
+  One broken feed never stops the live sweep while a healthy feed can serve it.
+
+The live board payload also carries `provider.state` (`CURRENT`, `BEHIND` or
+`NEVER_RUN`) with `lastSweepAt` and `ageSeconds`, so the panel can distinguish
+"nothing is being played" from "the sweep behind this panel stopped running" and
+say which one it is instead of implying an empty schedule.
+
 Mutations require the native session plus the CSRF token (header or body field),
 then the capability named. They take a JSON body:
 

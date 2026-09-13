@@ -526,7 +526,11 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
             <span class="dot synth" id="football-live-poll-dot" title="Auto-refresh status"></span>
             <span id="football-live-poll-note">Auto-refresh on — live match updates appear here automatically, immediately after the provider reports them.</span>
           </div>
-          <?php $liveMatches = array_values(array_filter(is_array($live['matches'] ?? null) ? $live['matches'] : [], static function ($match): bool {
+          <?php // Only a fixture a provider is currently reporting in play belongs
+          // here. The live board already withholds anything whose last live
+          // confirmation aged out; this repeats the status test so a payload
+          // built elsewhere can never put a finished match on the panel.
+          $liveMatches = array_values(array_filter(is_array($live['matches'] ?? null) ? $live['matches'] : [], static function ($match): bool {
               $fixture = is_array($match['fixture'] ?? null) ? $match['fixture'] : [];
               return in_array(strtoupper((string) ($fixture['status'] ?? '')), \AIWorkforce\Football\FixtureSyncService::LIVE_STATUSES, true);
           })); ?>
@@ -617,8 +621,17 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
   var dot = document.getElementById('football-live-poll-dot');
   var note = document.getElementById('football-live-poll-note');
   var timer = null;
+  var inFlight = null;
   var snapshots = {};
-  var pollEveryMs = 10000;
+  // The stored live board is a local read, so polling it often is cheap and is
+  // what makes an update appear as soon as the provider sweep has written it.
+  // The rate-limited provider call stays with the football-live scheduler.
+  var pollEveryMs = 5000;
+  // After a change the match is moving: look again sooner so the next goal or
+  // minute lands quickly, then settle back to the idle cadence.
+  var activeMs = 3000;
+  var backoffMs = pollEveryMs;
+  var maxBackoffMs = 60000;
   var ready = false;
   var liveMessage = 'Auto-refresh on — live match updates appear here automatically, immediately after the provider reports them.';
 
@@ -664,41 +677,94 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
       fixture.homeTeam || '', fixture.awayTeam || '', fixture.competition || '', fixture.kickoff || ''].join('|');
   }
 
-  function cardHtml(match, changed){
+  function cardInner(match){
     var fixture = match.fixture || {};
     var state = match.live || {};
     var score = state.score || {};
     var minute = state.minute !== null && state.minute !== undefined && isFinite(Number(state.minute))
       ? ' · ' + Math.trunc(Number(state.minute)) + "'" : '';
-    return '<div data-football-live-id="' + esc(fixture.id || 0) + '"' + (changed ? ' class="football-live-updated"' : '') + '>'
-      + '<b>' + crest(fixture.homeTeamLogo) + esc(fixture.homeTeam || '—') + ' '
+    return '<b>' + crest(fixture.homeTeamLogo) + esc(fixture.homeTeam || '—') + ' '
       + numberOrDash(score.home) + '–' + numberOrDash(score.away) + ' '
       + crest(fixture.awayTeamLogo) + esc(fixture.awayTeam || '—') + '</b>'
       + '<span>' + esc(fixture.competition || '—') + ' · ' + esc(state.state || 'LIVE') + minute + '</span>'
-      + '<span class="mono">Kickoff ' + esc(kickoffStamp(fixture.kickoff)) + '</span>'
-      + '</div>';
+      + '<span class="mono">Kickoff ' + esc(kickoffStamp(fixture.kickoff)) + '</span>';
   }
 
+  function emptyCard(){
+    var empty = document.createElement('p');
+    empty.className = 'football-help';
+    empty.id = 'football-live-empty';
+    empty.textContent = 'No match is currently live.';
+    return empty;
+  }
+
+  /**
+   * Reconcile the list against the matches the provider is reporting NOW.
+   *
+   * The list is keyed by fixture id and rebuilt by moving, updating and
+   * REMOVING nodes rather than being reprinted wholesale: a match the payload
+   * no longer contains is deleted from the DOM in the same pass that updates
+   * the ones still live. That removal is the point — the panel is a mirror of
+   * the current live set, never an accumulation of everything once seen.
+   */
   function render(matches){
     var next = {};
     var changed = 0;
+    var existing = {};
+    Array.prototype.forEach.call(list.querySelectorAll('[data-football-live-id]'), function(node){
+      existing[node.getAttribute('data-football-live-id')] = node;
+    });
+
     matches.forEach(function(match){
       var id = String((match.fixture || {}).id || 0);
       next[id] = snapshot(match);
-      if(ready && snapshots[id] !== undefined && snapshots[id] !== next[id]) changed++;
-      if(ready && snapshots[id] === undefined) changed++;
+      if(ready && snapshots[id] !== next[id]) changed++;
     });
-    if(ready){
-      Object.keys(snapshots).forEach(function(id){ if(next[id] === undefined) changed++; });
-    }
+    // Anything that was on the panel and is not in this payload has left the
+    // live set: count it as a change so the status line reports the takedown.
+    Object.keys(snapshots).forEach(function(id){
+      if(ready && next[id] === undefined) changed++;
+    });
+
+    var emptyNote = document.getElementById('football-live-empty');
     if(!matches.length){
-      list.innerHTML = '<p class="football-help" id="football-live-empty">No match is currently live.</p>';
-    } else {
-      list.innerHTML = matches.map(function(match){
-        var id = String((match.fixture || {}).id || 0);
-        return cardHtml(match, ready && snapshots[id] !== next[id]);
-      }).join('');
+      // Every stale card goes, including when the answer is "none live".
+      Object.keys(existing).forEach(function(id){ existing[id].remove(); });
+      if(!emptyNote) list.appendChild(emptyCard());
+      snapshots = next;
+      ready = true;
+      return changed;
     }
+    if(emptyNote) emptyNote.remove();
+
+    var previous = null;
+    matches.forEach(function(match){
+      var id = String((match.fixture || {}).id || 0);
+      var node = existing[id];
+      if(node){
+        // Repaint only when this match actually changed, so a card that is
+        // merely still live does not flash on every poll.
+        if(snapshots[id] !== next[id]){
+          node.innerHTML = cardInner(match);
+          node.classList.remove('football-live-updated');
+          void node.offsetWidth;                 // restart the highlight
+          node.classList.add('football-live-updated');
+        }
+        delete existing[id];
+      } else {
+        node = document.createElement('div');
+        node.setAttribute('data-football-live-id', id);
+        node.innerHTML = cardInner(match);
+        if(ready) node.classList.add('football-live-updated');
+      }
+      // Keep the provider's ordering without rebuilding untouched nodes.
+      var shouldBe = previous ? previous.nextSibling : list.firstChild;
+      if(node !== shouldBe) list.insertBefore(node, shouldBe);
+      previous = node;
+    });
+    // Whatever is still in `existing` was not reported live in this payload.
+    Object.keys(existing).forEach(function(id){ existing[id].remove(); });
+
     snapshots = next;
     ready = true;
     return changed;
@@ -709,14 +775,18 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
     if(dot) dot.className = 'dot ' + state;
   }
 
-  function schedule(){
+  function schedule(delay){
     clearTimeout(timer);
-    timer = setTimeout(poll, pollEveryMs);
+    timer = setTimeout(poll, delay);
   }
 
   function poll(){
-    if(document.hidden){ schedule(); return; }
-    fetch('/api/football/fixtures/live', {credentials: 'same-origin', cache: 'no-store'})
+    // A hidden tab is not watching: skip the read rather than queue work, and
+    // refresh the moment it comes back (see visibilitychange below).
+    if(document.hidden){ schedule(pollEveryMs); return; }
+    if(inFlight) return;
+    inFlight = true;
+    fetch('/api/football/fixtures/live', {credentials: 'same-origin', cache: 'no-store', headers: {'Accept': 'application/json'}})
       .then(function(response){
         if(!response.ok) throw new Error('HTTP ' + response.status);
         return response.json();
@@ -724,13 +794,41 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
       .then(function(data){
         var matches = Array.isArray(data.matches) ? data.matches.filter(isLiveMatch) : [];
         var changed = render(matches);
-        setStatus(liveMessage + (changed ? ' Latest update received.' : ''), 'up');
+        backoffMs = pollEveryMs;
+        var provider = data.provider || {};
+        if(provider.state === 'BEHIND' || provider.state === 'NEVER_RUN'){
+          // The rows are current as stored, but the sweep that writes them is
+          // not running. Saying "nothing is live" here would be a guess, so the
+          // panel reports the feed state instead of implying an empty schedule.
+          setStatus('Live feed is behind — the provider sweep has not reported recently. Showing the last confirmed live matches only.', 'down');
+        } else if(!matches.length){
+          setStatus('Auto-refresh on — no match is currently live. New matches appear here as soon as the provider reports them.', 'synth');
+        } else {
+          setStatus(liveMessage + (changed ? ' Updated just now.' : ''), 'up');
+        }
+        // Follow a moving match closely; idle back when nothing changed.
+        schedule(changed ? activeMs : pollEveryMs);
       })
       .catch(function(error){
-        var forbidden = String(error && error.message || '').indexOf('403') >= 0;
-        setStatus(forbidden ? 'Live auto-refresh needs the sports.view permission.' : 'Auto-refresh interrupted — retrying.', 'down');
+        var message = String(error && error.message || '');
+        if(message.indexOf('403') >= 0){
+          // A permission problem will not fix itself on the next tick.
+          setStatus('Live auto-refresh needs the sports.view permission.', 'down');
+          clearTimeout(timer);
+          return;
+        }
+        if(message.indexOf('401') >= 0){
+          setStatus('Live auto-refresh stopped — the session ended. Reload the page to sign in again.', 'down');
+          clearTimeout(timer);
+          return;
+        }
+        // Transient failure: keep the cards that are on screen, say so, and
+        // back off so a struggling server is not hammered by every open tab.
+        backoffMs = Math.min(maxBackoffMs, Math.max(pollEveryMs, backoffMs * 2));
+        setStatus('Auto-refresh interrupted — retrying in ' + Math.round(backoffMs / 1000) + 's.', 'down');
+        schedule(backoffMs);
       })
-      .then(schedule);
+      .then(function(){ inFlight = false; }, function(){ inFlight = false; });
   }
 
   document.addEventListener('visibilitychange', function(){

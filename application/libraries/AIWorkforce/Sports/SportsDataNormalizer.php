@@ -231,6 +231,30 @@ class SportsDataNormalizer
         foreach (['bookmaker', 'fixtureId', 'updatedAt', 'impliedProbability', 'winning', 'openingDecimalOdds', 'suspended'] as $key) {
             if (array_key_exists($key, $raw) && (is_scalar($raw[$key]) || $raw[$key] === null)) $out[$key] = $raw[$key];
         }
+        // Canonical market resolution (market-coverage requirement #9). The
+        // provider's own spelling is preserved above and in `providerMarket`;
+        // the canonical key is what the prediction engine and the ticket read,
+        // so no downstream consumer depends on one feed's naming scheme. An
+        // unrecognised market is carried through with `marketRecognized` false
+        // rather than being guessed into a near neighbour — attaching one
+        // market's price to another market's probability is worse than saying
+        // the market is not understood.
+        $canonical = SportsMarketRegistry::normalize($market);
+        $out['providerMarket'] = $market;
+        $out['canonicalMarket'] = $canonical['market'];
+        $out['marketRecognized'] = $canonical['recognized'];
+        if ($canonical['scope'] !== null) $out['marketScope'] = $canonical['scope'];
+        $canonicalSelection = SportsMarketRegistry::normalizeSelection($canonical['market'], $selection);
+        $out['providerSelection'] = $selection;
+        $out['canonicalSelection'] = $canonicalSelection['selection'];
+        if ($canonicalSelection['line'] !== null) $out['line'] = $canonicalSelection['line'];
+        // Player/team markets name the entity they resolve for. It is only
+        // ever taken from what the provider actually sent.
+        foreach (['playerId' => 'playerId', 'playerName' => 'playerName', 'teamId' => 'teamId', 'teamSide' => 'teamSide'] as $key => $field) {
+            if (array_key_exists($key, $raw) && (is_scalar($raw[$key]) || $raw[$key] === null) && $raw[$key] !== '') {
+                $out[$field] = $raw[$key];
+            }
+        }
         return $out;
     }
 

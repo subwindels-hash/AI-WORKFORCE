@@ -25,6 +25,19 @@ class ConfigurationService
     public const CORRELATION_LIMITS = ['LOW', 'MEDIUM'];
     public const VOID_POLICIES = ['RESTITUTE_ODDS', 'ALL_VOID_ONLY'];
 
+    /**
+     * The lowest confidence an operator may configure as the eligibility floor.
+     *
+     * A measured 25% read on verified data is a real signal and may be
+     * considered; the engine reports it as 25% and ranks it accordingly. This
+     * is a bound on what is CONFIGURABLE, not a promise about any prediction:
+     * the shipped default is still 75 (see defaults()), confidence is never
+     * inflated to clear a floor, and the data-quality gate is unchanged — a
+     * fixture below the quality floor is still rejected outright whatever its
+     * confidence happens to be.
+     */
+    public const MIN_CONFIDENCE_FLOOR = 25.0;
+
     public function __construct(private SportsRepository $repo, private AuditRepository $audit) {}
 
     /** Current active configuration (latest version), or a safe default when none exists yet. */
@@ -201,8 +214,17 @@ class ConfigurationService
         if ($min <= 1.0 || $max <= $min) return 'target odds range must satisfy 1.0 < min <= max';
         $maxSel = (int) $c['max_selections'];
         if ($maxSel < 1 || $maxSel > 12) return 'max_selections must be within [1, 12]';
+        // The configurable floor is 25, not 30: a legitimately measured 25%
+        // read on verified data is a usable signal and an operator is allowed
+        // to admit it. This only widens what an operator MAY configure — the
+        // shipped default remains 75 (ConfigurationService::defaults()), and
+        // the adaptive ladder still derives from whatever is configured, so
+        // nothing is loosened unless an administrator explicitly lowers it.
+        // Confidence is never inflated to clear a floor; see ConfidencePolicy.
         $conf = (float) $c['min_confidence'];
-        if ($conf < 30 || $conf > 100) return 'min_confidence must be within [30, 100]';
+        if ($conf < self::MIN_CONFIDENCE_FLOOR || $conf > 100) {
+            return 'min_confidence must be within [' . (int) self::MIN_CONFIDENCE_FLOOR . ', 100]';
+        }
         if ((float) $c['min_expected_value'] < 0) return 'min_expected_value must be >= 0';
         $dq = (int) $c['min_data_quality'];
         if ($dq < 50 || $dq > 100) return 'min_data_quality must be within [50, 100]';

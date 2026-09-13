@@ -111,6 +111,38 @@ final class ProviderGateway
         return false;
     }
 
+    /**
+     * When every provider that could serve `$capability` is in backoff.
+     *
+     * `call()` already walks the whole provider list and uses the first one
+     * that answers, so a single feed in backoff costs nothing — the request
+     * simply goes to the next. A scheduler must therefore ask about the
+     * capability as a whole, not about "any provider", or one permanently
+     * broken feed silently cancels a job the healthy feeds could still serve.
+     *
+     * Returns null when at least one capable provider is free to be called.
+     * Otherwise returns the moment the earliest of them may be retried, so the
+     * caller can report a specific time instead of an unexplained pause.
+     */
+    public function blockedUntil(string $capability): ?string
+    {
+        $method = self::CAPABILITIES[$capability] ?? $capability;
+        $earliest = null;
+        $capable = 0;
+        foreach ($this->providers->all() as $id => $provider) {
+            if (!method_exists($provider, $method)) continue;
+            $capable++;
+            $until = $this->backoffUntil((string) $id);
+            $stamp = is_string($until) && $until !== '' ? strtotime($until) : false;
+            if ($stamp === false || $stamp <= time()) return null;  // this one is usable now
+            $earliest = $earliest === null ? $stamp : min($earliest, $stamp);
+        }
+        // No provider implements the capability at all: that is a capability
+        // gap, not a backoff, and the caller's own precondition reports it.
+        if ($capable === 0 || $earliest === null) return null;
+        return gmdate('c', $earliest);
+    }
+
     public function provider(string $id): ?SportsDataProvider
     {
         return $this->providers->provider($id);

@@ -77,7 +77,10 @@ final class SchemaInstaller
     // Bumped after the daily-ticket migration guard was made column-aware.
     // Existing deployments may already have a stamp from a request that saw
     // the table but silently missed one of its ALTERs.
-    private const STAMP_VERSION = '2026-09-11-sports-daily-ticket-state-v3';
+    // Bumped again for football_fixtures.live_confirmed_at: a stamped database
+    // would otherwise skip the upgrade pass and never gain the column the Live
+    // Match freshness gate now reads.
+    private const STAMP_VERSION = '2026-09-13-football-live-confirmed-at-v1';
 
     public static function databaseDir(): string
     {
@@ -236,6 +239,12 @@ final class SchemaInstaller
             // Football: the daily provider-request counter is only trusted for the
             // day it was written, so a ceiling cannot leak across midnight.
             $pick('ALTER TABLE football_providers ADD COLUMN requests_used_date TEXT', 'ALTER TABLE football_providers ADD COLUMN requests_used_date DATE NULL', 'ALTER TABLE football_providers ADD COLUMN IF NOT EXISTS requests_used_date DATE'),
+            // Football: when a provider live snapshot last reported this fixture
+            // as in play. Live Match reads this column and not `updated_at`,
+            // which any unrelated write (a day sweep, a statistics collection,
+            // a competition link) refreshes — that is what used to keep a
+            // finished match pinned to the Live now section indefinitely.
+            $pick('ALTER TABLE football_fixtures ADD COLUMN live_confirmed_at TEXT', 'ALTER TABLE football_fixtures ADD COLUMN live_confirmed_at VARCHAR(32) NULL', 'ALTER TABLE football_fixtures ADD COLUMN IF NOT EXISTS live_confirmed_at VARCHAR(32)'),
             $pick('ALTER TABLE leads ADD COLUMN email TEXT', 'ALTER TABLE leads ADD COLUMN email VARCHAR(255) NULL', 'ALTER TABLE leads ADD COLUMN IF NOT EXISTS email VARCHAR(255)'),
             $pick('ALTER TABLE leads ADD COLUMN job_title TEXT', 'ALTER TABLE leads ADD COLUMN job_title VARCHAR(255) NULL', 'ALTER TABLE leads ADD COLUMN IF NOT EXISTS job_title VARCHAR(255)'),
             $pick('ALTER TABLE leads ADD COLUMN company_name TEXT', 'ALTER TABLE leads ADD COLUMN company_name VARCHAR(255) NULL', 'ALTER TABLE leads ADD COLUMN IF NOT EXISTS company_name VARCHAR(255)'),

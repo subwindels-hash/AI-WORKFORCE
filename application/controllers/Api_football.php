@@ -157,6 +157,13 @@ class Api_football extends Api_controller
         $date = \AIWorkforce\Football\RequestParams::date($g, 'date', gmdate('Y-m-d'), $notes);
         $available = $this->football()->markets()->available([]);
         $selected = $this->football()->markets()->resolve($g['market'] ?? null, $notes);
+        // The canonical market model (market-coverage requirement #9): the one
+        // vocabulary every provider is mapped into, published so a client never
+        // has to learn a feed's proprietary naming. `support` states plainly
+        // whether the platform MODELS a market or merely carries a provider's
+        // data for it — player and event markets are the latter, and saying so
+        // is what keeps the catalogue from implying forecasts it cannot make.
+        $canonical = \AIWorkforce\Sports\SportsMarketRegistry::catalog();
         $this->json([
             'status' => 'OK',
             'date' => $date,
@@ -164,7 +171,10 @@ class Api_football extends Api_controller
             'selected' => $selected['key'],
             'markets' => $available,
             'total' => count($available),
+            'canonicalMarkets' => $canonical,
+            'canonicalTotal' => count($canonical),
             'note' => 'Selecting a market is a view over the stored prediction: it never regenerates a match and never costs a provider call.',
+            'canonicalNote' => 'canonicalMarkets is the provider-neutral market model. support=MODELLED means the platform derives its own probability; support=PROVIDER_ONLY means the structure is understood and a verified provider quote is stored and shown, but no probability is generated and nothing is inferred when a provider does not supply it.',
             'request' => ['date' => $date, 'market' => $g['market'] ?? null, 'notes' => array_values($notes)],
             'generatedAt' => gmdate('c'),
         ]);

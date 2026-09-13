@@ -34,18 +34,27 @@ test('ticket optimizer never combines same-match selections', function () {
 });
 
 test('ticket optimizer enforces WINDELS daily ticket hard floors', function () {
-    // The absolute floors are 30/30 — an explicit admin setting is honoured,
-    // never clamped back up to a hard-coded 70/75 — so only sub-30 candidates
-    // are excluded when the caller asks for 10.
+    // The absolute confidence floor is 25 (ConfigurationService::
+    // MIN_CONFIDENCE_FLOOR) and the data-quality floor is 50 — an explicit
+    // admin setting is honoured, never clamped back up to a hard-coded 70/75,
+    // and never allowed below the floor either. A measured 24.99% read is
+    // still excluded; a measured 25%+ read is a usable signal.
     $out = (new TicketOptimizer())->optimize([
         fx_candidate(1, 4.9, .50),
-        array_merge(fx_candidate(2, 5.5, .50), ['confidence' => ['confidence' => 29.99]]),
+        array_merge(fx_candidate(2, 5.5, .50), ['confidence' => ['confidence' => 24.99]]),
         array_merge(fx_candidate(3, 5.6, .50), ['quality' => ['score' => 29]]),
         fx_candidate(4, 8.01, .50),
         fx_candidate(5, 6.0, .50),
     ], ['targetOddsMin' => 1.1, 'targetOddsMax' => 99, 'maxSelections' => 1, 'minConfidence' => 10, 'minDataQuality' => 10]);
     assert_equals('QUALIFIED', $out['status']);
-    assert_equals(3, $out['poolSize'], 'below-30 candidates are excluded even when the caller asks for 10');
+    assert_equals(3, $out['poolSize'], 'below-floor candidates are excluded even when the caller asks for 10');
+
+    // The floor moved from 30 to 25, so a legitimately measured 25–30% read is
+    // now admitted instead of being discarded before it is ever assessed.
+    $admits25 = (new TicketOptimizer())->optimize([
+        array_merge(fx_candidate(6, 5.5, .50), ['confidence' => ['confidence' => 25.0]]),
+    ], ['targetOddsMin' => 1.1, 'targetOddsMax' => 99, 'maxSelections' => 1, 'minConfidence' => 10, 'minDataQuality' => 10]);
+    assert_equals(1, $admits25['poolSize'], 'a measured 25% candidate is eligible for consideration');
     assert_equals(1, $out['selectionCount']);
     // ...and a 35% confidence candidate is admitted at the new 30% floor
     // (the data-quality floor stays 50 — only the confidence gate moved).

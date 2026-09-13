@@ -62,6 +62,8 @@ final class LiveMatchService
                 'refreshed' => $refreshed === null ? null : ['status' => $refreshed['status'] ?? null, 'processed' => $refreshed['processed'] ?? 0, 'requests' => $refreshed['requests'] ?? 0, 'expiredLive' => $refreshed['expiredLive'] ?? 0],
                 'refreshIntervalSeconds' => $this->refreshIntervalSeconds(),
                 'staleThresholdSeconds' => $this->staleThresholdSeconds(),
+                'provider' => $this->providerFreshness(),
+                'generatedAt' => gmdate('c'),
             ];
         }
         // Batch pre-load predictions: 1 query for all pre-match + 1 for live
@@ -92,6 +94,43 @@ final class LiveMatchService
             'refreshed' => $refreshed === null ? null : ['status' => $refreshed['status'] ?? null, 'processed' => $refreshed['processed'] ?? 0, 'requests' => $refreshed['requests'] ?? 0, 'expiredLive' => $refreshed['expiredLive'] ?? 0],
             'refreshIntervalSeconds' => $this->refreshIntervalSeconds(),
             'staleThresholdSeconds' => $this->staleThresholdSeconds(),
+            'provider' => $this->providerFreshness(),
+            'generatedAt' => gmdate('c'),
+        ];
+    }
+
+    /**
+     * Whether the provider live sweep itself is current.
+     *
+     * The panel polls stored rows, so "no live match" is only trustworthy when
+     * the sweep behind those rows actually ran. If it last ran hours ago, the
+     * page must say the feed is behind rather than quietly implying that
+     * nothing is being played anywhere.
+     *
+     * @return array{lastSweepAt:?string, ageSeconds:?int, state:string, status:?string}
+     */
+    private function providerFreshness(): array
+    {
+        try {
+            $run = $this->repo->lastSyncRun('LIVE');
+        } catch (\Throwable $e) {
+            $run = null;
+        }
+        $startedAt = is_array($run) ? (string) ($run['started_at'] ?? '') : '';
+        $started = $startedAt !== '' ? strtotime($startedAt) : false;
+        if ($started === false) {
+            return ['lastSweepAt' => null, 'ageSeconds' => null, 'state' => 'NEVER_RUN', 'status' => null];
+        }
+        $age = max(0, time() - $started);
+        // One missed cadence is normal jitter; the stale window is the point at
+        // which a card would no longer be trusted, so the sweep is judged the
+        // same way the rows it writes are.
+        $state = $age <= $this->staleThresholdSeconds() ? 'CURRENT' : 'BEHIND';
+        return [
+            'lastSweepAt' => gmdate('c', $started),
+            'ageSeconds' => $age,
+            'state' => $state,
+            'status' => is_array($run) ? (string) ($run['status'] ?? '') : null,
         ];
     }
 
@@ -103,8 +142,12 @@ final class LiveMatchService
 
     /**
      * How long a live row may remain visible without fresh provider confirmation.
-     * A stale row is not deleted — it is simply no longer allowed to fill the
-     * Live Match section until the provider reports it live again.
+     * A stale row is not deleted — it is taken out of the in-play status and is
+     * no longer allowed to fill the Live Match section until a provider live
+     * snapshot reports it live again.
+     *
+     * Measured against `live_confirmed_at` (the last live snapshot that actually
+     * listed the fixture), never against `updated_at`.
      */
     public function staleThresholdSeconds(): int
     {
@@ -119,14 +162,32 @@ final class LiveMatchService
         $now = time();
         $threshold = $this->staleThresholdSeconds();
         $fixtures = [];
+        $stale = false;
         foreach ($this->repo->listFixtures(['status' => FixtureSyncService::LIVE_STATUSES], max(1, min(500, $limit))) as $fixture) {
             $status = strtoupper((string) ($fixture['status'] ?? ''));
             if (!in_array($status, FixtureSyncService::LIVE_STATUSES, true)) continue;
-            $updatedAt = (string) ($fixture['updated_at'] ?? $fixture['source_timestamp'] ?? '');
-            $updated = $updatedAt !== '' ? strtotime($updatedAt) : false;
-            if ($updated === false || ($now - $updated) > $threshold) continue;
+            // Freshness is measured from the last provider LIVE confirmation and
+            // from nothing else. `updated_at` moves whenever any unrelated write
+            // touches the row — a day sweep, a statistics collection, a
+            // competition link — so a match that ended hours ago could keep
+            // renewing its own place on the panel. A row that was never
+            // confirmed live has no business filling Live Match at all.
+            $confirmedAt = (string) ($fixture['live_confirmed_at'] ?? '');
+            $confirmed = $confirmedAt !== '' ? strtotime($confirmedAt) : false;
+            if ($confirmed === false || ($now - $confirmed) > $threshold) { $stale = true; continue; }
             $fixtures[] = $fixture;
             if (count($fixtures) >= $limit) break;
+        }
+        // Hiding a stale card is not enough: the row itself must leave the live
+        // set, otherwise it keeps costing the live sweep and the settlement
+        // queue work, and reappears the moment the freshness maths shifts.
+        if ($stale) {
+            try {
+                $this->repo->expireStaleLiveFixtures(gmdate('c', $now - $threshold), gmdate('c'));
+            } catch (\Throwable $e) {
+                // Read paths never fail on a housekeeping write: the card is
+                // already withheld above, which is what the reader sees.
+            }
         }
         return $fixtures;
     }

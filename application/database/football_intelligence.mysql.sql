@@ -6,6 +6,11 @@
 -- invented values. data_state / coverage columns record WHY a value exists so
 -- any figure on the dashboard is traceable to a provider row or a stored,
 -- versioned model calculation.
+--
+-- football_fixtures.live_confirmed_at is the last time a provider LIVE snapshot
+-- actually reported that fixture as in play. It is deliberately separate from
+-- updated_at, which any unrelated write touches, because the Live Match panel
+-- measures "is this still live" against a provider statement and nothing else.
 
 CREATE TABLE IF NOT EXISTS football_providers (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -94,6 +99,7 @@ CREATE TABLE IF NOT EXISTS football_fixtures (
   coverage TEXT NULL,
   payload LONGTEXT NULL,
   source_timestamp VARCHAR(32) NOT NULL,
+  live_confirmed_at VARCHAR(32) NULL,
   settled_at VARCHAR(32) NULL,
   created_at VARCHAR(32) NOT NULL,
   updated_at VARCHAR(32) NOT NULL,

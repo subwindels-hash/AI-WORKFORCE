@@ -580,6 +580,7 @@ CREATE TABLE IF NOT EXISTS football_fixtures (
   coverage TEXT NULL,
   payload LONGTEXT NULL,
   source_timestamp VARCHAR(32) NOT NULL,
+  live_confirmed_at VARCHAR(32) NULL,
   settled_at VARCHAR(32) NULL,
   created_at VARCHAR(32) NOT NULL,
   updated_at VARCHAR(32) NOT NULL,

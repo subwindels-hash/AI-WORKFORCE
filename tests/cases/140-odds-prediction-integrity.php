@@ -330,6 +330,7 @@ test('qualified policy: built-in defaults demand 75%+ confidence, 80+ quality, L
     // Operators may still lower the floors explicitly (append-only, audited).
     $service = new ConfigurationService(new SportsRepositoryStub(), fx140_audit());
     assert_true($service->update(['min_confidence' => 30.0, 'min_data_quality' => 60], 'admin', 'test override')['ok'], 'explicit lower floors remain permitted');
+    assert_true($service->update(['min_confidence' => 25.0], 'admin', 'test override')['ok'], '25% is the lowest configurable floor');
     assert_false($service->update(['min_confidence' => 20.0], 'admin', 'test override')['ok'], 'self-contradictory gates are still refused');
 });
 

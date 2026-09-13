@@ -52,7 +52,12 @@ function fx_ui_today(SportsRepositoryStub $repo): string
     $repo->matches[] = ['id' => 9001, 'provider_id' => 1, 'external_id' => 'ui-1', 'sport' => 'football', 'competition' => 'UI League', 'home_team' => 'HomeA', 'away_team' => 'AwayA', 'kickoff_at' => $kickoff, 'status' => 'SCHEDULED', 'source_timestamp' => gmdate('c'), 'payload' => ['context' => ['recentForm' => ['homeGoalsPerMatch' => 1.6, 'awayGoalsPerMatch' => 1.4, 'homeConcededPerMatch' => 1.0, 'awayConcededPerMatch' => 0.9, 'source' => 'test'], 'marketLiquidity' => 50000]]];
 
     $ticketId = 'tkt_ui_0001';
-    $repo->saveTicket(['id' => $ticketId, 'created_at' => gmdate('c'), 'model_version_id' => $modelId, 'configuration_version' => '0', 'total_odds' => 6.4, 'selection_count' => 2, 'combined_probability' => 0.15, 'confidence' => 88.0, 'risk' => 'LOW', 'correlation' => 'LOW', 'data_quality_score' => 100, 'status' => 'PENDING', 'approval_status' => 'PENDING_USER_APPROVAL', 'settlement_status' => 'PENDING', 'stake' => 10.0, 'pnl' => null]);
+    // One stored leg, so the ticket header must declare one. `selection_count`
+    // used to say 2 while a single selection was saved, and the dashboard —
+    // correctly — reports the LARGER of the header count and the stored legs,
+    // because under-reporting a real leg would hide a pick that exists. That
+    // made the seeded run render 2 where every other funnel number was 1.
+    $repo->saveTicket(['id' => $ticketId, 'created_at' => gmdate('c'), 'model_version_id' => $modelId, 'configuration_version' => '0', 'total_odds' => 2.0, 'selection_count' => 1, 'combined_probability' => 0.15, 'confidence' => 88.0, 'risk' => 'LOW', 'correlation' => 'LOW', 'data_quality_score' => 100, 'status' => 'PENDING', 'approval_status' => 'PENDING_USER_APPROVAL', 'settlement_status' => 'PENDING', 'stake' => 10.0, 'pnl' => null]);
     $repo->saveTicketSelection(['ticket_id' => $ticketId, 'prediction_id' => 'prd_ui_1', 'match_id' => 9001, 'market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'odds' => 2.0, 'odds_timestamp' => gmdate('c'), 'odds_source' => 'ui-test', 'fair_odds' => 1.33, 'confidence' => 88.0, 'data_quality' => 100.0, 'model_probability' => 0.7, 'calibrated_probability' => 0.75, 'expected_value' => 0.5, 'risk' => 'LOW', 'result' => null, 'status' => 'PENDING']);
     $repo->savePrediction(['id' => 'prd_ui_1', 'match_id' => 9001, 'model_version_id' => $modelId, 'market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'raw_probability' => 0.7, 'calibrated_probability' => 0.75, 'expected_value' => 0.5, 'confidence' => 88.0, 'risk' => 'LOW', 'correlation' => 'LOW', 'data_quality_score' => 100, 'decision' => 'PREDICTION_READY', 'rejection_reasons' => '[]', 'factors' => json_encode(['gate' => ['passed' => []], 'drivers' => ['expectedGoalsProxy' => 2.45]]), 'input_version' => FeatureEngineeringEngine::VERSION, 'odds' => 2.0, 'odds_timestamp' => gmdate('c'), 'created_at' => gmdate('c')]);
     $repo->saveDailyTicket(['date' => gmdate('Y-m-d'), 'ticket_type' => 'ODDS_PREDICTION', 'ticket_id' => $ticketId, 'status' => 'PENDING_USER_APPROVAL', 'generation_status' => 'GENERATED', 'configuration_version' => 0, 'candidates_evaluated' => 1, 'predictions_recorded' => 1, 'rejections' => 0, 'rejection_summary' => json_encode(['_diagnostics' => ['eligibleFixtures' => 1, 'fixturesWithFreshOdds' => 1, 'fixturesRejectedStaleOdds' => 0, 'marketsEvaluated' => 1, 'predictionsGenerated' => 1, 'correlationQualifiedCandidates' => 1, 'finalQualifiedCandidates' => 1]]), 'message' => 'odds prediction ticket generated; awaiting user approval', 'provider' => 'ui-test', 'run_id' => 'run_ui', 'attempt_count' => 1, 'generated_at' => gmdate('c'), 'created_at' => gmdate('c'), 'updated_at' => gmdate('c')]);
@@ -238,6 +243,38 @@ test('sports UI: the feed sections are uniform, numbered and free of inline layo
     }
     assert_contains('<dt>Stale odds</dt><dd class="mono">0</dd>', $html,
         'a measured zero stale-odds count remains a real zero');
+
+    // The seeded run above has every funnel number equal to 1, so "1" on the
+    // page could come from the stored run OR from a fallback that counted the
+    // single stored leg. Re-render with a run whose stages are all DIFFERENT:
+    // now each figure can only be right if it was read from the stored run.
+    $wide = new SportsRepositoryStub();
+    $wideTicket = fx_ui_today($wide);
+    $wide->saveDailyTicket([
+        'date' => gmdate('Y-m-d'), 'ticket_type' => 'ODDS_PREDICTION', 'ticket_id' => $wideTicket,
+        'status' => 'PENDING_USER_APPROVAL', 'generation_status' => 'GENERATED', 'configuration_version' => 0,
+        'candidates_evaluated' => 9, 'predictions_recorded' => 5, 'rejections' => 0,
+        'rejection_summary' => json_encode(['_diagnostics' => [
+            'eligibleFixtures' => 8, 'fixturesEvaluated' => 9, 'predictionsGenerated' => 5,
+            'fixturesWithFreshOdds' => 7, 'fixturesRejectedStaleOdds' => 3,
+            'correlationQualifiedCandidates' => 4, 'finalQualifiedCandidates' => 2,
+        ]]),
+        'message' => 'distinct funnel stages', 'provider' => 'ui-test', 'run_id' => 'run_ui_wide',
+        'attempt_count' => 1, 'generated_at' => gmdate('c'), 'created_at' => gmdate('c'), 'updated_at' => gmdate('c'),
+    ]);
+    $wideHtml = fx_render_sports('index', ['dashboard' => (new SportsIntelligence($wide, fx_ui_audit()))->dashboard()]);
+    foreach ([
+        'Eligible fixtures' => 8,
+        'Fixtures evaluated' => 9,
+        'Predictions generated' => 5,
+        'Fresh odds' => 7,
+        'Stale odds' => 3,
+        'Qualified candidates' => 4,
+        'Selected picks' => 2,
+    ] as $metric => $expected) {
+        assert_contains('<dt>' . $metric . '</dt><dd class="mono">' . $expected . '</dd>', $wideHtml,
+            $metric . ' reports the stored run stage (' . $expected . '), not a recomputed guess');
+    }
     // Sub-blocks inside a section use one shared sub-heading, not ad-hoc bold text.
     foreach (['Risk distribution', 'Scheduled fixtures', 'Selected picks'] as $sub) {
         assert_contains('<h4>' . $sub . '</h4>', $html, $sub . ' is a real sub-heading');
