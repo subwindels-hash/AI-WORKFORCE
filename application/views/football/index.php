@@ -111,9 +111,12 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
       </p>
     </div>
     <div class="football-hero__actions" aria-label="Football date navigation">
-      <a class="btn small" href="/football?date=<?= e($yesterday ?? gmdate('Y-m-d', time() - 86400)) ?>">← Previous day</a>
-      <a class="btn small" href="/football">Today</a>
-      <a class="btn small" href="/football?date=<?= e($tomorrow ?? gmdate('Y-m-d', time() + 86400)) ?>">Next day →</a>
+      <?php // Day navigation keeps the operator's competition / market /
+            // provider selection (it re-reads stored rows, never regenerates).
+            $dayHref = static fn(string $day): string => '/football?' . http_build_query(array_merge(['date' => $day], $carry)); ?>
+      <a class="btn small" href="<?= e($dayHref((string) ($yesterday ?? gmdate('Y-m-d', time() - 86400)))) ?>">← Previous day</a>
+      <a class="btn small" href="<?= e($carry === [] ? '/football' : '/football?' . http_build_query($carry)) ?>">Today</a>
+      <a class="btn small" href="<?= e($dayHref((string) ($tomorrow ?? gmdate('Y-m-d', time() + 86400)))) ?>">Next day →</a>
     </div>
   </section>
 
@@ -148,7 +151,11 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
 
   <div class="football-layout">
     <div class="football-main stack">
-      <?php if ($isAdmin): ?>
+      <?php /* Competition, premium-league, market and date are read-only
+               selections over stored rows and are honoured for every signed-in
+               viewer, so every viewer gets the controls. Only the data-provider
+               pin is an administrator concern (the backend honours it for
+               admins under MANUAL mode), so that one selector stays gated. */ ?>
         <section class="panel football-section" id="football-filters" aria-labelledby="football-filters-heading">
           <div class="football-section__heading">
             <div class="football-section__title">
@@ -164,6 +171,7 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
             <p class="football-section-intro">These controls change what the three board sections below display. They only reorganize saved fixtures and stored odds — no provider request is spent and no prediction is created.</p>
             <form method="get" action="/football" class="football-filter-form">
               <input type="hidden" name="page" value="1">
+              <?php if ($isAdmin): ?>
               <label class="fld">Data provider
                 <select class="sel" name="provider" <?= $providerLocked ? 'disabled' : '' ?> title="Provider choice controls synced data; reading this board only uses stored rows.">
                   <?php if ($providerOptions === []): ?><option value="">No feed connected</option><?php endif; ?>
@@ -174,6 +182,7 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
                 </select>
                 <?php if ($providerLocked): ?><input type="hidden" name="provider" value="AUTO"><?php endif; ?>
               </label>
+              <?php endif; ?>
               <label class="fld">Competition
                 <select class="sel" name="competition">
                   <option value="">All competitions</option>
@@ -208,7 +217,6 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
             <p class="football-help">Filters only reorganize saved fixtures and stored odds. They do not spend a provider request or create a new prediction. The complete odds sheet remains available for every match below.</p>
           </div>
         </section>
-      <?php endif; ?>
 
       <section class="panel football-section" id="football-overview" aria-labelledby="day-overview-heading">
         <div class="football-section__heading">
@@ -301,7 +309,13 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
           <?php if ($rows === []): ?>
             <div class="empty-state"><p>No fixtures match this page and filter selection.</p></div>
           <?php else: ?>
-            <div class="football-fixture-list">
+            <div class="football-search" id="football-fixture-search" hidden>
+              <label class="visually-hidden" for="football-team-search">Search teams on this page</label>
+              <input type="search" id="football-team-search" placeholder="Search teams or competition on this page…" autocomplete="off"
+                     aria-controls="football-fixture-board" aria-describedby="football-search-count">
+              <span class="football-search__count" id="football-search-count" aria-live="polite"><?= count($rows) ?> of <?= count($rows) ?> shown</span>
+            </div>
+            <div class="football-fixture-list" id="football-fixture-board">
               <?php foreach ($rows as $row): ?>
                 <?php
                 $rowPageId = (int) ($row['fixtureId'] ?? $row['fixtureDatabaseId'] ?? 0);
@@ -836,5 +850,41 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
   });
   setStatus(liveMessage, 'synth');
   poll();
+})();
+</script>
+
+<script id="football-search-js">
+(function(){
+  // Team / competition finder over the fixtures ALREADY rendered on this page.
+  // A pure client-side view: no request is made, no prediction is generated,
+  // and clearing the box restores every row exactly as the server sent it.
+  // The control is hidden until this script runs, so a no-JS visitor never
+  // sees a dead input.
+  var wrap = document.getElementById('football-fixture-search');
+  var input = document.getElementById('football-team-search');
+  var board = document.getElementById('football-fixture-board');
+  var count = document.getElementById('football-search-count');
+  if(!wrap || !input || !board) return;
+  wrap.hidden = false;
+  var cards = Array.prototype.slice.call(board.querySelectorAll('.football-fixture'));
+  var total = cards.length;
+  var haystacks = cards.map(function(card){
+    var identity = card.querySelector('.football-fixture__identity');
+    return (identity ? identity.textContent : card.textContent).toLowerCase();
+  });
+  function apply(){
+    var needle = input.value.trim().toLowerCase();
+    var shown = 0;
+    cards.forEach(function(card, index){
+      var hit = needle === '' || haystacks[index].indexOf(needle) >= 0;
+      card.classList.toggle('is-filtered-out', !hit);
+      if(hit) shown++;
+    });
+    if(count) count.textContent = needle === ''
+      ? total + ' of ' + total + ' shown'
+      : shown + ' of ' + total + ' match' + (shown === 1 ? '' : 'es') + ' "' + input.value.trim() + '" on this page';
+  }
+  input.addEventListener('input', apply);
+  input.addEventListener('search', apply);
 })();
 </script>

@@ -19,10 +19,12 @@
     '/brokers',
     '/risk',
     '/sports',
+    '/football',
     '/lottery',
     '/multiplier',
     '/app/trading',
     '/notifications',
+    '/messages',
     '/account',
     '/admin',
   ];
@@ -305,35 +307,44 @@
     const sidebar = document.getElementById('app-sidebar');
     if (!sidebar) return;
     const links = sidebar.querySelectorAll('a[href]');
+    const cleanPath = path.split('?')[0].split('#')[0];
+    // Pass 1: exactly one link may match exactly. Every other link loses the
+    // class, so navigating /sports → /sports/odds-prediction-ticket can never
+    // leave two items highlighted at once.
+    let exact = null;
     links.forEach(a => {
       const href = a.getAttribute('href');
       if (!href) return;
-      // Simple active logic: exact match or prefix for language etc
-      const cleanPath = path.split('?')[0].split('#')[0];
       const cleanHref = href.split('?')[0].split('#')[0];
-      if (cleanPath === cleanHref) {
+      if (cleanPath === cleanHref && !exact) {
+        exact = a;
         a.classList.add('active');
-      } else if (cleanHref !== '/dashboard' && cleanPath.startsWith(cleanHref + '/')) {
-        // For sub-paths, keep parent active if no exact child active
-        // Only add active if no other link is exact active
-        // We'll handle by checking if any exact match exists later
-        // For now, don't auto-add
+        a.setAttribute('aria-current', 'page');
       } else {
         a.classList.remove('active');
+        a.removeAttribute('aria-current');
       }
     });
-    // If no active after loop, try prefix match
-    let hasActive = sidebar.querySelector('a.active');
-    if (!hasActive) {
+    // Pass 2: no exact match (e.g. /football/match/123) — highlight the
+    // longest ancestor link (/football), mirroring the server's $navMatch().
+    if (!exact) {
+      let best = null;
+      let bestLen = 0;
       links.forEach(a => {
         const href = a.getAttribute('href');
         if (!href) return;
-        const cleanPath = path.split('?')[0].split('#')[0];
         const cleanHref = href.split('?')[0].split('#')[0];
-        if (cleanHref !== '/' && cleanPath.startsWith(cleanHref)) {
-          a.classList.add('active');
+        if (cleanHref !== '/' && cleanHref !== '/dashboard'
+            && cleanPath.startsWith(cleanHref.replace(/\/$/, '') + '/')
+            && cleanHref.length > bestLen) {
+          best = a;
+          bestLen = cleanHref.length;
         }
       });
+      if (best) {
+        best.classList.add('active');
+        best.setAttribute('aria-current', 'page');
+      }
     }
     // Update page title element if needed
     const titleEl = document.getElementById('page-title');
@@ -350,6 +361,14 @@
   function initUI() {
     const toggle = document.getElementById('sidebar-toggle') || document.querySelector('.sidebar-toggle');
     const sidebar = document.getElementById('app-sidebar');
+    // Keep assistive tech in sync with the visual active state the server
+    // rendered (SPA swaps re-apply it through updateActiveLinks).
+    if (sidebar) {
+      sidebar.querySelectorAll('a').forEach((a) => {
+        if (a.classList.contains('active')) a.setAttribute('aria-current', 'page');
+        else a.removeAttribute('aria-current');
+      });
+    }
     if (toggle && sidebar) {
       // Remove old listeners by cloning? Simpler: use a flag
       if (!toggle.dataset.bound) {

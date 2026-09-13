@@ -120,6 +120,10 @@ $kickoffStamp = static function (mixed $iso): string {
       <noscript><button class="btn small" type="submit">View</button></noscript>
     </form>
     <div class="sports-actionbar__links">
+      <?php // Honest "last updated": when this page's stored payload was read.
+        $boardReadTs = is_string($d['generatedAt'] ?? null) ? strtotime((string) $d['generatedAt']) : false; ?>
+      <span class="dim mono sports-board-read" title="When this page read its stored data (UTC). Reload re-reads storage; Sync pulls fresh provider data.">Board read <?= $boardReadTs === false ? '—' : gmdate('H:i', $boardReadTs) ?> UTC</span>
+      <a class="btn small" href="/sports?date=<?= e($viewDateIso) ?>" title="Re-read the stored data for this date (no provider request)">Reload</a>
       <?php if (!empty($caps['sync'])): ?>
         <form method="post" action="/sports/sync" onsubmit="return confirm('Pull fresh fixtures, odds and results from the configured providers now?')">
           <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
@@ -853,7 +857,10 @@ $kickoffStamp = static function (mixed $iso): string {
 
   function render(matches){
     if(!matches.length){
-      body.innerHTML = '<tr><td colspan="6" class="dim" id="live-scores-empty">No matches currently live</td></tr>';
+      // Same empty state the server renders, without repeating its id: the
+      // SSR row already owns the live-scores-empty id, and a repaint must not
+      // introduce a duplicate DOM id (nothing queries that id after load).
+      body.innerHTML = '<tr><td colspan="6" class="dim">No matches currently live</td></tr>';
     } else {
       body.innerHTML = matches.map(rowHtml).join('');
     }
