@@ -94,11 +94,19 @@ $withheldBlock = is_array($intel['withheld'] ?? null) ? $intel['withheld'] : [];
               </form>
             <?php endif; ?>
           <?php else: ?>
-            <?php $p = is_array($contract['prediction'] ?? null) ? $contract['prediction'] : []; $probabilities = is_array($p['probabilities'] ?? null) ? $p['probabilities'] : []; $raw = is_array($contract['rawProbabilities'] ?? null) ? $contract['rawProbabilities'] : []; ?>
+            <?php
+              $p = is_array($contract['prediction'] ?? null) ? $contract['prediction'] : [];
+              $probabilities = is_array($p['probabilities'] ?? null) ? $p['probabilities'] : [];
+              $raw = is_array($contract['rawProbabilities'] ?? null) ? $contract['rawProbabilities'] : [];
+              $expectedGoals = is_array($p['expectedGoals'] ?? null) ? $p['expectedGoals'] : [];
+              $category = is_array($p['category'] ?? null) ? $p['category'] : [];
+              $alternativeScores = is_array($contract['alternativeScores'] ?? null) ? $contract['alternativeScores'] : [];
+            ?>
             <div class="football-outcome-grid">
               <div class="football-outcome"><span>Model outcome</span><b><?= e((string) ($p['result'] ?? '—')) ?></b><small>most likely stored score distribution</small></div>
               <div class="football-outcome"><span>Predicted score</span><b class="mono"><?= $score($p['predictedScore'] ?? null, 'home') ?>–<?= $score($p['predictedScore'] ?? null, 'away') ?></b><small>pre-match prediction</small></div>
               <div class="football-outcome"><span>Confidence</span><b class="mono"><?= $number($p['confidence'] ?? null, 1) ?>%</b><small><?= e((string) ($p['confidenceBasis'] ?? 'RAW')) ?></small></div>
+              <div class="football-outcome"><span>Category</span><b><?= e((string) ($category['label'] ?? 'Unrated')) ?></b><small><?= e((string) ($category['tier'] ?? 'DATA_UNAVAILABLE')) ?></small></div>
             </div>
             <div class="table-scroll">
               <table class="tbl">
@@ -112,8 +120,13 @@ $withheldBlock = is_array($intel['withheld'] ?? null) ? $intel['withheld'] : [];
               </table>
             </div>
             <dl class="football-key-values">
+              <div><dt>Expected home goals</dt><dd class="mono"><?= $number($expectedGoals['home'] ?? null) ?></dd></div>
+              <div><dt>Expected away goals</dt><dd class="mono"><?= $number($expectedGoals['away'] ?? null) ?></dd></div>
+              <div><dt>Expected-goals basis</dt><dd><?= e((string) ($expectedGoals['method'] ?? 'DATA_UNAVAILABLE')) ?></dd></div>
               <div><dt>Expected total goals</dt><dd class="mono"><?= $number($p['expectedTotalGoals'] ?? null) ?></dd></div>
+              <div><dt>Alternative scorelines</dt><dd class="mono"><?php if ($alternativeScores === []): ?>—<?php else: ?><?php foreach (array_slice($alternativeScores, 0, 3) as $index => $alternative): ?><?= $index > 0 ? ' · ' : '' ?><?= e((string) ($alternative['score'] ?? '—')) ?><?= is_numeric($alternative['probability'] ?? null) ? ' (' . $pct($alternative['probability']) . ')' : '' ?><?php endforeach; ?><?php endif; ?></dd></div>
               <div><dt>Data quality</dt><dd><span class="badge <?= $bandClass((string) ($contract['dataQuality']['status'] ?? '')) ?>"><?= e((string) ($contract['dataQuality']['status'] ?? '—')) ?> · <?= (int) ($contract['dataQuality']['score'] ?? 0) ?>/100</span></dd></div>
+              <div><dt>Fixture data availability</dt><dd><span class="badge <?= $bandClass((string) ($fixture['dataState'] ?? 'DATA_UNAVAILABLE')) ?>"><?= e((string) ($fixture['dataState'] ?? 'DATA_UNAVAILABLE')) ?></span></dd></div>
               <div><dt>Model version</dt><dd class="mono"><?= e((string) ($contract['model']['version'] ?? '—')) ?> · <?= e((string) ($p['calibrationState'] ?? 'CALIBRATION_PENDING')) ?></dd></div>
               <div><dt>Generated</dt><dd class="mono"><?= e($stamp($contract['generatedAt'] ?? null)) ?></dd></div>
             </dl>

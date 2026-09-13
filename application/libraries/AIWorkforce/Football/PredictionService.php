@@ -159,6 +159,10 @@ final class PredictionService
                 'provenance' => $features['provenance'] ?? [],
                 'xgMethod' => $payload['xgMethod'] ?? null,
                 'expectedGoals' => $payload['expectedGoals'] ?? null,
+                // Classification is part of the forecast record as well as a
+                // display field. Future threshold changes must not relabel the
+                // prediction that settlement later measures.
+                'category' => $payload['category'] ?? null,
             ]),
             // Both provenances are kept: which score model produced the grid, and
             // where its expected-goals rates came from.
@@ -202,6 +206,10 @@ final class PredictionService
     {
         $fixture ??= $this->repo->findFixtureById((int) ($prediction['fixture_id'] ?? 0)) ?? [];
         $qualityComponents = is_array($prediction['quality_components'] ?? null) ? $prediction['quality_components'] : [];
+        $confidence = is_numeric($prediction['confidence'] ?? null) ? (float) $prediction['confidence'] : null;
+        $dataQualityBand = (string) ($prediction['data_quality_band'] ?? QualityBand::REJECTED);
+        $expectedGoals = self::expectedGoalsSummary($prediction);
+        $category = self::storedCategory($prediction, $this->config);
         return [
             'predictionId' => (string) ($prediction['id'] ?? ''),
             'fixtureId' => (string) ($prediction['fixture_id'] ?? '') !== '' ? (string) ($fixture['external_id'] ?? $prediction['fixture_id']) : null,
@@ -213,21 +221,30 @@ final class PredictionService
             'kickoff' => $fixture['kickoff_at'] ?? null,
             'status' => (string) ($fixture['status'] ?? 'UNKNOWN'),
             'matchState' => (string) ($fixture['match_state'] ?? 'PRE_MATCH'),
+            'dataState' => (string) ($fixture['data_state'] ?? DataState::UNAVAILABLE),
             'score' => (isset($fixture['home_score'], $fixture['away_score']))
                 ? ['home' => (int) $fixture['home_score'], 'away' => (int) $fixture['away_score'], 'minute' => $fixture['minute'] ?? null] : null,
             'prediction' => [
                 'result' => (string) ($prediction['predicted_result'] ?? ''),
                 'predictedScore' => ['home' => $prediction['predicted_home_score'], 'away' => $prediction['predicted_away_score']],
                 'probabilities' => ['home' => $prediction['probability_home'], 'draw' => $prediction['probability_draw'], 'away' => $prediction['probability_away']],
-                'confidence' => $prediction['confidence'] ?? null,
+                'confidence' => $confidence,
                 'confidenceBasis' => (string) ($prediction['confidence_basis'] ?? 'RAW'),
+                'category' => $category,
+                // These are the two model rates that created the stored
+                // scoreline matrix. Values absent from an older snapshot stay
+                // null; they are never reconstructed from a final score or
+                // substituted with a league average at read time.
+                'expectedGoals' => $expectedGoals,
+                'expectedHomeGoals' => $expectedGoals['home'],
+                'expectedAwayGoals' => $expectedGoals['away'],
                 'expectedTotalGoals' => $prediction['expected_total_goals'] ?? null,
                 'calibrationState' => (string) ($prediction['calibration_state'] ?? CalibrationService::PENDING),
             ],
             // Both probability sets are published side by side on purpose (§9):
             // the model's own shares and the calibrated value actually displayed.
             'rawProbabilities' => ['home' => $prediction['raw_home'] ?? null, 'draw' => $prediction['raw_draw'] ?? null, 'away' => $prediction['raw_away'] ?? null],
-            'dataQuality' => ['score' => (int) ($prediction['data_quality_score'] ?? 0), 'status' => (string) ($prediction['data_quality_band'] ?? QualityBand::REJECTED), 'components' => $qualityComponents],
+            'dataQuality' => ['score' => (int) ($prediction['data_quality_score'] ?? 0), 'status' => $dataQualityBand, 'components' => $qualityComponents],
             'model' => [
                 'version' => (string) ($prediction['model_version'] ?? $this->modelVersionLabel((int) ($prediction['model_version_id'] ?? 0))),
                 'modelVersionId' => $prediction['model_version_id'] ?? null,
@@ -239,6 +256,63 @@ final class PredictionService
             'settlementState' => (string) ($prediction['settlement_state'] ?? 'OPEN'),
             'generatedAt' => (string) ($prediction['generated_at'] ?? ''),
         ];
+    }
+
+    /**
+     * The expected-goal rates captured when this prediction was generated.
+     *
+     * The repository deliberately keeps this in the immutable feature snapshot
+     * with the source/method. It means a historic prediction continues to show
+     * the rates it actually used even after new team statistics arrive. Older
+     * prediction rows did not store this detail, so they return null rather
+     * than having their values retroactively inferred.
+     *
+     * @return array{home:?float,away:?float,method:?string,source:?string}
+     */
+    public static function expectedGoalsSummary(array $prediction): array
+    {
+        $snapshot = is_array($prediction['feature_snapshot'] ?? null)
+            ? $prediction['feature_snapshot']
+            : json_decode((string) ($prediction['feature_snapshot'] ?? '{}'), true);
+        $snapshot = is_array($snapshot) ? $snapshot : [];
+        $stored = is_array($snapshot['expectedGoals'] ?? null) ? $snapshot['expectedGoals'] : [];
+        return [
+            'home' => is_numeric($stored['home'] ?? null) ? round((float) $stored['home'], 3) : null,
+            'away' => is_numeric($stored['away'] ?? null) ? round((float) $stored['away'], 3) : null,
+            'method' => isset($stored['method']) && trim((string) $stored['method']) !== '' ? (string) $stored['method']
+                : (isset($snapshot['xgMethod']) && trim((string) $snapshot['xgMethod']) !== '' ? (string) $snapshot['xgMethod'] : null),
+            'source' => isset($stored['source']) && trim((string) $stored['source']) !== '' ? (string) $stored['source'] : null,
+        ];
+    }
+
+    /**
+     * Category as it was written with this forecast. Historic rows that
+     * pre-date stored categories are mapped conservatively from their own
+     * confidence/data-quality values, which is the only honest fallback they
+     * contain.
+     *
+     * @return array{code:?string,label:string,tier:string,reason:string}
+     */
+    public static function storedCategory(array $prediction, FootballConfiguration $config): array
+    {
+        $snapshot = is_array($prediction['feature_snapshot'] ?? null)
+            ? $prediction['feature_snapshot']
+            : json_decode((string) ($prediction['feature_snapshot'] ?? '{}'), true);
+        $snapshot = is_array($snapshot) ? $snapshot : [];
+        $stored = is_array($snapshot['category'] ?? null) ? $snapshot['category'] : [];
+        if (array_key_exists('code', $stored) && isset($stored['label'], $stored['tier'])) {
+            $code = $stored['code'];
+            return [
+                'code' => in_array($code, ['A', 'B', 'C'], true) ? $code : null,
+                'label' => (string) $stored['label'],
+                'tier' => (string) $stored['tier'],
+                'reason' => isset($stored['reason']) ? (string) $stored['reason'] : 'Category stored when this prediction was generated.',
+            ];
+        }
+        return $config->predictionCategory(
+            is_numeric($prediction['confidence'] ?? null) ? (float) $prediction['confidence'] : null,
+            (string) ($prediction['data_quality_band'] ?? QualityBand::REJECTED),
+        );
     }
 
     /**
@@ -402,7 +476,10 @@ final class PredictionService
      */
     public function predictMissing(array $fixtures, int $limit = MatchFeed::MAX_PAGE_SIZE, string $kind = self::KIND_PRE_MATCH, array $signals = []): array
     {
-        $limit = max(0, min(MatchFeed::MAX_PAGE_SIZE, $limit));
+        // This service can be called outside the paginated feed (for
+        // example by a console action), so enforce the configured cycle here
+        // too rather than relying on every caller to remember it.
+        $limit = max(0, min(MatchFeed::MAX_PAGE_SIZE, $this->config->analysisBatchSize(), $limit));
         $model = $this->models->usable();
         $modelVersionId = (int) ($model['model']['id'] ?? 0);
         $policy = $this->regeneration();
@@ -530,7 +607,7 @@ final class PredictionService
      */
     public function reportOnly(array $fixtures, int $limit = MatchFeed::MAX_PAGE_SIZE, string $kind = self::KIND_PRE_MATCH): array
     {
-        $limit = max(0, min(MatchFeed::MAX_PAGE_SIZE, $limit));
+        $limit = max(0, min(MatchFeed::MAX_PAGE_SIZE, $this->config->analysisBatchSize(), $limit));
         $model = $this->models->usable();
         $modelVersionId = (int) ($model['model']['id'] ?? 0);
         $out = ['requested' => count($fixtures), 'limit' => $limit, 'generated' => 0, 'skipped' => 0,
@@ -556,44 +633,74 @@ final class PredictionService
                 'state' => self::MISSING_REFUSED, 'source' => MatchFeed::SOURCE_REFUSED,
                 'code' => 'NOT_GENERATED',
                 'reason' => 'No prediction is stored for this match yet. Generating this page creates at most '
-                    . MatchFeed::MAX_PAGE_SIZE . ' new predictions.',
+                    . $this->config->analysisBatchSize() . ' new predictions in this configured cycle.',
             ];
         }
         return $out;
     }
 
     /**
-     * Predict every stored fixture for a date that does not have a prediction
-     * yet, in batches of at most one page.
+     * Predict the configured cycle's stored fixtures for a date that do not
+     * have a prediction yet, in a batch of at most fifty.
      *
      * Matches that already carry a prediction for the model version in use are
      * skipped rather than rewritten: re-running this job is how a partly-filled
      * date gets finished, so it must cost nothing for the matches it already
      * handled. `$maxNew` caps how many *new* predictions one call may write
-     * (default: the analysis limit); each batch inside the call is capped at
-     * `MatchFeed::MAX_PAGE_SIZE` regardless.
+     * (default: the analysis limit). `$maxFixtures` is an internal caller cap
+     * for a shared multi-date cycle; it limits fixtures *evaluated*, including
+     * those honestly rejected on data quality, so an automatic cycle cannot
+     * exceed its configured total merely because some rows are not publishable.
      *
      * @return array{status:string, date:string, fixtures:int, analyzed:int, qualified:int, limited:int, rejected:int, predictions:list<array>, errors:list<string>, provider:string|null, model:array, skipped:int, frozen:int, failed:int, batches:int, maxNew:int}
      */
-    public function predictDay(string $date, ?string $providerId = null, ?int $maxNew = null): array
+    public function predictDay(string $date, ?string $providerId = null, ?int $maxNew = null, ?int $maxFixtures = null): array
     {
         $filter = ['date' => $date];
         if ($providerId !== null) $filter['providerId'] = (int) $providerId;
-        $analysisLimit = max(1, $this->config->analysisLimit());
-        $fixtures = $this->repo->listFixtures($filter, $analysisLimit);
-        $out = ['status' => 'COMPLETED', 'date' => $date, 'fixtures' => count($fixtures), 'analyzed' => 0, 'qualified' => 0, 'limited' => 0, 'rejected' => 0,
+        // One scheduled/on-demand day pass is one configured batch. The
+        // configuration itself is hard-capped at MatchFeed::MAX_PAGE_SIZE (50),
+        // which guarantees this path cannot silently turn a 50-match cycle into
+        // several 50-row sub-batches. A caller coordinating several dates may
+        // reserve a smaller part of that one cycle via `$maxFixtures`.
+        $configuredBatchSize = $this->config->analysisBatchSize();
+        $analysisLimit = $maxFixtures === null
+            ? $configuredBatchSize
+            : max(0, min($configuredBatchSize, $maxFixtures));
+        $model = $this->models->usable();
+        $modelVersionId = (int) ($model['model']['id'] ?? 0);
+        // Select pending fixtures ahead of already-stored ones. Without this,
+        // a 10-match cycle would keep re-reading the same first ten fixtures
+        // forever and never reach fixture eleven on a busy matchday. The scan
+        // only checks persisted identities in small database pages; it neither
+        // calls the provider nor calculates a prediction for a fixture outside
+        // this cycle's selected batch.
+        $availableFixtures = $this->repo->countFixtures($filter);
+        $fixtures = $analysisLimit > 0
+            ? $this->cycleFixtures($filter, $modelVersionId, $analysisLimit, $availableFixtures)
+            : [];
+        $out = ['status' => 'COMPLETED', 'date' => $date, 'fixtures' => count($fixtures),
+            'configuredBatchSize' => $configuredBatchSize, 'candidateLimit' => $analysisLimit,
+            'availableFixtures' => $availableFixtures, 'deferredFixtures' => max(0, $availableFixtures - count($fixtures)),
+            'analyzed' => 0, 'qualified' => 0, 'limited' => 0, 'rejected' => 0,
             // Fixtures whose pre-match slot had already closed are tallied apart,
             // so "we did not predict it in time" is never mistaken for "the data
             // was too thin to predict".
             'frozen' => 0, 'predictions' => [], 'errors' => [], 'skipped' => 0, 'refused' => 0, 'failed' => 0, 'batches' => 0,
-            'maxNew' => $maxNew ?? $analysisLimit, 'batchSize' => MatchFeed::MAX_PAGE_SIZE];
-        $model = $this->models->usable();
+            'maxNew' => min($analysisLimit, max(0, $maxNew ?? $analysisLimit)), 'batchSize' => $analysisLimit];
         $out['model'] = ['state' => $model['state'], 'label' => $model['label'], 'version' => $model['model']['model_version'] ?? null, 'reason' => $model['reason']];
         if ($fixtures === []) {
-            $out['status'] = DataState::UNAVAILABLE;
-            $out['reason'] = 'No fixture for ' . $date . ' is stored. The provider has not been reached for this date, so no prediction is produced.';
+            if ($analysisLimit <= 0) {
+                $out['status'] = 'SKIPPED';
+                $out['reason'] = 'The shared prediction-cycle limit was spent on an earlier date; this date was not evaluated in this cycle.';
+            } else {
+                $out['status'] = DataState::UNAVAILABLE;
+                $out['reason'] = 'No fixture for ' . $date . ' is stored. The provider has not been reached for this date, so no prediction is produced.';
+            }
             return $out;
         }
+        // `$maxNew` is accepted for callers that intentionally choose a
+        // smaller run, never a larger one than the configured cycle.
         $budget = max(0, min($analysisLimit, $maxNew ?? $analysisLimit));
         $attempted = [];
         while ($budget > 0) {
@@ -634,6 +741,44 @@ final class PredictionService
             }
         }
         return $out;
+    }
+
+    /**
+     * Pick the next persisted fixtures for one bounded prediction cycle.
+     *
+     * New slots are selected before already-predicted slots, allowing repeated
+     * scheduled cycles to progress through a matchday larger than the configured
+     * batch. When every fixture already has a record, the oldest page is used as
+     * the fallback so RegenerationPolicy can still refresh a prediction only
+     * when its evidence justifies it. This is a database-only selection pass;
+     * provider calls and prediction arithmetic remain limited to the returned
+     * fixtures.
+     *
+     * @param array<string,mixed> $filter
+     * @return list<array<string,mixed>>
+     */
+    private function cycleFixtures(array $filter, int $modelVersionId, int $limit, ?int $total = null): array
+    {
+        $limit = max(1, min(MatchFeed::MAX_PAGE_SIZE, $limit));
+        $total ??= $this->repo->countFixtures($filter);
+        $pending = [];
+        $fallback = [];
+        for ($offset = 0; $offset < $total && count($pending) < $limit; $offset += MatchFeed::MAX_PAGE_SIZE) {
+            $page = $this->repo->listFixtures($filter, MatchFeed::MAX_PAGE_SIZE, $offset);
+            if ($page === []) break;
+            $ids = array_values(array_filter(array_map(static fn(array $fixture): int => (int) ($fixture['id'] ?? 0), $page)));
+            $stored = $ids === [] ? [] : $this->repo->listPredictionsForFixtures($ids, self::KIND_PRE_MATCH, $modelVersionId);
+            foreach ($page as $fixture) {
+                $fixtureId = (int) ($fixture['id'] ?? 0);
+                if ($fixtureId > 0 && !isset($stored[$fixtureId])) {
+                    $pending[] = $fixture;
+                    if (count($pending) >= $limit) break;
+                } elseif (count($fallback) < $limit) {
+                    $fallback[] = $fixture;
+                }
+            }
+        }
+        return $pending !== [] ? $pending : array_slice($fallback, 0, $limit);
     }
 
     /** Predictions currently stored for a date (the board's read path). */

@@ -1101,6 +1101,12 @@ class Admin extends App_Controller
             $allowedManual = ['', 'MULTI', 'api-football', 'thesportsdb', 'sportmonks', 'http-provider'];
             $values['football_manual_provider'] = in_array($manual === 'multi' ? 'MULTI' : $manual, $allowedManual, true)
                 ? ($manual === 'multi' ? 'MULTI' : $manual) : '';
+            // A prediction cycle may analyze at most one bounded page. Keep
+            // the validation in the write path as well as the configuration
+            // and service layers, so an invalid/tampered Admin POST cannot
+            // make a scheduled cycle exceed fifty stored fixtures.
+            $batch = (int) ($values['football_analysis_batch_size'] ?? 50);
+            $values['football_analysis_batch_size'] = (string) max(1, min(\AIWorkforce\Football\MatchFeed::MAX_PAGE_SIZE, $batch));
         }
         $logged = array_keys($values);
         if ($category === 'signup') {

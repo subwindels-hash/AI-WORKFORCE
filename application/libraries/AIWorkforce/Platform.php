@@ -365,8 +365,9 @@ class Platform
     {
         try {
             if (!$model->db->table_exists('platform_settings')) return [];
-            $query = $model->db->where_in('k', ['football_provider_mode', 'football_manual_provider'])
-                ->get('platform_settings');
+            $query = $model->db->where_in('k', [
+                'football_provider_mode', 'football_manual_provider', 'football_analysis_batch_size',
+            ])->get('platform_settings');
             $rows = $query === false ? [] : $query->result_array();
         } catch (\Throwable $_) {
             return [];
@@ -379,6 +380,9 @@ class Platform
         }
         if (array_key_exists('football_manual_provider', $byKey)) {
             $out['WINDELS_FOOTBALL_MANUAL_PROVIDER'] = $byKey['football_manual_provider'];
+        }
+        if (array_key_exists('football_analysis_batch_size', $byKey)) {
+            $out['WINDELS_FOOTBALL_ANALYSIS_BATCH_SIZE'] = $byKey['football_analysis_batch_size'];
         }
         return $out;
     }

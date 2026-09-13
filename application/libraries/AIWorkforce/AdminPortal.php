@@ -55,6 +55,10 @@ class AdminPortal
         'football' => [
             'football_provider_mode' => 'AUTO',
             'football_manual_provider' => '',
+            // The configured maximum number of stored fixtures analyzed in
+            // one cycle. It is bounded again in FootballConfiguration and the
+            // prediction services, so a tampered form cannot exceed 50.
+            'football_analysis_batch_size' => '50',
         ],
     ];
 

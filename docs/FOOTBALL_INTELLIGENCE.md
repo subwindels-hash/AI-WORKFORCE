@@ -50,8 +50,8 @@ each panel exists exactly once in the product.
 | `OutcomePredictor.php` | probabilities, most likely scoreline, alternatives, confidence ceiling, evidence rows, reasons |
 | `CalibrationService.php` | temperature scaling fitted from settled predictions only; `CALIBRATION_PENDING` otherwise |
 | `ModelRegistry.php` | lifecycle states, transition guards, registration from the deployed fingerprint |
-| `PredictionService.php` | prediction storage, the §output contract, the post-kickoff freeze; `predictMissing()` generates only matches that have no prediction, `predictDay()` sweeps a date in 50-match batches and reuses what exists |
-| `MatchFeed.php` | the paginated feed: 50 matches per page, at most 50 NEW predictions per generation request, `match_id` de-duplication, competition and premium-league selection |
+| `PredictionService.php` | prediction storage, the §output contract, the post-kickoff freeze; `predictMissing()` generates only matches that have no prediction, while `predictDay()` advances through the next configured 1–50 stored fixtures per cycle |
+| `MatchFeed.php` | the paginated feed: 50 matches per read page, up to the configured 1–50 NEW predictions per generation request, `match_id` de-duplication, competition and premium-league selection |
 | `PredictionMarkets.php` | the odds-prediction markets: the catalogue, the evaluation of one market from the stored score distribution, and the odds a feed actually quoted |
 | `PredictionBoard.php` | the daily board for one page: date-wide summary counts, confidence categories, match cards, pager |
 | `LiveMatchService.php` | in-play board and `LIVE` estimate rows, never rewriting the pre-match row |
@@ -139,11 +139,14 @@ settled rows and says so, and `PerformanceService::report()` returns
   or old — it never dominates.
 * Displayed confidence is the calibrated value when a calibration exists, and the
   raw share capped by `50 + 45 × (dq/100)` when it does not. It is never 100%.
-* Board categories: `Highest Confidence` (≥ 80), `Strong Predictions` (75–79.99),
-  `Standard Predictions` (70–74.99), `Limited Data` (below 70 — both data that did
-  not clear the qualified threshold and qualified cards whose confidence sits
-  under the lowest cut line). Every card sits in exactly one category: paging
-  never makes an analyzed match disappear from the board.
+* Board categories use the configured confidence cuts (default: `Highest
+  Confidence` ≥60, `Strong Predictions` 52–59.99, `Standard Predictions`
+  45–51.99). For the requested compact notation, these qualified-data bands are
+  also exposed as **Category A**, **Category B** and **Category C**, respectively.
+  A `LIMITED` or lower-confidence prediction is deliberately **Unrated** — it is
+  kept in the Limited Data / Developing sections, rather than promoted into
+  Category C. Every analyzed card sits in exactly one board category: paging
+  never makes it disappear.
 
 ## Model lifecycle
 
@@ -170,10 +173,12 @@ Stored per version: `model_id`, `model_name`, `model_version`, `algorithm`,
 ## Predictions, live state and settlement
 
 * A prediction row stores the outcome probabilities, the raw probabilities, the
-  predicted score, expected total goals, the whole scoreline grid
-  (`football_score_probabilities`), confidence with its basis, the data-quality
-  score and band, model and calibration version ids, the feature snapshot, the
-  evidence rows, the reason, `generated_at` and `status_at_prediction`.
+  predicted score, **individual expected home and away goals** (with their
+  measured method/source) and expected total goals in its immutable feature
+  snapshot, the whole scoreline grid (`football_score_probabilities`), confidence
+  with its basis, the data-quality score and band, the assigned A/B/C (or
+  Unrated) category, model and calibration version ids, the feature snapshot,
+  the evidence rows, the reason, `generated_at` and `status_at_prediction`.
 * Predictions are frozen at kickoff: `PredictionService::frozenReason()` refuses a
   pre-match write once the match has started, and `savePrediction` refuses to
   overwrite a settled row. Postponed or cancelled fixtures are voided, not graded.
@@ -259,10 +264,13 @@ Page 3 → matches 101–120 generate these 20 → save      (120 stored, 0 outs
 Back to page 1 → the 50 rows are read back. Nothing is regenerated.
 ```
 
-The scheduled `predict` job fills a partly-predicted date the same way: it
-sweeps in 50-match batches (up to its `analysisLimit` budget) and skips every
-match that already has a row, so re-running it costs nothing for work already
-done.
+The example uses the default 50-match setting. If Admin configures 10 or 20,
+a read page still contains up to 50 stored fixtures but generation only attempts
+the configured number; the remainder is explicitly deferred. The scheduled
+`predict` job similarly selects the next pending stored fixtures first, up to
+that configured 1–50 ceiling. Today and tomorrow share the same ceiling in one
+scheduled cycle, and existing stored rows are skipped unless the stated
+regeneration policy permits a replacement.
 
 ## Selecting a competition, a premium league and a market
 
@@ -715,12 +723,16 @@ permission. Once a match has kicked off the prediction is frozen
   "homeTeam": "Manchester City",
   "awayTeam": "Everton",
   "status": "SCHEDULED",
+  "dataState": "AVAILABLE",
   "prediction": {
     "result": "HOME",
     "predictedScore": { "home": 2, "away": 0 },
     "probabilities": { "home": 0.71, "draw": 0.19, "away": 0.10 },
-    "confidence": 71.4
+    "confidence": 71.4,
+    "expectedGoals": { "home": 1.82, "away": 0.64, "method": "TEAM_VENUE_SPLITS", "source": "TEAM_VENUE_SPLITS" },
+    "category": { "code": "A", "label": "Category A", "tier": "Highest Confidence" }
   },
+  "alternativeScores": [{ "score": "1–0", "probability": 0.12 }, { "score": "2–1", "probability": 0.10 }],
   "dataQuality": { "score": 94, "status": "QUALIFIED" },
   "model": { "version": "v1+9f3c2a71", "calibrationVersion": "CALIBRATION_PENDING" },
   "reason": "Manchester City Win — 71% (raw 0.77, softened by …)",
@@ -880,6 +892,8 @@ that catalogue.
         "predictedScore": { "home": 2, "away": 0, "label": "2–0" },
         "probabilities": { "home": 0.71, "draw": 0.19, "away": 0.10 },
         "confidence": 71.4, "band": "QUALIFIED",
+        "expectedGoals": { "home": 1.82, "away": 0.64, "method": "TEAM_VENUE_SPLITS" },
+        "category": { "code": "A", "label": "Category A", "tier": "Highest Confidence" },
         "modelVersionId": 7, "predictionDate": "2026-09-05",
         "generatedAt": "2026-09-05T09:14:02+00:00"
       },
@@ -894,7 +908,7 @@ that catalogue.
     "hasPrevious": true, "hasNext": true, "previousPage": 1, "nextPage": 3
   },
   "generation": {
-    "requested": false, "batchLimit": 50,
+    "requested": false, "batchLimit": 50, "configuredBatchSize": 50,
     "generated": 0,            // new predictions written by THIS request
     "reused": 50,              // served from storage
     "remainingOnDate": 87,     // matches on the date with no prediction yet
@@ -990,8 +1004,9 @@ WINDELS_FOOTBALL_REFRESH_<BUCKET>=seconds    per-bucket cadence (fixtures, upcom
 WINDELS_FOOTBALL_BUDGET_<JOB>=n              requests one sweep may spend; 0 = database-only, -1 = unbounded (operator sync)
 WINDELS_FOOTBALL_MIN_REQUEST_SPACING_MS=250  spacing between provider requests
 WINDELS_FOOTBALL_DAILY_REQUEST_CEILING=0     fallback daily ceiling when a feed reports none
-WINDELS_FOOTBALL_ANALYSIS_LIMIT=120          fixtures one analysis pass may evaluate (1..500)
-WINDELS_FOOTBALL_MATCH_PAGE_SIZE=50          matches per page and per generation request (1..50, hard-capped in code)
+WINDELS_FOOTBALL_ANALYSIS_BATCH_SIZE=50     stored fixtures one prediction cycle may evaluate (1..50; Admin → System Settings → Football overrides)
+WINDELS_FOOTBALL_ANALYSIS_LIMIT=50            legacy alias for ANALYSIS_BATCH_SIZE; still supported and capped at 50
+WINDELS_FOOTBALL_MATCH_PAGE_SIZE=50           matches per read page (1..50, hard-capped in code); generation also honours ANALYSIS_BATCH_SIZE
 WINDELS_FOOTBALL_PREMIUM_COMPETITION=English Premier League   the featured ("Premium") league the console offers first
 WINDELS_FOOTBALL_PREMIUM_COMPETITION_ID=39   optional: pin it to a provider competition id instead of matching the name
 WINDELS_FOOTBALL_PREMIUM_COMPETITIONS=English Premier League  comma-separated list of leagues classified premium (names or
