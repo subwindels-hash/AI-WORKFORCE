@@ -258,7 +258,9 @@ class ConfidencePolicy
     {
         $min = null;
         foreach ($this->tiers as $tier) $min = $min === null ? $tier['minDataQuality'] : min($min, $tier['minDataQuality']);
-        return $min ?? self::DEFAULT_MIN_DATA_QUALITY;
+        $min = $min ?? self::DEFAULT_MIN_DATA_QUALITY;
+        // Never report (or accept) a floor beneath the hard data-quality gate.
+        return max(ConfigurationService::MIN_DATA_QUALITY_FLOOR, (int) $min);
     }
 
     /** The strictest confidence requirement in force (the top tier's). */
@@ -272,6 +274,11 @@ class ConfidencePolicy
     /** The tier a data-quality score falls into (null below the floor). */
     public function tierFor(int $dataQuality): ?array
     {
+        // The absolute data-quality gate is a hard floor that no derived or
+        // authored tier may undercut: 74 is rejected, 75 passes. An explicitly
+        // authored policy could otherwise publish a band below it and quietly
+        // admit evidence the operator's own floor forbids.
+        if ($dataQuality < ConfigurationService::MIN_DATA_QUALITY_FLOOR) return null;
         foreach ($this->tiers as $tier) {
             if ($dataQuality >= (int) $tier['minDataQuality']) return $tier;
         }

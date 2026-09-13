@@ -33,24 +33,24 @@ use AIWorkforce\Sports\ResultVerificationEngine;
 test('adaptive policy: the stock configuration produces the required data-quality bands', function () {
     $policy = ConfidencePolicy::fromConfiguration(ConfigurationService::defaults());
 
-    // Requirement #8, verbatim: >=85 normal/high, 75-84 moderate,
-    // 65-74 lower + safer markets only, <65 rejected.
+    // The ladder still brackets the configured quality floor, but spec §7 makes
+    // 75 a HARD gate: no tier may admit evidence below it, so the derived
+    // LIMITED band (70) is unreachable and 75 is the true reject floor.
     $tiers = $policy->tiers();
-    assert_equals(3, count($tiers), 'three predictable bands plus the reject floor');
+    assert_equals(3, count($tiers), 'three derived bands');
     assert_equals('EXCELLENT', $tiers[0]['tier']);
-    assert_equals(85, (int) $tiers[0]['minDataQuality']);
+    assert_equals(80, (int) $tiers[0]['minDataQuality']);
     assert_equals(30.0, (float) $tiers[0]['minConfidence'], 'the configured floor is the requirement at the best evidence');
     assert_equals('GOOD', $tiers[1]['tier']);
-    assert_equals(75, (int) $tiers[1]['minDataQuality']);
-    // Relief is applied per tier and clamped at the configurable floor (25),
-    // never at the shipped default — otherwise every band would collapse onto
-    // the same 30% bar and the ladder would stop being adaptive at all.
-    assert_equals(25.0, (float) $tiers[1]['minConfidence']);
+    assert_equals(70, (int) $tiers[1]['minDataQuality']);
+    // Relief is applied per tier and clamped at the confidence gate (30),
+    // which spec §6 makes the lowest requirement any band may demand.
+    assert_equals(30.0, (float) $tiers[1]['minConfidence']);
     assert_equals('LIMITED', $tiers[2]['tier']);
-    assert_equals(65, (int) $tiers[2]['minDataQuality']);
-    assert_equals(25.0, (float) $tiers[2]['minConfidence']);
+    assert_equals(60, (int) $tiers[2]['minDataQuality']);
+    assert_equals(30.0, (float) $tiers[2]['minConfidence']);
     assert_equals('SAFE', $tiers[2]['markets'], 'thin evidence is restricted to the safer markets');
-    assert_equals(65, $policy->minimumDataQuality(), 'below 65 nothing is predictable');
+    assert_equals(75, $policy->minimumDataQuality(), 'spec §7: below the hard 75 gate nothing is predictable');
 });
 
 test('adaptive policy: the ladder is configuration, not hard-coded — moving the floors moves every tier', function () {
@@ -66,8 +66,11 @@ test('adaptive policy: the ladder is configuration, not hard-coded — moving th
 
     $lenient = ConfidencePolicy::fromConfiguration(['min_confidence' => 60.0, 'min_data_quality' => 60]);
     assert_equals(60.0, $lenient->highestConfidenceRequirement());
-    assert_equals(50, $lenient->minimumDataQuality(), 'never below the assessable absolute floor');
-    assert_true($lenient->requiredConfidence(58) !== null, 'a deliberately lenient operator can reach further down');
+    // Spec §7: a lenient operator can lower their own bands, but never below
+    // the hard 75 data-quality gate — 74 stays unpredictable for everyone.
+    assert_equals(75, $lenient->minimumDataQuality(), 'never below the hard data-quality gate');
+    assert_null($lenient->requiredConfidence(74), 'quality 74 is rejected however lenient the policy');
+    assert_true($lenient->requiredConfidence(75) !== null, 'quality 75 is assessable');
 });
 
 test('adaptive policy: an explicitly authored policy overrides the derived ladder, and garbage is refused', function () {
@@ -79,8 +82,11 @@ test('adaptive policy: an explicitly authored policy overrides the derived ladde
         ]]),
     ]);
     assert_equals(82.0, $explicit->requiredConfidence(95), 'the authored tier wins over the derived one');
-    assert_equals(68.0, $explicit->requiredConfidence(72));
-    assert_equals('HOUSE_LOW', $explicit->tierFor(72)['tier']);
+    // Spec §7: an authored band below the hard 75 gate cannot admit evidence
+    // the operator's own floor forbids — 72 is refused, 76 uses HOUSE_LOW.
+    assert_null($explicit->requiredConfidence(72), 'an authored sub-75 band cannot undercut the hard gate');
+    assert_equals(68.0, $explicit->requiredConfidence(76));
+    assert_equals('HOUSE_LOW', $explicit->tierFor(76)['tier']);
 
     // Unusable input never silently becomes a policy.
     assert_null(ConfidencePolicy::normalizePolicy('not json'));
@@ -119,30 +125,40 @@ test('adaptive policy: below the reject band nothing qualifies, however confiden
     assert_equals(['DATA_QUALITY_BELOW_MINIMUM'], $verdict['reasons']);
     // Requirement #13: the reason names the score AND the minimum allowed.
     assert_contains('41', $verdict['explanation']);
-    assert_contains('65', $verdict['explanation']);
+    assert_contains('75', $verdict['explanation']);
     assert_null($verdict['requiredConfidence'], 'no confidence requirement is quoted for an unpredictable fixture');
 });
 
 test('adaptive policy: the LIMITED tier admits safer markets only — thin data never prices a thin line', function () {
-    $policy = ConfidencePolicy::fromConfiguration(ConfigurationService::defaults());
-    assert_equals('LIMITED', $policy->tierFor(68)['tier']);
+    // Spec §7 makes 75 a hard gate, so under the STOCK configuration the
+    // derived LIMITED band (60) is unreachable. An operator who raises their
+    // quality floor to 90 lifts the whole ladder and makes the restricted band
+    // land at 80-84, comfortably above the gate — that is the policy under
+    // test here, and quality below the hard gate is still refused outright.
+    $policy = ConfidencePolicy::fromConfiguration(['min_confidence' => 30.0, 'min_data_quality' => 90]);
+    assert_equals('LIMITED', $policy->tierFor(78)['tier']);
+    assert_null($policy->tierFor(74), 'quality 74 is below the hard data-quality gate');
 
     // Safe: two of three outcomes, or a line the game almost always clears.
-    assert_true($policy->marketAllowed(68, 'DOUBLE_CHANCE', 'HOME_OR_DRAW'));
-    assert_true($policy->marketAllowed(68, 'DRAW_NO_BET', 'HOME'));
-    assert_true($policy->marketAllowed(68, 'TOTAL_GOALS', 'OVER_0_5'));
-    assert_true($policy->marketAllowed(68, 'TOTAL_GOALS', 'UNDER_3_5'));
+    assert_true($policy->marketAllowed(78, 'DOUBLE_CHANCE', 'HOME_OR_DRAW'));
+    assert_true($policy->marketAllowed(78, 'DRAW_NO_BET', 'HOME'));
+    assert_true($policy->marketAllowed(78, 'TOTAL_GOALS', 'OVER_0_5'));
+    assert_true($policy->marketAllowed(78, 'TOTAL_GOALS', 'UNDER_3_5'));
     // Not safe on limited evidence.
-    assert_false($policy->marketAllowed(68, 'MATCH_RESULT', 'HOME'));
-    assert_false($policy->marketAllowed(68, 'BTTS', 'YES'));
-    assert_false($policy->marketAllowed(68, 'TOTAL_GOALS', 'OVER_2_5'));
+    assert_false($policy->marketAllowed(78, 'MATCH_RESULT', 'HOME'));
+    assert_false($policy->marketAllowed(78, 'BTTS', 'YES'));
+    assert_false($policy->marketAllowed(78, 'TOTAL_GOALS', 'OVER_2_5'));
     // The same markets are all fine once the evidence is there.
     assert_true($policy->marketAllowed(92, 'MATCH_RESULT', 'HOME'));
     assert_true($policy->marketAllowed(92, 'BTTS', 'YES'));
 
-    $verdict = $policy->evaluate(68, 90.0, 'BTTS', 'YES');
+    $verdict = $policy->evaluate(78, 90.0, 'BTTS', 'YES');
     assert_false($verdict['qualified'], 'a high confidence cannot buy a restricted market');
     assert_equals(['MARKET_RESTRICTED_AT_DATA_TIER'], $verdict['reasons']);
+    // …and below the hard gate the market question never even arises.
+    $belowGate = $policy->evaluate(74, 99.0, 'DOUBLE_CHANCE', 'HOME_OR_DRAW');
+    assert_false($belowGate['qualified']);
+    assert_equals(['DATA_QUALITY_BELOW_MINIMUM'], $belowGate['reasons']);
 });
 
 test('adaptive policy: an unmeasurable confidence is never treated as a passing one', function () {

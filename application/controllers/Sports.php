@@ -199,13 +199,34 @@ class Sports extends MY_Controller
         if (!$this->requireSportsPermission('sports.manage', 'generate odds prediction ticket')) return;
         @set_time_limit(180);
         $date = trim((string) $this->input->post('date'));
-        if ($date === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) $date = $this->ticketToday();
+        // Spec §21: an explicitly supplied date is honoured or refused — never
+        // silently swapped for today. Only an ABSENT date means "today".
+        if ($date === '') {
+            $date = $this->ticketToday();
+        } elseif (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            $this->flash('error', 'Generation refused: ' . mb_substr($date, 0, 40) . ' is not a valid date (expected YYYY-MM-DD). Nothing was generated.');
+            redirect('/sports');
+            return;
+        } else {
+            [$dateY, $dateM, $dateD] = array_map('intval', explode('-', $date));
+            if (!checkdate($dateM, $dateD, $dateY)) {
+                $this->flash('error', 'Generation refused: ' . $date . ' is not a real calendar date. Nothing was generated.');
+                redirect('/sports');
+                return;
+            }
+        }
         // force=1 clears the day's ACTIVE candidate state (no old pass odds can
         // be carried forward) before a clean regeneration runs.
         $force = (bool) $this->input->post('force');
         $sports = $this->platform->sports;
         try {
-            $result = $sports->dailyTickets->runDaily($date, null, $force ? ['force' => true] : []);
+            // Spec §1/§5: ONE service, and the run is attributed to the
+            // administrator who clicked Generate — never a blanket 'system'.
+            $options = ['actor' => $this->actor()];
+            if ($force) $options['force'] = true;
+            $result = \AIWorkforce\Sports\GenerationResult::fromRunDaily(
+                $sports->dailyTickets->runDaily($date, null, $options)
+            );
             if (($result['status'] ?? '') === 'RESET_FAILED') {
                 $this->flash('error', $result['message'] ?? 'Candidate reset failed');
                 redirect('/sports?date=' . urlencode($date));
@@ -216,35 +237,55 @@ class Sports extends MY_Controller
             redirect('/sports');
             return;
         }
+        // Canonical contract fields only (spec §1) — the same array the API
+        // returns, so the two surfaces can never disagree about an outcome.
         $status = (string) ($result['status'] ?? 'UNKNOWN');
         $ticketId = $result['ticketId'] ?? null;
-        $evaluated = (int) ($result['evaluated'] ?? 0);
-        $recorded = (int) ($result['predictionsRecorded'] ?? $result['predictions_recorded'] ?? 0);
+        $evaluated = (int) ($result['fixturesEvaluated'] ?? 0);
+        $recorded = (int) ($result['predictionsGenerated'] ?? 0);
         $rejections = (int) ($result['rejections'] ?? 0);
         $message = (string) ($result['message'] ?? '');
 
         if ($status === 'GENERATION_IN_PROGRESS') {
             $this->flash('notice', 'Odds prediction ticket generation is already in progress for ' . $date . '. Refresh shortly; no duplicate worker was started.');
-            redirect('/sports/odds-prediction-ticket');
+            redirect('/sports/odds-prediction-ticket?date=' . urlencode($date));
             return;
         }
-        // DUPLICATE_SKIPPED is intentionally not a daily-ticket outcome. An
-        // earlier attempt without a ticket is retryable; a valid ticket returns
-        // GENERATED with its existing id.
+        // Spec §20: a ticket that already exists for this date is reported as
+        // DUPLICATE_SKIPPED. Nothing is regenerated and no row is duplicated.
+        if ($status === 'DUPLICATE_SKIPPED') {
+            $this->flash('notice', sprintf(
+                'TICKET ALREADY GENERATED — Ticket ID %s for %s. Generation: already completed; no duplicate ticket or prediction rows were created.',
+                (string) $ticketId, $date));
+            redirect('/sports/odds-prediction-ticket?date=' . urlencode($date));
+            return;
+        }
         if ($ticketId) {
-            $headline = !empty($result['existing']) ? 'TICKET ALREADY GENERATED' : 'ODDS PREDICTION TICKET GENERATED';
-            $msg = sprintf('%s — Ticket ID %s for %s — status %s, %d evaluated, %d predictions, %d rejections. %s',
-                $headline, $ticketId, $date, $status, $evaluated, $recorded, $rejections, $message);
+            $msg = sprintf('🎯 ODDS PREDICTION TICKET GENERATED — Ticket ID %s for %s — status %s, %d fixtures evaluated, %d predictions, %d qualified candidates, %d selected picks. %s',
+                $ticketId, $date, $status, $evaluated, $recorded,
+                (int) ($result['qualifiedCandidates'] ?? 0), (int) ($result['selectedPicks'] ?? 0), $message);
             $this->flash('notice', $msg);
-            redirect('/sports/odds-prediction-ticket');
+            redirect('/sports/odds-prediction-ticket?date=' . urlencode($date));
+            return;
+        }
+        // Spec §8/§18: no provider configured is NOT a prediction outcome.
+        if ($status === 'NO_PROVIDER') {
+            $this->flash('error', sprintf('NO TICKET for %s — STATUS: NO_PROVIDER. SPORTS DATA PROVIDER NOT CONFIGURED — fixtures UNAVAILABLE, odds UNAVAILABLE, prediction engine WAITING FOR DATA. Configure a sports data provider (see Data feed), then run again — the day stays retryable.', $date));
+            redirect('/sports?date=' . $date);
             return;
         }
         if ($status === 'DATA_UNAVAILABLE') {
             // Every provider failed: a data outage, reported as such — never as "no qualified games".
             $ledger = [];
             foreach ((array) ($result['providerStatuses'] ?? []) as $pid => $st) $ledger[] = $pid . ': ' . $st;
-            $this->flash('error', sprintf('NO TICKET for %s — STATUS: DATA_UNAVAILABLE. All configured sports-data providers failed (%s). Matches evaluated: 0, predictions generated: 0. Fix or wait for the providers (see Data feed), then run again — the day stays retryable.',
+            $this->flash('error', sprintf('NO TICKET for %s — STATUS: DATA_UNAVAILABLE. Sports data temporarily unavailable: all configured sports-data providers failed (%s). No ticket was generated because verified data was unavailable. Fix or wait for the providers (see Data feed), then run again — the day stays retryable.',
                 $date, $ledger ? implode('; ', $ledger) : 'no detail'));
+            redirect('/sports?date=' . $date);
+            return;
+        }
+        // Spec §19: providers answered correctly but the day had no fixtures.
+        if ($status === 'NO_FIXTURES') {
+            $this->flash('notice', sprintf('NO TICKET for %s — STATUS: NO_FIXTURES. The provider answered successfully but returned no fixtures for this date. Nothing was fabricated and the day stays retryable.', $date));
             redirect('/sports?date=' . $date);
             return;
         }
@@ -254,11 +295,15 @@ class Sports extends MY_Controller
         // produced the unreadable triple-printed flash. Each fact is stated once.
         $hasFunnel = stripos($message, 'funnel:') !== false;
         $hasCounts = (bool) preg_match('/\(\d+ evaluated,/', $message);
+        // Spec §17: a NO_QUALIFIED_TICKET day must explain itself with the
+        // real, labelled gate breakdown — never a bare "no ticket generated".
         $summary = '';
-        if (!empty($result['rejectionSummary']) && is_array($result['rejectionSummary'])) {
+        if (!empty($result['gateFailures']) && is_array($result['gateFailures'])) {
             $parts = [];
-            foreach ($result['rejectionSummary'] as $k => $v) if (is_int($v)) $parts[] = $k . ':' . $v;
-            if ($parts) $summary = ' Rejections: ' . implode(', ', array_slice($parts, 0, 8)) . '.';
+            foreach ($result['gateFailures'] as $gate) {
+                $parts[] = (string) $gate['label'] . ': ' . (int) $gate['count'];
+            }
+            if ($parts) $summary = ' Rejection breakdown — ' . implode(', ', array_slice($parts, 0, 10)) . '.';
         }
         // Diagnostic funnel — which pipeline stage eliminated the candidates.
         $funnel = '';
@@ -282,7 +327,10 @@ class Sports extends MY_Controller
         // already state the outcome in words.
         $headline = $message !== '' ? $message : $status;
         if ($message !== '' && $status !== 'NO_QUALIFIED_TICKET') $headline = $status . ': ' . $message;
-        $counts = $hasCounts ? '' : sprintf(' (%d evaluated, %d predictions, %d rejections)', $evaluated, $recorded, $rejections);
+        $counts = $hasCounts ? '' : sprintf(' (%d fixtures evaluated, %d eligible, %d predictions, %d fresh odds, %d stale odds, %d qualified candidates, %d selected picks, %d rejections)',
+            $evaluated, (int) ($result['eligibleFixtures'] ?? 0), $recorded,
+            (int) ($result['freshOdds'] ?? 0), (int) ($result['staleOdds'] ?? 0),
+            (int) ($result['qualifiedCandidates'] ?? 0), (int) ($result['selectedPicks'] ?? 0), $rejections);
         $msg = sprintf('No qualified odds prediction ticket for %s — %s%s.%s%s',
             $date, $headline, $counts, $summary, $funnel);
         if ($status === 'NO_QUALIFIED_TICKET') {

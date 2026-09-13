@@ -15,7 +15,8 @@ test('configuration returns safe defaults before any admin change', function () 
     // shipped confidence default is 30 (see ConfigurationService::defaults());
     // 25 is only the lowest value an operator may configure.
     assert_equals(30.0, (float) $c['min_confidence']);
-    assert_equals(80, (int) $c['min_data_quality']);
+    // Spec §7: the hard data-quality gate is 75.
+    assert_equals(75, (int) $c['min_data_quality']);
     assert_equals(['MATCH_RESULT', 'TOTAL_GOALS', 'BTTS', 'DOUBLE_CHANCE', 'DRAW_NO_BET'], $c['allowed_markets'], 'every market the model can price and settle is allowed by default');
     assert_equals('RESTITUTE_ODDS', $c['void_policy']);
 });
@@ -42,12 +43,14 @@ test('configuration validation rejects malformed values', function () {
     assert_false($svc->update(['target_odds_min' => 8, 'target_odds_max' => 5], 'a')['ok']);
     assert_false($svc->update(['max_selections' => 0], 'a')['ok']);
     assert_true($svc->update(['min_confidence' => 70.0], 'a', 'a stricter 70 percent floor is still allowed')['ok']);
-    // A measured 25% read on verified data is a usable signal, so 25 is the
-    // lowest floor an operator may configure. The shipped default stays 30.
-    assert_true($svc->update(['min_confidence' => 30.0], 'a', 'the floor is not 70')['ok']);
-    assert_true($svc->update(['min_confidence' => 25.0], 'a', 'the configurable floor is 25')['ok']);
-    assert_false($svc->update(['min_confidence' => 24.99], 'a')['ok']);
-    assert_true($svc->update(['min_data_quality' => 50], 'a', 'quality floor is 50 too')['ok']);
+    // Spec §6: the configurable confidence range is 30-100. 30 is the lowest
+    // an operator may set and is also the shipped default; 29.99 is refused.
+    assert_true($svc->update(['min_confidence' => 30.0], 'a', 'the configurable floor is 30')['ok']);
+    assert_false($svc->update(['min_confidence' => 29.99], 'a')['ok'], '29.99 is below the confidence floor');
+    assert_false($svc->update(['min_confidence' => 25.0], 'a')['ok'], '25 is no longer configurable');
+    // Spec §7: the data-quality gate is a separate hard floor of 75.
+    assert_true($svc->update(['min_data_quality' => 75], 'a', 'the data-quality floor is 75')['ok']);
+    assert_false($svc->update(['min_data_quality' => 74], 'a')['ok'], '74 is below the data-quality floor');
     assert_false($svc->update(['min_data_quality' => 10], 'a')['ok']);
     assert_false($svc->update(['stake_amount' => 500, 'max_exposure' => 10], 'a')['ok']);
     assert_false($svc->update(['platform_mode' => 'MOON'], 'a')['ok']);

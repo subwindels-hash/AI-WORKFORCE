@@ -280,6 +280,17 @@ class SandboxSportsProvider implements SportsDataProvider
         return [$home, $teams[$awayIdx]];
     }
 
+    /**
+     * A deterministic "observed at" anchored to the fixture, capped at now so
+     * a future fixture never claims a future observation. Whole minutes keep
+     * it stable across a second boundary.
+     */
+    private function observedAtTs(string $day, int $slot): int
+    {
+        $twoHoursBefore = $this->kickoffTs($day, $slot) - 7200;
+        return (int) (min(time(), $twoHoursBefore) / 60) * 60;
+    }
+
     private function kickoffTs(string $day, int $slot): int
     {
         $hours = [14, 16, 19][$slot % 3];
@@ -293,7 +304,11 @@ class SandboxSportsProvider implements SportsDataProvider
             'externalId' => $ext, 'homeTeam' => $home, 'awayTeam' => $away,
             'competition' => $league, 'kickoff' => gmdate('c', $this->kickoffTs($day, $slot)),
             'status' => $status, 'sport' => 'football',
-            'sourceTimestamp' => gmdate('c'), 'provider' => $this->id(),
+            // Determinism includes the timestamps: gmdate('c') here made two
+            // instances constructed either side of a second tick disagree,
+            // which is exactly what the determinism test exists to catch.
+            // Anchor them to the fixture's own kickoff instead of "now".
+            'sourceTimestamp' => gmdate('c', $this->observedAtTs($day, $slot)), 'provider' => $this->id(),
             'simulated' => true,
             'homeTeamLogo' => $this->crestUrl($home),
             'awayTeamLogo' => $this->crestUrl($away),
@@ -304,7 +319,7 @@ class SandboxSportsProvider implements SportsDataProvider
                     'homeConcededPerMatch' => $form['homeConcededPerMatch'],
                     'awayConcededPerMatch' => $form['awayConcededPerMatch'],
                     'source' => $this->id() . ':simulated-form',
-                    'timestamp' => gmdate('c'),
+                    'timestamp' => gmdate('c', $this->observedAtTs($day, $slot)),
                 ],
                 'marketLiquidity' => 20000 + $this->randInt('liq:' . $ext, 0, 80000),
                 'restDays' => 2 + ($this->randInt('rest:' . $ext, 0, 2)),

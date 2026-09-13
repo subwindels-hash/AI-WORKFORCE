@@ -148,6 +148,13 @@ const server = http.createServer(async (req, res) => {
         'x-ai-workforce-cookie': req.headers.cookie ?? '',
         // The preview's login page displays the demo operator's credentials.
         'x-ai-workforce-demo-admin': JSON.stringify({ email: DEMO_ADMIN_EMAIL, password: DEMO_ADMIN_PASSWORD }),
+        // Opt-in deterministic sports feed for offline workflow testing:
+        //   WINDELS_SPORTS_SANDBOX=1 node server.mjs
+        // Off unless explicitly requested, so the default preview still shows
+        // the honest "no provider configured" state.
+        ...(process.env.WINDELS_SPORTS_SANDBOX === '1'
+          ? { 'x-ai-workforce-sports-sandbox': '1' }
+          : {}),
       },
       body: body.length ? body : undefined,
     });

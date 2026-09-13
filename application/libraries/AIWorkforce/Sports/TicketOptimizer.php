@@ -88,7 +88,12 @@ class TicketOptimizer
             ConfigurationService::MIN_CONFIDENCE_FLOOR,
             isset($config['minConfidence']) && is_numeric($config['minConfidence']) ? (float) $config['minConfidence'] : 30.0
         );
-        $minQuality = max(50, isset($config['minDataQuality']) && is_numeric($config['minDataQuality']) ? (int) $config['minDataQuality'] : 80);
+        // Spec §7: the data-quality hard gate. 74.99 is rejected, 75 passes —
+        // a caller may raise this floor but never lower it.
+        $minQuality = max(
+            ConfigurationService::MIN_DATA_QUALITY_FLOOR,
+            isset($config['minDataQuality']) && is_numeric($config['minDataQuality']) ? (int) $config['minDataQuality'] : ConfigurationService::MIN_DATA_QUALITY_FLOOR
+        );
         // The ADAPTIVE policy (requirements #1/#8), when the caller supplies
         // one: each candidate is then judged against the confidence its own
         // data quality earns, instead of one flat floor for the whole pool.

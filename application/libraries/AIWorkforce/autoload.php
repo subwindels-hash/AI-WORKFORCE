@@ -235,6 +235,7 @@ spl_autoload_register(static function (string $class) use ($ai_workforceDir): vo
     'AIWorkforce\\Sports\\FairValueEngine' => 'Sports/FairValueEngine.php',
     'AIWorkforce\\Sports\\FeatureEngineeringEngine' => 'Sports/FeatureEngineeringEngine.php',
     'AIWorkforce\\Sports\\FormResolver' => 'Sports/FormResolver.php',
+    'AIWorkforce\\Sports\\GenerationResult' => 'Sports/GenerationResult.php',
     'AIWorkforce\\Sports\\LiveScoreService' => 'Sports/LiveScoreService.php',
     'AIWorkforce\\Sports\\MatchIntelligenceEngine' => 'Sports/MatchIntelligenceEngine.php',
     'AIWorkforce\\Sports\\ModelDriftMonitor' => 'Sports/ModelDriftMonitor.php',
