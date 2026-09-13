@@ -24,10 +24,11 @@ namespace AIWorkforce\Sports;
  *
  *   1. PREFERRED  — every configured criterion is met (confidence floor,
  *      quality floor, positive value, risk, correlation cap, odds range).
- *   2. RELAXED_CONFIDENCE — the confidence floor is the only unmet criterion;
- *      candidates are ranked by confidence, then data quality, then expected
- *      value, then risk, then correlation, and the strongest non-correlated
- *      combination inside the configured odds range is taken.
+ *   2. RELAXED_CONFIDENCE — only a stricter configured/adaptive confidence
+ *      floor above the hard 30% gate is unmet; candidates are ranked by
+ *      confidence, then data quality, then expected value, then risk, then
+ *      correlation, and the strongest non-correlated combination inside the
+ *      configured odds range is taken.
  *
  * The correlation cap is deliberately NOT one of the things a fallback may
  * relax: requirement #10 asks for the strongest NON-CORRELATED combination,
@@ -38,6 +39,7 @@ namespace AIWorkforce\Sports;
  *     price are eligible — nothing is fabricated to fill a ticket;
  *   • expected value must be positive;
  *   • risk must be approved and never HIGH;
+ *   • measured confidence must be 30% and above;
  *   • two legs of the same match, or sharing a team, are never combined;
  *   • the configured combined-odds range is always respected;
  *   • selections are never padded to hit a target odds value.
@@ -161,13 +163,15 @@ class TicketOptimizer
         $eligible = $this->rank($eligible);
         // The PREFERRED pool: eligible AND every soft criterion met too.
         $preferred = array_values(array_filter($eligible, fn(array $r): bool => $r['softReasons'] === []));
-        // The fallback pool keeps the quality floor (a ticket must still rest
-        // on assessable data) and the adaptive tier's market restriction (a
-        // market its evidence cannot support stays out at every tier) but
-        // admits a missed confidence floor.
+        // The fallback pool keeps the hard gates: a ticket must still rest on
+        // assessable data, an evidence tier may still restrict a market, and a
+        // leg must still measure at least 30% confidence. Fallback can relax
+        // only a stricter configured/adaptive confidence requirement above
+        // that platform floor.
         $relaxed = array_values(array_filter($eligible, fn(array $r): bool => !in_array('LOW_DATA_QUALITY', $r['softReasons'], true)
             && !in_array('MARKET_RESTRICTED_AT_DATA_TIER', $r['softReasons'], true)
-            && $r['confidence'] !== null));
+            && $r['confidence'] !== null
+            && (float) $r['confidence'] + 1e-9 >= ConfigurationService::MIN_CONFIDENCE_FLOOR));
 
         $attempts = [];
         $tiers = [
@@ -363,7 +367,7 @@ class TicketOptimizer
         return sprintf(
             'FALLBACK (%s): no combination cleared the %.0f%% confidence floor, so the strongest non-correlated candidates '
             . 'ranked by confidence → data quality → expected value → risk → correlation were selected instead%s. '
-            . 'Every leg is still a real prediction with positive expected value, approved risk and a quoted price.',
+            . 'Every leg is still a real prediction with 30%+ measured confidence, positive expected value, approved risk and a quoted price.',
             $tier, $minConfidence, $lowest === null ? '' : sprintf(' (lowest leg confidence %.2f%%)', $lowest)
         );
     }

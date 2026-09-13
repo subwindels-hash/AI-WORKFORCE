@@ -11,9 +11,9 @@ test('configuration returns safe defaults before any admin change', function () 
     [, , $svc] = fx_config_audit();
     $c = $svc->active();
     assert_equals('USER_APPROVAL_REQUIRED', $c['engine_mode']);
-    // Qualified-ticket policy defaults: 30%+ confidence, 80+ quality. The
+    // Qualified-ticket policy defaults: 30%+ confidence, 75+ quality. The
     // shipped confidence default is 30 (see ConfigurationService::defaults());
-    // 25 is only the lowest value an operator may configure.
+    // 30 is also the lowest value an operator may configure.
     assert_equals(30.0, (float) $c['min_confidence']);
     // Spec §7: the hard data-quality gate is 75.
     assert_equals(75, (int) $c['min_data_quality']);

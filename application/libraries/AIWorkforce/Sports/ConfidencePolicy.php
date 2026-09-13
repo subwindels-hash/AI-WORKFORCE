@@ -22,8 +22,9 @@ namespace AIWorkforce\Sports;
  *   Data Quality >= 85  → EXCELLENT: the normal/high confidence requirement
  *   Data Quality 75–84  → GOOD:      a moderate requirement
  *   Data Quality 65–74  → LIMITED:   a lower requirement, and only the safer
- *                                    supported markets may be used
- *   Data Quality < 65   → REJECT:    no prediction is qualified at all
+ *                                    supported markets may be used when the
+ *                                    deployment's hard data-quality floor allows it
+ *   Below the hard data-quality floor → REJECT: no prediction is qualified at all
  *
  * Every number above is a CONFIGURATION VALUE, resolved in this one place:
  *
@@ -133,8 +134,8 @@ class ConfidencePolicy
      * and one step below is the LIMITED tier (thinner evidence, a lower bar,
      * and safer markets only). Moving either configured floor moves the whole
      * ladder with it, which is what keeps the policy configurable instead of
-     * hard-coded — with the stock 75 / 80 configuration the bands come out at
-     * exactly the requested >=85 / 75-84 / 65-74 / <65.
+     * hard-coded. Whatever the configured ladder, confidence requirements are
+     * never allowed below the 30% hard gate.
      */
     public const TIER_QUALITY_STEP = 5;      // quality points between EXCELLENT and GOOD
     public const LIMITED_QUALITY_STEP = 10;  // further quality points down to LIMITED
@@ -146,7 +147,7 @@ class ConfidencePolicy
     /**
      * The derived ladder. Never below the absolute assessable floor, never
      * two tiers on the same threshold, and never a confidence requirement
-     * outside [0, 100].
+     * outside [30, 100].
      *
      * @return array{tiers:list<array>,safeMarkets:array<string,list<string>>}
      */
@@ -169,10 +170,9 @@ class ConfidencePolicy
             $tiers[] = [
                 'tier' => $name,
                 'minDataQuality' => $threshold,
-                // Clamp to the configurable floor, NOT to the shipped default:
-                // clamping at 30 made every tier demand the same 30% under the
-                // stock 30/80 configuration, collapsing the adaptive ladder and
-                // erasing the per-tier relief entirely.
+                // Clamp to the platform hard floor: adaptive relief can lower a
+                // stricter tier, but no derived requirement may admit confidence
+                // below 30%.
                 'minConfidence' => round(max(ConfigurationService::MIN_CONFIDENCE_FLOOR, $top - $relief), 2),
                 'markets' => $markets,
             ];
@@ -183,12 +183,15 @@ class ConfidencePolicy
 
     /**
      * Validate + canonicalise a policy document. Returns null when the input
-     * carries no usable policy (so the next source in the chain is used); an
-     * unusable tier is dropped rather than silently reinterpreted.
+     * carries no usable policy (so the next source in the chain is used).
+     * By default unusable tiers are dropped so legacy/env policy documents can
+     * be salvaged without ever admitting sub-30 confidence. Configuration
+     * validation passes `$strict = true`, where any bad tier invalidates the
+     * document instead of being silently ignored.
      *
      * @return array{tiers:list<array>,safeMarkets:array<string,list<string>>}|null
      */
-    public static function normalizePolicy($policy): ?array
+    public static function normalizePolicy($policy, bool $strict = false): ?array
     {
         if (is_string($policy)) {
             $policy = trim($policy);
@@ -204,12 +207,17 @@ class ConfidencePolicy
 
         $tiers = [];
         foreach ((array) $rawTiers as $row) {
-            if (!is_array($row)) continue;
-            if (!isset($row['minDataQuality'], $row['minConfidence'])) continue;
-            if (!is_numeric($row['minDataQuality']) || !is_numeric($row['minConfidence'])) continue;
+            if (!is_array($row)) { if ($strict) return null; continue; }
+            if (!isset($row['minDataQuality'], $row['minConfidence'])) { if ($strict) return null; continue; }
+            if (!is_numeric($row['minDataQuality']) || !is_numeric($row['minConfidence'])) { if ($strict) return null; continue; }
             $quality = (int) $row['minDataQuality'];
             $confidence = (float) $row['minConfidence'];
-            if ($quality < 0 || $quality > 100 || $confidence < 0 || $confidence > 100) continue;
+            // Authored tiers may be stricter, but never looser than the
+            // platform's hard confidence gate: a prediction must measure 30%
+            // or above to qualify anywhere in the ticket engine.
+            if ($quality < 0 || $quality > 100
+                || $confidence < ConfigurationService::MIN_CONFIDENCE_FLOOR
+                || $confidence > 100) { if ($strict) return null; continue; }
             $markets = $row['markets'] ?? 'ALL';
             if (is_string($markets)) $markets = strtoupper(trim($markets));
             $tiers[] = [

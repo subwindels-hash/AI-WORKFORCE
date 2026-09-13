@@ -317,11 +317,11 @@ test('odds integrity E2E: fixtures without any odds evaluate fully but force no 
     assert_equals([], $repo->odds, 'no odds rows means no stored odds');
 });
 
-test('qualified policy: built-in defaults demand 30%+ confidence, 80+ quality, LOW correlation', function () {
+test('qualified policy: built-in defaults demand 30%+ confidence, 75+ quality, LOW correlation', function () {
     $defaults = ConfigurationService::defaults();
     // The shipped confidence default is 30; the adaptive ladder (see
     // 146-adaptive-confidence-policy) is what separates the data-quality
-    // bands, and 25 is the lowest value an operator may configure.
+    // bands, and 30 is the lowest value an operator may configure.
     assert_equals(30.0, (float) $defaults['min_confidence'], 'the shipped default confidence floor is 30');
     // Spec §7: the hard data-quality gate is 75 (74.99 rejected, 75 passes).
     assert_equals(75, (int) $defaults['min_data_quality']);
@@ -331,7 +331,8 @@ test('qualified policy: built-in defaults demand 30%+ confidence, 80+ quality, L
     assert_equals(5.0, (float) $defaults['target_odds_min']);
     assert_equals(8.0, (float) $defaults['target_odds_max']);
     assert_equals('USER_APPROVAL_REQUIRED', $defaults['engine_mode']);
-    // Operators may still lower the floors explicitly (append-only, audited).
+    // Operators may raise the floors, or lower them back to the hard gates
+    // explicitly (append-only, audited).
     $service = new ConfigurationService(new SportsRepositoryStub(), fx140_audit());
     // Spec §6/§7: an operator may raise the floors, and the lowest values the
     // engine accepts are exactly the two hard gates (confidence 30, quality 75).

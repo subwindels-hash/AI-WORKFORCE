@@ -90,7 +90,7 @@ class ConfigurationService
             'max_selections' => 5,
             'risk_level' => 'CONSERVATIVE',
             // Qualified-ticket policy: predictions must have measured confidence
-            // >= the configured minimum (30% by default), data quality 80+,
+            // >= the configured minimum (30% by default), data quality 75+,
             // positive value and LOW correlation between legs. Anything weaker
             // is rejected and the day honestly reports NO QUALIFIED TICKET
             // instead of a forced combination. Changes remain append-only and
@@ -100,11 +100,10 @@ class ConfigurationService
             'max_correlation' => 'LOW',
             'min_data_quality' => 75,
             // Adaptive confidence policy (requirements #1/#8). NULL means the
-            // tiers are DERIVED from the two floors above: with the stock
-            // 30 / 80 that is data quality >=85 → 30% confidence required,
-            // 75-84 → 70%, 65-74 → 65% and safer markets only, <65 → rejected.
-            // Set it explicitly to author the tiers directly; nothing in the
-            // engine hard-codes a threshold.
+            // tiers are DERIVED from the two floors above, but every tier is
+            // still bounded by the hard gates: 30%+ confidence and 75+ data
+            // quality. Set it explicitly to author the tiers directly; nothing
+            // in the engine may admit a sub-30 confidence reading.
             'confidence_policy' => null,
             'min_liquidity' => null,
             // Every market the model can price AND settle (requirement #5).
@@ -186,7 +185,7 @@ class ConfigurationService
     private static function encodePolicy($policy): ?string
     {
         if ($policy === null || $policy === '' || $policy === []) return null;
-        $normalized = ConfidencePolicy::normalizePolicy($policy);
+        $normalized = ConfidencePolicy::normalizePolicy($policy, true);
         return $normalized === null ? null : json_encode($normalized);
     }
 
@@ -218,13 +217,11 @@ class ConfigurationService
         if ($min <= 1.0 || $max <= $min) return 'target odds range must satisfy 1.0 < min <= max';
         $maxSel = (int) $c['max_selections'];
         if ($maxSel < 1 || $maxSel > 12) return 'max_selections must be within [1, 12]';
-        // The configurable floor is 25, not 30: a legitimately measured 25%
-        // read on verified data is a usable signal and an operator is allowed
-        // to admit it. This only widens what an operator MAY configure — the
-        // shipped default remains 30 (ConfigurationService::defaults()), and
-        // the adaptive ladder still derives from whatever is configured, so
-        // nothing is loosened unless an administrator explicitly lowers it.
-        // Confidence is never inflated to clear a floor; see ConfidencePolicy.
+        // The configurable floor is 30: a legitimately measured 29.99%
+        // read is still below the eligibility gate, while 30.00% and above can
+        // qualify when every other gate passes. Administrators may raise the
+        // floor, but no configuration path may lower it. Confidence is never
+        // inflated to clear a floor; see ConfidencePolicy.
         $conf = (float) $c['min_confidence'];
         if ($conf < self::MIN_CONFIDENCE_FLOOR || $conf > 100) {
             return 'min_confidence must be within [' . (int) self::MIN_CONFIDENCE_FLOOR . ', 100]';
@@ -239,8 +236,8 @@ class ConfigurationService
         // believe tiers are in force that are not.
         $policy = $c['confidence_policy'] ?? null;
         if ($policy !== null && $policy !== '' && $policy !== []) {
-            if (ConfidencePolicy::normalizePolicy($policy) === null) {
-                return 'confidence_policy must be a list of tiers, each with numeric minDataQuality and minConfidence within [0, 100]';
+            if (ConfidencePolicy::normalizePolicy($policy, true) === null) {
+                return 'confidence_policy must be a list of tiers, each with numeric minDataQuality within [0, 100] and minConfidence within [' . (int) self::MIN_CONFIDENCE_FLOOR . ', 100]';
             }
         }
         if ((float) $c['max_exposure'] <= 0) return 'max_exposure must be > 0';
