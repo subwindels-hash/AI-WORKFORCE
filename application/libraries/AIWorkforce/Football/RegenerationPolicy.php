@@ -110,7 +110,7 @@ final class RegenerationPolicy
         }
 
         $status = strtoupper((string) ($fixture['status'] ?? ''));
-        if (in_array($status, ['POSTPONED', 'CANCELLED', 'SUSPENDED', 'LIVE'], true)) {
+        if (in_array($status, array_merge(['POSTPONED', 'CANCELLED', 'SUSPENDED'], FixtureSyncService::LIVE_STATUSES), true)) {
             $codes[] = self::R_STATUS;
             $reasons[] = 'The fixture status is now ' . $status . '; the prediction was made against a scheduled match.';
         }

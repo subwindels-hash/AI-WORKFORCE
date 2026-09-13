@@ -516,7 +516,7 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         <div class="football-section__heading">
           <div class="football-section__title">
             <div>
-              <p class="football-eyebrow">In play</p>
+              <p class="football-eyebrow">Live now</p>
               <h3 id="live-heading">Live Match</h3>
             </div>
           </div>
@@ -526,7 +526,10 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
             <span class="dot synth" id="football-live-poll-dot" title="Auto-refresh status"></span>
             <span id="football-live-poll-note">Auto-refresh on — live match updates appear here automatically, immediately after the provider reports them.</span>
           </div>
-          <?php $liveMatches = is_array($live['matches'] ?? null) ? $live['matches'] : []; ?>
+          <?php $liveMatches = array_values(array_filter(is_array($live['matches'] ?? null) ? $live['matches'] : [], static function ($match): bool {
+              $fixture = is_array($match['fixture'] ?? null) ? $match['fixture'] : [];
+              return in_array(strtoupper((string) ($fixture['status'] ?? '')), \AIWorkforce\Football\FixtureSyncService::LIVE_STATUSES, true);
+          })); ?>
           <div class="football-live-list" id="football-live-list">
             <?php if ($liveMatches === []): ?>
               <p class="football-help" id="football-live-empty">No match is currently live.</p>
@@ -644,6 +647,15 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
     return url ? '<img class="football-live-crest" src="' + esc(url) + '" alt="" width="18" height="18" loading="lazy">' : '';
   }
 
+  function isLiveMatch(match){
+    var fixture = match.fixture || {};
+    var live = match.live || {};
+    var status = String(fixture.status || '').toUpperCase();
+    var state = String(live.state || '').toUpperCase();
+    return ['LIVE','HALFTIME','EXTRA_TIME','PENALTIES'].indexOf(status) >= 0
+      || ['IN_PLAY','LIVE','HALFTIME','EXTRA_TIME','PENALTIES','LIMITED_DATA'].indexOf(state) >= 0;
+  }
+
   function snapshot(match){
     var fixture = match.fixture || {};
     var state = match.live || {};
@@ -710,7 +722,8 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         return response.json();
       })
       .then(function(data){
-        var changed = render(Array.isArray(data.matches) ? data.matches : []);
+        var matches = Array.isArray(data.matches) ? data.matches.filter(isLiveMatch) : [];
+        var changed = render(matches);
         setStatus(liveMessage + (changed ? ' Latest update received.' : ''), 'up');
       })
       .catch(function(error){

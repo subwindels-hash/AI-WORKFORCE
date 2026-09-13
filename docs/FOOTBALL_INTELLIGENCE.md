@@ -189,7 +189,11 @@ Stored per version: `model_id`, `model_name`, `model_version`, `algorithm`,
 * The 30-day panel is `SELECT`-aggregated over settled rows: evaluated count,
   correct results, result accuracy, exact-score accuracy, average confidence,
   Brier, ECE, log loss, average data quality, average goal error, plus the
-  per-model breakdown over the same window.
+  per-model breakdown over the same window. Legacy settlement rows that are
+  missing copied metric columns are repaired from the frozen settlement facts
+  first, then the joined immutable prediction row and stored final result; mixed
+  modern/legacy windows are averaged over the full evaluated set rather than over
+  only the non-null settlement columns.
 
 ## Paging: 50 matches at a time
 
@@ -763,6 +767,12 @@ GET /api/football/providers            the provider catalogue behind the Data Pr
 GET /api/football/providers/health     per-provider health: status, response time, rate limit, coverage, odds, what is missing
 GET /api/football/matches/fetch        ?provider=AUTO&competition=&date=&dateFrom=&dateTo=&limit=50&with=lineups&refresh=1
 ```
+
+The Live Match endpoint and console panel only return in-play statuses (`LIVE`,
+`HALFTIME`, `EXTRA_TIME`, `PENALTIES`) that were confirmed recently. When a
+successful live-provider snapshot no longer includes a fixture, the row is moved
+to `STALE_LIVE` and removed from the panel immediately; its last in-play score is
+cleared so settlement waits for the results endpoint to confirm the final score.
 
 Mutations require the native session plus the CSRF token (header or body field),
 then the capability named. They take a JSON body:

@@ -102,15 +102,27 @@ interface FootballRepository
     /** @return array<string,mixed>|null */
     public function findFixture(int $providerId, string $externalId): ?array;
     /**
-     * Filter keys: date, from, to, status, competition, team, providerId,
-     * unsettledOnly, competitionExternalId (one league), competitionExternalIds
-     * (a group of leagues — the "all premium leagues" selection; an empty list
-     * matches nothing). Rows are ordered by kickoff then id, so a page
-     * boundary is stable: match 51 of a date is the same row on every call.
+     * Filter keys: date, from, to, status (string or list), competition, team,
+     * providerId, unsettledOnly, competitionExternalId (one league),
+     * competitionExternalIds (a group of leagues — the "all premium leagues"
+     * selection; an empty list matches nothing). Rows are ordered by kickoff
+     * then id, so a page boundary is stable: match 51 of a date is the same row
+     * on every call.
      *
      * @return array<int,array<string,mixed>>
      */
     public function listFixtures(array $filter = [], int $limit = 500, int $offset = 0): array;
+
+    /**
+     * A successful live-provider response is the current live set for that
+     * provider. Any previously in-play fixture from the same provider that is no
+     * longer present is taken off the live board immediately, without deleting
+     * the fixture or reusing its last live score as a final score.
+     *
+     * @param list<string> $activeExternalIds provider fixture ids still reported live
+     * @return int number of fixture rows taken out of the live set
+     */
+    public function expireMissingLiveFixtures(int $providerId, array $activeExternalIds, string $observedAt): int;
 
     /**
      * How many fixtures a filter matches, without loading them. Pagination
@@ -179,6 +191,8 @@ interface FootballRepository
     public function findCalibration(int $id): ?array;
     /** @return array<int,array<string,mixed>> */
     public function listCalibrations(?int $modelVersionId = null, ?string $status = null, int $limit = 50): array;
+    /** Exact count for model summaries; unlike listCalibrations(), this is never page-limited. */
+    public function countCalibrations(?int $modelVersionId = null, ?string $status = null): int;
     /** @param array<string,mixed> $patch */
     public function updateCalibration(int $id, array $patch): void;
 
@@ -281,12 +295,14 @@ interface FootballRepository
     /** Filter keys: modelVersionId, from, to. @return array<int,array<string,mixed>> */
     public function listSettlements(array $filter = [], int $limit = 2000): array;
     /** Aggregate counts computed in SQL over the settlement table (never in
-     *  the UI layer). Keys: evaluated, correctResults, correctScores,
-     *  avgConfidence, avgDataQuality, sumBrier, sumLogLoss. */
+     *  the UI layer). Keys include evaluated, correctResults, correctScores,
+     *  averageConfidence, averageDataQuality, averageGoalError, brier, logLoss,
+     *  plus metric-missing counters for legacy rows. */
     public function settlementAggregates(array $filter = []): array;
     /**
-     * Settled predictions joined to their stored probability row — the only
-     * sample set calibration and performance measurement may use.
+     * Settled predictions plus their frozen probabilities, with the prediction
+     * row joined when it still exists for raw-probability calibration and legacy
+     * metric repair.
      *
      * @param array{modelVersionId?:int,from?:string,to?:string,limit?:int,calibrationState?:string} $filter
      * @return list<array<string,mixed>>

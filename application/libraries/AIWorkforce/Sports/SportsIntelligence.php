@@ -411,6 +411,159 @@ class SportsIntelligence
         catch (\Throwable $e) { return DailyTicketDate::today($timezone); }
     }
 
+    /** Metric keys printed in the /sports generation-run sidebar. */
+    private const DASHBOARD_RUN_METRIC_KEYS = [
+        'eligibleFixtures',
+        'fixturesEvaluated',
+        'predictionsGenerated',
+        'fixturesWithFreshOdds',
+        'fixturesRejectedStaleOdds',
+        'correlationQualifiedCandidates',
+        'finalQualifiedCandidates',
+    ];
+
+    /** @return array<string,int|null> */
+    private static function emptyDashboardRunMetrics(): array
+    {
+        return array_fill_keys(self::DASHBOARD_RUN_METRIC_KEYS, null);
+    }
+
+    private static function numericMetric(array $source, string $key): ?int
+    {
+        if (!array_key_exists($key, $source)) return null;
+        $value = $source[$key];
+        if ($value === null || $value === '' || !is_numeric($value)) return null;
+        return max(0, (int) $value);
+    }
+
+    private static function firstNumericMetric(array ...$candidates): ?int
+    {
+        foreach ($candidates as $candidate) {
+            if (!isset($candidate[0], $candidate[1]) || !is_array($candidate[0])) continue;
+            $value = self::numericMetric($candidate[0], (string) $candidate[1]);
+            if ($value !== null) return $value;
+        }
+        return null;
+    }
+
+    /** Sum numeric rejection-summary buckets while ignoring provider ledgers and diagnostics arrays. */
+    private static function rejectionCount(array $summary, array $keys): int
+    {
+        $total = 0;
+        foreach ($keys as $key) {
+            $value = $summary[(string) $key] ?? null;
+            if (is_numeric($value)) $total += max(0, (int) $value);
+        }
+        return $total;
+    }
+
+    private static function distinctCount(array $rows, string $field): int
+    {
+        $seen = [];
+        foreach ($rows as $row) {
+            if (!is_array($row) || !isset($row[$field]) || (string) $row[$field] === '') continue;
+            $seen[(string) $row[$field]] = true;
+        }
+        return count($seen);
+    }
+
+    /**
+     * Normalize the generation-run funnel used by /sports.
+     *
+     * Newer DailyTicketService rows carry `_diagnostics`, which is the primary
+     * source. Legacy rows may only have the daily counters, rejection buckets,
+     * predictions and ticket selections; those are still persisted facts, so the
+     * sidebar can show the best reconstructable values instead of misleading
+     * zeros. A missing daily row remains unavailable (`null`) because no run was
+     * recorded for that date.
+     *
+     * @return array<string,int|null>
+     */
+    private function dashboardRunMetrics(?array $daily, ?array $ticket, array $ticketSelections, array $todayPredictions): array
+    {
+        $metrics = self::emptyDashboardRunMetrics();
+        if ($daily === null) return $metrics;
+
+        $summary = is_array($daily['rejection_summary'] ?? null) ? $daily['rejection_summary'] : [];
+        $diag = is_array($summary['_diagnostics'] ?? null) ? $summary['_diagnostics'] : [];
+        $runSummary = is_array($diag['runSummary'] ?? null) ? $diag['runSummary'] : [];
+
+        $selectedPicks = count($ticketSelections);
+        if ($ticket !== null) {
+            $ticketSelectionCount = self::numericMetric($ticket, 'selection_count');
+            if ($ticketSelectionCount !== null) $selectedPicks = max($selectedPicks, $ticketSelectionCount);
+        }
+        $selectedMatches = self::distinctCount($ticketSelections, 'match_id');
+        $selectedPredictionIds = self::distinctCount($ticketSelections, 'prediction_id');
+        $qualifiedPredictions = array_values(array_filter($todayPredictions, static fn($p): bool => is_array($p) && ($p['decision'] ?? '') === 'PREDICTION_READY'));
+
+        $fixturesEvaluated = self::firstNumericMetric([$diag, 'fixturesEvaluated'], [$daily, 'candidates_evaluated'], [$runSummary, 'matchesDiscovered']);
+        if ($fixturesEvaluated === null) $fixturesEvaluated = 0;
+
+        $fixtureStageRejected = self::rejectionCount($summary, [
+            'FIXTURE_NOT_NS_OR_TOO_SOON', 'MATCH_FINISHED', 'MATCH_ALREADY_STARTED', 'KICKOFF_TOO_CLOSE',
+            'MATCH_NOT_FOUND', 'MATCH_STATUS_INVALID', 'MATCH_DATA_INVALID', 'NOT_SUPPORTED_SPORT',
+        ]);
+        $eligibleFixtures = self::firstNumericMetric([$diag, 'eligibleFixtures'], [$runSummary, 'matchesEvaluated']);
+        if ($eligibleFixtures === null) $eligibleFixtures = max(0, $fixturesEvaluated - $fixtureStageRejected);
+
+        $staleOdds = self::firstNumericMetric([$diag, 'fixturesRejectedStaleOdds']);
+        if ($staleOdds === null) $staleOdds = self::rejectionCount($summary, ['STALE_ODDS', 'ODDS_STALE']);
+
+        $oddsStageRejected = $staleOdds + self::rejectionCount($summary, [
+            'ODDS_UNAVAILABLE', 'SUPPORTED_ODDS_UNAVAILABLE', 'MARKET_UNAVAILABLE', 'ODDS_TIMESTAMP_INVALID',
+            'ODDS_INVALID', 'UNPRICEABLE_MARKET', 'NO_QUOTABLE_PRICE', 'UNREALISTIC_ODDS',
+            'MARKET_SUSPENDED', 'NO_SUPPORTED_MARKET',
+        ]);
+        $freshOdds = self::firstNumericMetric([$diag, 'fixturesWithFreshOdds']);
+        if ($freshOdds === null) $freshOdds = max(0, $eligibleFixtures - $oddsStageRejected);
+
+        // If a legacy row's rejection buckets are incomplete, stored decisions
+        // and selected legs still prove at least these many fixtures/markets
+        // reached later stages of the same run. They are lower bounds, never
+        // guesses.
+        $predictionFixtureFloor = self::distinctCount($todayPredictions, 'match_id');
+        $freshOdds = max($freshOdds, $predictionFixtureFloor, $selectedMatches);
+        $eligibleFixtures = max($eligibleFixtures, $freshOdds, $selectedMatches);
+        $fixturesEvaluated = max($fixturesEvaluated, $eligibleFixtures);
+
+        $predictionsGenerated = self::numericMetric($diag, 'predictionsGenerated');
+        if ($predictionsGenerated === null) {
+            $predictionsGenerated = max(
+                (int) (self::numericMetric($runSummary, 'predictionsGenerated') ?? 0),
+                (int) (self::numericMetric($daily, 'predictions_recorded') ?? 0),
+                count($todayPredictions),
+                $selectedPredictionIds
+            );
+        } else {
+            $predictionsGenerated = max($predictionsGenerated, $selectedPredictionIds);
+        }
+
+        $qualifiedCandidates = self::firstNumericMetric(
+            [$diag, 'correlationQualifiedCandidates'],
+            [$diag, 'riskQualifiedCandidates'],
+            [$diag, 'positiveValueCandidates'],
+            [$diag, 'confidenceQualifiedCandidates'],
+            [$diag, 'eligiblePoolSize']
+        );
+        if ($qualifiedCandidates === null) $qualifiedCandidates = max(count($qualifiedPredictions), $selectedPicks);
+        else $qualifiedCandidates = max($qualifiedCandidates, $selectedPicks);
+
+        $finalQualified = self::numericMetric($diag, 'finalQualifiedCandidates');
+        if ($finalQualified === null) $finalQualified = $selectedPicks;
+        else $finalQualified = max($finalQualified, $selectedPicks);
+
+        $metrics['eligibleFixtures'] = $eligibleFixtures;
+        $metrics['fixturesEvaluated'] = $fixturesEvaluated;
+        $metrics['predictionsGenerated'] = $predictionsGenerated;
+        $metrics['fixturesWithFreshOdds'] = $freshOdds;
+        $metrics['fixturesRejectedStaleOdds'] = $staleOdds;
+        $metrics['correlationQualifiedCandidates'] = $qualifiedCandidates;
+        $metrics['finalQualifiedCandidates'] = $finalQualified;
+
+        return $metrics;
+    }
+
     /**
      * Dashboard aggregation (spec §37) — everything from stored data.
      *
@@ -464,6 +617,7 @@ class SportsIntelligence
             }
         }
         unset($selection);
+        $runMetrics = $this->dashboardRunMetrics($daily, $ticket, $ticketSelections, $todayPredictions);
         $confidenceValues = array_values(array_filter(array_map(fn($p) => is_numeric($p['confidence']) ? (float) $p['confidence'] : null, $todayPredictions)));
         $riskDist = ['LOW' => 0, 'MEDIUM' => 0, 'HIGH' => 0, 'REJECTED' => 0];
         foreach ($todayPredictions as $p) {
@@ -503,6 +657,7 @@ class SportsIntelligence
                 'today' => $daily,
                 'ticket' => $ticket,
                 'ticketSelections' => $ticketSelections,
+                'runMetrics' => $runMetrics,
             ],
             'performance' => $perf,
             'models' => ['versions' => $models, 'approvedCalibrations' => $calibrations],

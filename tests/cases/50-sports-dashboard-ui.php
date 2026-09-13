@@ -262,6 +262,72 @@ test('sports UI: the feed sections are uniform, numbered and free of inline layo
     assert_contains('.sports-step', $css);
 });
 
+test('sports UI: sidebar generation funnel fills legacy daily rows from persisted facts', function () {
+    $repo = new SportsRepositoryStub();
+    $repo->ensureProvider('legacy-ui', 'Legacy UI');
+    $day = gmdate('Y-m-d');
+    $kickoff = $day . 'T15:00:00+00:00';
+    $repo->matches[] = ['id' => 9301, 'provider_id' => 1, 'external_id' => 'legacy-1', 'sport' => 'football',
+        'competition' => 'Legacy League', 'home_team' => 'LegacyHome', 'away_team' => 'LegacyAway',
+        'kickoff_at' => $kickoff, 'status' => 'SCHEDULED', 'source_timestamp' => $day . 'T09:00:00+00:00',
+        'updated_at' => $day . 'T09:00:00+00:00', 'payload' => []];
+    $repo->matches[] = ['id' => 9302, 'provider_id' => 1, 'external_id' => 'legacy-2', 'sport' => 'football',
+        'competition' => 'Legacy League', 'home_team' => 'SecondHome', 'away_team' => 'SecondAway',
+        'kickoff_at' => $kickoff, 'status' => 'SCHEDULED', 'source_timestamp' => $day . 'T09:00:00+00:00',
+        'updated_at' => $day . 'T09:00:00+00:00', 'payload' => []];
+    $repo->savePrediction(['id' => 'prd_legacy_1', 'match_id' => 9301, 'model_version_id' => 1, 'market' => 'TOTAL_GOALS',
+        'selection' => 'OVER_1_5', 'raw_probability' => 0.7, 'calibrated_probability' => 0.75, 'expected_value' => 0.5,
+        'confidence' => 82.0, 'risk' => 'LOW', 'correlation' => 'LOW', 'data_quality_score' => 100,
+        'decision' => 'PREDICTION_READY', 'rejection_reasons' => '[]', 'factors' => '{}',
+        'input_version' => 'legacy-test', 'odds' => 2.0, 'odds_timestamp' => $day . 'T10:00:00+00:00', 'created_at' => $day . 'T11:00:00+00:00']);
+    $repo->savePrediction(['id' => 'prd_legacy_2', 'match_id' => 9302, 'model_version_id' => 1, 'market' => 'MATCH_RESULT',
+        'selection' => 'HOME', 'raw_probability' => 0.58, 'calibrated_probability' => 0.6, 'expected_value' => 0.2,
+        'confidence' => 79.0, 'risk' => 'LOW', 'correlation' => 'LOW', 'data_quality_score' => 90,
+        'decision' => 'PREDICTION_READY', 'rejection_reasons' => '[]', 'factors' => '{}',
+        'input_version' => 'legacy-test', 'odds' => 2.1, 'odds_timestamp' => $day . 'T10:05:00+00:00', 'created_at' => $day . 'T11:05:00+00:00']);
+
+    $ticketId = 'tkt_legacy_metrics';
+    $repo->saveTicket(['id' => $ticketId, 'created_at' => $day . 'T12:00:00+00:00', 'model_version_id' => 1,
+        'configuration_version' => '0', 'total_odds' => 2.0, 'selection_count' => 1, 'combined_probability' => 0.5,
+        'confidence' => 82.0, 'risk' => 'LOW', 'correlation' => 'LOW', 'data_quality_score' => 100, 'status' => 'PENDING',
+        'approval_status' => 'PENDING_USER_APPROVAL', 'settlement_status' => 'PENDING', 'stake' => 10.0, 'pnl' => null]);
+    $repo->saveTicketSelection(['ticket_id' => $ticketId, 'prediction_id' => 'prd_legacy_1', 'match_id' => 9301,
+        'market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'odds' => 2.0, 'odds_timestamp' => $day . 'T10:00:00+00:00',
+        'model_probability' => 0.7, 'calibrated_probability' => 0.75, 'expected_value' => 0.5, 'risk' => 'LOW',
+        'result' => null, 'status' => 'PENDING']);
+    $repo->saveDailyTicket(['date' => $day, 'ticket_type' => 'ODDS_PREDICTION', 'ticket_id' => $ticketId,
+        'status' => 'PENDING_USER_APPROVAL', 'generation_status' => 'GENERATED', 'configuration_version' => 0,
+        'candidates_evaluated' => 4, 'predictions_recorded' => 2, 'rejections' => 2,
+        // Legacy shape: no _diagnostics. The persisted counters still say 4 evaluated,
+        // one fixture died before eligibility and one at the stale-odds gate.
+        'rejection_summary' => json_encode(['FIXTURE_NOT_NS_OR_TOO_SOON' => 1, 'STALE_ODDS' => 1]),
+        'message' => 'legacy run without diagnostics', 'provider' => 'legacy-ui', 'run_id' => 'run_legacy_metrics',
+        'attempt_count' => 1, 'generated_at' => $day . 'T12:00:00+00:00', 'created_at' => $day . 'T12:00:00+00:00', 'updated_at' => $day . 'T12:00:00+00:00']);
+
+    $dash = (new SportsIntelligence($repo, fx_ui_audit()))->dashboard($day);
+    assert_equals(4, $dash['ticketEngine']['runMetrics']['fixturesEvaluated']);
+    assert_equals(3, $dash['ticketEngine']['runMetrics']['eligibleFixtures']);
+    assert_equals(2, $dash['ticketEngine']['runMetrics']['predictionsGenerated']);
+    assert_equals(2, $dash['ticketEngine']['runMetrics']['fixturesWithFreshOdds']);
+    assert_equals(1, $dash['ticketEngine']['runMetrics']['fixturesRejectedStaleOdds']);
+    assert_equals(2, $dash['ticketEngine']['runMetrics']['correlationQualifiedCandidates']);
+    assert_equals(1, $dash['ticketEngine']['runMetrics']['finalQualifiedCandidates']);
+
+    $html = fx_render_sports('index', ['dashboard' => $dash, 'date' => $day]);
+    foreach ([
+        'Eligible fixtures' => 3,
+        'Fixtures evaluated' => 4,
+        'Predictions generated' => 2,
+        'Fresh odds' => 2,
+        'Stale odds' => 1,
+        'Qualified candidates' => 2,
+        'Selected picks' => 1,
+    ] as $metric => $value) {
+        assert_contains('<dt>' . $metric . '</dt><dd class="mono">' . $value . '</dd>', $html,
+            $metric . ' is reconstructed from persisted legacy run facts');
+    }
+});
+
 test('sports UI: the live scores board shows the match date and time', function () {
     $repo = new SportsRepositoryStub();
     $repo->ensureProvider('ui-test', 'UI Test');

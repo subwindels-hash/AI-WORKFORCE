@@ -110,6 +110,49 @@ test('football: a provider error is surfaced verbatim and stores nothing new', f
     assert_true(in_array($failures['state'], ['DEGRADED', 'NOT_CONFIGURED', 'CONNECTED'], true), 'status stays a known token');
 });
 
+test('football: Live Match contains only the provider-confirmed live set', function () {
+    $kickoff = gmdate('c', time() - 1200);
+    $old = fx_fb_row('fx-old-live', $kickoff, 'Manchester City', 'Everton', '10', '20', 'LIVE', 1, 0, 70);
+    $current = fx_fb_row('fx-current-live', $kickoff, 'Brighton', 'Burnley', '30', '40', 'LIVE', 0, 0, 18);
+    [$repo, $provider, $module] = fx_fb_harness([], ['live' => [$old, $current], 'skipHistory' => true], ['WINDELS_FOOTBALL_REFRESH_LIVE' => 30]);
+
+    $first = $module->fixtures()->syncLive('test:live:first', null, -1);
+    assert_equals('COMPLETED', $first['status']);
+    assert_equals(2, count($module->live()->board(false)['matches']), 'both provider-reported live fixtures are shown');
+
+    $provider->setLiveFixtures([fx_fb_row('fx-current-live', $kickoff, 'Brighton', 'Burnley', '30', '40', 'HALFTIME', 1, 0, 45)]);
+    $second = $module->fixtures()->syncLive('test:live:second', null, -1);
+    assert_equals('COMPLETED', $second['status'], 'a successful live snapshot updates the board');
+    assert_equals(1, (int) ($second['expiredLive'] ?? 0), 'the missing old live match is taken down immediately');
+
+    $board = $module->live()->board(false);
+    assert_equals(1, count($board['matches']), 'only the still-live provider row remains');
+    assert_equals('fx-current-live', (string) ($board['matches'][0]['fixture']['externalId'] ?? ''));
+    assert_equals('HALFTIME', (string) ($board['matches'][0]['fixture']['status'] ?? ''), 'halftime is still an in-play state');
+    $expired = $repo->findFixture((int) ($repo->providers[0]['id'] ?? 0), 'fx-old-live');
+    assert_equals('STALE_LIVE', (string) ($expired['status'] ?? ''), 'a removed live card is no longer in an in-play status');
+    assert_null($expired['home_score'] ?? null, 'the old live score is not reused as a final result');
+
+    $provider->setLiveFixtures([]);
+    $empty = $module->fixtures()->syncLive('test:live:empty', null, -1);
+    assert_equals('COMPLETED', $empty['status'], 'an empty live endpoint means no live fixtures, not provider failure');
+    assert_equals([], $module->live()->board(false)['matches'], 'the Live Match section is empty once no match is reported live');
+});
+
+test('football: stale live rows cannot keep filling the Live Match section', function () {
+    [$repo, , $module] = fx_fb_harness([], ['skipHistory' => true], ['WINDELS_FOOTBALL_REFRESH_LIVE' => 30]);
+    $stored = $repo->saveFixture(1, fx_fb_row('fx-stale-live', gmdate('c', time() - 7200), 'Manchester City', 'Everton', '10', '20', 'LIVE', 1, 1, 88));
+    foreach ($repo->fixtures as &$row) {
+        if ((int) ($row['id'] ?? 0) === (int) $stored['id']) $row['updated_at'] = gmdate('c', time() - 700);
+    }
+    unset($row);
+
+    $board = $module->live()->board(false);
+    assert_equals([], $board['matches'], 'a live row older than the freshness window is hidden');
+    assert_equals('NO_LIVE_FIXTURES', $board['state']);
+    assert_true((int) ($board['staleThresholdSeconds'] ?? 0) >= 300, 'the freshness window is reported to clients');
+});
+
 test('football: demo data stays behind an explicit environment switch', function () {
     assert_equals(false, (new FootballConfiguration(['DEMO_MODE' => false]))->demoMode(), 'explicit false stays false');
     assert_equals(false, (new FootballConfiguration([]))->demoMode() && getenv('DEMO_MODE') === false,

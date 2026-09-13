@@ -182,7 +182,7 @@ final class CalibrationService
 
     public function approvedCount(): int
     {
-        return count(array_filter($this->repo->listCalibrations(null, self::CALIBRATED, 200), static fn(array $row) => (string) ($row['status'] ?? '') === self::CALIBRATED));
+        return $this->repo->countCalibrations(null, self::CALIBRATED);
     }
 
     /** @return list<array<string,mixed>> */

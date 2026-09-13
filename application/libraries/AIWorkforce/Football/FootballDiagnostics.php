@@ -50,7 +50,7 @@ final class FootballDiagnostics
         // withCompetitionRef queries per listFixtures call.
         $fixturesTodayCount = $this->repo->countFixtures(['date' => $today]);
         $fixturesToday = $fixturesTodayCount === 0 ? [] : $this->repo->listFixtures(['date' => $today], min(5, max(1, $this->config->analysisLimit())));
-        $liveCount = $this->repo->countFixtures(['status' => 'LIVE']);
+        $liveCount = $this->repo->countFixtures(['status' => FixtureSyncService::LIVE_STATUSES]);
         $finishedCount = $this->repo->countFixtures(['status' => 'FINISHED']);
         $predictionsCount = $this->repo->countPredictions(['date' => $today, 'kind' => PredictionService::KIND_PRE_MATCH]);
         $model = $this->models->usable();

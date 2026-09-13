@@ -188,7 +188,7 @@ final class RefreshPolicy
                 $upcoming = $this->repo->listFixtures(['from' => gmdate('c', $now - 3600), 'to' => gmdate('c', $now + 3 * 86400)], 400);
                 return ['present' => $upcoming !== [] || !$this->recentlySynced('FIXTURES'), 'count' => count($upcoming), 'note' => 'fixtures within 3 days of kickoff'];
             case 'live':
-                $live = $this->repo->listFixtures(['status' => 'LIVE'], 200);
+                $live = $this->repo->listFixtures(['status' => FixtureSyncService::LIVE_STATUSES], 200);
                 $startingSoon = $this->repo->listFixtures(['status' => 'SCHEDULED', 'from' => gmdate('c', $now), 'to' => gmdate('c', $now + 3600)], 200);
                 return ['present' => $live !== [] || $startingSoon !== [], 'count' => count($live), 'note' => 'starting within the hour: ' . count($startingSoon), 'imminent' => count($startingSoon)];
             case 'pending-results':
@@ -263,7 +263,7 @@ final class RefreshPolicy
         $status = strtoupper((string) ($fixture['status'] ?? ''));
         $kickoff = (string) ($fixture['kickoff_at'] ?? '');
         $untilKickoff = $kickoff === '' ? null : ((int) strtotime($kickoff) - time());
-        if ($status === 'LIVE') {
+        if (in_array($status, FixtureSyncService::LIVE_STATUSES, true)) {
             return ['phase' => 'LIVE', 'interval' => $this->config->refreshInterval('live'), 'reason' => 'in play — refresh at the live cadence, bounded by the provider rate limit'];
         }
         if ($status === 'FINISHED') {

@@ -159,7 +159,7 @@ final class FootballCronService
         $sync = $this->football->fixtures()->syncLive('live' . $suffix);
         $statistics = 0; $errors = (array) ($sync['errors'] ?? []);
         if (in_array((string) ($sync['status'] ?? ''), ['COMPLETED', 'DEFERRED'], true)) {
-            foreach ($this->repo->listFixtures(['status' => 'LIVE'], 60) as $fixture) {
+            foreach ($this->repo->listFixtures(['status' => FixtureSyncService::LIVE_STATUSES], 60) as $fixture) {
                 $result = $this->football->statistics()->collectFixtureStatistics((int) $fixture['id'], (string) ($fixture['provider_code'] ?? ''), (string) ($fixture['external_id'] ?? ''));
                 if (($result['status'] ?? '') === 'COMPLETED') $statistics++;
             }
@@ -167,7 +167,8 @@ final class FootballCronService
         $board = $this->football->live()->board(false);
         $errors = array_merge($errors, (array) ($board['errors'] ?? []));
         return ['status' => (string) ($sync['status'] ?? 'FAILED'), 'processed' => (int) ($sync['processed'] ?? 0),
-            'created' => 0, 'updated' => (int) ($sync['processed'] ?? 0), 'liveMatches' => count($board['matches']),
+            'created' => 0, 'updated' => (int) ($sync['updated'] ?? $sync['processed'] ?? 0),
+            'expiredLive' => (int) ($sync['expiredLive'] ?? 0), 'liveMatches' => count($board['matches']),
             'fixtureStatistics' => $statistics, 'requests' => (int) ($sync['requests'] ?? 0), 'errors' => $errors];
     }
 

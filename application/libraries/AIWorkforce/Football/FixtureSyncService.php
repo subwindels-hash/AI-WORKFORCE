@@ -22,7 +22,11 @@ final class FixtureSyncService
 {
     /** Fields the read model treats as required for a complete fixture row. */
     private const CORE_FIELDS = ['externalId', 'homeTeam', 'awayTeam', 'competition', 'kickoff', 'status'];
-    private const STATUSES = ['SCHEDULED', 'LIVE', 'FINISHED', 'POSTPONED', 'CANCELLED', 'SUSPENDED'];
+    /** Canonical provider statuses that mean the match belongs in Live Match. */
+    public const LIVE_STATUSES = ['LIVE', 'HALFTIME', 'EXTRA_TIME', 'PENALTIES'];
+    /** Internal holding status: left the provider's live set, final result not confirmed yet. */
+    public const STALE_LIVE_STATUS = 'STALE_LIVE';
+    private const STATUSES = ['SCHEDULED', 'LIVE', 'HALFTIME', 'EXTRA_TIME', 'PENALTIES', 'FINISHED', 'POSTPONED', 'CANCELLED', 'SUSPENDED'];
 
     public function __construct(
         private FootballRepository $repo,
@@ -142,36 +146,51 @@ final class FixtureSyncService
 
         $providerCode = (string) $attempt['provider'];
         $providerRow = $this->repo->ensureProvider($providerCode, ['displayName' => $providerCode, 'status' => 'ONLINE', 'enabled' => true]);
+        $providerRowId = (int) $providerRow['id'];
         // The row exists now, so the requests this sweep spent can be recorded
         // against the provider's daily budget instead of vanishing with the run.
         $this->gateway->noteProviderReady($providerCode);
+        $activeLiveExternalIds = [];
         foreach ((array) $attempt['result'] as $raw) {
             if (!is_array($raw)) continue;
             try {
                 $row = $this->normalize($raw, $providerCode);
-                $stored = $this->repo->saveFixture((int) $providerRow['id'], $row);
+                if ($jobType === 'LIVE' && in_array((string) ($row['status'] ?? ''), self::LIVE_STATUSES, true)) {
+                    $activeLiveExternalIds[] = (string) ($row['externalId'] ?? '');
+                }
+                $stored = $this->repo->saveFixture($providerRowId, $row);
                 $processed++;
                 (($stored['created_at'] ?? '') === ($stored['updated_at'] ?? '')) ? $created++ : $updated++;
-                $this->upsertReferences((int) $providerRow['id'], $raw, $stored);
+                $this->upsertReferences($providerRowId, $raw, $stored);
             } catch (\Throwable $e) {
                 // A malformed row is counted and named; it never aborts the day
                 // and is never replaced by a synthetic fixture.
                 $errors[] = mb_substr($e->getMessage(), 0, 200);
             }
         }
-        if ($processed === 0 && $errors === []) $errors[] = 'provider returned no fixtures for ' . $from;
-        $status = $processed > 0 ? 'COMPLETED' : ($errors === [] ? 'COMPLETED' : 'FAILED');
+        $expiredLive = 0;
+        if ($jobType === 'LIVE' && $errors === []) {
+            // The provider's live endpoint is an authoritative snapshot of what
+            // is in play now. Rows not returned are removed from Live Match in
+            // this same sweep; their scores are cleared by the repository so a
+            // last live score is never mistaken for the final result.
+            $expiredLive = $this->repo->expireMissingLiveFixtures($providerRowId, $activeLiveExternalIds, gmdate('c'));
+        }
+        if ($processed === 0 && $errors === [] && $jobType !== 'LIVE') $errors[] = 'provider returned no fixtures for ' . $from;
+        $status = $errors === [] ? 'COMPLETED' : ($processed > 0 ? 'COMPLETED' : 'FAILED');
         $this->repo->finishSyncRun($executionKey, [
-            'status' => $status, 'processed' => $processed, 'created' => $created, 'updated' => $updated,
+            'status' => $status, 'processed' => $processed, 'created' => $created, 'updated' => $updated + $expiredLive,
             'requests' => $this->gateway->requestsMade(), 'errors' => $errors,
             'rateLimitRemaining' => null, 'nextRunAt' => $this->nextRunAt($status, $capability),
         ]);
         $this->audit?->emit('FOOTBALL_SYNC_' . $status, 'Football ' . strtolower($jobType) . ' sync ' . strtolower($status) . ' for ' . $from, [
             'provider' => $providerCode, 'processed' => $processed, 'created' => $created,
-            'updated' => $updated, 'errors' => array_slice($errors, 0, 5), 'requests' => $this->gateway->requestsMade(),
+            'updated' => $updated + $expiredLive, 'expiredLive' => $expiredLive,
+            'errors' => array_slice($errors, 0, 5), 'requests' => $this->gateway->requestsMade(),
         ], 'system');
         return ['status' => $status, 'job' => $jobType, 'date' => $from, 'provider' => $providerCode,
-            'processed' => $processed, 'created' => $created, 'updated' => $updated, 'errors' => $errors,
+            'processed' => $processed, 'created' => $created, 'updated' => $updated + $expiredLive,
+            'expiredLive' => $expiredLive, 'errors' => $errors,
             'deferred' => false, 'requests' => $this->gateway->requestsMade()];
     }
 
@@ -228,8 +247,7 @@ final class FixtureSyncService
             'round' => $raw['round'] ?? $raw['roundId'] ?? null,
             'kickoff' => $kickoff,
             'status' => $status,
-            'matchState' => match ($status) {
-                'LIVE' => 'IN_PLAY',
+            'matchState' => in_array($status, self::LIVE_STATUSES, true) ? 'IN_PLAY' : match ($status) {
                 'FINISHED' => 'COMPLETED',
                 'POSTPONED', 'CANCELLED' => 'ABANDONED',
                 'SUSPENDED' => 'SUSPENDED',

@@ -11,6 +11,7 @@
 require_once TESTSPATH . 'football_support.php';
 
 use AIWorkforce\Football\CalibrationService;
+use AIWorkforce\Football\FootballConfiguration;
 use AIWorkforce\Football\ModelRegistry;
 use AIWorkforce\Football\PerformanceService;
 use AIWorkforce\Football\PredictionService;
@@ -75,6 +76,132 @@ function fx_fb_module_with(FootballRepositoryStub $repo, \AIWorkforce\Football\F
 {
     return new \AIWorkforce\Football\FootballIntelligence($repo, $source->providerManager(), null, new \AIWorkforce\Football\FootballConfiguration($config));
 }
+
+test('football: performance report fills every sidebar metric from settled predictions', function () {
+    [$repo, $module, , , $predictionId, $settlement] = fx_fb_settled(2, 0);
+    assert_equals('SETTLED', $settlement['status']);
+    $row = $repo->findSettlement($predictionId);
+    assert_not_null($row, 'the prediction was settled');
+
+    $report = $module->performance()->report(30);
+    assert_equals('MEASURED', $report['state']);
+    assert_equals(1, $report['evaluatedPredictions']);
+    assert_equals((int) ($row['correct_result'] ?? 0), $report['correctResults']);
+    assert_equals(round((int) ($row['correct_result'] ?? 0) / 1, 5), $report['resultAccuracy']);
+    assert_equals((int) ($row['correct_exact_score'] ?? 0), $report['correctScores']);
+    assert_equals(round((int) ($row['correct_exact_score'] ?? 0) / 1, 5), $report['exactScoreAccuracy']);
+    assert_equals(round((float) $row['confidence'], 2), (float) $report['averageConfidence']);
+    assert_equals(round((float) $row['brier'], 6), (float) $report['brier']);
+    assert_equals(round((float) $row['log_loss'], 6), (float) $report['logLoss']);
+    assert_true(is_numeric($report['ece']), 'ECE is measured from the stored probability/result sample');
+    assert_equals(round((float) $row['data_quality_score'], 2), (float) $report['averageDataQuality']);
+    assert_equals(round((float) $row['absolute_goal_error'], 3), (float) $report['averageGoalError']);
+});
+
+test('football: performance report repairs legacy settlements from joined prediction facts', function () {
+    [$repo, $module, , , $predictionId] = fx_fb_settled(2, 0);
+    foreach ($repo->settlements as &$settlement) {
+        if ((string) ($settlement['prediction_id'] ?? '') !== $predictionId) continue;
+        // Legacy rows may pre-date the copied metric columns. The report must
+        // recompute from the stored prediction/result pair instead of leaving
+        // the sidebar blank or treating NULL grades as wrong.
+        $settlement['predicted_result'] = null;
+        $settlement['predicted_home_score'] = null;
+        $settlement['predicted_away_score'] = null;
+        $settlement['correct_result'] = null;
+        $settlement['correct_exact_score'] = null;
+        $settlement['brier'] = null;
+        $settlement['log_loss'] = null;
+        $settlement['absolute_goal_error'] = null;
+        $settlement['confidence'] = null;
+        $settlement['data_quality_score'] = null;
+    }
+    unset($settlement);
+
+    $prediction = $repo->findPrediction($predictionId);
+    assert_not_null($prediction, 'the immutable prediction row still exists for legacy repair');
+    $row = $repo->findSettlement($predictionId);
+    assert_not_null($row, 'the legacy settlement row still exists');
+    $report = $module->performance()->report(30);
+
+    $actual = (string) ($row['actual_result'] ?? '');
+    $expectedResult = strtoupper((string) ($prediction['predicted_result'] ?? '')) === strtoupper($actual) ? 1 : 0;
+    $expectedExact = ((int) ($prediction['predicted_home_score'] ?? -1) === (int) ($row['actual_home_score'] ?? -2)
+        && (int) ($prediction['predicted_away_score'] ?? -1) === (int) ($row['actual_away_score'] ?? -2)) ? 1 : 0;
+    $expectedGoalError = round((abs((int) $prediction['predicted_home_score'] - (int) $row['actual_home_score'])
+        + abs((int) $prediction['predicted_away_score'] - (int) $row['actual_away_score'])) / 2, 3);
+
+    assert_equals('MEASURED', $report['state']);
+    assert_equals(1, $report['evaluatedPredictions']);
+    assert_equals($expectedResult, $report['correctResults']);
+    assert_equals((float) $expectedResult, (float) $report['resultAccuracy']);
+    assert_equals($expectedExact, $report['correctScores']);
+    assert_equals((float) $expectedExact, (float) $report['exactScoreAccuracy']);
+    assert_equals(round((float) ($prediction['confidence'] ?? 0), 2), (float) $report['averageConfidence']);
+    assert_true(is_numeric($report['brier']), 'Brier is recomputed from stored probabilities');
+    assert_true(is_numeric($report['logLoss']), 'log loss is recomputed from stored probabilities');
+    assert_equals(round((float) ($prediction['data_quality_score'] ?? 0), 2), (float) $report['averageDataQuality']);
+    assert_equals($expectedGoalError, (float) $report['averageGoalError']);
+});
+
+
+test('football: performance report does not average only the non-null half of mixed legacy rows', function () {
+    [$repo, $module] = fx_fb_many_settlements(2);
+    assert_true(count($repo->settlements) >= 2, 'the harness settled at least two predictions');
+
+    // One row has the modern copied columns; the other is legacy and must be
+    // completed from the immutable prediction row. The sidebar average must cover
+    // both rows, not just the non-null settlement column the SQL AVG can see.
+    $repo->settlements[0]['predicted_result'] = null;
+    $repo->settlements[0]['predicted_home_score'] = null;
+    $repo->settlements[0]['predicted_away_score'] = null;
+    $repo->settlements[0]['confidence'] = null;
+    $repo->settlements[0]['data_quality_score'] = null;
+    $repo->settlements[0]['absolute_goal_error'] = null;
+
+    $confidence = [];
+    $quality = [];
+    $goalError = [];
+    foreach ($repo->settlements as $settlement) {
+        $prediction = $repo->findPrediction((string) ($settlement['prediction_id'] ?? ''));
+        assert_not_null($prediction, 'settlement still joins to the stored prediction');
+        $confidence[] = is_numeric($settlement['confidence'] ?? null)
+            ? (float) $settlement['confidence']
+            : (float) ($prediction['confidence'] ?? 0);
+        $quality[] = is_numeric($settlement['data_quality_score'] ?? null)
+            ? (float) $settlement['data_quality_score']
+            : (float) ($prediction['data_quality_score'] ?? 0);
+        if (is_numeric($settlement['absolute_goal_error'] ?? null)) {
+            $goalError[] = (float) $settlement['absolute_goal_error'];
+        } else {
+            $goalError[] = round((abs((int) ($prediction['predicted_home_score'] ?? 0) - (int) ($settlement['actual_home_score'] ?? 0))
+                + abs((int) ($prediction['predicted_away_score'] ?? 0) - (int) ($settlement['actual_away_score'] ?? 0))) / 2, 3);
+        }
+    }
+
+    $report = $module->performance()->report(30);
+    assert_equals(count($repo->settlements), $report['evaluatedPredictions']);
+    assert_equals(round(array_sum($confidence) / count($confidence), 2), (float) $report['averageConfidence']);
+    assert_equals(round(array_sum($quality) / count($quality), 2), (float) $report['averageDataQuality']);
+    assert_equals(round(array_sum($goalError) / count($goalError), 3), (float) $report['averageGoalError']);
+});
+
+test('football: approved calibration count is exact beyond the calibration list page size', function () {
+    $repo = new FootballRepositoryStub();
+    for ($i = 0; $i < 205; $i++) {
+        $repo->calibrations[] = [
+            'id' => $i + 1,
+            'model_version_id' => 1,
+            'calibration_version' => 'T1-' . $i,
+            'status' => CalibrationService::CALIBRATED,
+            'created_at' => gmdate('c', time() - $i),
+        ];
+    }
+    $repo->calibrations[] = ['id' => 999, 'model_version_id' => 1, 'calibration_version' => 'pending', 'status' => CalibrationService::PENDING, 'created_at' => gmdate('c')];
+
+    $service = new CalibrationService($repo, new FootballConfiguration());
+    assert_equals(205, $service->approvedCount(), "the sidebar count is not capped at listCalibrations()'s 200-row page");
+});
 
 test('football: a model version starts as DRAFT and is never pre-approved (§8)', function () {
     $repo = new FootballRepositoryStub();

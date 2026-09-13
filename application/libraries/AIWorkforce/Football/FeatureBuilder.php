@@ -44,7 +44,8 @@ final class FeatureBuilder
         $headToHead = $this->headToHead($providerId, $fixture, $coverage, $provenance);
         $competition = $this->competition($fixture, $coverage, $provenance);
         $fixtureQuality = $this->fixtureCompleteness($fixture, $coverage);
-        $inMatch = ($fixture['status'] ?? '') === 'LIVE' || ($fixture['status'] ?? '') === 'FINISHED'
+        $status = strtoupper((string) ($fixture['status'] ?? ''));
+        $inMatch = in_array($status, FixtureSyncService::LIVE_STATUSES, true) || $status === 'FINISHED'
             ? $this->repo->findFixtureStatistics((int) $fixture['id'], 'MATCH') : null;
         $freshness = $this->freshness($fixture, $coverage, $provenance);
         $reliability = $this->providerReliability($providerRow, $coverage, $provenance);
@@ -325,7 +326,8 @@ final class FeatureBuilder
         $candidates = array_filter([$fixture['source_timestamp'] ?? null, $fixture['updated_at'] ?? null]);
         $newest = $candidates === [] ? null : max($candidates);
         if ($newest === null) { $coverage['freshness'] = DataState::UNAVAILABLE; $provenance['freshness'] = 'NO_TIMESTAMP'; return 0.0; }
-        $bucket = (string) ($fixture['status'] ?? '') === 'LIVE' ? 'live' : ((string) ($fixture['status'] ?? '') === 'FINISHED' ? 'results' : 'fixtures');
+        $status = strtoupper((string) ($fixture['status'] ?? ''));
+        $bucket = in_array($status, FixtureSyncService::LIVE_STATUSES, true) ? 'live' : ($status === 'FINISHED' ? 'results' : 'fixtures');
         $window = max(60, $this->config->maxDataAgeSeconds($bucket));
         try { $age = max(0, time() - (new \DateTimeImmutable((string) $newest))->getTimestamp()); } catch (\Throwable $e) { return 0.0; }
         $coverage['freshness'] = $age <= $window ? DataState::AVAILABLE : ($age <= $window * 4 ? DataState::LIMITED : DataState::UNAVAILABLE);

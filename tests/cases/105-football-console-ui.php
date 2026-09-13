@@ -210,6 +210,18 @@ test('football: the football screens own their panels — no duplication, no lef
     }
     assert_contains("\$models['approvedCalibrationCount']", $console,
         'approved calibrations are bound to the stored model summary');
+    assert_contains('countCalibrations(null, self::CALIBRATED)',
+        fx_fb_source('application/libraries/AIWorkforce/Football/CalibrationService.php'),
+        'approved calibration count uses an exact repository count, not a paged list');
+    $repository = fx_fb_source('application/libraries/AIWorkforce/Persistence/FootballRepositoryDatabase.php');
+    assert_contains('s.absolute_goal_error', $repository,
+        'the settled-prediction sample query includes the stored goal-error metric shown in the sidebar');
+    assert_contains('s.probability_home AS settled_probability_home', $repository,
+        'ECE and repaired Brier/log loss prefer the frozen settlement probabilities before prediction-row fallback');
+    assert_contains('p.data_quality_score AS prediction_data_quality_score', $repository,
+        'legacy settlement rows can still fill average data quality from the immutable prediction row');
+    assert_contains('p.predicted_result AS prediction_predicted_result', $repository,
+        'legacy settlement rows can still grade result/exact score from the immutable prediction row');
     assert_contains('$board[\'categories\']', $console, 'the view iterates the confidence categories the board produced');
     // The categories themselves are a data contract, so they are checked where
     // they are produced.
