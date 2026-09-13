@@ -317,9 +317,12 @@ test('odds integrity E2E: fixtures without any odds evaluate fully but force no 
     assert_equals([], $repo->odds, 'no odds rows means no stored odds');
 });
 
-test('qualified policy: built-in defaults demand 75%+ confidence, 80+ quality, LOW correlation', function () {
+test('qualified policy: built-in defaults demand 30%+ confidence, 80+ quality, LOW correlation', function () {
     $defaults = ConfigurationService::defaults();
-    assert_equals(75.0, (float) $defaults['min_confidence'], 'weak 66/68% tickets are rejected by default');
+    // The shipped confidence default is 30; the adaptive ladder (see
+    // 146-adaptive-confidence-policy) is what separates the data-quality
+    // bands, and 25 is the lowest value an operator may configure.
+    assert_equals(30.0, (float) $defaults['min_confidence'], 'the shipped default confidence floor is 30');
     assert_equals(80, (int) $defaults['min_data_quality']);
     assert_equals('LOW', $defaults['max_correlation']);
     assert_equals(5, (int) $defaults['max_selections']);

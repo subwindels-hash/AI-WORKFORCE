@@ -169,7 +169,11 @@ class ConfidencePolicy
             $tiers[] = [
                 'tier' => $name,
                 'minDataQuality' => $threshold,
-                'minConfidence' => round(max(30.0, $top - $relief), 2),
+                // Clamp to the configurable floor, NOT to the shipped default:
+                // clamping at 30 made every tier demand the same 30% under the
+                // stock 30/80 configuration, collapsing the adaptive ladder and
+                // erasing the per-tier relief entirely.
+                'minConfidence' => round(max(ConfigurationService::MIN_CONFIDENCE_FLOOR, $top - $relief), 2),
                 'markets' => $markets,
             ];
         }

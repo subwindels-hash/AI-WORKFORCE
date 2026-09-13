@@ -36,7 +36,7 @@ class ConfigurationService
      * fixture below the quality floor is still rejected outright whatever its
      * confidence happens to be.
      */
-    public const MIN_CONFIDENCE_FLOOR = 30.0;
+    public const MIN_CONFIDENCE_FLOOR = 25.0;
 
     public function __construct(private SportsRepository $repo, private AuditRepository $audit) {}
 

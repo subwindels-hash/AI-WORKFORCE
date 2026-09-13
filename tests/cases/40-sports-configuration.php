@@ -11,8 +11,10 @@ test('configuration returns safe defaults before any admin change', function () 
     [, , $svc] = fx_config_audit();
     $c = $svc->active();
     assert_equals('USER_APPROVAL_REQUIRED', $c['engine_mode']);
-    // Qualified-ticket policy defaults: 75%+ confidence, 80+ quality.
-    assert_equals(75.0, (float) $c['min_confidence']);
+    // Qualified-ticket policy defaults: 30%+ confidence, 80+ quality. The
+    // shipped confidence default is 30 (see ConfigurationService::defaults());
+    // 25 is only the lowest value an operator may configure.
+    assert_equals(30.0, (float) $c['min_confidence']);
     assert_equals(80, (int) $c['min_data_quality']);
     assert_equals(['MATCH_RESULT', 'TOTAL_GOALS', 'BTTS', 'DOUBLE_CHANCE', 'DRAW_NO_BET'], $c['allowed_markets'], 'every market the model can price and settle is allowed by default');
     assert_equals('RESTITUTE_ODDS', $c['void_policy']);
@@ -41,7 +43,7 @@ test('configuration validation rejects malformed values', function () {
     assert_false($svc->update(['max_selections' => 0], 'a')['ok']);
     assert_true($svc->update(['min_confidence' => 70.0], 'a', 'a stricter 70 percent floor is still allowed')['ok']);
     // A measured 25% read on verified data is a usable signal, so 25 is the
-    // lowest floor an operator may configure. The default stays 75.
+    // lowest floor an operator may configure. The shipped default stays 30.
     assert_true($svc->update(['min_confidence' => 30.0], 'a', 'the floor is not 70')['ok']);
     assert_true($svc->update(['min_confidence' => 25.0], 'a', 'the configurable floor is 25')['ok']);
     assert_false($svc->update(['min_confidence' => 24.99], 'a')['ok']);

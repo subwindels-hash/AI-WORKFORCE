@@ -77,7 +77,7 @@ unchanged.
 The lowest confidence an operator may configure is
 `ConfigurationService::MIN_CONFIDENCE_FLOOR` (25%). This widens what an
 administrator *may* set; it changes no default — the shipped configuration is
-still 75% — and it never inflates a value. The adaptive ladder in
+30% — and it never inflates a value. The adaptive ladder in
 `ConfidencePolicy` continues to derive the per-tier requirement from data
 quality, and a fixture below the data-quality floor is still rejected outright
 whatever its confidence happens to be.

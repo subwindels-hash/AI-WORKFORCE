@@ -39,13 +39,16 @@ test('adaptive policy: the stock configuration produces the required data-qualit
     assert_equals(3, count($tiers), 'three predictable bands plus the reject floor');
     assert_equals('EXCELLENT', $tiers[0]['tier']);
     assert_equals(85, (int) $tiers[0]['minDataQuality']);
-    assert_equals(75.0, (float) $tiers[0]['minConfidence'], 'the configured floor is the requirement at the best evidence');
+    assert_equals(30.0, (float) $tiers[0]['minConfidence'], 'the configured floor is the requirement at the best evidence');
     assert_equals('GOOD', $tiers[1]['tier']);
     assert_equals(75, (int) $tiers[1]['minDataQuality']);
-    assert_equals(70.0, (float) $tiers[1]['minConfidence']);
+    // Relief is applied per tier and clamped at the configurable floor (25),
+    // never at the shipped default — otherwise every band would collapse onto
+    // the same 30% bar and the ladder would stop being adaptive at all.
+    assert_equals(25.0, (float) $tiers[1]['minConfidence']);
     assert_equals('LIMITED', $tiers[2]['tier']);
     assert_equals(65, (int) $tiers[2]['minDataQuality']);
-    assert_equals(65.0, (float) $tiers[2]['minConfidence']);
+    assert_equals(25.0, (float) $tiers[2]['minConfidence']);
     assert_equals('SAFE', $tiers[2]['markets'], 'thin evidence is restricted to the safer markets');
     assert_equals(65, $policy->minimumDataQuality(), 'below 65 nothing is predictable');
 });
