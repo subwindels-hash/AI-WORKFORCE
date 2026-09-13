@@ -1,6 +1,6 @@
 <?php
 defined('BASEPATH') or exit('No direct script access allowed');
-require_once APPPATH . 'core/App_Controller.php';
+require_once APPPATH . 'core/MY_Controller.php';
 
 /**
  * Sports Intelligence console (integration plan step 6 — dashboards,
@@ -13,10 +13,36 @@ require_once APPPATH . 'core/App_Controller.php';
  * same permission checks the API enforces, and the odds prediction ticket stays audited with
  * the acting user.
  */
-class Sports extends App_Controller
+class Sports extends MY_Controller
 {
+    /** Signed-in identity for this request, or null for a logged-out visitor. */
+    protected ?array $identity = null;
+
+    public function __construct()
+    {
+        parent::__construct();
+        // Read pages render for everyone; logged-out visitors get the page
+        // shell plus an in-page sign-in prompt. Mutations still enforce the
+        // sports RBAC matrix per request.
+        $this->identity = $this->optionalLogin();
+    }
+
+    /** Renders the sign-in gate inside the page shell when nobody is signed in. */
+    private function gateGuest(string $title): bool
+    {
+        if ($this->identity !== null) return false;
+        $data = $this->base($title, 'sports');
+        $data['signInUrl'] = $this->signInUrl('/sports');
+        $data['gateTitle'] = 'Sign in to view Sports Intelligence';
+        $this->load->view('layout/header', $data);
+        $this->load->view('partials/signin_gate', $data);
+        $this->load->view('layout/footer');
+        return true;
+    }
+
     public function index()
     {
+        if ($this->gateGuest('Sports Intelligence')) return;
         $data = $this->base('Sports Intelligence', 'sports');
         $get = $this->input->get(NULL, true) ?: [];
         $notes = [];
@@ -35,6 +61,7 @@ class Sports extends App_Controller
 
     public function tickets()
     {
+        if ($this->gateGuest('🎯 Odds Prediction Tickets')) return;
         $data = $this->base('🎯 Odds Prediction Tickets', 'sports');
         $data['tickets'] = $this->platform->model->sports->listTickets([], 100);
         $data['dailyRuns'] = $this->platform->model->sports->listDailyTickets(30);
@@ -427,6 +454,14 @@ class Sports extends App_Controller
      */
     private function requireSportsPermission(string $permission, string $action): bool
     {
+        // A logged-out visitor cannot perform a mutation: send them to sign in
+        // and return to the sports console afterwards, rather than showing a
+        // permission-refusal that implies they merely lack a role.
+        if ($this->identity === null && $this->currentUser() === null) {
+            $this->session->set_userdata('return_to', '/sports');
+            redirect('/login');
+            return false;
+        }
         // Read permissions from the database: a role granted after sign-in
         // applies immediately instead of waiting for the next sign-in.
         $user = $this->refreshIdentityPermissions($this->identity);

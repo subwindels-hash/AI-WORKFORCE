@@ -887,6 +887,13 @@ pre.raw {
   .app-main { grid-column: auto; }
   .sidebar { display: none; position: fixed; z-index: 40; width: min(280px, 86vw); box-shadow: var(--shadow); }
   .sidebar-open .sidebar { display: flex; }
+  /* Dim the page behind the off-canvas drawer so open-state is unmistakable and
+     the content underneath can't be tapped by mistake. Tapping the scrim closes
+     the drawer via the existing outside-click handler in app-shell.js. */
+  .sidebar-open::before {
+    content: ""; position: fixed; inset: 0; z-index: 39;
+    background: rgba(3, 7, 18, .55); backdrop-filter: blur(1px);
+  }
   .sidebar-toggle { display: inline-flex; }
   .brand .mark { display: grid; }
   .brand .sub { display: none; }
@@ -1825,4 +1832,19 @@ pre.raw {
   .football-fixture__summary { grid-template-columns: 1fr; }
   .football-fixture__summary > div { border-right: 0; border-bottom: 1px solid var(--line); }
   .football-fixture__summary > div:last-child { border-bottom: 0; }
+}
+
+/* ── In-page sign-in gate (read pages viewed while logged out) ─────────────── */
+.signin-gate { max-width: 560px; margin: 32px auto; }
+.signin-gate__inner { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px; padding: 36px 28px; }
+.signin-gate__icon { display: inline-grid; place-items: center; width: 72px; height: 72px; border-radius: 50%; background: var(--brand-soft); color: var(--brand); }
+.signin-gate h2 { margin: 4px 0 0; font-size: 20px; }
+.signin-gate p { margin: 0; color: var(--muted, #97a2b6); max-width: 46ch; line-height: 1.55; }
+.signin-gate__actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 8px; }
+.signin-gate__note { font-size: 12px; opacity: .75; margin-top: 6px; }
+@media (max-width: 480px) {
+  .signin-gate { margin: 18px 8px; }
+  .signin-gate__inner { padding: 26px 18px; }
+  .signin-gate__actions { width: 100%; }
+  .signin-gate__actions .btn { flex: 1 1 auto; text-align: center; justify-content: center; }
 }
