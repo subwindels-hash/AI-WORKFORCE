@@ -403,11 +403,23 @@ class Api_football extends Api_controller
         ]);
     }
 
-    /** Fixtures currently in play, with live score/minute/red cards as stored. */
+    /**
+     * Fixtures currently in play, with live score/minute/red cards as stored.
+     *
+     * This is what the console's Live now panel polls. The read pulls the
+     * provider itself when the live cadence is due (`autoSweep`), so an open
+     * page shows a goal as soon as the feed reports it instead of waiting for
+     * an external scheduler that a given deployment may not run at all. The
+     * cost is gated by RefreshPolicy and deduplicated by the sweep's execution
+     * key, so many readers in one window still produce at most one provider
+     * call. `?refresh=1` remains the heavier operator view that also recomputes
+     * every live estimate.
+     */
     public function fixtures_live()
     {
         if (!$this->requirePermission('sports.view', false)) return;
-        $board = $this->football()->live()->board(!empty($this->input->get('refresh')));
+        $refresh = !empty($this->input->get('refresh'));
+        $board = $this->football()->live()->board($refresh, !$refresh);
         $this->json($board);
     }
 

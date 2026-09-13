@@ -813,7 +813,14 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         var changed = render(matches);
         backoffMs = pollEveryMs;
         var provider = data.provider || {};
-        if(provider.state === 'BEHIND' || provider.state === 'NEVER_RUN'){
+        var sweep = data.sweep || {};
+        if(sweep.reason === 'PROVIDER_NOT_CONFIGURED' || sweep.reason === 'MODULE_DISABLED'){
+          // Nothing is fetching and nothing can: say which, rather than leaving
+          // an empty panel implying no football is being played anywhere.
+          setStatus(sweep.reason === 'MODULE_DISABLED'
+            ? 'Live updates are off — the football module is disabled.'
+            : 'Live updates are unavailable — no football data provider is connected.', 'down');
+        } else if(provider.state === 'BEHIND' || provider.state === 'NEVER_RUN'){
           // The rows are current as stored, but the sweep that writes them is
           // not running. Saying "nothing is live" here would be a guess, so the
           // panel reports the feed state instead of implying an empty schedule.

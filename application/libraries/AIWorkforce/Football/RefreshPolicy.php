@@ -211,8 +211,25 @@ final class RefreshPolicy
                 return ['present' => $upcoming !== [] || !$this->recentlySynced('FIXTURES'), 'count' => count($upcoming), 'note' => 'fixtures within 3 days of kickoff'];
             case 'live':
                 $live = $this->repo->listFixtures(['status' => FixtureSyncService::LIVE_STATUSES], 200);
-                $startingSoon = $this->repo->listFixtures(['status' => 'SCHEDULED', 'from' => gmdate('c', $now), 'to' => gmdate('c', $now + 3600)], 200);
-                return ['present' => $live !== [] || $startingSoon !== [], 'count' => count($live), 'note' => 'starting within the hour: ' . count($startingSoon), 'imminent' => count($startingSoon)];
+                // The window looks BACKWARDS as well as forwards, and that is
+                // the whole point of the lower bound. A match that kicked off
+                // ten minutes ago is still stored as SCHEDULED until a live
+                // snapshot says otherwise — the sweep is the only thing that
+                // can promote it. A forward-only window therefore refused to
+                // run the live job for exactly the fixture that most needed it,
+                // and the match only appeared once some other job happened to
+                // restatus it. The lower bound is one match-length (kickoff,
+                // stoppages, extra time, penalties); past that the fixture is
+                // the results sweep's problem, so a permanently mis-stated row
+                // cannot hold the live job open forever.
+                $kickedOffOrImminent = $this->repo->listFixtures([
+                    'status' => 'SCHEDULED',
+                    'from' => gmdate('c', $now - 3 * 3600),
+                    'to' => gmdate('c', $now + 3600),
+                ], 200);
+                return ['present' => $live !== [] || $kickedOffOrImminent !== [], 'count' => count($live),
+                    'note' => 'kicked off or starting within the hour: ' . count($kickedOffOrImminent),
+                    'imminent' => count($kickedOffOrImminent)];
             case 'pending-results':
                 $pending = $this->repo->listFixturesAwaitingResult(200);
                 return ['present' => $pending !== [], 'count' => count($pending), 'note' => 'fixtures without a final stored score'];
