@@ -35,6 +35,19 @@ $runMetrics = $daily === null ? [
     'finalQualifiedCandidates' => $dashboardRunMetrics['finalQualifiedCandidates'] ?? (int) ($runDiag['finalQualifiedCandidates'] ?? count((array) ($engine['ticketSelections'] ?? []))),
 ];
 $runCount = static fn(mixed $value): string => is_numeric($value) ? number_format((int) $value) : '—';
+$generationStages = [
+    'Checking provider', 'Loading fixtures', 'Checking fixture eligibility',
+    'Loading current odds', 'Checking odds freshness', 'Calculating predictions',
+    'Checking confidence', 'Checking data quality', 'Checking expected value',
+    'Checking risk', 'Checking correlation', 'Selecting qualified candidates',
+    'Optimizing ticket', 'Saving prediction ticket',
+];
+// A synchronous POST cannot stream intermediate HTTP responses. The browser
+// therefore shows the first stage while the request is running, and the
+// completed run renders the persisted funnel below; it never invents a
+// percentage or claims a stage completed before the service returned.
+$generationTerminal = $daily !== null && in_array((string) ($daily['generation_status'] ?? ''), ['GENERATED', 'FAILED', 'RETRYING'], true);
+$generationFailedAt = $daily !== null && (($daily['status'] ?? '') === 'DATA_UNAVAILABLE') ? 0 : null;
 $windelsModelId = 'Windels Model id: 1520863';
 $selByName = [];
 foreach (array_merge($today['upcoming'] ?? [], $today['live'] ?? []) as $m) {
@@ -131,6 +144,18 @@ $kickoffStamp = static function (mixed $iso): string {
         </form>
       <?php else: ?>
         <button class="btn small" disabled title="Requires the sports.manage permission">Sync now</button>
+      <?php endif; ?>
+      <?php // Keep the primary generation action visible in the dashboard toolbar.
+            // It used to live only in the Engine output panel, which made it
+            // easy to miss (especially after a long provider-status panel). ?>
+      <?php if (!empty($caps['sync'])): ?>
+        <form method="post" action="/sports/generate-ticket" onsubmit="return confirm('Generate odds prediction ticket for <?= e($viewDateIso) ?> from stored data?')">
+          <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+          <input type="hidden" name="date" value="<?= e($ticketDateIso) ?>">
+          <button class="btn small sports-ticket-btn" type="submit">Generate Odds Prediction</button>
+        </form>
+      <?php else: ?>
+        <button class="btn small sports-ticket-btn" type="button" disabled title="Requires the sports.manage permission">Generate Odds Prediction</button>
       <?php endif; ?>
       <a class="btn small" href="/football">Football match &amp; full odds board</a>
       <a class="btn small" href="/sports/odds-prediction-ticket">Ticket history</a>
@@ -255,6 +280,14 @@ $kickoffStamp = static function (mixed $iso): string {
             <?php if (!empty($daily['last_error_code'])): ?><span class="badge b-red"><?= e((string) $daily['last_error_code']) ?></span><?php endif; ?>
           </div>
         <?php endif; ?>
+        <section class="generation-status-panel" id="odds-generation-status" aria-live="polite" hidden data-generation-result="<?= e((string) ($daily['status'] ?? '')) ?>" data-generation-status="<?= e((string) ($daily['generation_status'] ?? '')) ?>">
+          <div class="sports-subhead"><h4>Generation status</h4><span class="dim">No estimated percentages — stages report persisted pipeline progress only.</span></div>
+          <ol class="generation-stages">
+            <?php foreach ($generationStages as $stageIndex => $stage): ?>
+              <li data-generation-stage="<?= $stageIndex ?>"><span class="generation-stage__marker" aria-hidden="true">○</span><span><?= e($stage) ?></span><b class="generation-stage__state">Pending</b></li>
+            <?php endforeach; ?>
+          </ol>
+        </section>
         <div class="sports-controls">
           <?php if (!empty($caps['sync'])): ?>
             <form method="post" action="/sports/generate-ticket" class="sports-controls__form" onsubmit="return confirm('Generate odds prediction ticket for <?= e($viewDateIso) ?> from stored data?')">
@@ -331,10 +364,11 @@ $kickoffStamp = static function (mixed $iso): string {
               <?php endif; ?>
               <div class="stat" title="Fixtures with real odds older than the configured TTL that no provider could refresh"><div class="k">Stale odds</div><div class="v"><?= (int) ($diag['fixturesRejectedStaleOdds'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Predictions</div><div class="v"><?= (int) ($diag['predictionsGenerated'] ?? 0) ?></div></div>
+              <div class="stat"><div class="k">Minimum confidence</div><div class="v"><?= number_format((float) ($diag['thresholds']['configuredMinConfidence'] ?? 30), 1) ?>%</div></div>
               <div class="stat"><div class="k">Confidence ≥ floor</div><div class="v"><?= (int) ($diag['confidenceQualifiedCandidates'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Positive value</div><div class="v"><?= (int) ($diag['positiveValueCandidates'] ?? 0) ?></div></div>
               <div class="stat"><div class="k">Risk qualified</div><div class="v"><?= (int) ($diag['riskQualifiedCandidates'] ?? 0) ?></div></div>
-              <div class="stat"><div class="k">Qualified candidates</div><div class="v"><?= (int) ($diag['correlationQualifiedCandidates'] ?? 0) ?></div></div>
+              <div class="stat"><div class="k">Qualified candidates</div><div class="v"><?= (int) ($diag['correlationQualifiedCandidates'] ?? 0) ?></div><small class="dim">passed all gates before optimizer</small></div>
               <div class="stat"><div class="k">Selected picks</div><div class="v"><?= (int) ($diag['finalQualifiedCandidates'] ?? 0) ?></div></div>
               <?php if ((int) ($diag['fixturesDeferred'] ?? 0) > 0): ?>
                 <div class="stat" title="Fixtures past the <?= (int) ($diag['generationCap'] ?? 50) ?>-per-generation cap with no reusable stored prediction; named below, never silently dropped"><div class="k">Deferred (cap <?= (int) ($diag['generationCap'] ?? 50) ?>)</div><div class="v"><?= (int) $diag['fixturesDeferred'] ?></div></div>
@@ -751,24 +785,46 @@ $kickoffStamp = static function (mixed $iso): string {
 
 <script id="generate-ticket-btn-js">
 (function(){
-  // Enhance GENERATE buttons: show generating state, prevent double-click
+  // Enhance GENERATE buttons: show an honest stage panel and prevent
+  // double-submit. The service remains the authority; this UI never advances
+  // a stage on a timer or displays a fabricated percentage.
+  var generationPanel = document.getElementById('odds-generation-status');
+  var stages = generationPanel ? Array.prototype.slice.call(generationPanel.querySelectorAll('[data-generation-stage]')) : [];
+  function showGenerationPanel(activeIndex) {
+    if (!generationPanel) return;
+    generationPanel.hidden = false;
+    stages.forEach(function(row, index) {
+      row.classList.toggle('is-active', index === activeIndex);
+      row.classList.remove('is-complete', 'is-failed');
+      var state = row.querySelector('.generation-stage__state');
+      var marker = row.querySelector('.generation-stage__marker');
+      if (state) state.textContent = index === activeIndex ? 'Running' : 'Pending';
+      if (marker) marker.textContent = index === activeIndex ? '⟳' : '○';
+    });
+  }
+  if (generationPanel && generationPanel.dataset.generationStatus) {
+    generationPanel.hidden = false;
+    var unavailable = generationPanel.dataset.generationResult === 'DATA_UNAVAILABLE';
+    stages.forEach(function(row, index) {
+      var state = row.querySelector('.generation-stage__state');
+      var marker = row.querySelector('.generation-stage__marker');
+      var complete = !unavailable;
+      row.classList.toggle('is-complete', complete);
+      row.classList.toggle('is-failed', unavailable && index === 0);
+      if (state) state.textContent = complete ? 'Complete' : (index === 0 ? 'Failed' : 'Not reached');
+      if (marker) marker.textContent = complete ? '✓' : (index === 0 ? '×' : '○');
+    });
+  }
   document.querySelectorAll('form[action$="/generate-ticket"], form[action$="/sports/generate-ticket"]').forEach(function(form){
-    form.addEventListener('submit', function(){
+    form.addEventListener('submit', function(event){
       var btn = form.querySelector('button');
-      if(!btn) return;
-      if(btn.dataset.generating === '1') return;
+      if(!btn || btn.dataset.generating === '1') { event.preventDefault(); return; }
       btn.dataset.generating = '1';
       btn.dataset.originalText = btn.innerHTML;
-      btn.innerHTML = '⏳ Generating odds prediction ticket...';
+      btn.innerHTML = '⏳ Generating Odds Predictions...';
       btn.disabled = true;
-      // allow form to submit, but re-enable after 10s if still on page (e.g. validation fail)
-      setTimeout(function(){
-        if(btn.dataset.generating === '1'){
-          btn.innerHTML = btn.dataset.originalText;
-          btn.disabled = false;
-          delete btn.dataset.generating;
-        }
-      }, 10000);
+      btn.setAttribute('aria-busy', 'true');
+      showGenerationPanel(0);
     });
   });
   // Also offer API-driven generation for operators who prefer no page reload

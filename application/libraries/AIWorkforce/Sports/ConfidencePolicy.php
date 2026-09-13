@@ -57,9 +57,9 @@ class ConfidencePolicy
      *                   only allowed into safer markets)
      */
     public const DEFAULT_TIERS = [
-        ['tier' => self::TIER_EXCELLENT, 'minDataQuality' => 85, 'minConfidence' => 75.0, 'markets' => 'ALL'],
-        ['tier' => self::TIER_GOOD, 'minDataQuality' => 75, 'minConfidence' => 70.0, 'markets' => 'ALL'],
-        ['tier' => self::TIER_LIMITED, 'minDataQuality' => 65, 'minConfidence' => 65.0, 'markets' => 'SAFE'],
+        ['tier' => self::TIER_EXCELLENT, 'minDataQuality' => 85, 'minConfidence' => 30.0, 'markets' => 'ALL'],
+        ['tier' => self::TIER_GOOD, 'minDataQuality' => 75, 'minConfidence' => 30.0, 'markets' => 'ALL'],
+        ['tier' => self::TIER_LIMITED, 'minDataQuality' => 65, 'minConfidence' => 30.0, 'markets' => 'SAFE'],
     ];
 
     /**
@@ -169,7 +169,7 @@ class ConfidencePolicy
             $tiers[] = [
                 'tier' => $name,
                 'minDataQuality' => $threshold,
-                'minConfidence' => round(max(0.0, $top - $relief), 2),
+                'minConfidence' => round(max(30.0, $top - $relief), 2),
                 'markets' => $markets,
             ];
         }

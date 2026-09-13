@@ -90,7 +90,7 @@ $withheldBlock = is_array($intel['withheld'] ?? null) ? $intel['withheld'] : [];
             <?php if ($matchId > 0): ?>
               <form method="post" action="/football/match/<?= $matchId ?>/analyze" class="football-inline-form" onsubmit="return confirm('Analyze this match from its stored data now?')">
                 <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
-                <button class="btn primary" <?= empty($caps['sync']) ? 'disabled title="Requires the sports.manage permission"' : '' ?>>Analyze this match — generate odds prediction</button>
+                <button class="btn primary" type="submit" <?= empty($caps['sync']) ? 'title="Requires the sports.manage permission — click to see the access message"' : '' ?>>Analyze this match — generate odds prediction</button>
               </form>
             <?php endif; ?>
           <?php else: ?>

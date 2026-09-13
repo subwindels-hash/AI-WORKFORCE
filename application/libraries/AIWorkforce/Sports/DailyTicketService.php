@@ -944,7 +944,7 @@ class DailyTicketService
                         }
                     }
                     if ($ticketId === null && $message === '') {
-                        $confidenceFloor = number_format((float) ($config['min_confidence'] ?? 75.0), 0);
+                        $confidenceFloor = number_format((float) ($config['min_confidence'] ?? 30.0), 0);
                         $message = $evaluated === 0
                             ? 'NO VALUE TICKET TODAY — no verified fixtures received for ' . $date
                             : 'NO QUALIFIED TICKET — ' . "Today's available matches did not meet the configured prediction requirements"
@@ -1144,6 +1144,13 @@ class DailyTicketService
             'timezone' => $timezone, 'message' => $message, 'generatedAt' => $generatedAt,
             'nextRetryAt' => $nextRetryAt, 'errorCode' => $errorCode, 'attempt' => $attemptCount,
             'evaluated' => $evaluated, 'predictionsRecorded' => $recorded, 'rejections' => $rejections, 'rejectionSummary' => $rejectionSummary,
+            // Canonical response fields shared by browser and API callers.
+            'fixturesEvaluated' => $evaluated,
+            'predictionsGenerated' => (int) ($diagnostics['predictionsGenerated'] ?? $recorded),
+            'qualifiedCandidates' => (int) ($diagnostics['correlationQualifiedCandidates'] ?? 0),
+            'selectedPicks' => $ticketId !== null ? count($this->repo->ticketSelections((string) $ticketId)) : 0,
+            'freshOdds' => (int) ($diagnostics['fixturesWithFreshOdds'] ?? 0),
+            'staleOdds' => (int) ($diagnostics['fixturesRejectedStaleOdds'] ?? 0),
             'diagnostics' => $diagnostics, 'invalidated' => $invalidated,
             'provider' => $provider, 'providerFailures' => $providerFailures, 'providerStatuses' => $providerStatuses,
             'runId' => $runId, 'executionKey' => $key, 'errors' => $errors,
@@ -1226,8 +1233,14 @@ class DailyTicketService
             'evaluated' => (int) ($daily['candidates_evaluated'] ?? 0),
             'predictionsRecorded' => (int) ($daily['predictions_recorded'] ?? 0),
             'rejections' => (int) ($daily['rejections'] ?? 0),
+            'fixturesEvaluated' => (int) ($daily['candidates_evaluated'] ?? 0),
+            'predictionsGenerated' => (int) ($daily['predictions_recorded'] ?? 0),
+            'qualifiedCandidates' => (int) (($summary['_diagnostics']['correlationQualifiedCandidates'] ?? 0)),
+            'selectedPicks' => count($selections),
+            'freshOdds' => (int) (($summary['_diagnostics']['fixturesWithFreshOdds'] ?? 0)),
+            'staleOdds' => (int) (($summary['_diagnostics']['fixturesRejectedStaleOdds'] ?? 0)),
             'diagnostics' => (array) ($summary['_diagnostics'] ?? []),
-            'message' => 'Existing persisted daily ticket returned; no duplicate was created',
+            'message' => 'TICKET ALREADY GENERATED: existing persisted daily ticket returned; no duplicate was created',
             'runId' => $daily['run_id'] ?? null, 'provider' => $daily['provider'] ?? null,
             'providerStatuses' => [], 'errors' => [],
         ];

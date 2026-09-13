@@ -125,7 +125,7 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
       <form method="post" action="/football/sync" onsubmit="return confirm('Pull fixtures for this date from the connected provider now? Provider rate limits and daily quotas are respected.')">
         <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
         <input type="hidden" name="date" value="<?= e((string) ($date ?? gmdate('Y-m-d'))) ?>">
-        <button class="btn small primary" <?= empty($caps['sync']) ? 'disabled title="Requires the sports.manage permission"' : '' ?>>Sync this date</button>
+        <button class="btn small primary" type="submit" <?= empty($caps['sync']) ? 'title="Requires the sports.manage permission — click to see the access message"' : '' ?>>Sync this date</button>
       </form>
       <form method="post" action="/football/predict" onsubmit="return confirm('Generate predictions for unmatched fixtures on this page? At most 50 new predictions are created; stored predictions are reused.')">
         <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
@@ -134,7 +134,7 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         <input type="hidden" name="competition" value="<?= e((string) ($carry['competition'] ?? '')) ?>">
         <input type="hidden" name="market" value="<?= e((string) ($carry['market'] ?? '')) ?>">
         <input type="hidden" name="provider" value="<?= e((string) ($carry['provider'] ?? '')) ?>">
-        <button class="btn small" <?= empty($caps['sync']) ? 'disabled title="Requires the sports.manage permission"' : '' ?>>Generate this page (max 50)</button>
+        <button class="btn small" type="submit" <?= empty($caps['sync']) ? 'title="Requires the sports.manage permission — click to see the access message"' : '' ?>>Generate this page (max 50)</button>
       </form>
     </div>
     <div class="football-actionbar__group">
@@ -581,7 +581,10 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
             </div>
           <?php endif; ?>
           <?php if (!empty($diag['blockers'])): ?><p class="football-help"><b>Blockers:</b> <?= e(implode(', ', (array) $diag['blockers'])) ?></p><?php endif; ?>
-          <?php if (!empty($caps['settle'])): ?><form method="post" action="/football/settle" class="football-inline-form"><input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><button class="btn small">Run settlement sweep</button></form><?php endif; ?>
+          <form method="post" action="/football/settle" class="football-inline-form">
+            <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+            <button class="btn small" type="submit" <?= empty($caps['settle']) ? 'title="Requires the sports.settle permission — click to see the access message"' : '' ?>>Run settlement sweep<?= empty($caps['settle']) ? ' (needs sports.settle)' : '' ?></button>
+          </form>
         </div>
       </section>
 
