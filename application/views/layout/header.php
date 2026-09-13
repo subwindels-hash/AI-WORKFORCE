@@ -40,6 +40,15 @@ $unread = AIWorkforce_NotificationsHelper::unreadCount();
 $isActive = function(array $keys) use ($active): bool {
     return in_array($active, $keys, true);
 };
+// Current same-origin request path, used to highlight the exact sub-page inside
+// a grouped nav section (e.g. /sports vs /sports/tickets share $active='sports').
+$currentPath = '/' . ltrim((string) uri_string(), '/');
+// True when the path equals $href exactly or is a descendant of it (/football
+// highlights on /football/match/12 but not on /football-something-else).
+$navMatch = function(string $href) use ($currentPath): bool {
+    if ($currentPath === $href) return true;
+    return $href !== '/' && str_starts_with($currentPath, rtrim($href, '/') . '/');
+};
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -91,11 +100,17 @@ $isActive = function(array $keys) use ($active): bool {
   <a href="/execution" class="<?= $active === 'execution' ? 'active' : '' ?>" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg><span>Execution</span></a>
   <a href="/brokers" class="<?= $active === 'brokers' ? 'active' : '' ?> sidebar-sub" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V8l7-4 7 4v13"/><path d="M9 21v-6h6v6"/></svg><span>Brokers</span></a>
   <a href="/risk" class="<?= $active === 'risk' ? 'active' : '' ?> sidebar-sub" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 4 3.5 7.5 8 9 4.5-1.5 8-5 8-9V6z"/><path d="M9 12l2 2 4-4"/></svg><span>Risk Center</span></a>
-  <a href="/football" class="<?= $active === 'football' ? 'active' : '' ?> sidebar-sub" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="9"/></svg><span>Football Predictions</span></a>
-  <a href="/sports" class="<?= $active === 'sports' ? 'active' : '' ?> sidebar-sub" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.5 9h17M3.5 15h17M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg><span>Sports Intel</span></a>
   <a href="/lottery" class="<?= $active === 'lottery' ? 'active' : '' ?> sidebar-sub" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M8 15h3M13 15h3"/><circle cx="7" cy="7" r="1"/><circle cx="12" cy="7" r="1"/><circle cx="17" cy="7" r="1"/></svg><span>EuroMillions</span></a>
   <a href="/multiplier" class="<?= $active === 'multiplier' ? 'active' : '' ?> sidebar-sub" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg><span>Multiplier AI</span></a>
   <a href="/notifications" class="<?= $active === 'notifications' ? 'active' : '' ?> sidebar-sub" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg><span>Alerts</span><?php if ($unread > 0): ?> <span class="badge b-red"><?= (int)$unread ?></span><?php endif; ?></a>
+
+  <!-- Sports Intelligence: only routes that resolve to real, implemented pages. -->
+  <p class="sidebar-label">Sports Intelligence</p>
+  <a href="/sports" class="<?= $active === 'sports' && $navMatch('/sports') && !$navMatch('/sports/odds-prediction-ticket') && !$navMatch('/sports/tickets') ? 'active' : '' ?>" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.5 9h17M3.5 15h17M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg><span>Sports Overview</span></a>
+  <a href="/sports/odds-prediction-ticket" class="<?= $navMatch('/sports/odds-prediction-ticket') || $navMatch('/sports/tickets') ? 'active' : '' ?> sidebar-sub" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v6a2 2 0 0 0 0 4v4H4v-4a2 2 0 0 0 0-4z"/><path d="M9 9h6M9 13h4"/></svg><span>Odds Prediction Tickets</span></a>
+  <a href="/football" class="<?= $active === 'football' && !$navMatch('/football/models') ? 'active' : '' ?>" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="9"/></svg><span>Football Intelligence</span></a>
+  <a href="/football#football-live-panel" class="sidebar-sub" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M5 12a7 7 0 0 1 14 0M2.5 12a9.5 9.5 0 0 1 19 0"/></svg><span>Live Matches</span></a>
+  <a href="/football/models" class="<?= $navMatch('/football/models') ? 'active' : '' ?> sidebar-sub" data-dashboard-link><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="3.5"/></svg><span>Models &amp; Calibration</span></a>
 
   <!-- Required: Settings / My Account -->
   <p class="sidebar-label">Account</p>

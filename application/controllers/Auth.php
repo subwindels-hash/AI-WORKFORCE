@@ -6,7 +6,20 @@ class Auth extends MY_Controller
 {
     public function index()
     {
+        // Honour ?return_to=/path so an in-page "sign in to view" link on a
+        // gated console page returns the visitor to that exact page after they
+        // authenticate. Same-origin path only — never a scheme or //host.
+        $returnTo = trim((string) $this->input->get('return_to', true));
+        if ($returnTo !== '' && str_starts_with($returnTo, '/') && !str_starts_with($returnTo, '//') && !str_contains($returnTo, '://')) {
+            $this->session->set_userdata('return_to', $returnTo);
+        }
         if ($user = $this->sessionUser()) {
+            $next = (string) $this->session->userdata('return_to');
+            if ($next !== '' && str_starts_with($next, '/') && !str_starts_with($next, '//') && !str_contains($next, '://')) {
+                $this->session->unset_userdata('return_to');
+                redirect($next);
+                return;
+            }
             redirect($this->isAdmin($user) ? '/admin' : '/dashboard');
             return;
         }
@@ -295,10 +308,16 @@ class Auth extends MY_Controller
         $this->issueRememberCookie((int) $user['id']);
         $next = (string) $this->session->userdata('return_to');
         $this->session->unset_userdata('return_to');
+        // Preserve the exact page the visitor requested before signing in, for
+        // everyone including administrators — a person who asked for /sports
+        // must land on /sports, not be diverted to /admin. Only accept a safe,
+        // same-origin internal path (leading single slash, no scheme, no
+        // protocol-relative //host) so an open redirect can never be smuggled
+        // through return_to.
+        $safeNext = ($next !== '' && str_starts_with($next, '/') && !str_starts_with($next, '//') && !str_contains($next, '://'))
+            ? $next : '';
+        if ($safeNext !== '') { redirect($safeNext); return; }
         if ($admin || $this->isAdmin($user)) { redirect('/admin'); return; }
-        if ($next !== '' && str_starts_with($next, '/') && !str_starts_with($next, '//') && !str_contains($next, '://')) {
-            redirect($next); return;
-        }
         redirect('/dashboard');
     }
 

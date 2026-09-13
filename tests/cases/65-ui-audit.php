@@ -148,9 +148,17 @@ test('auth pages are routed and protected-dashboard routes redirect to login', f
     assert_contains("redirect('/login')", $core, 'requireLogin redirects visitors to /login');
     assert_contains('function requireAdminPage', $core);
     assert_contains("redirect('/access-denied')", $core, 'requireAdminPage redirects non-admins to /access-denied');
-    foreach (['Welcome', 'Workspace', 'Paper', 'Admin', 'Sports', 'Lang_learn', 'Leads', 'Execution', 'Brokers', 'Risk_center', 'Journal', 'Notifications', 'Strategy_lab'] as $name) {
+    foreach (['Welcome', 'Workspace', 'Paper', 'Admin', 'Lang_learn', 'Leads', 'Execution', 'Brokers', 'Risk_center', 'Journal', 'Notifications', 'Strategy_lab'] as $name) {
         $src = file_get_contents(FCPATH . 'application/controllers/' . $name . '.php');
         assert_contains('extends App_Controller', $src, "$name must extend App_Controller (login gate)");
+    }
+    // Sports and Football are the deliberate soft-gate exception: the read
+    // pages render their shell plus an in-page sign-in prompt for guests
+    // (optionalLogin, not requireLogin), so they must NOT hard-redirect.
+    foreach (['Sports', 'Football'] as $name) {
+        $src = file_get_contents(FCPATH . 'application/controllers/' . $name . '.php');
+        assert_contains('extends MY_Controller', $src, "$name must extend MY_Controller (soft sign-in gate)");
+        assert_contains('optionalLogin', $src, "$name must use the non-redirecting optionalLogin gate");
     }
     $admin = file_get_contents(FCPATH . 'application/controllers/Admin.php');
     assert_contains('requireAdminPage', $admin, 'admin controller enforces the super-admin gate');

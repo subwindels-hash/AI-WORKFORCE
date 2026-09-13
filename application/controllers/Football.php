@@ -1,6 +1,6 @@
 <?php
 defined('BASEPATH') or exit('No direct script access allowed');
-require_once APPPATH . 'core/App_Controller.php';
+require_once APPPATH . 'core/MY_Controller.php';
 
 /**
  * Football Intelligence console.
@@ -15,10 +15,40 @@ require_once APPPATH . 'core/App_Controller.php';
  * every request, plus the session CSRF token, because platform-wide CSRF is off
  * and privileged actions guard themselves.
  */
-class Football extends App_Controller
+class Football extends MY_Controller
 {
+    /** Signed-in identity for this request, or null for a logged-out visitor. */
+    protected ?array $identity = null;
+
+    public function __construct()
+    {
+        parent::__construct();
+        // Read pages render for everyone (logged-out visitors see the page
+        // shell plus an in-page sign-in prompt); mutation actions still enforce
+        // the football RBAC matrix per request.
+        $this->identity = $this->optionalLogin();
+    }
+
+    /**
+     * True and renders the gate when nobody is signed in. The page shell (the
+     * global header + sidebar) is already emitted around the gate, so the
+     * visitor lands on the correct destination with a clear sign-in call.
+     */
+    private function gateGuest(string $title): bool
+    {
+        if ($this->identity !== null) return false;
+        $data = $this->base($title, 'football');
+        $data['signInUrl'] = $this->signInUrl('/football');
+        $data['gateTitle'] = 'Sign in to view Football Intelligence';
+        $this->load->view('layout/header', $data);
+        $this->load->view('partials/signin_gate', $data);
+        $this->load->view('layout/footer');
+        return true;
+    }
+
     public function index()
     {
+        if ($this->gateGuest("Today's Football Predictions")) return;
         $data = $this->base("Today's Football Predictions", 'football');
         $get = $this->input->get(NULL, true) ?: [];
         $notes = [];
@@ -145,6 +175,7 @@ class Football extends App_Controller
     /** One fixture: stored facts, features, data quality and the prediction. */
     public function match(string $id)
     {
+        if ($this->gateGuest('Football Match Analysis')) return;
         if (!ctype_digit($id)) { show_404(); return; }
         $fixtureId = (int) $id;
         $analysis = $this->platform->football->analysis($fixtureId);
@@ -210,6 +241,7 @@ class Football extends App_Controller
     /** Model lifecycle + calibration state, straight from stored rows. */
     public function models()
     {
+        if ($this->gateGuest('Football Models & Calibration')) return;
         $data = $this->base('Football Models & Calibration', 'football');
         $data['models'] = $this->platform->football->modelSummary();
         $data['performance'] = $this->platform->football->performance()->report(30);
@@ -402,6 +434,14 @@ class Football extends App_Controller
      */
     private function requireFootballPermission(string $permission, string $action): bool
     {
+        // A logged-out visitor cannot perform a mutation: send them to sign in
+        // and return to the football console afterwards, rather than showing a
+        // permission-refusal that implies they merely lack a role.
+        if ($this->identity === null && $this->currentUser() === null) {
+            $this->session->set_userdata('return_to', '/football');
+            redirect('/login');
+            return false;
+        }
         $user = $this->refreshIdentityPermissions($this->identity);
         if (!is_array($user) || !$this->platform->identity->can($user, $permission)) {
             $this->flash('error', "Refused: signed-in identity lacks '{$permission}' — the {$action} action was not performed."

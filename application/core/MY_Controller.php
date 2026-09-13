@@ -231,6 +231,50 @@ class MY_Controller extends CI_Controller
         return $user ?? $this->currentUser();
     }
 
+    /**
+     * Optional authentication for read-only console pages.
+     *
+     * Unlike requireLogin(), this never redirects a visitor away. It returns
+     * the signed-in identity (restoring a remember-me session when present) or
+     * null for a logged-out visitor, and — when logged out — records the exact
+     * path requested so a later sign-in returns the person to the page they
+     * actually asked for. The page can then render its correct shell and show
+     * an in-page sign-in prompt instead of bouncing straight to /login.
+     *
+     * @return array|null the identity, or null when nobody is signed in
+     */
+    protected function optionalLogin(): ?array
+    {
+        $user = $this->currentUser();
+        if (is_array($user) && !empty($user['id'])) {
+            if (!$this->impersonator()) {
+                $fresh = $this->AIWorkforce_model->identity->findUserById((int) $user['id']);
+                if (!$fresh || empty($fresh['active'])) {
+                    $this->session->unset_userdata(['identity']);
+                    return null;
+                }
+            }
+            return $user;
+        }
+        // Remember where the visitor wanted to go, so signing in returns them
+        // here rather than the generic dashboard. Same-origin path only.
+        $next = '/' . ltrim((string) uri_string(), '/');
+        if ($next !== '/' && $next !== '' && !str_starts_with($next, '//') && !str_contains($next, '://')) {
+            $this->session->set_userdata('return_to', $next);
+        }
+        return null;
+    }
+
+    /** Absolute URL to /login that returns to the given internal path afterwards. */
+    protected function signInUrl(string $returnTo = ''): string
+    {
+        $returnTo = trim($returnTo);
+        if ($returnTo === '' || !str_starts_with($returnTo, '/') || str_starts_with($returnTo, '//') || str_contains($returnTo, '://')) {
+            $returnTo = '/' . ltrim((string) uri_string(), '/');
+        }
+        return '/login?return_to=' . rawurlencode($returnTo);
+    }
+
     protected function requireLogin(): array
     {
         $user = $this->currentUser();
