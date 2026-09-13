@@ -132,6 +132,18 @@ $kickoffStamp = static function (mixed $iso): string {
       <?php else: ?>
         <button class="btn small" disabled title="Requires the sports.manage permission">Sync now</button>
       <?php endif; ?>
+      <?php // Keep the primary generation action visible in the dashboard toolbar.
+            // It used to live only in the Engine output panel, which made it
+            // easy to miss (especially after a long provider-status panel). ?>
+      <?php if (!empty($caps['sync'])): ?>
+        <form method="post" action="/sports/generate-ticket" onsubmit="return confirm('Generate odds prediction ticket for <?= e($viewDateIso) ?> from stored data?')">
+          <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+          <input type="hidden" name="date" value="<?= e($ticketDateIso) ?>">
+          <button class="btn small sports-ticket-btn" type="submit">Generate Odds Prediction</button>
+        </form>
+      <?php else: ?>
+        <button class="btn small sports-ticket-btn" type="button" disabled title="Requires the sports.manage permission">Generate Odds Prediction</button>
+      <?php endif; ?>
       <a class="btn small" href="/football">Football match &amp; full odds board</a>
       <a class="btn small" href="/sports/odds-prediction-ticket">Ticket history</a>
     </div>
