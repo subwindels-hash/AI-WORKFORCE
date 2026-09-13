@@ -301,10 +301,19 @@ final class MatchFeed
             PredictionService::KIND_PRE_MATCH,
         );
 
-        // Stage 2 — generate at most one page's worth of NEW matches.
+        // Stage 2 — generate only the configured cycle's worth of NEW
+        // matches. Reading remains a 50-row page, while writing is additionally
+        // constrained by the administrator's batch setting. This makes a 10- or
+        // 20-match cycle real on both the API and console paths, rather than a
+        // setting the scheduler alone happens to honor.
+        $generationLimit = min($limit, $this->config->analysisBatchSize());
+        if ($generate && $generationLimit < $limit) {
+            $notes[] = 'The page contains ' . $limit . ' fixtures, but this deployment is configured to analyze at most '
+                . $generationLimit . ' fixture(s) per prediction cycle; the remaining stored fixtures stay pending for a later cycle.';
+        }
         $generation = $generate
-            ? $this->predictions->predictMissing($fixtures, $limit, PredictionService::KIND_PRE_MATCH)
-            : $this->predictions->reportOnly($fixtures, $limit, PredictionService::KIND_PRE_MATCH);
+            ? $this->predictions->predictMissing($fixtures, $generationLimit, PredictionService::KIND_PRE_MATCH)
+            : $this->predictions->reportOnly($fixtures, $generationLimit, PredictionService::KIND_PRE_MATCH);
 
         $matches = [];
         $reused = 0;
@@ -417,6 +426,7 @@ final class MatchFeed
             'generation' => [
                 'requested' => $generate,
                 'batchLimit' => $generation['limit'],
+                'configuredBatchSize' => $this->config->analysisBatchSize(),
                 'generated' => (int) $generation['generated'],
                 'reused' => $reused,
                 'skippedStored' => (int) $generation['skipped'],
@@ -928,6 +938,10 @@ final class MatchFeed
                 'away' => $prediction['probability_away'] ?? null],
             'confidence' => isset($prediction['confidence']) ? round((float) $prediction['confidence'], 1) : null,
             'confidenceBasis' => (string) ($prediction['confidence_basis'] ?? 'RAW'),
+            'expectedGoals' => PredictionService::expectedGoalsSummary($prediction),
+            'alternativeScores' => is_array($prediction['alternative_scores'] ?? null)
+                ? array_slice($prediction['alternative_scores'], 0, 3)
+                : array_slice((array) (json_decode((string) ($prediction['alternative_scores'] ?? '[]'), true) ?: []), 0, 3),
             'calibrationState' => (string) ($prediction['calibration_state'] ?? CalibrationService::PENDING),
             'dataQuality' => (int) ($prediction['data_quality_score'] ?? 0),
             'band' => (string) ($prediction['data_quality_band'] ?? QualityBand::REJECTED),
@@ -958,6 +972,11 @@ final class MatchFeed
         $regeneration = isset($outcome['regeneration']) && is_array($outcome['regeneration'])
             ? $outcome['regeneration'] : null;
         $kickoff = (string) ($fixture['kickoff_at'] ?? '');
+        $summary = $prediction === null ? null : self::predictionSummary($prediction);
+        $category = $prediction === null
+            ? $this->config->predictionCategory(null, QualityBand::REJECTED)
+            : PredictionService::storedCategory($prediction, $this->config);
+        if ($summary !== null) $summary['category'] = $category;
         return [
             'matchId' => self::matchId($fixture),
             'fixtureId' => (int) ($fixture['id'] ?? 0),
@@ -986,7 +1005,8 @@ final class MatchFeed
             'dataState' => (string) ($fixture['data_state'] ?? DataState::UNAVAILABLE),
             'analysisState' => $prediction === null ? 'NOT_ANALYZED' : 'ANALYZED',
             'predictionSource' => $source,
-            'prediction' => $prediction === null ? null : self::predictionSummary($prediction),
+            'prediction' => $summary,
+            'category' => $category,
             'predictionRefusal' => $prediction === null ? [
                 'code' => (string) ($outcome['code'] ?? ($source === self::SOURCE_DEFERRED ? 'BATCH_LIMIT_REACHED' : 'NO_PREDICTION')),
                 'reason' => (string) ($outcome['reason'] ?? $this->refusalReason($source)),
@@ -1000,10 +1020,10 @@ final class MatchFeed
     {
         return match ($source) {
             self::SOURCE_DEFERRED => 'The generation batch for this request was already full ('
-                . self::MAX_PAGE_SIZE . ' new matches); this match is analyzed on the next request.',
+                . $this->config->analysisBatchSize() . ' new matches); this match is analyzed on the next request.',
             self::SOURCE_FAILED => 'The prediction engine failed for this match; the stored reason is in generation.errors.',
             default => 'No prediction is stored for this match yet. Generating this page creates at most '
-                . self::MAX_PAGE_SIZE . ' new predictions.',
+                . $this->config->analysisBatchSize() . ' new predictions in this configured cycle.',
         };
     }
 

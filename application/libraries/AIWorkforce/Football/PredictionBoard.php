@@ -372,6 +372,14 @@ final class PredictionBoard
         $confidence = $prediction !== null && is_numeric($prediction['confidence'] ?? null)
             ? round((float) $prediction['confidence'], 1) : null;
         $band = (string) ($prediction['data_quality_band'] ?? QualityBand::REJECTED);
+        $expectedGoals = $prediction === null
+            ? ['home' => null, 'away' => null, 'method' => null, 'source' => null]
+            : PredictionService::expectedGoalsSummary($prediction);
+        $category = $prediction === null
+            ? $this->config->predictionCategory(null, $band)
+            : PredictionService::storedCategory($prediction, $this->config);
+        $predictionSummary = $prediction === null ? null : MatchFeed::predictionSummary($prediction);
+        if ($predictionSummary !== null) $predictionSummary['category'] = $category;
         $fixtureId = (int) ($fixture['id'] ?? 0);
         // Contract: every stored fixture must have internal DB fixture ID >0 before appears in prediction table
         if ($fixtureId <= 0) {
@@ -400,8 +408,12 @@ final class PredictionBoard
             'matchState' => (string) ($fixture['match_state'] ?? 'PRE_MATCH'),
             'analysisState' => $prediction === null ? 'NOT_ANALYZED' : 'ANALYZED',
             'predictionStatus' => $prediction === null ? 'NOT_ANALYZED' : 'ANALYZED',
-            'prediction' => $prediction === null ? null : MatchFeed::predictionSummary($prediction),
+            'prediction' => $predictionSummary,
             'resultLabel' => $prediction === null ? null : self::resultLabel($prediction, $fixture),
+            'expectedGoals' => $expectedGoals,
+            'expectedHomeGoals' => $expectedGoals['home'],
+            'expectedAwayGoals' => $expectedGoals['away'],
+            'category' => $category,
             'confidence' => $confidence,
             'band' => $band,
             'dataQuality' => (int) ($prediction['data_quality_score'] ?? 0),
@@ -435,6 +447,7 @@ final class PredictionBoard
         $evidence = is_array($evidence) ? $evidence : [];
         $snapshot = is_array($prediction['feature_snapshot'] ?? null) ? $prediction['feature_snapshot'] : json_decode((string) ($prediction['feature_snapshot'] ?? '{}'), true);
         $snapshot = is_array($snapshot) ? $snapshot : [];
+        $expectedGoals = PredictionService::expectedGoalsSummary($prediction);
         $alternatives = is_array($prediction['alternative_scores'] ?? null) ? $prediction['alternative_scores'] : json_decode((string) ($prediction['alternative_scores'] ?? '[]'), true);
         $matrix = is_array($prediction['probabilities_matrix'] ?? null) ? $prediction['probabilities_matrix'] : json_decode((string) ($prediction['probabilities_matrix'] ?? '{}'), true);
         $bySide = [];
@@ -448,6 +461,7 @@ final class PredictionBoard
         $kickoff = (string) ($fixture['kickoff_at'] ?? '');
         $confidence = is_numeric($prediction['confidence'] ?? null) ? round((float) $prediction['confidence'], 1) : null;
         $band = (string) ($prediction['data_quality_band'] ?? QualityBand::REJECTED);
+        $category = PredictionService::storedCategory($prediction, $this->config);
         $tiers = $this->config->confidenceTiers();
         // A LIMITED card is labelled for what it is (usable, thinner basis); a
         // QUALIFIED card below the lowest tier is Developing (well-evidenced but
@@ -492,11 +506,15 @@ final class PredictionBoard
             'confidenceLabel' => $confidence === null ? DataState::UNAVAILABLE
                 : ($calibrated ? number_format($confidence, 1) . '%' : number_format($confidence, 1) . '% (uncalibrated)'),
             'tier' => $tierLabel,
+            'category' => $category,
             // Earned by the prediction — QUALIFIED data at/above the Highest
             // tier — not by the registry state or a fitted calibration. An
             // uncalibrated card still shows "(uncalibrated)" next to its
             // confidence, so the badge is never a calibrated guarantee.
             'highConfidence' => !empty($model['highConfidenceAllowed']) && $band === QualityBand::QUALIFIED && $confidence !== null && $confidence >= (float) ($tiers[0]['min'] ?? 60) ? 'HIGH_CONFIDENCE' : null,
+            'expectedGoals' => $expectedGoals,
+            'expectedHomeGoals' => $expectedGoals['home'],
+            'expectedAwayGoals' => $expectedGoals['away'],
             'expectedTotalGoals' => $prediction['expected_total_goals'] ?? null,
             'alternativeScores' => is_array($alternatives) ? array_slice($alternatives, 0, 3) : [],
             'matrixRows' => is_array($matrix['rows'] ?? null) ? array_slice($matrix['rows'], 0, 4) : [],

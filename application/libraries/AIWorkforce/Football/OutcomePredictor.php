@@ -146,6 +146,10 @@ final class OutcomePredictor
             'temperature' => $calibrated['temperature'],
             'rawConfidence' => round($rawConfidence, 1),
             'tier' => self::tier($confidence, $band, $tiers),
+            // The configured A/B/C mapping is emitted with the freshly
+            // calculated result as well as being reconstructed from the stored
+            // immutable snapshot on later reads.
+            'category' => $this->config->predictionCategory($confidence, $band),
             'tierThresholds' => $tiers,
             'highConfidenceLabel' => $highConfidenceAllowed ? 'HIGH_CONFIDENCE' : null,
             'dataQuality' => ['score' => $score, 'status' => $band, 'band' => $band, 'components' => $quality['components'] ?? []],

@@ -5,6 +5,10 @@ $ai = $set['ai'] ?? [];
 $football = $set['football'] ?? [];
 $footballMode = strtoupper(trim((string) ($football['football_provider_mode'] ?? 'AUTO'))) === 'MANUAL' ? 'MANUAL' : 'AUTO';
 $footballManual = (string) ($football['football_manual_provider'] ?? '');
+// This value is independently bounded in the admin write path and in the
+// prediction services; normalizing here only keeps a malformed stored value
+// from being presented as a valid setting.
+$footballBatchSize = max(1, min(50, (int) ($football['football_analysis_batch_size'] ?? 50)));
 $security = $set['security'] ?? [];
 $accounts = $set['accounts'] ?? [];
 $seo = $set['seo'] ?? [];
@@ -57,6 +61,7 @@ $signupWarnings = is_array($signupWarnings ?? null) ? $signupWarnings : [];
     <div class="stat-grid" style="margin:10px 0">
       <div class="stat"><div class="k">Current mode</div><div class="v"><span class="badge <?= $footballMode === 'AUTO' ? 'b-green' : 'b-amber' ?>"><?= e($footballMode) ?></span></div><div class="trend" style="font-size:11px"><?= $footballMode === 'AUTO' ? 'locked to Auto / Smart' : 'operator may choose the feed' ?></div></div>
       <div class="stat"><div class="k">Manual default</div><div class="v" style="font-size:13px"><?= $footballManual === '' ? 'Auto / Smart' : e($footballManual) ?></div><div class="trend" style="font-size:11px">pre-selection when MANUAL</div></div>
+      <div class="stat"><div class="k">Prediction batch</div><div class="v"><?= (int) $footballBatchSize ?></div><div class="trend" style="font-size:11px">maximum stored fixtures per analysis cycle (1–50)</div></div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
       <form method="post" action="/admin/settings/football-toggle" style="display:inline">
@@ -82,7 +87,12 @@ $signupWarnings = is_array($signupWarnings ?? null) ? $signupWarnings : [];
         <option value="<?= e($pv) ?>" <?= $footballManual === $pv ? 'selected' : '' ?>><?= e($pl) ?></option>
         <?php endforeach; ?>
       </select></label>
-      <button class="btn primary" type="submit">Save football provider</button>
+      <label>Prediction analysis batch size
+        <input type="number" name="football_analysis_batch_size" min="1" max="50" step="1" list="football-batch-sizes" value="<?= (int) $footballBatchSize ?>" required>
+        <small class="dim">Maximum stored fixtures evaluated in one cycle. Use 10, 20, 50, or another whole number from 1–50. Fewer fixtures with sufficient provider data produce fewer predictions; the system never fills a batch with synthetic matches.</small>
+      </label>
+      <datalist id="football-batch-sizes"><option value="10"><option value="20"><option value="50"></datalist>
+      <button class="btn primary" type="submit">Save football settings</button>
     </form>
   </div>
 </section>

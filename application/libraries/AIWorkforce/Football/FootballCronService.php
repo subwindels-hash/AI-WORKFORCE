@@ -98,7 +98,13 @@ final class FootballCronService
             'upcoming' => $this->track('UPCOMING', fn() => $this->jobUpcoming($date, $suffix), $suffix),
             'live' => $this->track('LIVE', fn() => $this->jobLive($suffix), $suffix),
             'results' => $this->track('RESULTS', fn() => $this->football->fixtures()->syncResults('results' . $suffix), $suffix),
-            'statistics' => $this->track('STATISTICS', fn() => $this->football->collectStatisticsForDay($date, 24), $suffix),
+            // Enrich the same bounded candidate set that the next prediction
+            // cycle can analyze. A provider budget/rate limit may stop this
+            // early, in which case the missing evidence is reported and the
+            // prediction quality gate decides per fixture — no data is filled in.
+            'statistics' => $this->track('STATISTICS', fn() => $this->football->collectStatisticsForDay(
+                $date, $this->football->config()->analysisBatchSize()
+            ), $suffix),
             'predict' => $this->track('PREDICT', fn() => $this->jobPredict($date), $suffix),
             'settle' => $this->track('SETTLE', fn() => $this->football->settlements()->settleDue(200, 0, 'settle' . $suffix), $suffix),
             'performance' => $this->track('PERFORMANCE', fn() => $this->jobPerformance(), $suffix),
@@ -172,22 +178,36 @@ final class FootballCronService
             'fixtureStatistics' => $statistics, 'requests' => (int) ($sync['requests'] ?? 0), 'errors' => $errors];
     }
 
-    /** Today + tomorrow's not-yet-kicked-off fixtures get a stored prediction. */
+    /**
+     * Today's and tomorrow's not-yet-kicked-off fixtures share one configured
+     * prediction cycle. A busy two-day window must not turn a 50-match setting
+     * into 50 today plus another 50 tomorrow: after the current date consumes
+     * its evaluated-fixture allowance, tomorrow receives only what remains.
+     */
     private function jobPredict(string $date): array
     {
-        $today = $this->football->predictions()->predictDay($date);
-        $tomorrow = $this->football->predictions()->predictDay(gmdate('Y-m-d', strtotime($date . ' +1 day')));
+        $batchSize = $this->football->config()->analysisBatchSize();
+        $today = $this->football->predictions()->predictDay($date, null, null, $batchSize);
+        $remaining = max(0, $batchSize - (int) ($today['analyzed'] ?? 0));
+        $tomorrow = $this->football->predictions()->predictDay(
+            gmdate('Y-m-d', strtotime($date . ' +1 day')), null, null, $remaining
+        );
+        $processed = (int) ($today['analyzed'] ?? 0) + (int) ($tomorrow['analyzed'] ?? 0);
         return [
-            'status' => ($today['status'] ?? '') === DataState::UNAVAILABLE && ($tomorrow['status'] ?? '') === DataState::UNAVAILABLE ? DataState::UNAVAILABLE : 'COMPLETED',
-            'processed' => (int) ($today['analyzed'] ?? 0) + (int) ($tomorrow['analyzed'] ?? 0),
+            'status' => $processed === 0 && ($today['status'] ?? '') === DataState::UNAVAILABLE && ($tomorrow['status'] ?? '') === DataState::UNAVAILABLE
+                ? DataState::UNAVAILABLE : 'COMPLETED',
+            'processed' => $processed,
             'created' => (int) ($today['qualified'] ?? 0) + (int) ($tomorrow['qualified'] ?? 0),
             'updated' => 0,
+            'batchSize' => $batchSize,
+            'remainingAfterToday' => $remaining,
             'qualified' => (int) ($today['qualified'] ?? 0) + (int) ($tomorrow['qualified'] ?? 0),
             'limited' => (int) ($today['limited'] ?? 0) + (int) ($tomorrow['limited'] ?? 0),
             'rejected' => (int) ($today['rejected'] ?? 0) + (int) ($tomorrow['rejected'] ?? 0),
             'errors' => array_merge((array) ($today['errors'] ?? []), (array) ($tomorrow['errors'] ?? [])),
             'requests' => 0,
-            'note' => 'analysis reads stored fixtures only; provider budget for this job is ' . $this->football->config()->requestBudget('predict'),
+            'note' => 'analysis reads stored fixtures only; this run evaluated ' . $processed . ' of at most ' . $batchSize
+                . ' fixture(s) across today and tomorrow. Provider budget for this job is ' . $this->football->config()->requestBudget('predict'),
         ];
     }
 

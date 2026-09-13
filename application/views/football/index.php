@@ -370,6 +370,21 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
                 }
                 $primaryValue = is_array($primary['value'] ?? null) ? $primary['value'] : [];
                 $primaryPricing = is_array($primary['pricing'] ?? null) ? $primary['pricing'] : [];
+                // Core prediction fields are read from the immutable stored
+                // row, not derived in the template. A match without a stored
+                // prediction remains visibly unavailable instead of receiving
+                // an estimated display value.
+                $rowPrediction = is_array($row['prediction'] ?? null) ? $row['prediction'] : [];
+                $oneXtwo = is_array($rowPrediction['probabilities'] ?? null) ? $rowPrediction['probabilities'] : [];
+                $expectedGoals = is_array($row['expectedGoals'] ?? null) ? $row['expectedGoals'] : [];
+                $category = is_array($row['category'] ?? null) ? $row['category'] : [];
+                $alternativeLabels = [];
+                foreach ((array) ($rowPrediction['alternativeScores'] ?? []) as $alternative) {
+                  if (!is_array($alternative)) continue;
+                  $scoreline = (string) ($alternative['score'] ?? '');
+                  if ($scoreline === '' && isset($alternative['home'], $alternative['away'])) $scoreline = (int) $alternative['home'] . '–' . (int) $alternative['away'];
+                  if ($scoreline !== '') $alternativeLabels[] = $scoreline . (is_numeric($alternative['probability'] ?? null) ? ' (' . $pct($alternative['probability']) . ')' : '');
+                }
                 ?>
                 <article class="football-fixture" id="fixture-<?= $fixtureId ?>">
                   <header class="football-fixture__header">
@@ -379,6 +394,8 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
                     </div>
                     <div class="football-fixture__badges">
                       <span class="badge <?= $bandClass((string) ($row['band'] ?? '')) ?>">DQ <?= (int) ($row['dataQualityScore'] ?? $row['dataQuality'] ?? 0) ?>/100</span>
+                      <span class="badge <?= $bandClass((string) ($row['fixtureDataState'] ?? 'DATA_UNAVAILABLE')) ?>">Data <?= e((string) ($row['fixtureDataState'] ?? 'DATA_UNAVAILABLE')) ?></span>
+                      <span class="badge <?= $bandClass((string) ($row['band'] ?? '')) ?>" title="<?= e((string) ($category['reason'] ?? 'A/B/C requires qualified data and the stored confidence band.')) ?>"><?= e((string) ($category['label'] ?? 'Unrated')) ?></span>
                       <span class="badge <?= $bandClass((string) ($row['riskStatus'] ?? $row['risk']['level'] ?? '')) ?>"><?= e((string) ($row['riskStatus'] ?? $row['risk']['level'] ?? 'UNKNOWN')) ?> risk</span>
                       <span class="badge <?= ($row['predictionStatus'] ?? '') === 'ANALYZED' ? 'b-green' : 'b-gray' ?>"><?= e((string) ($row['predictionStatus'] ?? 'NOT_ANALYZED')) ?></span>
                     </div>
@@ -388,6 +405,11 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
                     <div><span class="football-summary-label">WINDELS probability</span><b class="mono"><?= $pct($primary['probability'] ?? null) ?></b><span><?= e((string) ($primary['source'] ?? '')) ?></span></div>
                     <div><span class="football-summary-label">Bookmaker odds</span><b class="mono"><?= $odds($primary['odds'] ?? null) ?></b><span><?= is_numeric($primary['odds'] ?? null) ? 'verified provider price' : 'UNPRICED' ?></span></div>
                     <div><span class="football-summary-label">Potential edge</span><b class="mono <?= (float) ($primaryValue['expectedValue'] ?? -1) >= 0 ? 'up' : 'down' ?>"><?= $signedPct($primaryValue['expectedValue'] ?? null) ?></b><span><?= e((string) ($primaryValue['valueLabel'] ?? 'No value verdict')) ?></span></div>
+                    <div><span class="football-summary-label">Most likely winner</span><b><?= e((string) ($row['resultLabel'] ?? '—')) ?></b><span>most likely 1X2 outcome</span></div>
+                    <div><span class="football-summary-label">Home / draw / away</span><b class="mono"><?= $pct($oneXtwo['home'] ?? null) ?> / <?= $pct($oneXtwo['draw'] ?? null) ?> / <?= $pct($oneXtwo['away'] ?? null) ?></b><span>stored 1X2 probabilities</span></div>
+                    <div><span class="football-summary-label">Most likely score</span><b class="mono"><?= e((string) ($rowPrediction['predictedScore']['label'] ?? '—')) ?></b><span>modal scoreline</span></div>
+                    <div><span class="football-summary-label">Expected goals</span><b class="mono"><?= $dash($expectedGoals['home'] ?? null, 2) ?> – <?= $dash($expectedGoals['away'] ?? null, 2) ?></b><span><?= e((string) ($expectedGoals['method'] ?? 'DATA_UNAVAILABLE')) ?></span></div>
+                    <div><span class="football-summary-label">Alternative scorelines</span><b class="mono"><?= e($alternativeLabels === [] ? '—' : implode(' · ', array_slice($alternativeLabels, 0, 3))) ?></b><span>next most likely scores</span></div>
                     <div><span class="football-summary-label">Confidence</span><b class="mono"><?= $dash($row['confidence'] ?? null) ?>%</b><span><?= e((string) ($row['band'] ?? '')) ?></span></div>
                   </div>
                   <details class="football-odds-disclosure">

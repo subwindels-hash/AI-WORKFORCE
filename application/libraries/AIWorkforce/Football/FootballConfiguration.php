@@ -152,10 +152,77 @@ final class FootballConfiguration
         return max(0.0, min(1.0, (float) $this->num('WINDELS_FOOTBALL_ODDS_MOVEMENT_THRESHOLD', 0.05)));
     }
 
-    /** How many fixtures one analysis pass may evaluate (bounded, never "all"). */
+    /**
+     * Number of fixtures one prediction cycle may analyze.
+     *
+     * This is a strict operational ceiling, not merely a display preference:
+     * every automatic cycle and every on-demand generation request is bounded
+     * by it.  The provider can return a whole matchday, but this module will
+     * only evaluate the next configured number of *stored* fixtures, never
+     * fabricate rows to fill a short cycle.  Fifty is the platform maximum;
+     * use the Admin → System Settings → Football control (or the environment)
+     * to choose a lower operational batch such as 10 or 20.
+     *
+     * `WINDELS_FOOTBALL_ANALYSIS_LIMIT` remains a supported legacy name for
+     * existing deployments.  The explicit `_ANALYSIS_BATCH_SIZE` setting wins
+     * when both are present.
+     */
+    public function analysisBatchSize(): int
+    {
+        $name = 'WINDELS_FOOTBALL_ANALYSIS_BATCH_SIZE';
+        $configured = null;
+        if (array_key_exists($name, $this->overrides)) {
+            if (is_numeric($this->overrides[$name])) $configured = (int) $this->overrides[$name];
+        } else {
+            $value = getenv($name);
+            if (is_numeric($value)) $configured = (int) $value;
+        }
+        if ($configured === null) {
+            $configured = (int) $this->num('WINDELS_FOOTBALL_ANALYSIS_LIMIT', MatchFeed::MAX_PAGE_SIZE);
+        }
+        return max(1, min(MatchFeed::MAX_PAGE_SIZE, $configured));
+    }
+
+    /** @deprecated Use analysisBatchSize(); retained for existing callers. */
     public function analysisLimit(): int
     {
-        return max(1, min(500, (int) $this->num('WINDELS_FOOTBALL_ANALYSIS_LIMIT', 120)));
+        return $this->analysisBatchSize();
+    }
+
+    /**
+     * A conservative A/B/C classification for a *stored* football prediction.
+     *
+     * A/B/C only describe predictions with QUALIFIED data.  LIMITED or
+     * genuinely low-confidence readings are deliberately UNRATED rather than
+     * promoted into Category C: a category must not hide a data-quality caveat.
+     * The cut lines use confidenceTiers(), so changing the configured bands
+     * changes the category consistently on the board, match page and API.
+     *
+     * @return array{code:?string,label:string,tier:string,reason:string}
+     */
+    public function predictionCategory(?float $confidence, string $dataQualityBand): array
+    {
+        if ($confidence === null) {
+            return ['code' => null, 'label' => 'Unrated', 'tier' => 'Unrated',
+                'reason' => 'No measured confidence is stored for this fixture.'];
+        }
+        if (strtoupper($dataQualityBand) !== QualityBand::QUALIFIED) {
+            return ['code' => null, 'label' => 'Unrated — limited data', 'tier' => 'Limited Data',
+                'reason' => 'A/B/C is reserved for qualified data; this prediction is reported with its data-quality limit.'];
+        }
+        $codes = ['highest' => 'A', 'strong' => 'B', 'standard' => 'C'];
+        foreach ($this->confidenceTiers() as $tier) {
+            $key = (string) ($tier['key'] ?? '');
+            if ($confidence >= (float) ($tier['min'] ?? 101) && $confidence <= (float) ($tier['max'] ?? -1)) {
+                $code = $codes[$key] ?? null;
+                if ($code !== null) {
+                    return ['code' => $code, 'label' => 'Category ' . $code, 'tier' => (string) ($tier['label'] ?? ''),
+                        'reason' => 'Qualified data and measured confidence fall in the ' . (string) ($tier['label'] ?? '') . ' band.'];
+                }
+            }
+        }
+        return ['code' => null, 'label' => 'Unrated — developing', 'tier' => 'Developing',
+            'reason' => 'Qualified data is present, but measured confidence is below the Category C cut line.'];
     }
 
     // ── fair value, stability and the intelligence score ──────────────────────
@@ -533,7 +600,11 @@ final class FootballConfiguration
             'intelligenceWeights' => $this->intelligenceWeights(),
             'intelligenceBands' => $this->intelligenceBands(),
             'revisionRetentionDays' => $this->revisionRetentionDays(),
+            // analysisLimit is retained in the public diagnostics payload
+            // for older clients; analysisBatchSize is the explicit current name.
+            'analysisBatchSize' => $this->analysisBatchSize(),
             'analysisLimit' => $this->analysisLimit(),
+            'maxAnalysisBatchSize' => MatchFeed::MAX_PAGE_SIZE,
             'matchPageSize' => $this->matchPageSize(),
             'maxMatchPageSize' => MatchFeed::MAX_PAGE_SIZE,
             'model' => [
