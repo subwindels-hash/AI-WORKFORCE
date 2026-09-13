@@ -134,7 +134,7 @@ final class FootballIntelligence
 
     public function live(): LiveMatchService
     {
-        return $this->live ??= new LiveMatchService($this->repo, $this->features(), $this->predictor(), $this->models(), $this->predictions(), $this->fixtures(), $this->audit);
+        return $this->live ??= new LiveMatchService($this->repo, $this->features(), $this->predictor(), $this->models(), $this->predictions(), $this->fixtures(), $this->audit, $this->config);
     }
 
     public function settlements(): SettlementService

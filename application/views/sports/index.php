@@ -11,8 +11,10 @@ $daily = is_array($engine['today'] ?? null) ? $engine['today'] : null;
 $generationStatus = $daily !== null
     ? (string) ($daily['generation_status'] ?? (!empty($daily['ticket_id']) ? 'GENERATED' : 'PENDING'))
     : 'PENDING';
-$runDiag = $daily !== null && is_array($daily['rejection_summary']['_diagnostics'] ?? null)
-    ? $daily['rejection_summary']['_diagnostics'] : [];
+$runRejectionSummary = is_array($daily['rejection_summary'] ?? null) ? $daily['rejection_summary'] : [];
+$runDiag = $daily !== null && is_array($runRejectionSummary['_diagnostics'] ?? null)
+    ? $runRejectionSummary['_diagnostics'] : [];
+$dashboardRunMetrics = is_array($engine['runMetrics'] ?? null) ? $engine['runMetrics'] : [];
 // The rail reports the latest stored generation funnel for the viewed date.
 // A missing run remains unavailable; a recorded run with no rows is truthfully 0.
 $runMetrics = $daily === null ? [
@@ -24,13 +26,13 @@ $runMetrics = $daily === null ? [
     'correlationQualifiedCandidates' => null,
     'finalQualifiedCandidates' => null,
 ] : [
-    'eligibleFixtures' => (int) ($runDiag['eligibleFixtures'] ?? 0),
-    'fixturesEvaluated' => (int) ($runDiag['fixturesEvaluated'] ?? $daily['candidates_evaluated'] ?? 0),
-    'predictionsGenerated' => (int) ($runDiag['predictionsGenerated'] ?? $daily['predictions_recorded'] ?? 0),
-    'fixturesWithFreshOdds' => (int) ($runDiag['fixturesWithFreshOdds'] ?? 0),
-    'fixturesRejectedStaleOdds' => (int) ($runDiag['fixturesRejectedStaleOdds'] ?? 0),
-    'correlationQualifiedCandidates' => (int) ($runDiag['correlationQualifiedCandidates'] ?? 0),
-    'finalQualifiedCandidates' => (int) ($runDiag['finalQualifiedCandidates'] ?? count((array) ($engine['ticketSelections'] ?? []))),
+    'eligibleFixtures' => $dashboardRunMetrics['eligibleFixtures'] ?? (int) ($runDiag['eligibleFixtures'] ?? 0),
+    'fixturesEvaluated' => $dashboardRunMetrics['fixturesEvaluated'] ?? (int) ($runDiag['fixturesEvaluated'] ?? $daily['candidates_evaluated'] ?? 0),
+    'predictionsGenerated' => $dashboardRunMetrics['predictionsGenerated'] ?? (int) ($runDiag['predictionsGenerated'] ?? $daily['predictions_recorded'] ?? 0),
+    'fixturesWithFreshOdds' => $dashboardRunMetrics['fixturesWithFreshOdds'] ?? (int) ($runDiag['fixturesWithFreshOdds'] ?? 0),
+    'fixturesRejectedStaleOdds' => $dashboardRunMetrics['fixturesRejectedStaleOdds'] ?? (int) ($runDiag['fixturesRejectedStaleOdds'] ?? 0),
+    'correlationQualifiedCandidates' => $dashboardRunMetrics['correlationQualifiedCandidates'] ?? (int) ($runDiag['correlationQualifiedCandidates'] ?? 0),
+    'finalQualifiedCandidates' => $dashboardRunMetrics['finalQualifiedCandidates'] ?? (int) ($runDiag['finalQualifiedCandidates'] ?? count((array) ($engine['ticketSelections'] ?? []))),
 ];
 $runCount = static fn(mixed $value): string => is_numeric($value) ? number_format((int) $value) : '—';
 $windelsModelId = 'Windels Model id: 1520863';

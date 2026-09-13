@@ -1061,6 +1061,36 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
         return array_map(fn(array $row) => $this->decorate($row), array_slice($rows, max(0, $offset), max(1, $limit)));
     }
 
+    public function expireMissingLiveFixtures(int $providerId, array $activeExternalIds, string $observedAt): int
+    {
+        $active = array_flip(array_values(array_unique(array_filter(
+            array_map(static fn($value): string => trim((string) $value), $activeExternalIds),
+            static fn(string $value): bool => $value !== ''
+        ))));
+        $expired = 0;
+        foreach ($this->fixtures as &$row) {
+            if ((int) ($row['provider_id'] ?? 0) !== $providerId) continue;
+            if (!in_array(strtoupper((string) ($row['status'] ?? '')), \AIWorkforce\Football\FixtureSyncService::LIVE_STATUSES, true)) continue;
+            if (isset($active[(string) ($row['external_id'] ?? '')])) continue;
+            $row['status'] = \AIWorkforce\Football\FixtureSyncService::STALE_LIVE_STATUS;
+            $row['match_state'] = 'STALE';
+            // Disappearing from the live endpoint removes a card from Live Match,
+            // but a live score is not a final score. Settlement must wait for the
+            // results endpoint to confirm it.
+            $row['minute'] = null;
+            $row['extra_minute'] = null;
+            $row['home_score'] = null;
+            $row['away_score'] = null;
+            $row['data_state'] = \AIWorkforce\Football\DataState::LIMITED;
+            $row['source_timestamp'] = $observedAt;
+            $row['updated_at'] = gmdate('c');
+            $this->writes[] = 'fixture:expire-live:' . (string) ($row['external_id'] ?? '');
+            $expired++;
+        }
+        unset($row);
+        return $expired;
+    }
+
     public function countFixtures(array $filter = []): int
     {
         return count($this->filterFixtures($filter));
@@ -1071,7 +1101,12 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
     {
         $rows = array_values(array_filter($this->fixtures, function (array $row) use ($filter) {
             if (!empty($filter['providerId']) && (int) $row['provider_id'] !== (int) $filter['providerId']) return false;
-            if (!empty($filter['status']) && strtoupper((string) ($row['status'] ?? '')) !== strtoupper((string) $filter['status'])) return false;
+            if (!empty($filter['status'])) {
+                $statuses = is_array($filter['status'])
+                    ? array_values(array_unique(array_filter(array_map(static fn($value): string => strtoupper(trim((string) $value)), $filter['status']), static fn(string $value): bool => $value !== '')))
+                    : [strtoupper((string) $filter['status'])];
+                if ($statuses === [] || !in_array(strtoupper((string) ($row['status'] ?? '')), $statuses, true)) return false;
+            }
             if (!empty($filter['matchState']) && strtoupper((string) ($row['match_state'] ?? '')) !== strtoupper((string) $filter['matchState'])) return false;
             if (!empty($filter['date']) && !str_starts_with((string) ($row['kickoff_at'] ?? ''), (string) $filter['date'])) return false;
             if (!empty($filter['from']) && (string) ($row['kickoff_at'] ?? '') < (string) $filter['from']) return false;
@@ -1135,7 +1170,7 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
         $rows = array_values(array_filter($this->fixtures, function (array $row) use ($providerId) {
             if ($providerId !== null && (int) $row['provider_id'] !== $providerId) return false;
             $status = strtoupper((string) ($row['status'] ?? ''));
-            if ($status === 'LIVE' || $status === 'SCHEDULED') return true;
+            if (in_array($status, \AIWorkforce\Football\FixtureSyncService::LIVE_STATUSES, true) || $status === \AIWorkforce\Football\FixtureSyncService::STALE_LIVE_STATUS || $status === 'SCHEDULED') return true;
             return $status === 'FINISHED' && (empty($row['home_score']) && $row['home_score'] !== 0 || empty($row['settled_at']));
         }));
         usort($rows, fn(array $a, array $b) => strcmp((string) ($b['kickoff_at'] ?? ''), (string) ($a['kickoff_at'] ?? '')));
@@ -1318,6 +1353,12 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
             && ($status === null || ($r['status'] ?? '') === $status)));
         usort($rows, fn(array $a, array $b) => strcmp((string) ($b['created_at'] ?? ''), (string) ($a['created_at'] ?? '')));
         return array_slice($rows, 0, max(1, min(200, $limit)));
+    }
+
+    public function countCalibrations(?int $modelVersionId = null, ?string $status = null): int
+    {
+        return count(array_filter($this->calibrations, fn(array $r) => ($modelVersionId === null || (int) $r['model_version_id'] === $modelVersionId)
+            && ($status === null || ($r['status'] ?? '') === $status)));
     }
 
     public function updateCalibration(int $id, array $patch): void
@@ -1715,12 +1756,12 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
             return true;
         }));
         usort($rows, fn(array $a, array $b) => strcmp((string) ($b['settled_at'] ?? ''), (string) ($a['settled_at'] ?? '')));
-        return array_slice($rows, 0, max(1, min(5000, $limit)));
+        return array_slice($rows, 0, max(1, min(100000, $limit)));
     }
 
     public function settlementAggregates(array $filter = []): array
     {
-        $rows = $this->listSettlements($filter, 5000);
+        $rows = $this->listSettlements($filter, 100000);
         $evaluated = count($rows);
         $correctResults = count(array_filter($rows, fn(array $r) => (int) ($r['correct_result'] ?? 0) === 1));
         $correctScores = count(array_filter($rows, fn(array $r) => (int) ($r['correct_exact_score'] ?? 0) === 1));
@@ -1728,12 +1769,19 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
         $quality = array_values(array_filter(array_map(fn(array $r) => $r['data_quality_score'] ?? null, $rows), 'is_numeric'));
         $brier = array_values(array_filter(array_map(fn(array $r) => $r['brier'] ?? null, $rows), 'is_numeric'));
         $logLoss = array_values(array_filter(array_map(fn(array $r) => $r['log_loss'] ?? null, $rows), 'is_numeric'));
+        $goalError = array_values(array_filter(array_map(fn(array $r) => $r['absolute_goal_error'] ?? null, $rows), 'is_numeric'));
         return [
             'evaluated' => $evaluated,
             'correctResults' => $correctResults,
             'correctScores' => $correctScores,
             'averageConfidence' => $confidence === [] ? null : round(array_sum($confidence) / count($confidence), 2),
             'averageDataQuality' => $quality === [] ? null : round(array_sum($quality) / count($quality), 2),
+            'averageGoalError' => $goalError === [] ? null : round(array_sum($goalError) / count($goalError), 3),
+            'resultGradeMissing' => count(array_filter($rows, fn(array $r) => ($r['correct_result'] ?? null) === null)),
+            'scoreGradeMissing' => count(array_filter($rows, fn(array $r) => ($r['correct_exact_score'] ?? null) === null)),
+            'confidenceMissing' => count(array_filter($rows, fn(array $r) => ($r['confidence'] ?? null) === null)),
+            'dataQualityMissing' => count(array_filter($rows, fn(array $r) => ($r['data_quality_score'] ?? null) === null)),
+            'goalErrorMissing' => count(array_filter($rows, fn(array $r) => ($r['absolute_goal_error'] ?? null) === null)),
             'brier' => $evaluated > 0 && count($brier) === $evaluated ? round(array_sum($brier) / $evaluated, 6) : null,
             'logLoss' => $evaluated > 0 && count($logLoss) === $evaluated ? round(array_sum($logLoss) / $evaluated, 6) : null,
         ];
@@ -1743,13 +1791,20 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
     {
         $rows = [];
         foreach ($this->listSettlements($filter, (int) ($filter['limit'] ?? 5000)) as $settlement) {
-            $prediction = $this->findPrediction((string) ($settlement['prediction_id'] ?? ''));
-            if ($prediction === null) continue;
+            $prediction = $this->findPrediction((string) ($settlement['prediction_id'] ?? '')) ?? [];
             if ($settlement['actual_home_score'] === null || $settlement['actual_away_score'] === null) continue;
             $rows[] = array_merge($settlement, [
                 'raw_home' => $prediction['raw_home'] ?? null, 'raw_draw' => $prediction['raw_draw'] ?? null, 'raw_away' => $prediction['raw_away'] ?? null,
+                'settled_probability_home' => $settlement['probability_home'] ?? null, 'settled_probability_draw' => $settlement['probability_draw'] ?? null,
+                'settled_probability_away' => $settlement['probability_away'] ?? null,
                 'probability_home' => $prediction['probability_home'] ?? null, 'probability_draw' => $prediction['probability_draw'] ?? null,
-                'probability_away' => $prediction['probability_away'] ?? null, 'confidence' => $prediction['confidence'] ?? null,
+                'probability_away' => $prediction['probability_away'] ?? null,
+                'settled_confidence' => $settlement['confidence'] ?? null,
+                'prediction_predicted_result' => $prediction['predicted_result'] ?? null,
+                'prediction_predicted_home_score' => $prediction['predicted_home_score'] ?? null,
+                'prediction_predicted_away_score' => $prediction['predicted_away_score'] ?? null,
+                'confidence' => $prediction['confidence'] ?? null,
+                'prediction_data_quality_score' => $prediction['data_quality_score'] ?? null,
                 'confidence_basis' => $prediction['confidence_basis'] ?? null, 'calibration_state' => $prediction['calibration_state'] ?? null,
                 'data_quality_band' => $prediction['data_quality_band'] ?? null, 'eligibility' => $prediction['eligibility'] ?? null,
                 'kickoff_at' => $prediction['kickoff_at'] ?? null, 'generated_at' => $prediction['generated_at'] ?? null,

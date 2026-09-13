@@ -256,6 +256,33 @@ class FootballRepositoryDatabase implements FootballRepository
         return $this->withCompetitionRef(array_map(fn(array $r) => $this->decode($r), $rows));
     }
 
+    public function expireMissingLiveFixtures(int $providerId, array $activeExternalIds, string $observedAt): int
+    {
+        $active = array_values(array_unique(array_filter(
+            array_map(static fn($value): string => trim((string) $value), $activeExternalIds),
+            static fn(string $value): bool => $value !== ''
+        )));
+        $at = self::iso($observedAt) ?: gmdate('c');
+        $this->db->where('provider_id', $providerId)
+            ->where_in('status', \AIWorkforce\Football\FixtureSyncService::LIVE_STATUSES);
+        if ($active !== []) $this->db->where_not_in('external_id', $active);
+        $this->db->update('football_fixtures', [
+            'status' => \AIWorkforce\Football\FixtureSyncService::STALE_LIVE_STATUS,
+            'match_state' => 'STALE',
+            // A row that simply disappeared from the live endpoint is no longer
+            // live, but its last in-play score is not a final result. Clear it so
+            // settlement waits for the results endpoint to confirm the score.
+            'minute' => null,
+            'extra_minute' => null,
+            'home_score' => null,
+            'away_score' => null,
+            'data_state' => \AIWorkforce\Football\DataState::LIMITED,
+            'source_timestamp' => $at,
+            'updated_at' => gmdate('c'),
+        ]);
+        return (int) $this->db->affected_rows();
+    }
+
     public function countFixtures(array $filter = []): int
     {
         $this->applyFixtureFilter($filter);
@@ -295,7 +322,17 @@ class FootballRepositoryDatabase implements FootballRepository
             $competitionIds = array_map(static fn(array $row): int => (int) $row['id'], $rows);
         }
         if (!empty($filter['providerId'])) $this->db->where('provider_id', (int) $filter['providerId']);
-        if (!empty($filter['status'])) $this->db->where('status', strtoupper((string) $filter['status']));
+        if (!empty($filter['status'])) {
+            if (is_array($filter['status'])) {
+                $statuses = array_values(array_unique(array_filter(
+                    array_map(static fn($value): string => strtoupper(trim((string) $value)), $filter['status']),
+                    static fn(string $value): bool => $value !== ''
+                )));
+                $this->db->where_in('status', $statuses === [] ? ['__NO_STATUS__'] : $statuses);
+            } else {
+                $this->db->where('status', strtoupper((string) $filter['status']));
+            }
+        }
         if (!empty($filter['matchState'])) $this->db->where('match_state', strtoupper((string) $filter['matchState']));
         if (!empty($filter['date'])) {
             $date = (string) $filter['date'];
@@ -530,7 +567,8 @@ class FootballRepositoryDatabase implements FootballRepository
     public function listFixturesAwaitingResult(int $limit = 200, ?int $providerId = null): array
     {
         $this->db->group_start();
-        $this->db->where('status', 'LIVE')
+        $this->db->where_in('status', \AIWorkforce\Football\FixtureSyncService::LIVE_STATUSES)
+            ->or_where('status', \AIWorkforce\Football\FixtureSyncService::STALE_LIVE_STATUS)
             ->or_group_start()->where('status', 'SCHEDULED')->where('kickoff_at <=', gmdate('c'))->group_end()
             ->or_group_start()->where('status', 'FINISHED')->where('home_score', null)->group_end()
             ->or_group_start()->where('status', 'FINISHED')->where('settled_at', null)->group_end();
@@ -775,6 +813,13 @@ class FootballRepositoryDatabase implements FootballRepository
         if ($status !== null) $this->db->where('status', $status);
         $rows = $this->db->order_by('created_at', 'DESC')->limit(min(200, max(1, $limit)))->get('football_calibration_versions')->result_array();
         return array_map(fn(array $r) => $this->decode($r), $rows);
+    }
+
+    public function countCalibrations(?int $modelVersionId = null, ?string $status = null): int
+    {
+        if ($modelVersionId !== null) $this->db->where('model_version_id', $modelVersionId);
+        if ($status !== null) $this->db->where('status', $status);
+        return (int) $this->db->count_all_results('football_calibration_versions');
     }
 
     public function updateCalibration(int $id, array $patch): void
@@ -1094,7 +1139,13 @@ class FootballRepositoryDatabase implements FootballRepository
             . 'COALESCE(SUM(CASE WHEN correct_result = 1 THEN 1 ELSE 0 END), 0) AS correct_results, '
             . 'COALESCE(SUM(CASE WHEN correct_exact_score = 1 THEN 1 ELSE 0 END), 0) AS correct_scores, '
             . 'AVG(confidence) AS avg_confidence, AVG(data_quality_score) AS avg_data_quality, '
+            . 'AVG(absolute_goal_error) AS avg_goal_error, '
             . 'SUM(brier) AS sum_brier, SUM(log_loss) AS sum_log_loss, '
+            . 'SUM(CASE WHEN correct_result IS NULL THEN 1 ELSE 0 END) AS result_grade_missing, '
+            . 'SUM(CASE WHEN correct_exact_score IS NULL THEN 1 ELSE 0 END) AS score_grade_missing, '
+            . 'SUM(CASE WHEN confidence IS NULL THEN 1 ELSE 0 END) AS confidence_missing, '
+            . 'SUM(CASE WHEN data_quality_score IS NULL THEN 1 ELSE 0 END) AS data_quality_missing, '
+            . 'SUM(CASE WHEN absolute_goal_error IS NULL THEN 1 ELSE 0 END) AS goal_error_missing, '
             . 'SUM(CASE WHEN brier IS NULL THEN 1 ELSE 0 END) AS brier_missing, '
             . 'SUM(CASE WHEN log_loss IS NULL THEN 1 ELSE 0 END) AS log_loss_missing';
         $this->db->select($select, false);
@@ -1109,6 +1160,12 @@ class FootballRepositoryDatabase implements FootballRepository
             'correctScores' => (int) ($row['correct_scores'] ?? 0),
             'averageConfidence' => $row['avg_confidence'] !== null ? round((float) $row['avg_confidence'], 2) : null,
             'averageDataQuality' => $row['avg_data_quality'] !== null ? round((float) $row['avg_data_quality'], 2) : null,
+            'averageGoalError' => $row['avg_goal_error'] !== null ? round((float) $row['avg_goal_error'], 3) : null,
+            'resultGradeMissing' => (int) ($row['result_grade_missing'] ?? 0),
+            'scoreGradeMissing' => (int) ($row['score_grade_missing'] ?? 0),
+            'confidenceMissing' => (int) ($row['confidence_missing'] ?? 0),
+            'dataQualityMissing' => (int) ($row['data_quality_missing'] ?? 0),
+            'goalErrorMissing' => (int) ($row['goal_error_missing'] ?? 0),
             'brier' => $evaluated > 0 && (int) ($row['brier_missing'] ?? 0) === 0 && $row['sum_brier'] !== null
                 ? round((float) $row['sum_brier'] / $evaluated, 6) : null,
             'logLoss' => $evaluated > 0 && (int) ($row['log_loss_missing'] ?? 0) === 0 && $row['sum_log_loss'] !== null
@@ -1119,13 +1176,17 @@ class FootballRepositoryDatabase implements FootballRepository
     public function listCalibrationSamples(array $filter = []): array
     {
         $select = 's.prediction_id, s.fixture_id, s.actual_home_score, s.actual_away_score, s.actual_result, '
-            . 's.correct_result, s.correct_exact_score, s.brier, s.log_loss, s.confidence AS settled_confidence, '
-            . 's.data_quality_score, s.model_version_id, s.calibration_version_id, s.settled_at, '
-            . 'p.raw_home, p.raw_draw, p.raw_away, p.probability_home, p.probability_draw, p.probability_away, '
-            . 'p.confidence, p.confidence_basis, p.calibration_state, p.data_quality_band, p.eligibility, p.kickoff_at, p.generated_at';
+            . 's.predicted_result, s.predicted_home_score, s.predicted_away_score, '
+            . 's.correct_result, s.correct_exact_score, s.brier, s.log_loss, s.absolute_goal_error, s.confidence AS settled_confidence, '
+            . 's.probability_home AS settled_probability_home, s.probability_draw AS settled_probability_draw, '
+            . 's.probability_away AS settled_probability_away, s.data_quality_score, s.model_version_id, s.calibration_version_id, s.settled_at, '
+            . 'p.predicted_result AS prediction_predicted_result, p.predicted_home_score AS prediction_predicted_home_score, '
+            . 'p.predicted_away_score AS prediction_predicted_away_score, p.raw_home, p.raw_draw, p.raw_away, '
+            . 'p.probability_home, p.probability_draw, p.probability_away, '
+            . 'p.confidence, p.confidence_basis, p.calibration_state, p.data_quality_score AS prediction_data_quality_score, p.data_quality_band, p.eligibility, p.kickoff_at, p.generated_at';
         $this->db->select($select, false);
         $this->db->from('football_prediction_settlements s');
-        $this->db->join('football_match_predictions p', 'p.id = s.prediction_id', 'inner');
+        $this->db->join('football_match_predictions p', 'p.id = s.prediction_id', 'left');
         $this->db->where('s.actual_home_score IS NOT NULL');
         $this->db->where('s.actual_away_score IS NOT NULL');
         if (!empty($filter['modelVersionId'])) $this->db->where('s.model_version_id', (int) $filter['modelVersionId']);
@@ -1133,9 +1194,9 @@ class FootballRepositoryDatabase implements FootballRepository
         if (!empty($filter['from'])) $this->db->where('s.settled_at >=', (string) $filter['from']);
         if (!empty($filter['to'])) $this->db->where('s.settled_at <=', (string) $filter['to']);
         $limit = (int) ($filter['limit'] ?? 5000);
-        $rows = $this->db->order_by('s.settled_at', 'DESC')->limit(min(10000, max(1, $limit)))->get()->result_array();
+        $rows = $this->db->order_by('s.settled_at', 'DESC')->limit(min(100000, max(1, $limit)))->get()->result_array();
         foreach ($rows as &$row) {
-            foreach (['raw_home', 'raw_draw', 'raw_away', 'probability_home', 'probability_draw', 'probability_away', 'confidence', 'settled_confidence', 'brier', 'log_loss', 'data_quality_score'] as $key) {
+            foreach (['raw_home', 'raw_draw', 'raw_away', 'settled_probability_home', 'settled_probability_draw', 'settled_probability_away', 'probability_home', 'probability_draw', 'probability_away', 'confidence', 'settled_confidence', 'brier', 'log_loss', 'absolute_goal_error', 'data_quality_score', 'prediction_data_quality_score', 'prediction_predicted_home_score', 'prediction_predicted_away_score'] as $key) {
                 if (array_key_exists($key, $row) && $row[$key] !== null && $row[$key] !== '') $row[$key] = (float) $row[$key];
             }
             foreach (['correct_result', 'correct_exact_score'] as $key) {

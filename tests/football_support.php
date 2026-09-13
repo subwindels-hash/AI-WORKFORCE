@@ -57,6 +57,7 @@ final class FxFootballProvider implements SportsDataProvider
         }
         return [];
     }
+    public function setLiveFixtures(array $fixtures): void { $this->data['live'] = $fixtures; }
     public function liveFixtures(): array { $this->calls++; return $this->data['live'] ?? []; }
     public function fixture(string $externalId): array
     {

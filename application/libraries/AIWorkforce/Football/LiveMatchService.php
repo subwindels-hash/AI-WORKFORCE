@@ -29,13 +29,14 @@ final class LiveMatchService
         private PredictionService $predictions,
         private ?FixtureSyncService $sync = null,
         private ?AuditRepository $audit = null,
+        private ?FootballConfiguration $config = null,
     ) {}
 
     /**
      * The live board: every fixture the module currently believes is in play,
      * with its frozen pre-match prediction beside the live estimate.
      *
-     * @return array{status:string, state:string, matches:list<array>, errors:list<string>, refreshed:?array}
+     * @return array{status:string, state:string, matches:list<array>, errors:list<string>, refreshed:?array, refreshIntervalSeconds:int, staleThresholdSeconds:int}
      */
     public function board(bool $refresh = true): array
     {
@@ -51,14 +52,16 @@ final class LiveMatchService
                 $errors[] = 'live sync: ' . mb_substr($e->getMessage(), 0, 160);
             }
         }
-        $fixtures = $this->repo->listFixtures(['status' => 'LIVE'], 200);
+        $fixtures = $this->currentLiveFixtures(200);
         if ($fixtures === []) {
             return [
                 'status' => DataState::UNAVAILABLE,
                 'state' => 'NO_LIVE_FIXTURES',
                 'matches' => [],
                 'errors' => $errors,
-                'refreshed' => $refreshed === null ? null : ['status' => $refreshed['status'] ?? null, 'processed' => $refreshed['processed'] ?? 0, 'requests' => $refreshed['requests'] ?? 0],
+                'refreshed' => $refreshed === null ? null : ['status' => $refreshed['status'] ?? null, 'processed' => $refreshed['processed'] ?? 0, 'requests' => $refreshed['requests'] ?? 0, 'expiredLive' => $refreshed['expiredLive'] ?? 0],
+                'refreshIntervalSeconds' => $this->refreshIntervalSeconds(),
+                'staleThresholdSeconds' => $this->staleThresholdSeconds(),
             ];
         }
         // Batch pre-load predictions: 1 query for all pre-match + 1 for live
@@ -86,8 +89,46 @@ final class LiveMatchService
             'state' => $matches === [] ? 'NO_LIVE_FIXTURES' : 'LIVE',
             'matches' => $matches,
             'errors' => $errors,
-            'refreshed' => $refreshed === null ? null : ['status' => $refreshed['status'] ?? null, 'processed' => $refreshed['processed'] ?? 0, 'requests' => $refreshed['requests'] ?? 0],
+            'refreshed' => $refreshed === null ? null : ['status' => $refreshed['status'] ?? null, 'processed' => $refreshed['processed'] ?? 0, 'requests' => $refreshed['requests'] ?? 0, 'expiredLive' => $refreshed['expiredLive'] ?? 0],
+            'refreshIntervalSeconds' => $this->refreshIntervalSeconds(),
+            'staleThresholdSeconds' => $this->staleThresholdSeconds(),
         ];
+    }
+
+    /** Provider poll interval mirrored in the live API so the browser can display the cadence. */
+    public function refreshIntervalSeconds(): int
+    {
+        return $this->config?->refreshInterval('live') ?? 90;
+    }
+
+    /**
+     * How long a live row may remain visible without fresh provider confirmation.
+     * A stale row is not deleted — it is simply no longer allowed to fill the
+     * Live Match section until the provider reports it live again.
+     */
+    public function staleThresholdSeconds(): int
+    {
+        return max(300, min(600, $this->refreshIntervalSeconds() * 3));
+    }
+
+    /**
+     * @return list<array<string,mixed>> live-status fixtures still confirmed recently
+     */
+    private function currentLiveFixtures(int $limit): array
+    {
+        $now = time();
+        $threshold = $this->staleThresholdSeconds();
+        $fixtures = [];
+        foreach ($this->repo->listFixtures(['status' => FixtureSyncService::LIVE_STATUSES], max(1, min(500, $limit))) as $fixture) {
+            $status = strtoupper((string) ($fixture['status'] ?? ''));
+            if (!in_array($status, FixtureSyncService::LIVE_STATUSES, true)) continue;
+            $updatedAt = (string) ($fixture['updated_at'] ?? $fixture['source_timestamp'] ?? '');
+            $updated = $updatedAt !== '' ? strtotime($updatedAt) : false;
+            if ($updated === false || ($now - $updated) > $threshold) continue;
+            $fixtures[] = $fixture;
+            if (count($fixtures) >= $limit) break;
+        }
+        return $fixtures;
     }
 
     /**
@@ -222,20 +263,21 @@ final class LiveMatchService
                 'score' => $hasScore ? ['home' => (int) $fixture['home_score'], 'away' => (int) $fixture['away_score']] : null,
                 'redCards' => ['home' => $fixture['home_red_cards'] ?? null, 'away' => $fixture['away_red_cards'] ?? null], 'elapsed' => true];
         }
-        if ($status !== 'LIVE') {
+        if (!in_array($status, FixtureSyncService::LIVE_STATUSES, true)) {
             return ['state' => 'PRE_MATCH', 'reason' => 'The match has not started (status ' . $status . ').', 'minute' => is_numeric($minute) ? (int) $minute : null,
                 'score' => $hasScore ? ['home' => (int) $fixture['home_score'], 'away' => (int) $fixture['away_score']] : null,
                 'redCards' => ['home' => $fixture['home_red_cards'] ?? null, 'away' => $fixture['away_red_cards'] ?? null], 'elapsed' => false];
         }
+        $liveLabel = $status === 'LIVE' ? 'IN_PLAY' : $status;
         if (!is_numeric($minute)) {
             return ['state' => DataState::LIMITED, 'reason' => 'The match is live but the provider reported no minute, so elapsed time is unavailable.',
                 'minute' => null, 'score' => $hasScore ? ['home' => (int) $fixture['home_score'], 'away' => (int) $fixture['away_score']] : ['home' => DataState::UNAVAILABLE, 'away' => DataState::UNAVAILABLE],
                 'redCards' => ['home' => $fixture['home_red_cards'] ?? null, 'away' => $fixture['away_red_cards'] ?? null], 'elapsed' => false];
         }
-        return ['state' => 'IN_PLAY', 'reason' => null, 'minute' => (int) $minute,
+        return ['state' => $liveLabel, 'reason' => null, 'minute' => (int) $minute,
             'score' => $hasScore ? ['home' => (int) $fixture['home_score'], 'away' => (int) $fixture['away_score']] : ['home' => DataState::UNAVAILABLE, 'away' => DataState::UNAVAILABLE],
             'redCards' => ['home' => $fixture['home_red_cards'] ?? null, 'away' => $fixture['away_red_cards'] ?? null],
-            'elapsed' => (int) $minute >= 90];
+            'elapsed' => in_array($status, ['EXTRA_TIME', 'PENALTIES'], true) || (int) $minute >= 90];
     }
 
     /**

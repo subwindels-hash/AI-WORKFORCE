@@ -654,7 +654,7 @@ final class PredictionService
     {
         $status = strtoupper((string) ($fixture['status'] ?? ''));
         $kickoff = (string) ($fixture['kickoff_at'] ?? '');
-        $started = in_array($status, ['LIVE', 'FINISHED', 'SUSPENDED'], true);
+        $started = in_array($status, array_merge(FixtureSyncService::LIVE_STATUSES, ['FINISHED', 'SUSPENDED']), true);
         if (!$started && $kickoff !== '') {
             try { $started = (new \DateTimeImmutable($kickoff))->getTimestamp() <= time(); } catch (\Throwable $e) { $started = false; }
         }
