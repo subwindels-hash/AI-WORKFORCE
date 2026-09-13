@@ -232,8 +232,9 @@ class Sports extends MY_Controller
         // earlier attempt without a ticket is retryable; a valid ticket returns
         // GENERATED with its existing id.
         if ($ticketId) {
-            $msg = sprintf('GENERATED odds prediction ticket %s for %s — status %s, %d evaluated, %d predictions, %d rejections. %s',
-                $ticketId, $date, $status, $evaluated, $recorded, $rejections, $message);
+            $headline = !empty($result['existing']) ? 'TICKET ALREADY GENERATED' : 'ODDS PREDICTION TICKET GENERATED';
+            $msg = sprintf('%s — Ticket ID %s for %s — status %s, %d evaluated, %d predictions, %d rejections. %s',
+                $headline, $ticketId, $date, $status, $evaluated, $recorded, $rejections, $message);
             $this->flash('notice', $msg);
             redirect('/sports/odds-prediction-ticket');
             return;

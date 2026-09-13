@@ -632,24 +632,17 @@ $heroMarketLabel = function (string $market, string $selection): string {
 
 <script id="generate-ticket-btn-js">
 (function(){
-  // Enhance GENERATE buttons: show generating state, prevent double-click
+  // Show the in-flight state and keep the submit locked until the server
+  // responds. The server-side idempotency key is the final protection against
+  // duplicate tickets; this prevents the common double-click race in the UI.
   document.querySelectorAll('form[action$="/generate-ticket"], form[action$="/sports/generate-ticket"]').forEach(function(form){
-    form.addEventListener('submit', function(){
+    form.addEventListener('submit', function(event){
       var btn = form.querySelector('button');
-      if(!btn) return;
-      if(btn.dataset.generating === '1') return;
+      if(!btn || btn.dataset.generating === '1') { event.preventDefault(); return; }
       btn.dataset.generating = '1';
-      btn.dataset.originalText = btn.innerHTML;
-      btn.innerHTML = '⏳ Generating odds prediction ticket...';
+      btn.innerHTML = '⏳ Generating Odds Predictions...';
       btn.disabled = true;
-      // allow form to submit, but re-enable after 10s if still on page (e.g. validation fail)
-      setTimeout(function(){
-        if(btn.dataset.generating === '1'){
-          btn.innerHTML = btn.dataset.originalText;
-          btn.disabled = false;
-          delete btn.dataset.generating;
-        }
-      }, 10000);
+      btn.setAttribute('aria-busy', 'true');
     });
   });
   // Also offer API-driven generation for operators who prefer no page reload
