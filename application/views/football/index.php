@@ -87,12 +87,16 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
     $href = static function (int $target) use ($viewDate, $carry): string {
         return '/football?' . http_build_query(array_merge(['date' => $viewDate, 'page' => $target], $carry));
     };
+    // Inactive edges render as a real disabled button rather than a styled
+    // span: a span keeps the .btn `cursor: pointer` affordance, so it looks
+    // clickable while doing nothing. A native disabled button is announced as
+    // unavailable, is skipped by tab order and shows `not-allowed` on hover.
     $previous = !empty($pagination['hasPrevious'])
-        ? '<a class="btn small" href="' . e($href((int) $pagination['previousPage'])) . '">&larr; Previous</a>'
-        : '<span class="btn small is-disabled" aria-disabled="true">&larr; Previous</span>';
+        ? '<a class="btn small" href="' . e($href((int) $pagination['previousPage'])) . '" rel="prev">&larr; Previous</a>'
+        : '<button class="btn small" type="button" disabled title="You are on the first page">&larr; Previous</button>';
     $next = !empty($pagination['hasNext'])
-        ? '<a class="btn small" href="' . e($href((int) $pagination['nextPage'])) . '">Next &rarr;</a>'
-        : '<span class="btn small is-disabled" aria-disabled="true">Next &rarr;</span>';
+        ? '<a class="btn small" href="' . e($href((int) $pagination['nextPage'])) . '" rel="next">Next &rarr;</a>'
+        : '<button class="btn small" type="button" disabled title="You are on the last page">Next &rarr;</button>';
     return '<nav class="football-pager" aria-label="Match pages">'
         . '<div>' . $previous . '</div>'
         . '<div class="football-pager__status"><b>Page ' . $page . ' of ' . $pages . '</b><span>'

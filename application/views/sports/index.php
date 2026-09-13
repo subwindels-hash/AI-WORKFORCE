@@ -140,10 +140,10 @@ $kickoffStamp = static function (mixed $iso): string {
       <?php if (!empty($caps['sync'])): ?>
         <form method="post" action="/sports/sync" onsubmit="return confirm('Pull fresh fixtures, odds and results from the configured providers now?')">
           <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
-          <button class="btn primary small">Sync now</button>
+          <button class="btn primary small" type="submit">Sync now</button>
         </form>
       <?php else: ?>
-        <button class="btn small" disabled title="Requires the sports.manage permission">Sync now</button>
+        <button class="btn small" type="button" disabled aria-disabled="true" title="Requires the sports.manage permission">Sync now</button>
       <?php endif; ?>
       <?php // Keep the primary generation action visible in the dashboard toolbar.
             // It used to live only in the Engine output panel, which made it
@@ -293,7 +293,7 @@ $kickoffStamp = static function (mixed $iso): string {
             <form method="post" action="/sports/generate-ticket" class="sports-controls__form" onsubmit="return confirm('Generate odds prediction ticket for <?= e($viewDateIso) ?> from stored data?')">
               <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
               <input type="hidden" name="date" value="<?= e($ticketDateIso) ?>">
-              <button class="btn small sports-generate-btn">
+              <button class="btn small sports-generate-btn" type="submit">
                 🎯 Generate Odds Predictions
               </button>
               <label class="sports-controls__check" title="First delete this day's active candidates (old pass predictions, the pending ticket, daily slot, unquotable odds), then generate from the current stored pool. Settled/historical records are kept.">
@@ -303,12 +303,12 @@ $kickoffStamp = static function (mixed $iso): string {
             <form method="post" action="/sports/reset-candidates" onsubmit="return confirm('Clear the ACTIVE candidate state for <?= e($viewDateIso) ?>? Settled/historical records are preserved.')">
               <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
               <input type="hidden" name="date" value="<?= e($ticketDateIso) ?>">
-              <button class="btn small" title="Delete active (not historical) candidates for the selected date">♻️ Clear</button>
+              <button class="btn small" type="submit" title="Delete active (not historical) candidates for the selected date">♻️ Clear</button>
             </form>
             <span class="mono sports-controls__date" title="Configured-local ticket date <?= e($ticketDateIso) ?>"><?= e($ticketDateShown) ?></span>
             <span class="sports-controls__note">optional manual run/retry — automatic daily generation remains active</span>
           <?php else: ?>
-            <button class="btn small sports-generate-btn" disabled title="Requires the sports.manage permission">🎯 Odds Prediction Ticket</button>
+            <button class="btn small sports-generate-btn" type="button" disabled aria-disabled="true" title="Requires the sports.manage permission">🎯 Odds Prediction Ticket</button>
             <span class="mono sports-controls__date" title="Configured-local ticket date <?= e($ticketDateIso) ?>"><?= e($ticketDateShown) ?></span>
           <?php endif; ?>
         </div>
@@ -509,18 +509,18 @@ $kickoffStamp = static function (mixed $iso): string {
                 <form method="post" action="/sports/<?= e((string) $ticket['id']) ?>/decide">
                   <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
                   <input type="hidden" name="approve" value="1">
-                  <button class="btn primary small">Approve (sports.approve)</button>
+                  <button class="btn primary small" type="submit">Approve (sports.approve)</button>
                 </form>
                 <form method="post" action="/sports/<?= e((string) $ticket['id']) ?>/decide" onsubmit="return confirm('Reject this record?')">
                   <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
                   <input type="hidden" name="approve" value="0">
-                  <button class="btn danger small">Reject</button>
+                  <button class="btn danger small" type="submit">Reject</button>
                 </form>
               </div>
               <p class="sports-note">Approval is recorded with the acting identity. There is no external execution connector — approval never places a bet.</p>
             <?php else: ?>
               <div class="sports-actions">
-                <button class="btn small" disabled title="Requires the sports.approve permission">Approve / reject (needs sports.approve)</button>
+                <button class="btn small" type="button" disabled aria-disabled="true" title="Requires the sports.approve permission">Approve / reject (needs sports.approve)</button>
               </div>
               <p class="sports-note">Your account cannot approve records — ask an administrator for the <b>sports.approve</b> permission (Sports administrator role).</p>
             <?php endif; ?>
@@ -530,12 +530,12 @@ $kickoffStamp = static function (mixed $iso): string {
               <div class="sports-actions">
                 <form method="post" action="/sports/<?= e((string) $ticket['id']) ?>/settle">
                   <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
-                  <button class="btn small">Settle from verified results (sports.settle)</button>
+                  <button class="btn small" type="submit">Settle from verified results (sports.settle)</button>
                 </form>
               </div>
             <?php else: ?>
               <div class="sports-actions">
-                <button class="btn small" disabled title="Requires the sports.settle permission">Settle (needs sports.settle)</button>
+                <button class="btn small" type="button" disabled aria-disabled="true" title="Requires the sports.settle permission">Settle (needs sports.settle)</button>
               </div>
               <p class="sports-note">Settlement stays with identities holding <b>sports.settle</b>.</p>
             <?php endif; ?>
