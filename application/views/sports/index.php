@@ -149,13 +149,13 @@ $kickoffStamp = static function (mixed $iso): string {
             // It used to live only in the Engine output panel, which made it
             // easy to miss (especially after a long provider-status panel). ?>
       <?php if (!empty($caps['sync'])): ?>
-        <form method="post" action="/sports/generate-ticket" onsubmit="return confirm('Generate odds prediction ticket for <?= e($viewDateIso) ?> from stored data?')">
+        <form method="post" action="/sports/generate-ticket">
           <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
           <input type="hidden" name="date" value="<?= e($ticketDateIso) ?>">
-          <button class="btn small sports-ticket-btn" type="submit">Generate Odds Prediction</button>
+          <button class="btn small sports-ticket-btn" type="submit">🎯 Generate Odds Predictions</button>
         </form>
       <?php else: ?>
-        <button class="btn small sports-ticket-btn" type="button" disabled title="Requires the sports.manage permission">Generate Odds Prediction</button>
+        <button class="btn small sports-ticket-btn" type="button" disabled aria-disabled="true" title="Requires the sports.manage permission">🎯 Generate Odds Predictions</button>
       <?php endif; ?>
       <a class="btn small" href="/football">Football match &amp; full odds board</a>
       <a class="btn small" href="/sports/odds-prediction-ticket">Ticket history</a>
@@ -294,7 +294,7 @@ $kickoffStamp = static function (mixed $iso): string {
               <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
               <input type="hidden" name="date" value="<?= e($ticketDateIso) ?>">
               <button class="btn small sports-generate-btn">
-                🎯 Odds Prediction Ticket
+                🎯 Generate Odds Predictions
               </button>
               <label class="sports-controls__check" title="First delete this day's active candidates (old pass predictions, the pending ticket, daily slot, unquotable odds), then generate from the current stored pool. Settled/historical records are kept.">
                 <input type="checkbox" name="force" value="1"> Force fresh run

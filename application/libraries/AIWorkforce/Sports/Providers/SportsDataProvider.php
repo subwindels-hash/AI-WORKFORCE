@@ -43,6 +43,9 @@ class SportsProviderManager
     private ProviderCircuitBreaker $breaker;
     /** @var array<string,array> last live health per provider (this process) */
     private array $lastHealth = [];
+    /** Avoid probing every provider twice while one dashboard payload is assembled. */
+    private ?array $healthSnapshot = null;
+    private int $healthSnapshotAt = 0;
 
     public function __construct(?ProviderCircuitBreaker $breaker = null)
     {
@@ -86,6 +89,14 @@ class SportsProviderManager
      */
     public function health(): array
     {
+        // A dashboard asks for health through both the detailed status and
+        // readiness summaries. Reusing a very short snapshot prevents those
+        // two reads (and the controller's header read) from issuing duplicate
+        // network probes, while still allowing the next request to observe
+        // provider recovery promptly.
+        if ($this->healthSnapshot !== null && (time() - $this->healthSnapshotAt) < 5) {
+            return $this->healthSnapshot;
+        }
         $out = [];
         foreach ($this->all() as $id => $provider) {
             $circuit = $this->breaker->state($id);
@@ -103,6 +114,8 @@ class SportsProviderManager
             $h['operational'] = ($h['status'] ?? '') === 'ONLINE' && $circuit['state'] !== ProviderCircuitBreaker::OPEN;
             $out[$id] = array_merge(['id' => $id], $h);
         }
+        $this->healthSnapshot = $out;
+        $this->healthSnapshotAt = time();
         return $out;
     }
 

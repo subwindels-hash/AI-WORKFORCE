@@ -31,7 +31,7 @@ class ConfigurationService
      * A measured 25% read on verified data is a real signal and may be
      * considered; the engine reports it as 25% and ranks it accordingly. This
      * is a bound on what is CONFIGURABLE, not a promise about any prediction:
-     * the shipped default is still 75 (see defaults()), confidence is never
+     * the shipped default is 30 (see defaults()), confidence is never
      * inflated to clear a floor, and the data-quality gate is unchanged — a
      * fixture below the quality floor is still rejected outright whatever its
      * confidence happens to be.
@@ -96,7 +96,7 @@ class ConfigurationService
             'min_data_quality' => 80,
             // Adaptive confidence policy (requirements #1/#8). NULL means the
             // tiers are DERIVED from the two floors above: with the stock
-            // 75 / 80 that is data quality >=85 → 75% confidence required,
+            // 30 / 80 that is data quality >=85 → 30% confidence required,
             // 75-84 → 70%, 65-74 → 65% and safer markets only, <65 → rejected.
             // Set it explicitly to author the tiers directly; nothing in the
             // engine hard-codes a threshold.
@@ -216,7 +216,7 @@ class ConfigurationService
         // The configurable floor is 25, not 30: a legitimately measured 25%
         // read on verified data is a usable signal and an operator is allowed
         // to admit it. This only widens what an operator MAY configure — the
-        // shipped default remains 75 (ConfigurationService::defaults()), and
+        // shipped default remains 30 (ConfigurationService::defaults()), and
         // the adaptive ladder still derives from whatever is configured, so
         // nothing is loosened unless an administrator explicitly lowers it.
         // Confidence is never inflated to clear a floor; see ConfidencePolicy.
