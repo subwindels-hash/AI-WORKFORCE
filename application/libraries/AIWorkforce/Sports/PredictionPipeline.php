@@ -257,7 +257,19 @@ class PredictionPipeline
         $qualityScore = (int) round((float) ($quality['score'] ?? 0));
         $measuredConfidence = is_numeric($conf['confidence'] ?? null) ? (float) $conf['confidence'] : null;
         $verdict = $policy->evaluate($qualityScore, $measuredConfidence, (string) $candidate['market'], (string) $candidate['selection']);
-        $minConfidence = $verdict['requiredConfidence'] ?? $policy->highestConfidenceRequirement();
+        // The configured confidence is a hard floor for every data-quality
+        // tier. Adaptive policy tiers may add stricter requirements, but they
+        // can never lower the operator's configured minimum. This keeps a
+        // measured 29.9% rejection-safe and a measured 30.0% acceptance-safe
+        // without rounding or altering the model output.
+        $configuredMinConfidence = isset($config['min_confidence']) && is_numeric($config['min_confidence'])
+            ? max(30.0, (float) $config['min_confidence']) : 30.0;
+        $minConfidence = max($configuredMinConfidence, (float) ($verdict['requiredConfidence'] ?? $policy->highestConfidenceRequirement()));
+        $verdict['requiredConfidence'] = $minConfidence;
+        if ($measuredConfidence !== null && $measuredConfidence + 1e-9 < $minConfidence) {
+            $verdict['qualified'] = false;
+            if (!in_array('LOW_CONFIDENCE', $verdict['reasons'], true)) $verdict['reasons'][] = 'LOW_CONFIDENCE';
+        }
 
         // The whole adaptive decision is recorded on the candidate so the UI,
         // the decision trace and the rejection audit can all show WHAT was

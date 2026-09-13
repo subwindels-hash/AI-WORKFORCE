@@ -36,7 +36,7 @@ class ConfigurationService
      * fixture below the quality floor is still rejected outright whatever its
      * confidence happens to be.
      */
-    public const MIN_CONFIDENCE_FLOOR = 25.0;
+    public const MIN_CONFIDENCE_FLOOR = 30.0;
 
     public function __construct(private SportsRepository $repo, private AuditRepository $audit) {}
 
@@ -84,14 +84,13 @@ class ConfigurationService
             'target_odds_max' => 8.0,
             'max_selections' => 5,
             'risk_level' => 'CONSERVATIVE',
-            // Qualified-ticket policy: only strong, well-evidenced predictions
-            // may enter a daily ticket — 75%+ WINDELS confidence, data quality
-            // 80+, LOW correlation between legs. Anything weaker is rejected
-            // and the day honestly reports NO QUALIFIED TICKET instead of a
-            // forced combination. Operators can still lower these floors
-            // explicitly (append-only, audited); the validation range below
-            // only rules out self-contradictory gates.
-            'min_confidence' => 75.0,
+            // Qualified-ticket policy: predictions must have measured confidence
+            // >= the configured minimum (30% by default), data quality 80+,
+            // positive value and LOW correlation between legs. Anything weaker
+            // is rejected and the day honestly reports NO QUALIFIED TICKET
+            // instead of a forced combination. Changes remain append-only and
+            // audited.
+            'min_confidence' => 30.0,
             'min_expected_value' => 0.02,
             'max_correlation' => 'LOW',
             'min_data_quality' => 80,

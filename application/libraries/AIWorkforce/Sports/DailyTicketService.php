@@ -944,7 +944,7 @@ class DailyTicketService
                         }
                     }
                     if ($ticketId === null && $message === '') {
-                        $confidenceFloor = number_format((float) ($config['min_confidence'] ?? 75.0), 0);
+                        $confidenceFloor = number_format((float) ($config['min_confidence'] ?? 30.0), 0);
                         $message = $evaluated === 0
                             ? 'NO VALUE TICKET TODAY — no verified fixtures received for ' . $date
                             : 'NO QUALIFIED TICKET — ' . "Today's available matches did not meet the configured prediction requirements"
