@@ -86,7 +86,7 @@ class TicketOptimizer
         // the configuration screen accepted.
         $minConfidence = max(
             ConfigurationService::MIN_CONFIDENCE_FLOOR,
-            isset($config['minConfidence']) && is_numeric($config['minConfidence']) ? (float) $config['minConfidence'] : 75.0
+            isset($config['minConfidence']) && is_numeric($config['minConfidence']) ? (float) $config['minConfidence'] : 30.0
         );
         $minQuality = max(50, isset($config['minDataQuality']) && is_numeric($config['minDataQuality']) ? (int) $config['minDataQuality'] : 80);
         // The ADAPTIVE policy (requirements #1/#8), when the caller supplies

@@ -35,7 +35,8 @@ $ticketDateShown = gmdate('m/d/Y', (int) strtotime($ticketDateIso . ' 00:00:00 U
       <div class="sports-date-form">
         <span class="dim">Ticket date (UTC)</span>
         <span class="mono sports-chip-strong" title="Ticket date (UTC)"><?= e($ticketDateShown) ?></span>
-        <button class="btn small" disabled title="Requires the sports.manage permission">🎯 Odds Prediction Ticket</button>
+        <button class="btn small sports-ticket-btn" type="button" disabled title="Requires the sports.manage permission">🎯 Odds Prediction Ticket</button>
+        <span class="sports-note">Read-only access — ask an administrator for the sports.manage permission to generate.</span>
       </div>
     <?php endif; ?>
     <div class="sports-actionbar__links">

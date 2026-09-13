@@ -117,7 +117,7 @@ class ConfidencePolicy
         if ($explicit !== null) return new self($explicit);
         $topConfidence = isset($config['min_confidence']) && is_numeric($config['min_confidence'])
             ? (float) $config['min_confidence']
-            : (isset($config['minConfidence']) && is_numeric($config['minConfidence']) ? (float) $config['minConfidence'] : 75.0);
+            : (isset($config['minConfidence']) && is_numeric($config['minConfidence']) ? (float) $config['minConfidence'] : 30.0);
         $floor = isset($config['min_data_quality']) && is_numeric($config['min_data_quality'])
             ? (int) $config['min_data_quality']
             : (isset($config['minDataQuality']) && is_numeric($config['minDataQuality']) ? (int) $config['minDataQuality'] : self::DEFAULT_MIN_DATA_QUALITY);
