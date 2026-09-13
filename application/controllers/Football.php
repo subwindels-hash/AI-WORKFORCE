@@ -146,10 +146,11 @@ class Football extends MY_Controller
         $providers['mode'] = $providerMode;
         $providers['locked'] = $providerLocked;
         $data['providers'] = $providers;
-        // The selection panel (Data Provider → Select Competition → Premium
-        // League → Select Odds Prediction → Date) is an administrator concern.
-        // Operators see the board only; the AUTO · managed by admin selectors
-        // stay visible to administrators, who are the ones the backend honours.
+        // Competition / premium-league / market / date are read-only selections
+        // over stored rows and are honoured for every signed-in viewer, so the
+        // whole console shows the filter panel. Only the Data Provider pin is
+        // an administrator concern (`$isAdmin` gates that one selector in the
+        // view) — the backend honours a pin only under MANUAL provider mode.
         $data['isAdmin'] = $this->isAdmin($this->refreshIdentityPermissions($this->identity));
         $data['competition'] = $competition;
         $data['market'] = $market;

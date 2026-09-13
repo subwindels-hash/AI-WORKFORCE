@@ -634,6 +634,10 @@ class SportsIntelligence
         $recentSyncs = [];
         try { $recentSyncs = $this->repository->listSyncRuns(null, 8); } catch (\Throwable $e) { $recentSyncs = []; }
         return [
+            // The moment this dashboard payload was read from storage — the
+            // page's honest "last updated" stamp (it never claims provider
+            // freshness, which lives in the Data feed panel).
+            'generatedAt' => gmdate('c'),
             'systemStatus' => [
                 'enabled' => $status['enabled'], 'mode' => $status['mode'], 'isDemoData' => $status['isDemoData'],
                 'providers' => $status['providers'], 'liveHealth' => $status['liveHealth'],
