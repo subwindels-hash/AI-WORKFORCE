@@ -97,11 +97,18 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
     $next = !empty($pagination['hasNext'])
         ? '<a class="btn small" href="' . e($href((int) $pagination['nextPage'])) . '" rel="next">Next &rarr;</a>'
         : '<button class="btn small" type="button" disabled title="You are on the last page">Next &rarr;</button>';
+    // Past the last page the board holds nothing, so say that plainly and
+    // offer a one-click way back to real content. "Page 9 of 2" with an empty
+    // table reads as a broken screen.
+    $status = $page > $pages
+        ? '<b>Page ' . $page . ' is past the last page (' . $pages . ')</b><span>No matches on this page · '
+            . $total . ' matches across ' . $pages . ' page' . ($pages === 1 ? '' : 's') . '</span>'
+        : '<b>Page ' . $page . ' of ' . $pages . '</b><span>'
+            . (int) ($pagination['from'] ?? 0) . '–' . (int) ($pagination['to'] ?? 0) . ' of ' . $total
+            . ' matches · ' . (int) ($pagination['pageSize'] ?? 50) . ' matches per page</span>';
     return '<nav class="football-pager" aria-label="Match pages">'
         . '<div>' . $previous . '</div>'
-        . '<div class="football-pager__status"><b>Page ' . $page . ' of ' . $pages . '</b><span>'
-        . (int) ($pagination['from'] ?? 0) . '–' . (int) ($pagination['to'] ?? 0) . ' of ' . $total
-        . ' matches · ' . (int) ($pagination['pageSize'] ?? 50) . ' matches per page</span></div>'
+        . '<div class="football-pager__status">' . $status . '</div>'
         . '<div>' . $next . '</div></nav>';
 };
 ?>
