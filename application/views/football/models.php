@@ -97,7 +97,10 @@ $stateClass = static fn(string $state): string => match (strtoupper($state)) {
             <button class="btn small primary">Fit calibration from stored settlements</button>
           </form>
         <?php else: ?>
-          <button class="btn small" disabled title="Requires the sports.manage permission">Fit calibration (needs sports.manage)</button>
+          <form method="post" action="/football/calibrate" class="football-inline-form">
+            <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+            <button class="btn small" type="submit" title="Requires the sports.manage permission — click to see the access message">Fit calibration (needs sports.manage)</button>
+          </form>
         <?php endif; ?>
         </div>
       </section>
