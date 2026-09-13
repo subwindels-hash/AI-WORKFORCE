@@ -151,12 +151,21 @@ final class FixtureSyncService
         // against the provider's daily budget instead of vanishing with the run.
         $this->gateway->noteProviderReady($providerCode);
         $activeLiveExternalIds = [];
+        $sweptAt = gmdate('c');
         foreach ((array) $attempt['result'] as $raw) {
             if (!is_array($raw)) continue;
             try {
                 $row = $this->normalize($raw, $providerCode);
-                if ($jobType === 'LIVE' && in_array((string) ($row['status'] ?? ''), self::LIVE_STATUSES, true)) {
-                    $activeLiveExternalIds[] = (string) ($row['externalId'] ?? '');
+                if (in_array((string) ($row['status'] ?? ''), self::LIVE_STATUSES, true)) {
+                    // This sweep is the witness: stamp the moment a provider
+                    // actually reported the fixture in play. Live Match reads
+                    // that stamp, so a fixture stays on the panel only while a
+                    // provider keeps saying it is live — and a claim from a
+                    // six-hourly fixtures sweep ages out of the freshness
+                    // window exactly like any other.
+                    $row['liveConfirmed'] = true;
+                    $row['liveConfirmedAt'] = $sweptAt;
+                    if ($jobType === 'LIVE') $activeLiveExternalIds[] = (string) ($row['externalId'] ?? '');
                 }
                 $stored = $this->repo->saveFixture($providerRowId, $row);
                 $processed++;
@@ -166,14 +175,29 @@ final class FixtureSyncService
                 // A malformed row is counted and named; it never aborts the day
                 // and is never replaced by a synthetic fixture.
                 $errors[] = mb_substr($e->getMessage(), 0, 200);
+                // The provider did list this fixture, so it is still part of the
+                // live snapshot even though its payload could not be stored.
+                // Protecting it here is what lets the takedown below run on a
+                // sweep that hit a bad row, instead of being skipped entirely
+                // and leaving every finished match on the panel.
+                if ($jobType === 'LIVE') {
+                    $listed = trim((string) ($raw['externalId'] ?? ''));
+                    if ($listed !== '') $activeLiveExternalIds[] = $listed;
+                }
             }
         }
         $expiredLive = 0;
-        if ($jobType === 'LIVE' && $errors === []) {
+        if ($jobType === 'LIVE') {
             // The provider's live endpoint is an authoritative snapshot of what
             // is in play now. Rows not returned are removed from Live Match in
             // this same sweep; their scores are cleared by the repository so a
             // last live score is never mistaken for the final result.
+            //
+            // This runs on every successful provider call — including one where
+            // some rows failed to normalize, because those rows are protected
+            // above by the id the provider sent. Gating it on a completely
+            // error-free sweep is what used to let one bad row keep every
+            // already-finished match pinned to Live Match.
             $expiredLive = $this->repo->expireMissingLiveFixtures($providerRowId, $activeLiveExternalIds, gmdate('c'));
         }
         if ($processed === 0 && $errors === [] && $jobType !== 'LIVE') $errors[] = 'provider returned no fixtures for ' . $from;

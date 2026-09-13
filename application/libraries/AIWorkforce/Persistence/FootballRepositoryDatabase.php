@@ -206,6 +206,13 @@ class FootballRepositoryDatabase implements FootballRepository
             'source_timestamp' => self::iso((string) ($fixture['sourceTimestamp'] ?? '')) ?: $now,
             'updated_at' => $now,
         ];
+        // Only a live sweep may witness a fixture as in play. `updated_at` is
+        // touched by every unrelated write, so it cannot answer "is this still
+        // live"; this column records the moment a provider live snapshot
+        // actually listed the fixture, and nothing else ever sets it.
+        if (!empty($fixture['liveConfirmed']) && in_array($data['status'], \AIWorkforce\Football\FixtureSyncService::LIVE_STATUSES, true)) {
+            $data['live_confirmed_at'] = self::iso((string) ($fixture['liveConfirmedAt'] ?? '')) ?: $now;
+        }
         $existing = $this->db->get_where('football_fixtures', ['provider_id' => $providerId, 'external_id' => $externalId], 1)->row_array();
         if ($existing) {
             // A finished match keeps its final score: a later provider response
@@ -278,6 +285,38 @@ class FootballRepositoryDatabase implements FootballRepository
             'away_score' => null,
             'data_state' => \AIWorkforce\Football\DataState::LIMITED,
             'source_timestamp' => $at,
+            // The fixture is no longer witnessed live: drop the confirmation so
+            // it cannot be re-admitted to Live Match by a later unrelated write.
+            'live_confirmed_at' => null,
+            'updated_at' => gmdate('c'),
+        ]);
+        return (int) $this->db->affected_rows();
+    }
+
+    public function expireStaleLiveFixtures(string $confirmedBefore, string $observedAt): int
+    {
+        $before = self::iso($confirmedBefore) ?: gmdate('c');
+        $at = self::iso($observedAt) ?: gmdate('c');
+        // Two kinds of row are swept here, and both are "the provider is no
+        // longer telling us this is live":
+        //   1. last confirmed live before the freshness cutoff;
+        //   2. never confirmed live at all (a row left in an in-play status by
+        //      a day sweep, or written before this column existed).
+        $this->db->where_in('status', \AIWorkforce\Football\FixtureSyncService::LIVE_STATUSES)
+            ->group_start()
+                ->where('live_confirmed_at <', $before)
+                ->or_where('live_confirmed_at IS NULL')
+            ->group_end();
+        $this->db->update('football_fixtures', [
+            'status' => \AIWorkforce\Football\FixtureSyncService::STALE_LIVE_STATUS,
+            'match_state' => 'STALE',
+            'minute' => null,
+            'extra_minute' => null,
+            'home_score' => null,
+            'away_score' => null,
+            'data_state' => \AIWorkforce\Football\DataState::LIMITED,
+            'source_timestamp' => $at,
+            'live_confirmed_at' => null,
             'updated_at' => gmdate('c'),
         ]);
         return (int) $this->db->affected_rows();

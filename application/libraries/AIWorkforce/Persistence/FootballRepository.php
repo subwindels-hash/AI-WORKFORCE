@@ -125,6 +125,19 @@ interface FootballRepository
     public function expireMissingLiveFixtures(int $providerId, array $activeExternalIds, string $observedAt): int;
 
     /**
+     * Take every in-play fixture off the live board whose last provider live
+     * confirmation is older than `$confirmedBefore` (or which was never
+     * confirmed live at all). This is the backstop for the case the per-sweep
+     * expiry cannot cover: a provider that stops answering, a sweep that failed
+     * before it could compare sets, or a row left in an in-play status by a
+     * non-live code path. Scores are cleared for the same reason as
+     * expireMissingLiveFixtures — a last live score is not a final result.
+     *
+     * @return int number of fixture rows taken out of the live set
+     */
+    public function expireStaleLiveFixtures(string $confirmedBefore, string $observedAt): int;
+
+    /**
      * How many fixtures a filter matches, without loading them. Pagination
      * needs the total to answer "Page 1 of 20" — it must never be guessed from
      * the size of one page.

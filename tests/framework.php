@@ -1021,6 +1021,13 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
         if (isset($fixture['kickoff'])) $data['kickoff_at'] = $fixture['kickoff'];
         $data['external_id'] = $external;
         $data['provider_id'] = $providerId;
+        // Same rule as the SQL repository: only a live sweep witnesses a fixture
+        // in play, and only then is the live confirmation stamped.
+        unset($data['liveConfirmed'], $data['liveConfirmedAt']);
+        if (!empty($fixture['liveConfirmed'])
+            && in_array(strtoupper((string) ($data['status'] ?? '')), \AIWorkforce\Football\FixtureSyncService::LIVE_STATUSES, true)) {
+            $data['live_confirmed_at'] = (string) ($fixture['liveConfirmedAt'] ?? gmdate('c'));
+        }
         if ($existing !== null) {
             // Same freeze rules as SQL: a finished match keeps its final score and
             // its terminal status, and never reverts to an earlier partial row.
@@ -1083,12 +1090,55 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
             $row['away_score'] = null;
             $row['data_state'] = \AIWorkforce\Football\DataState::LIMITED;
             $row['source_timestamp'] = $observedAt;
+            $row['live_confirmed_at'] = null;
             $row['updated_at'] = gmdate('c');
             $this->writes[] = 'fixture:expire-live:' . (string) ($row['external_id'] ?? '');
             $expired++;
         }
         unset($row);
         return $expired;
+    }
+
+    public function expireStaleLiveFixtures(string $confirmedBefore, string $observedAt): int
+    {
+        $cutoff = (int) strtotime($confirmedBefore);
+        $expired = 0;
+        foreach ($this->fixtures as &$row) {
+            if (!in_array(strtoupper((string) ($row['status'] ?? '')), \AIWorkforce\Football\FixtureSyncService::LIVE_STATUSES, true)) continue;
+            $confirmed = (string) ($row['live_confirmed_at'] ?? '');
+            // Never confirmed live, or confirmed before the cutoff: either way
+            // no provider is calling this match live right now.
+            if ($confirmed !== '' && (int) strtotime($confirmed) >= $cutoff) continue;
+            $row['status'] = \AIWorkforce\Football\FixtureSyncService::STALE_LIVE_STATUS;
+            $row['match_state'] = 'STALE';
+            $row['minute'] = null;
+            $row['extra_minute'] = null;
+            $row['home_score'] = null;
+            $row['away_score'] = null;
+            $row['data_state'] = \AIWorkforce\Football\DataState::LIMITED;
+            $row['source_timestamp'] = $observedAt;
+            $row['live_confirmed_at'] = null;
+            $row['updated_at'] = gmdate('c');
+            $this->writes[] = 'fixture:expire-stale-live:' . (string) ($row['external_id'] ?? '');
+            $expired++;
+        }
+        unset($row);
+        return $expired;
+    }
+
+    /**
+     * Test-only: set stored columns directly, bypassing the write rules.
+     *
+     * Cases that need to simulate the passage of time (a live confirmation
+     * ageing past the freshness window) must be able to write the raw column,
+     * because `saveFixture()` deliberately refuses to backdate it.
+     */
+    public function mutateFixture(int $fixtureId, array $columns): void
+    {
+        foreach ($this->fixtures as &$row) {
+            if ((int) $row['id'] === $fixtureId) $row = array_merge($row, $columns);
+        }
+        unset($row);
     }
 
     public function countFixtures(array $filter = []): int

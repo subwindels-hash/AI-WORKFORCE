@@ -43,6 +43,20 @@ final class RefreshPolicy
      */
     private const PROVIDER_PRECONDITIONS = ['today', 'window', 'live', 'pending-results', 'statistics'];
 
+    /**
+     * The provider capability each provider-facing job actually calls. Backoff
+     * is judged against this capability rather than against the provider list
+     * as a whole, so a feed that cannot serve live scores never stops the live
+     * job while a healthy feed is available to serve it.
+     */
+    private const PRECONDITION_CAPABILITY = [
+        'today' => 'fixtures',
+        'window' => 'fixtures',
+        'live' => 'live',
+        'pending-results' => 'results',
+        'statistics' => 'teamStatistics',
+    ];
+
     /** A failed run is retried after at most this many seconds (see evaluate()). */
     public const FAILED_RETRY_SECONDS = 900;
 
@@ -98,15 +112,23 @@ final class RefreshPolicy
         // settle, and the performance snapshot stays current while the
         // provider recovers — none of them needs the network.
         if ($callsProvider) {
-            // The gateway reports the stored backoff as `backoffUntil`; the provider
-            // row's own column name is `backoff_until`, so accept either spelling.
-            $backoffUntil = null;
-            foreach ((array) ($this->gateway->status()['providers'] ?? []) as $provider) {
-                $until = $provider['backoffUntil'] ?? ($provider['backoff_until'] ?? null);
-                if (is_string($until) && $until !== '' && strtotime($until) > $now) $backoffUntil = $until;
+            // Only a job whose every capable provider is in backoff has to
+            // wait. The gateway tries each provider in turn and uses the first
+            // that answers, so one broken feed among several must not cancel
+            // the sweep: on a multi-feed install that is how a permanently
+            // failing secondary could keep the live panel from ever being
+            // refreshed while the primary was online the whole time.
+            $capability = self::PRECONDITION_CAPABILITY[$precondition] ?? null;
+            $backoffUntil = $capability === null ? null : $this->gateway->blockedUntil($capability);
+            if ($backoffUntil === null && $capability === null) {
+                // Unknown capability: fall back to the conservative reading.
+                foreach ((array) ($this->gateway->status()['providers'] ?? []) as $provider) {
+                    $until = $provider['backoffUntil'] ?? ($provider['backoff_until'] ?? null);
+                    if (is_string($until) && $until !== '' && strtotime($until) > $now) $backoffUntil = $until;
+                }
             }
             if ($backoffUntil !== null) {
-                return $verdict(['due' => false, 'reason' => 'PROVIDER_BACKOFF', 'detail' => ['until' => $backoffUntil]]);
+                return $verdict(['due' => false, 'reason' => 'PROVIDER_BACKOFF', 'detail' => ['until' => $backoffUntil, 'capability' => $capability]]);
             }
         }
         $deferral = $lastRun['next_run_at'] ?? null;

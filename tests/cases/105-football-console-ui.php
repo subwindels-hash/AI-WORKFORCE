@@ -552,6 +552,10 @@ test('football: a live match card carries the match date and time from the store
         'kickoff' => $kickoff, 'status' => 'LIVE', 'minute' => 34,
         'homeTeam' => 'Manchester City', 'awayTeam' => 'Everton', 'homeTeamId' => '10', 'awayTeamId' => '20',
         'homeScore' => 1, 'awayScore' => 1,
+        // What a provider sweep stamps when its live snapshot lists the match.
+        // Live Match admits a card on this confirmation alone, so a fixture
+        // written without one is not in play as far as the panel is concerned.
+        'liveConfirmed' => true, 'liveConfirmedAt' => gmdate('c'),
     ]);
     $match = ($module->live()->board(false)['matches'] ?? [])[0] ?? [];
     assert_equals((string) $stored['kickoff_at'], (string) ($match['fixture']['kickoff'] ?? ''),
@@ -689,8 +693,11 @@ test('football UI: every section on every football screen is the same numbered, 
         'Measured from stored settlements only'] as $writeUp) {
         assert_contains($writeUp, $views['board'], 'the board explains its section: ' . $writeUp);
     }
+    // The live panel's eyebrow is "Live now": the section holds matches a
+    // provider is reporting in play at this moment, and the wording is the
+    // reader's cue that the list is current rather than a view of the date.
     foreach (['Day overview', 'Ranked reading', 'Fixture odds board', 'Measured results',
-        'Reading the board', 'In play', 'Data health', 'Governance', 'Automation'] as $eyebrow) {
+        'Reading the board', 'Live now', 'Data health', 'Governance', 'Automation'] as $eyebrow) {
         assert_contains('football-eyebrow">' . $eyebrow . '</p>', $views['board'],
             'the board introduces a section as "' . $eyebrow . '"');
     }
