@@ -40,8 +40,11 @@ test('configuration validation rejects malformed values', function () {
     assert_false($svc->update(['target_odds_min' => 8, 'target_odds_max' => 5], 'a')['ok']);
     assert_false($svc->update(['max_selections' => 0], 'a')['ok']);
     assert_true($svc->update(['min_confidence' => 70.0], 'a', 'a stricter 70 percent floor is still allowed')['ok']);
-    assert_true($svc->update(['min_confidence' => 30.0], 'a', 'the floor is 30, not 70')['ok']);
-    assert_false($svc->update(['min_confidence' => 29.99], 'a')['ok']);
+    // A measured 25% read on verified data is a usable signal, so 25 is the
+    // lowest floor an operator may configure. The default stays 75.
+    assert_true($svc->update(['min_confidence' => 30.0], 'a', 'the floor is not 70')['ok']);
+    assert_true($svc->update(['min_confidence' => 25.0], 'a', 'the configurable floor is 25')['ok']);
+    assert_false($svc->update(['min_confidence' => 24.99], 'a')['ok']);
     assert_true($svc->update(['min_data_quality' => 50], 'a', 'quality floor is 50 too')['ok']);
     assert_false($svc->update(['min_data_quality' => 10], 'a')['ok']);
     assert_false($svc->update(['stake_amount' => 500, 'max_exposure' => 10], 'a')['ok']);

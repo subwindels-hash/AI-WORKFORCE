@@ -78,10 +78,16 @@ class TicketOptimizer
         $min = max(5.0, (float) ($config['targetOddsMin'] ?? 5.0));
         $max = min(8.0, (float) ($config['targetOddsMax'] ?? 8.0));
         $limit = min(6, max(1, (int) ($config['maxSelections'] ?? 5)));
-        // Absolute floors mirror the configuration validation range [30, 100]:
-        // an explicit admin setting is honoured, never clamped back up to a
-        // hard-coded 70/75. Defaults match ConfigurationService::defaults().
-        $minConfidence = max(30.0, isset($config['minConfidence']) && is_numeric($config['minConfidence']) ? (float) $config['minConfidence'] : 75.0);
+        // Absolute floors mirror the configuration validation range
+        // [ConfigurationService::MIN_CONFIDENCE_FLOOR, 100]: an explicit admin
+        // setting is honoured, never clamped back up to a hard-coded 70/75.
+        // Defaults match ConfigurationService::defaults(). The floor is read
+        // from that one constant so the optimizer can never disagree with what
+        // the configuration screen accepted.
+        $minConfidence = max(
+            ConfigurationService::MIN_CONFIDENCE_FLOOR,
+            isset($config['minConfidence']) && is_numeric($config['minConfidence']) ? (float) $config['minConfidence'] : 75.0
+        );
         $minQuality = max(50, isset($config['minDataQuality']) && is_numeric($config['minDataQuality']) ? (int) $config['minDataQuality'] : 80);
         // The ADAPTIVE policy (requirements #1/#8), when the caller supplies
         // one: each candidate is then judged against the confidence its own
