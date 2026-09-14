@@ -571,6 +571,107 @@ class ApiFootballProvider implements SportsDataProvider
         return $this->mapOdds($rows);
     }
 
+    /**
+     * In-play odds (GET /odds/live?fixture=ID) — the vendor's live odds feed
+     * (docs: Odds (In-Play) → odds/live). The wire shape differs from the
+     * pre-match /odds endpoint in three documented ways this mapper preserves
+     * instead of flattening away:
+     *   - quotes are NOT grouped by bookmaker (one aggregated live board);
+     *   - each value may carry `handicap`, `main` (the primary line when a
+     *     bet lists the same value at several lines) and `suspended` (the
+     *     bookmaker paused this exact price — it is carried through, never
+     *     silently dropped, so a consumer can show "suspended" honestly);
+     *   - the row-level `status` block ({stopped, blocked, finished}) states
+     *     whether play is halted or the whole match's betting is blocked.
+     *
+     * No history is stored upstream, so this is always a *snapshot*: rows come
+     * back flagged `live: true` with the vendor's own `update` clock.
+     */
+    public function liveOdds(string $fixtureExternalId): array
+    {
+        $json = $this->decodeJson($this->doRequest('/odds/live?' . http_build_query(['fixture' => $fixtureExternalId])));
+        $out = [];
+        foreach ($this->extractList($json) as $r) {
+            $status = is_array($r['status'] ?? null) ? $r['status'] : [];
+            $updatedAt = isset($r['update']) && is_string($r['update']) && trim($r['update']) !== '' ? trim($r['update']) : null;
+            foreach (($r['odds'] ?? []) as $bet) {
+                $market = self::normalizeMarket((string) ($bet['name'] ?? 'UNKNOWN'));
+                foreach (($bet['values'] ?? []) as $v) {
+                    if (!isset($v['odd']) || !is_numeric($v['odd'])) continue;
+                    $selectionRaw = (string) ($v['value'] ?? '');
+                    $handicap = isset($v['handicap']) && $v['handicap'] !== null && $v['handicap'] !== '' ? (string) $v['handicap'] : null;
+                    // A handicapped live selection ("Home" at line -1) is only
+                    // meaningful with its line; fold it into the raw text the
+                    // selection normalizer already understands ("Home -1").
+                    $selection = self::normalizeSelection($market, $handicap !== null ? trim($selectionRaw . ' ' . (str_starts_with($handicap, '-') ? $handicap : '+' . $handicap)) : $selectionRaw);
+                    $row = [
+                        'market' => $market,
+                        'providerMarket' => (string) ($bet['name'] ?? ''),
+                        'selection' => $selection,
+                        'providerSelection' => $selectionRaw,
+                        'decimalOdds' => (float) $v['odd'],
+                        'observedAt' => gmdate('c'),
+                        'live' => true,
+                        'suspended' => (bool) ($v['suspended'] ?? false),
+                        'fixtureId' => (string) ($r['fixture']['id'] ?? ''),
+                        // Match-level betting state, straight from the feed.
+                        'stopped' => (bool) ($status['stopped'] ?? false),
+                        'blocked' => (bool) ($status['blocked'] ?? false),
+                        'finished' => (bool) ($status['finished'] ?? false),
+                    ];
+                    if ($handicap !== null) $row['handicap'] = $handicap;
+                    if (isset($v['main']) && $v['main'] !== null) $row['main'] = (bool) $v['main'];
+                    if ($updatedAt !== null) $row['updatedAt'] = $updatedAt;
+                    $out[] = $row;
+                }
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Bookmaker catalog (GET /odds/bookmakers) — pure reference data: id and
+     * name for every bookmaker the /odds feed may quote. Call rarely, cache.
+     * @return array<int,array{id:string,name:string}>
+     */
+    public function oddsBookmakers(): array
+    {
+        $rows = $this->extractList($this->decodeJson($this->doRequest('/odds/bookmakers')));
+        $out = [];
+        foreach ($rows as $r) {
+            $name = trim((string) ($r['name'] ?? ''));
+            if ($name === '') continue;
+            $out[] = ['id' => (string) ($r['id'] ?? ''), 'name' => $name];
+        }
+        return $out;
+    }
+
+    /**
+     * Bet-type catalogs. The vendor keeps TWO separate id systems and mixing
+     * them is the documented gotcha: ids from /odds/bets filter only the
+     * pre-match /odds endpoint, ids from /odds/live/bets filter only
+     * /odds/live. `$live` selects which catalog this call returns, and each
+     * row carries the canonical market key the platform maps that name to.
+     * @return array<int,array{id:string,name:string,scope:string,canonicalMarket:string}>
+     */
+    public function oddsBetTypes(bool $live = false): array
+    {
+        $path = $live ? '/odds/live/bets' : '/odds/bets';
+        $rows = $this->extractList($this->decodeJson($this->doRequest($path)));
+        $out = [];
+        foreach ($rows as $r) {
+            $name = trim((string) ($r['name'] ?? ''));
+            if ($name === '') continue;
+            $out[] = [
+                'id' => (string) ($r['id'] ?? ''),
+                'name' => $name,
+                'scope' => $live ? 'LIVE' : 'PRE_MATCH',
+                'canonicalMarket' => self::normalizeMarket($name),
+            ];
+        }
+        return $out;
+    }
+
     public function results(string $fixtureExternalId): array
     {
         $resp = $this->doRequest('/fixtures?id=' . rawurlencode($fixtureExternalId));

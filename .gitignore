@@ -30,3 +30,4 @@ assets/uploads/avatars/*
 
 # Deployment reference file with real credentials — server-side only.
 /env
+application/cache/football_odds_catalog_*.json

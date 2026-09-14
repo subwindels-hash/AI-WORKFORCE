@@ -266,6 +266,7 @@ $route['api/sports/correlation'] = 'api_sports/correlation_monitor';
 // Football Intelligence — console (§10/§11/§16)
 $route['football'] = 'football';
 $route['football/match/(:num)/analyze'] = 'football/analyze/$1';
+$route['football/match/(:num)/refresh-odds'] = 'football/refresh_odds/$1';
 $route['football/match/(:num)'] = 'football/match/$1';
 $route['football/live'] = 'football/live';
 $route['football/models'] = 'football/models';
@@ -294,6 +295,13 @@ $route['api/football/providers'] = 'api_football/providers';
 $route['api/football/providers/health'] = 'api_football/providers_health';
 $route['api/football/matches/fetch'] = 'api_football/fetch_matches';
 $route['api/football/markets'] = 'api_football/markets';
+// Odds surfaces. The catalog routes come BEFORE the numeric ones: CI3 matches
+// in declaration order and "bookmakers" must never be read as a fixture id.
+$route['api/football/odds/bookmakers'] = 'api_football/odds_bookmakers';
+$route['api/football/odds/bets'] = 'api_football/odds_bet_types';
+$route['api/football/odds/(:num)/refresh'] = 'api_football/odds_refresh/$1';
+$route['api/football/odds/(:num)/live'] = 'api_football/odds_live/$1';
+$route['api/football/odds/(:num)'] = 'api_football/odds_sheet/$1';
 $route['api/football/picks'] = 'api_football/picks';
 $route['api/football/intelligence'] = 'api_football/match_intelligence';
 $route['api/football/intelligence/(:num)'] = 'api_football/match_intelligence/$1';
