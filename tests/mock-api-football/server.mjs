@@ -17,6 +17,16 @@
  *   - +1..+3: more SCHEDULED fixtures (the upcoming sweep)
  *   - past 21 days: FINISHED fixtures with deterministic scores (form/history)
  *
+ * Odds family (mirrors the vendor's dashboard tester surface):
+ *   GET /odds            fixture | league+season | date, plus bet/bookmaker
+ *                        filters, 10 rows/page (fixture rows)
+ *   GET /odds/bets       pre-match bet catalog (id, search)
+ *   GET /odds/bookmakers bookmaker catalog (id, search)
+ *   GET /odds/mapping    league+season grouped fixture ids, 100 ids/page
+ *   GET /odds/live       in-play odds (fixture, league, bet — NO season:
+ *                        passing season returns the vendor soft-error shape)
+ *   GET /odds/live/bets  live bet catalog (separate id space from /odds/bets)
+ *
  * Admin controls (drive results/settlement tests):
  *   POST /__finish  {"id":100001,"home":2,"away":1}   flip a fixture to FT
  *   POST /__reset                                   clear all overrides
@@ -126,7 +136,7 @@ function fixturesForDate(dateStr) {
 
 function fixtureJson(f) {
   const statusShort = f.status ?? 'NS';
-  const statusLong = { NS: 'Not Started', FT: 'Match Finished', PST: 'Postponed', '1H': 'First Half' }[statusShort] ?? 'Not Started';
+  const statusLong = { NS: 'Not Started', FT: 'Match Finished', PST: 'Postponed', '1H': 'First Half', '2H': 'Second Half' }[statusShort] ?? 'Not Started';
   const venue = (VENUES[f.home] ?? 'Stadium|City').split('|');
   const homeScore = f.homeScore ?? null;
   const awayScore = f.awayScore ?? null;
@@ -135,7 +145,7 @@ function fixtureJson(f) {
       id: f.id, referee: 'M. Oliver', timezone: 'UTC',
       date: f.kickoff.toISOString(), timestamp: Math.floor(f.kickoff.getTime() / 1000),
       venue: { name: venue[0], city: venue[1] },
-      status: { long: statusLong, short: statusShort, elapsed: statusShort === 'FT' ? 90 : null },
+      status: { long: statusLong, short: statusShort, elapsed: f.elapsed ?? (statusShort === 'FT' ? 90 : null) },
     },
     league: { id: 39, name: 'Premier League', country: 'England', logo: '', flag: '', season: SEASON, round: 'Regular Season - 12' },
     teams: {
@@ -234,10 +244,10 @@ function standingsJson() {
   }];
 }
 
-/** Bookmaker prices derived from team strength with a ~5% overround. */
-function oddsJson(fixtureId) {
-  const f = allKnownFixtures().find((x) => String(x.id) === String(fixtureId));
-  if (!f) return [];
+/** Bookmaker prices derived from team strength with a ~5% overround.
+ * Filters: bookmaker id (keep one bookmaker), bet id (keep one market).
+ * Rows whose filters remove every bookmaker are dropped by the caller. */
+function oddsRowFor(f, { bookmaker = null, bet = null } = {}) {
   const sh = TEAMS[f.home].str, sa = TEAMS[f.away].str;
   const pH = Math.max(0.08, Math.min(0.8, 0.42 + (sh - sa) * 0.22));
   const pD = 0.26; const pA = Math.max(0.05, 1 - pH - pD);
@@ -248,22 +258,136 @@ function oddsJson(fixtureId) {
   const pBTTS = Math.max(0.2, Math.min(0.8, 0.48 + (total - 2.4) * 0.12));
   const price = (p) => (Math.round((0.95 / p) * 100) / 100).toFixed(2);
   const iso = new Date().toISOString();
-  const bet = (name, values) => ({ id: 1, name, update: iso, values: values.map(([value, odd]) => ({ value, odd })) });
-  const mkBook = (shiftPct) => ({
-    bets: [
-      bet('Match Winner', [['Home', price(pH * (1 + shiftPct))], ['Draw', price(pD * (1 + shiftPct))], ['Away', price(pA * (1 + shiftPct))]]),
-      bet('Goals Over/Under', [['Over 1.5', price(pOver15)], ['Over 2.5', price(pOver25)], ['Over 3.5', price(pOver35)], ['Under 3.5', price(1 - pOver35)]]),
-      bet('Both Teams Score', [['Yes', price(pBTTS)], ['No', price(1 - pBTTS)]]),
-    ],
-  });
-  return [{
+  // Bet ids mirror the /odds/bets catalog below (pre-match id space).
+  const betRow = (id, name, values) => ({ id, name, update: iso, values: values.map(([value, odd]) => ({ value, odd })) });
+  let bets = [
+    betRow(1, 'Match Winner', [['Home', price(pH)], ['Draw', price(pD)], ['Away', price(pA)]]),
+    betRow(5, 'Goals Over/Under', [['Over 1.5', price(pOver15)], ['Over 2.5', price(pOver25)], ['Over 3.5', price(pOver35)], ['Under 3.5', price(1 - pOver35)]]),
+    betRow(8, 'Both Teams Score', [['Yes', price(pBTTS)], ['No', price(1 - pBTTS)]]),
+  ];
+  if (bet) bets = bets.filter((b) => b.id === Number(bet));
+  if (bets.length === 0) return null;
+  const mkBook = (id, name, shiftPct) => ({ id, name, bets });
+  let bookmakers = [mkBook(1, 'Bet365', 0), mkBook(2, 'Bwin', 0.03)];
+  if (bookmaker) bookmakers = bookmakers.filter((b) => b.id === Number(bookmaker));
+  if (bookmakers.length === 0) return null;
+  return {
     fixture: { id: f.id, update: iso },
     league: { id: 39, name: 'Premier League', country: 'England', season: SEASON },
-    bookmakers: [
-      { id: 1, name: 'Bet365', ...mkBook(0) },
-      { id: 2, name: 'Bwin', ...mkBook(0.03) },
-    ],
-  }];
+    bookmakers,
+  };
+}
+
+/** Pre-match fixtures that carry odds: today's board (minus postponed) plus
+ * the +1..+3 upcoming sweep — the vendor's 1–14 day pre-match window. */
+function prematchOddsFixtures() {
+  const out = todaysFixtures().filter((f) => f.status !== 'PST');
+  for (let d = 1; d <= 3; d++) out.push(...fixturesForDate(addDays(TODAY(), d)));
+  return out;
+}
+
+/** Candidates for a /odds or /odds/mapping query (fixture/date/league).
+ * Postponed fixtures carry no odds (the vendor drops them too); finished
+ * fixtures keep theirs (the 7-day history). */
+function oddsCandidates(url) {
+  const live = (list) => list.filter((f) => f.status !== 'PST');
+  const fixture = url.searchParams.get('fixture');
+  if (fixture) return live(allKnownFixtures().filter((f) => String(f.id) === String(fixture)));
+  const date = url.searchParams.get('date');
+  if (date) return live(fixturesForDate(date));
+  if (url.searchParams.get('league')) {
+    // league+season board: only the current season has odds.
+    const season = url.searchParams.get('season');
+    if (season && Number(season) !== SEASON) return [];
+    return prematchOddsFixtures();
+  }
+  return [];
+}
+
+// ── reference catalogs (bet ids: pre-match and live are SEPARATE id spaces) ──
+const ODDS_BETS = [
+  { id: 1, name: 'Match Winner' },
+  { id: 2, name: 'Home/Away' },
+  { id: 3, name: 'Second Half Winner' },
+  { id: 4, name: 'Asian Handicap' },
+  { id: 5, name: 'Goals Over/Under' },
+  { id: 6, name: 'Goals Over/Under First Half' },
+  { id: 7, name: 'Goals Over/Under Second Half' },
+  { id: 8, name: 'Both Teams Score' },
+  { id: 9, name: 'Correct Score' },
+  { id: 10, name: 'Double Chance' },
+  { id: 11, name: 'Draw No Bet' },
+  { id: 12, name: 'First Half Winner' },
+  { id: 13, name: 'Handicap Result' },
+  { id: 14, name: 'Exact Goals Number' },
+  { id: 15, name: 'Halftime/Fulltime' },
+];
+const ODDS_BOOKMAKERS = [
+  { id: 1, name: 'Bet365' },
+  { id: 2, name: 'Bwin' },
+  { id: 3, name: 'Unibet' },
+  { id: 4, name: 'Marathonbet' },
+  { id: 5, name: 'Betfair' },
+  { id: 6, name: 'William Hill' },
+  { id: 7, name: '1xBet' },
+  { id: 8, name: '888Sport' },
+];
+const ODDS_LIVE_BETS = [
+  { id: 1, name: 'Over/Under Extra Time' },
+  { id: 2, name: 'Next Goal' },
+  { id: 3, name: 'Match Winner' },
+  { id: 5, name: 'Goals Over/Under' },
+  { id: 8, name: 'Both Teams Score' },
+  { id: 11, name: 'Exact Goals Number' },
+];
+
+/** The in-play board for /odds/live (never returned by /fixtures). */
+function liveFixtures() {
+  const now = new Date();
+  const ko = (minsAgo) => new Date(now.getTime() - minsAgo * 60000);
+  return [
+    { id: 700001, home: 42, away: 49, kickoff: ko(63), status: '2H', elapsed: 63 }, // Arsenal vs Chelsea
+    { id: 700002, home: 40, away: 47, kickoff: ko(28), status: '1H', elapsed: 28 }, // Liverpool vs Tottenham
+  ];
+}
+
+/** In-play odds row: live odds are NOT per-bookmaker and carry the live-only
+ * flags; `main` marks the primary line when several identical values exist. */
+function liveOddsJson(f, betFilter) {
+  const sh = TEAMS[f.home].str, sa = TEAMS[f.away].str;
+  const pH = Math.max(0.08, Math.min(0.8, 0.45 + (sh - sa) * 0.2));
+  const pD = 0.28; const pA = Math.max(0.05, 1 - pH - pD);
+  const total = Math.max(0.9, sh + sa);
+  const pOver15 = Math.max(0.3, Math.min(0.9, (total - 1.1) / 2));
+  const price = (p) => (Math.round((0.95 / p) * 100) / 100).toFixed(2);
+  const iso = new Date().toISOString();
+  // Live bet ids mirror the /odds/live/bets catalog (live id space).
+  let bets = [
+    { id: 3, name: 'Match Winner', values: [{ value: 'Home', odd: price(pH) }, { value: 'Draw', odd: price(pD) }, { value: 'Away', odd: price(pA) }] },
+    { id: 5, name: 'Goals Over/Under', values: [
+      { value: 'Over 1.5', odd: price(pOver15), main: true },
+      { value: 'Under 1.5', odd: price(1 - pOver15), main: true },
+      { value: 'Over 2.5', odd: price(Math.max(0.15, pOver15 - 0.25)) },
+      { value: 'Under 2.5', odd: price(Math.max(0.15, 1 - pOver15 - 0.25)) },
+    ] },
+    { id: 2, name: 'Next Goal', values: [{ value: 'Home', odd: price(0.45) }, { value: 'No Goal', odd: price(0.3) }, { value: 'Away', odd: price(0.25) }] },
+  ];
+  if (betFilter) bets = bets.filter((b) => b.id === Number(betFilter));
+  return {
+    fixture: { id: f.id, date: f.kickoff.toISOString(), status: { long: f.status === '2H' ? 'Second Half' : 'First Half', short: f.status, elapsed: f.elapsed } },
+    league: { id: 39, name: 'Premier League', country: 'England', season: SEASON },
+    odds: { stopped: false, blocked: false, finished: false, bets },
+  };
+}
+
+/** Shared id/search catalog filtering (mirrors the vendor's query params). */
+function catalogFilter(rows, url) {
+  const id = Number(url.searchParams.get('id') ?? 0);
+  const search = url.searchParams.get('search');
+  let out = rows;
+  if (id) out = out.filter((r) => r.id === id);
+  if (search) out = out.filter((r) => r.name.toLowerCase().includes(search.toLowerCase()));
+  return out;
 }
 
 function allKnownFixtures() {
@@ -303,10 +427,16 @@ const server = http.createServer((req, res) => {
     return;
   }
   requests++;
-  const envelope = (response, params = {}) => {
+  const envelope = (response, params = {}, paging = null) => {
     res.writeHead(200, { 'content-type': 'application/json', 'x-ratelimit-requests-limit': '500', 'x-ratelimit-requests-remaining': String(Math.max(0, 500 - requests)) });
-    res.end(JSON.stringify({ get: path.replace('/', '').split('?')[0], parameters: params, errors: [], results: Array.isArray(response) ? response.length : 0, paging: { current: 1, total: 1 }, response }));
+    res.end(JSON.stringify({
+      get: path.replace('/', '').split('?')[0], parameters: params, errors: [],
+      results: Array.isArray(response) ? response.length : 0,
+      paging: paging ?? { current: 1, total: 1 }, response,
+    }));
   };
+  /** Echo the received query params the way the vendor does. */
+  const echoParams = () => Object.fromEntries([...url.searchParams.entries()].map(([k, v]) => [k, Number.isFinite(Number(v)) && v !== '' ? Number(v) : v]));
 
   const applyOverride = (list) => list.map((f) => {
     const o = overrides.get(f.id);
@@ -351,8 +481,53 @@ const server = http.createServer((req, res) => {
     return envelope([]);
   }
   if (path === '/odds') {
+    // Pre-match odds: fixture | date | league+season candidate boards, with
+    // optional bet/bookmaker filters inside each row. Paginated at 10 fixture
+    // rows per page exactly like the vendor (fetchAllPages follows this).
+    const bet = url.searchParams.get('bet');
+    const bookmaker = url.searchParams.get('bookmaker');
+    const rows = oddsCandidates(url)
+      .map((f) => oddsRowFor(f, { bookmaker, bet }))
+      .filter((r) => r !== null);
+    const page = Math.max(1, Number(url.searchParams.get('page') ?? 1) || 1);
+    const total = Math.max(1, Math.ceil(rows.length / 10));
+    return envelope(rows.slice((page - 1) * 10, page * 10), echoParams(), { current: page, total });
+  }
+  if (path === '/odds/bets') return envelope(catalogFilter(ODDS_BETS, url), echoParams());
+  if (path === '/odds/bookmakers') return envelope(catalogFilter(ODDS_BOOKMAKERS, url), echoParams());
+  if (path === '/odds/live/bets') return envelope(catalogFilter(ODDS_LIVE_BETS, url), echoParams());
+  if (path === '/odds/mapping') {
+    // Fixture ids with odds, grouped by league+season, 100 ids per page.
+    if (url.searchParams.get('season') && Number(url.searchParams.get('season')) !== SEASON) return envelope([]);
+    const bet = url.searchParams.get('bet');
+    const bookmaker = url.searchParams.get('bookmaker');
+    const ids = oddsCandidates(url)
+      .map((f) => oddsRowFor(f, { bookmaker, bet }))
+      .filter((r) => r !== null)
+      .map((r) => r.fixture.id);
+    const page = Math.max(1, Number(url.searchParams.get('page') ?? 1) || 1);
+    const total = Math.max(1, Math.ceil(ids.length / 100));
+    const row = { league: { id: 39, name: 'Premier League', season: SEASON }, fixtures: ids.slice((page - 1) * 100, page * 100) };
+    const paged = row.fixtures.length > 0 ? [row] : [];
+    return envelope(paged, echoParams(), { current: page, total });
+  }
+  if (path === '/odds/live') {
+    // In-play only. The vendor documents NO season parameter here — passing
+    // one gets the HTTP 200 soft-error envelope (never a silent empty list).
+    if (url.searchParams.get('season')) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ get: 'odds/live', parameters: echoParams(), errors: { season: 'This endpoint does not accept the season parameter. Use league, fixture or bet.' }, results: 0, paging: { current: 1, total: 1 }, response: [] }));
+    }
     const fixture = url.searchParams.get('fixture');
-    return envelope(oddsJson(fixture));
+    const league = url.searchParams.get('league');
+    const bet = url.searchParams.get('bet');
+    let fs = liveFixtures();
+    if (fixture) fs = fs.filter((f) => String(f.id) === String(fixture));
+    if (league && Number(league) !== 39) fs = [];
+    const page = Math.max(1, Number(url.searchParams.get('page') ?? 1) || 1);
+    const rows = fs.map((f) => liveOddsJson(f, bet));
+    const total = Math.max(1, Math.ceil(rows.length / 10));
+    return envelope(rows.slice((page - 1) * 10, page * 10), echoParams(), { current: page, total });
   }
   if (path === '/standings') return envelope(standingsJson());
   if (path === '/teams/statistics') {

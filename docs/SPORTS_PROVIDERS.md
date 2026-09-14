@@ -30,7 +30,7 @@ A provider is registered only when its credential exists. Multiple configured pr
 
 | Provider | Fixtures | Results | Odds | Form source (standings / team stats) | Top players |
 |---|---:|---:|---:|---:|---:|
-| API-Football | Yes | Yes | Yes, via the odds endpoint | Team statistics + season standings fallback | Yes (scorers / assists / yellow cards / red cards) |
+| API-Football | Yes | Yes | Yes — the full /odds family (pre-match queries, live in-play, bets/bookmakers catalogs, mapping) | Team statistics + season standings fallback | Yes (scorers / assists / yellow cards / red cards) |
 | TheSportsDB | Yes | Yes | No bookmaker odds endpoint | Season table (`lookuptable.php`) | No |
 | SportMonks | Yes (incl. full-round bulk fetch) | Yes | Yes, per fixture and per round (odds add-on) | Season standings | No |
 
@@ -77,6 +77,63 @@ provider with top-player support serves the request (health-aware fallback),
 and the response reports which provider answered. Results are cached per
 (provider, league, season, type) for 15 minutes to protect the provider's
 daily request quota (`?cache=0` bypasses).
+
+### Vendor odds suite (the dashboard-tester surface)
+
+`ApiFootballProvider` implements the **whole** api-football `/odds` family —
+the six endpoints the vendor's own tester
+(dashboard.api-football.com/soccer/tester) exercises. They are concrete-class
+capabilities (not on the `SportsDataProvider` contract), so the API surface
+gates on `instanceof ApiFootballProvider` and answers a structured 503
+(`providerStatus: NOT_CONFIGURED`) when the provider is absent instead of an
+empty list that reads as "no odds today". The legacy `FootballApiProvider`
+wrapper delegates all six to the native adapter and refuses them honestly for
+non-api-football delegates.
+
+| Method | Endpoint | Notes |
+|---|---|---|
+| `oddsByQuery($query)` | `GET /odds` | every documented filter: `fixture`, `league`+`season`, `date` (YYYY-MM-DD), `bet`, `bookmaker`, `timezone`. Follows the 10 rows/page pagination. **At least one filter required** — an unfiltered pull walks every page and burns the daily quota. |
+| `oddsBets($id, $search)` | `GET /odds/bets` | pre-match bet-market catalog. Memoized in-process for 6 h; `id`/`search` are applied locally on the memo. |
+| `oddsBookmakers($id, $search)` | `GET /odds/bookmakers` | bookmaker catalog, same 6 h memo. |
+| `oddsMapping($query)` | `GET /odds/mapping` | which fixtures have pre-match odds, grouped league+season. **One page (100 ids) per call** with the vendor `paging` block — walking the whole mapping stays an explicit caller decision. |
+| `oddsLive($fixture, $league, $bet)` | `GET /odds/live` | in-play only, no history. **No `season` parameter** — the controller rejects one with 422 and the vendor's own soft-error envelope is propagated if it ever reaches the wire. Rows carry the live-only flags (`stopped`, `blocked`, `finished`) and the per-value `main` marker; the mapper tolerates the documented `odds.bets` shape plus two reshapings. |
+| `oddsLiveBets()` | `GET /odds/live/bets` | live bet catalog, 60 s memo (vendor updates it every minute). |
+
+Two vendor rules are load-bearing here:
+
+- **Pre-match bet ids and live bet ids are two separate id spaces** — id 5 is
+  "Goals Over/Under" pre-match but the live catalog has its own numbering.
+  The API responses tag `idSpace: prematch|live` and the two catalogs are
+  memoized under separate keys so they can never bleed into each other.
+- **Live odds are not per-bookmaker** (unlike pre-match), so live rows carry
+  no `bookmaker` field — anything reading both shapes must treat it as
+  optional.
+
+Exposed to the API as (all `sports.view`, all live provider reads that spend
+quota — unlike the stored-row football endpoints):
+
+```
+GET /api/football/odds?fixture=718244            # or league+season / date / bet / bookmaker
+GET /api/football/odds/bets?id=5|search=over
+GET /api/football/odds/bookmakers?id=1|search=bet
+GET /api/football/odds/mapping?league=39&season=2026&page=1
+GET /api/football/odds/live?fixture=700001       # or league / bet
+GET /api/football/odds/live/bets
+```
+
+Every response is honest about emptiness: `state: DATA_UNAVAILABLE` plus an
+explanatory `message` (pre-match odds exist 1–14 days before kick-off with a
+7-day history; live odds only exist while a fixture is In Play). Provider
+failures map to HTTP 503 (offline/timeout/rate/quota, with `retryAt` for
+quota) or 502 (everything else) with the classified `providerStatus`.
+
+The offline mock (`tests/mock-api-football/server.mjs`, key `mock-key-12345`,
+port 9377) speaks the exact wire shapes of all six endpoints — including the
+10-row `/odds` pagination, the `season` soft-error on `/odds/live`, and a
+two-fixture in-play board — so the whole family can be exercised end-to-end
+with `API_FOOTBALL_BASE_URL=http://127.0.0.1:9377`. Unit coverage lives in
+`tests/cases/160-football-odds-vendor-suite.php` (transport-canned, no server
+needed).
 
 ## TheSportsDB notes
 

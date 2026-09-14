@@ -293,6 +293,16 @@ $route['api/football/competitions'] = 'api_football/competitions';
 $route['api/football/providers'] = 'api_football/providers';
 $route['api/football/providers/health'] = 'api_football/providers_health';
 $route['api/football/matches/fetch'] = 'api_football/fetch_matches';
+// Vendor odds family (api-football /odds…): live provider reads, gated on the
+// api-football provider being configured. NOTE the order: /odds/live/bets and
+// /odds/live must be declared before a generic /odds/(:any) could shadow them
+// (none exists today, but the specific-first ordering matches the CI3 rules).
+$route['api/football/odds'] = 'api_football/odds';
+$route['api/football/odds/bets'] = 'api_football/odds_bets';
+$route['api/football/odds/bookmakers'] = 'api_football/odds_bookmakers';
+$route['api/football/odds/mapping'] = 'api_football/odds_mapping';
+$route['api/football/odds/live/bets'] = 'api_football/odds_live_bets';
+$route['api/football/odds/live'] = 'api_football/odds_live';
 $route['api/football/markets'] = 'api_football/markets';
 $route['api/football/picks'] = 'api_football/picks';
 $route['api/football/intelligence'] = 'api_football/match_intelligence';

@@ -571,6 +571,283 @@ class ApiFootballProvider implements SportsDataProvider
         return $this->mapOdds($rows);
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // ODDS SUITE — the full api-football /odds family (the endpoints the
+    // vendor's dashboard tester exercises). These are api-football-specific
+    // capabilities exposed on the concrete provider, NOT part of the
+    // SportsDataProvider contract: callers check instanceof, so TheSportsDB
+    // (no odds) and SportMonks (pre-match only) keep their smaller contracts.
+    //
+    // Vendor cadences (documentation-v3): /odds updates every 3h (pre-match
+    // window 1–14 days, 7-day history, 10 rows/page); /odds/mapping 100
+    // rows/page; the catalogs change a few times a week (bets/bookmakers) or
+    // every 60s (live/bets). Pre-match bet ids and live bet ids are TWO
+    // SEPARATE catalogs and are never interchangeable.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Pre-match odds with EVERY documented filter (GET /odds): fixture,
+     * league(+season), date, bet, bookmaker. Follows the 10-rows-per-page
+     * pagination so a many-bookmaker fixture is never truncated. Rows are the
+     * same normalized shape odds() returns (market, selection, decimalOdds,
+     * bookmaker, fixtureId, updatedAt) — one dataset for every consumer.
+     *
+     * @param array{fixture?:int|string,league?:int|string,season?:int|string,bet?:int|string,bookmaker?:int|string,date?:string,timezone?:string} $query
+     * @return list<array<string,mixed>>
+     */
+    public function oddsByQuery(array $query): array
+    {
+        $params = [];
+        foreach (['fixture', 'league', 'season', 'bet', 'bookmaker'] as $intKey) {
+            if (!empty($query[$intKey])) {
+                // Same strictness as RequestParams::int(): is_numeric() would
+                // accept '1e3' and '12.5' and read them as 1 and 12 — a
+                // different request than the one that was made.
+                if (!is_int($query[$intKey]) && !(is_string($query[$intKey]) && preg_match('/^[+-]?\d+$/', trim($query[$intKey])) === 1)) {
+                    throw new ProviderException('odds: ' . $intKey . ' must be a numeric id (got ' . mb_substr((string) $query[$intKey], 0, 40) . ')', ProviderException::DATA_ERROR);
+                }
+                $params[$intKey] = (string) (int) $query[$intKey];
+            }
+        }
+        if (!empty($query['date'])) {
+            $date = (string) $query['date'];
+            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) !== 1) {
+                throw new ProviderException('odds: date must be YYYY-MM-DD', ProviderException::DATA_ERROR);
+            }
+            $params['date'] = $date;
+        }
+        if (!empty($query['timezone']) && is_string($query['timezone'])) $params['timezone'] = $query['timezone'];
+        if ($params === []) {
+            throw new ProviderException(
+                'odds: at least one filter is required (fixture, league+season, date, bet or bookmaker) — '
+                . 'an unfiltered pull walks every page at 10 rows per page and burns the daily quota. '
+                . 'For "all odds today" pass date=<today>.',
+                ProviderException::DATA_ERROR
+            );
+        }
+        $rows = $this->fetchAllPages('/odds', $params);
+        return $this->mapOdds($rows);
+    }
+
+    /**
+     * Which fixtures currently have pre-match odds (GET /odds/mapping) —
+     * league+season grouped fixture ids. Paged at 100 rows per page: one page
+     * per call with the vendor paging block returned, so walking the whole
+     * mapping stays an explicit caller decision instead of silently costing
+     * every page.
+     *
+     * @param array{fixture?:int|string,league?:int|string,season?:int|string,bookmaker?:int|string,bet?:int|string,date?:string,page?:int|string} $query
+     * @return array{rows:list<array<string,mixed>>,paging:array{current:int,total:int},results:int}
+     */
+    public function oddsMapping(array $query): array
+    {
+        $params = [];
+        foreach (['fixture', 'league', 'season', 'bookmaker', 'bet'] as $intKey) {
+            if (!empty($query[$intKey])) {
+                // Strict integer syntax (see oddsByQuery): '1e3' must be
+                // refused, not silently read as 1.
+                if (!is_int($query[$intKey]) && !(is_string($query[$intKey]) && preg_match('/^[+-]?\d+$/', trim($query[$intKey])) === 1)) {
+                    throw new ProviderException('odds/mapping: ' . $intKey . ' must be a numeric id (got ' . mb_substr((string) $query[$intKey], 0, 40) . ')', ProviderException::DATA_ERROR);
+                }
+                $params[$intKey] = (string) (int) $query[$intKey];
+            }
+        }
+        if (!empty($query['date'])) {
+            $date = (string) $query['date'];
+            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) !== 1) {
+                throw new ProviderException('odds/mapping: date must be YYYY-MM-DD', ProviderException::DATA_ERROR);
+            }
+            $params['date'] = $date;
+        }
+        $page = max(1, (int) ($query['page'] ?? 1));
+        if ($page > 1) $params['page'] = $page;
+        $json = $this->decodeJson($this->doRequest('/odds/mapping' . ($params === [] ? '' : '?' . http_build_query($params))));
+        $paging = is_array($json['paging'] ?? null) ? $json['paging'] : [];
+        return [
+            'rows' => $this->mapOddsMapping($this->extractList($json)),
+            'paging' => ['current' => (int) ($paging['current'] ?? $page), 'total' => (int) ($paging['total'] ?? 1)],
+            'results' => (int) ($json['results'] ?? 0),
+        ];
+    }
+
+    /**
+     * In-play odds (GET /odds/live). Only fixtures currently In Play are
+     * served and there is NO history. `season` is deliberately NOT a parameter
+     * on this endpoint (documented) — the controller rejects it with the
+     * reason so a caller never wonders why the filter "did nothing". Live bet
+     * ids are a SEPARATE catalog from pre-match bet ids.
+     *
+     * @return list<array<string,mixed>> normalized live rows with the
+     *         live-only flags (stopped/blocked/finished) and the `main` marker
+     */
+    public function oddsLive(?int $fixture = null, ?int $league = null, ?int $bet = null): array
+    {
+        $params = [];
+        if ($fixture !== null) $params['fixture'] = $fixture;
+        if ($league !== null) $params['league'] = $league;
+        if ($bet !== null) $params['bet'] = $bet;
+        $json = $this->decodeJson($this->doRequest('/odds/live' . ($params === [] ? '' : '?' . http_build_query($params))));
+        return $this->mapLiveOdds($this->extractList($json));
+    }
+
+    /**
+     * Pre-match bet-market catalog (GET /odds/bets). Reference data the vendor
+     * refreshes a few times a week — memoized in-process (6h) so repeated
+     * renders cost no extra quota; the vendor itself recommends 1 call/day.
+     * The ids returned filter /odds ONLY, never /odds/live.
+     * @return list<array{id:int,name:string}>
+     */
+    public function oddsBets(?int $id = null, ?string $search = null): array
+    {
+        return $this->oddsCatalog('/odds/bets', $id, $search, 21600);
+    }
+
+    /** Bookmaker catalog (GET /odds/bookmakers) — same cadence as oddsBets(). */
+    public function oddsBookmakers(?int $id = null, ?string $search = null): array
+    {
+        return $this->oddsCatalog('/odds/bookmakers', $id, $search, 21600);
+    }
+
+    /** Live bet-market catalog (GET /odds/live/bets) — vendor updates every 60s. */
+    public function oddsLiveBets(): array
+    {
+        return $this->oddsCatalog('/odds/live/bets', null, null, 60);
+    }
+
+    /** @var array<string,array{rows:list<array{id:int,name:string}>,at:int}> */
+    private array $oddsCatalogMemo = [];
+
+    /**
+     * Shared catalog fetch + in-process TTL memo + optional id/search filter.
+     * The id/search filters are applied LOCALLY on the memoized list: they are
+     * lookups against slowly-changing reference data, so they must not cost a
+     * paid API call each time (the vendor's own guidance is to cache these).
+     *
+     * @return list<array{id:int,name:string}>
+     */
+    private function oddsCatalog(string $path, ?int $id, ?string $search, int $ttlSeconds): array
+    {
+        $memo = $this->oddsCatalogMemo[$path] ?? null;
+        if ($memo === null || (time() - $memo['at']) >= $ttlSeconds) {
+            $json = $this->decodeJson($this->doRequest($path));
+            $rows = [];
+            foreach ($this->extractList($json) as $row) {
+                if (!is_array($row) || !isset($row['id'], $row['name'])) continue;
+                $rows[] = ['id' => (int) $row['id'], 'name' => (string) $row['name']];
+            }
+            $memo = ['rows' => $rows, 'at' => time()];
+            $this->oddsCatalogMemo[$path] = $memo;
+        }
+        $rows = $memo['rows'];
+        if ($id !== null) return array_values(array_filter($rows, fn (array $r): bool => $r['id'] === $id));
+        if ($search !== null && trim($search) !== '') {
+            $needle = strtolower(trim($search));
+            return array_values(array_filter($rows, fn (array $r): bool => str_contains(strtolower($r['name']), $needle)));
+        }
+        return $rows;
+    }
+
+    /**
+     * Map /odds/mapping rows. The documented shape groups fixture ids by
+     * league+season: {league:{id,season}, fixtures:[ids]}. A fixture-keyed row
+     * shape is also tolerated, so a vendor reshape degrades to per-fixture
+     * rows instead of the data disappearing.
+     *
+     * @param list<mixed> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function mapOddsMapping(array $rows): array
+    {
+        $out = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) continue;
+            $league = is_array($row['league'] ?? null) ? $row['league'] : [];
+            $leagueId = isset($league['id']) && is_numeric($league['id']) ? (int) $league['id'] : null;
+            $season = isset($league['season']) && is_numeric($league['season']) ? (int) $league['season'] : null;
+            if (isset($row['fixtures']) && is_array($row['fixtures'])) {
+                $ids = [];
+                foreach ($row['fixtures'] as $fid) {
+                    if (is_numeric($fid)) $ids[] = (int) $fid;
+                }
+                $out[] = ['leagueId' => $leagueId, 'season' => $season, 'fixtureIds' => $ids, 'fixtureCount' => count($ids)];
+                continue;
+            }
+            $fixture = is_array($row['fixture'] ?? null) ? $row['fixture'] : [];
+            if (isset($fixture['id']) && is_numeric($fixture['id'])) {
+                $out[] = [
+                    'leagueId' => $leagueId, 'season' => $season,
+                    'fixtureIds' => [(int) $fixture['id']], 'fixtureCount' => 1,
+                    'fixtureDate' => isset($fixture['date']) && is_scalar($fixture['date']) ? (string) $fixture['date'] : null,
+                ];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Map /odds/live rows into the normalized odds shape plus the live-only
+     * flags and the per-value `main` marker. The vendor documents live rows as
+     * {fixture, league, odds:{stopped, blocked, finished, bets:[{id,name,
+     * values}]}} (live odds are NOT per-bookmaker); a reshape where `odds` is
+     * directly the bet list, or the bets sit at the row top level, is
+     * tolerated so a payload evolution degrades gracefully instead of
+     * returning zero rows.
+     *
+     * @param list<mixed> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function mapLiveOdds(array $rows): array
+    {
+        $out = [];
+        foreach ($rows as $r) {
+            if (!is_array($r)) continue;
+            $fixtureId = isset($r['fixture']['id']) && is_numeric($r['fixture']['id']) ? (string) $r['fixture']['id'] : '';
+            $league = is_array($r['league'] ?? null) ? $r['league'] : [];
+            $odds = $r['odds'] ?? null;
+            $flags = ['stopped' => false, 'blocked' => false, 'finished' => false];
+            if (is_array($odds)) {
+                foreach (array_keys($flags) as $flag) {
+                    if (array_key_exists($flag, $odds)) $flags[$flag] = (bool) $odds[$flag];
+                }
+            }
+            $betGroups = [];
+            if (is_array($odds) && isset($odds['bets']) && is_array($odds['bets'])) $betGroups = $odds['bets'];
+            elseif (self::isListOfBetGroups($odds)) $betGroups = $odds;
+            elseif (isset($r['bets']) && is_array($r['bets'])) $betGroups = $r['bets'];
+            foreach ($betGroups as $bet) {
+                if (!is_array($bet) || !isset($bet['values']) || !is_array($bet['values'])) continue;
+                $market = self::normalizeMarket((string) ($bet['name'] ?? 'UNKNOWN'));
+                $betId = isset($bet['id']) && is_numeric($bet['id']) ? (int) $bet['id'] : null;
+                foreach ($bet['values'] as $v) {
+                    if (!is_array($v) || !isset($v['odd']) || !is_numeric($v['odd'])) continue;
+                    $out[] = [
+                        'fixtureId' => $fixtureId,
+                        'leagueId' => isset($league['id']) && is_numeric($league['id']) ? (int) $league['id'] : null,
+                        'market' => $market,
+                        'selection' => self::normalizeSelection($market, (string) ($v['value'] ?? '')),
+                        'valueLabel' => (string) ($v['value'] ?? ''),
+                        'decimalOdds' => (float) $v['odd'],
+                        'betId' => $betId,
+                        'main' => !empty($v['main']),
+                        'stopped' => $flags['stopped'],
+                        'blocked' => $flags['blocked'],
+                        'finished' => $flags['finished'],
+                        'observedAt' => gmdate('c'),
+                    ];
+                }
+            }
+        }
+        return $out;
+    }
+
+    /** True when the value is a list of {name, values} bet groups. */
+    private static function isListOfBetGroups($value): bool
+    {
+        if (!is_array($value) || $value === [] || !array_is_list($value)) return false;
+        $first = $value[0];
+        return is_array($first) && isset($first['values']) && is_array($first['values']);
+    }
+
     public function results(string $fixtureExternalId): array
     {
         $resp = $this->doRequest('/fixtures?id=' . rawurlencode($fixtureExternalId));
@@ -2254,4 +2531,46 @@ class FootballApiProvider implements SportsDataProvider
     public function fixtures(array $query): array { return $this->delegate->fixtures($query); }
     public function odds(string $fixtureExternalId): array { return $this->delegate->odds($fixtureExternalId); }
     public function results(string $fixtureExternalId): array { return $this->delegate->results($fixtureExternalId); }
+
+    // Odds-suite pass-throughs: anything constructed through this legacy
+    // wrapper (kind-based registration, older tests) must keep the full
+    // api-football odds surface, not silently lose the new endpoints. The
+    // methods only exist on ApiFootballProvider — check the delegate's real
+    // class so a TheSportsDB/SportMonks delegate fails honestly instead of
+    // fatalitying on a missing method.
+    public function oddsByQuery(array $query): array
+    {
+        if ($this->delegate instanceof ApiFootballProvider) return $this->delegate->oddsByQuery($query);
+        throw new ProviderException('provider ' . $this->delegate->id() . ' does not support odds queries', ProviderException::DATA_ERROR);
+    }
+
+    public function oddsMapping(array $query): array
+    {
+        if ($this->delegate instanceof ApiFootballProvider) return $this->delegate->oddsMapping($query);
+        throw new ProviderException('provider ' . $this->delegate->id() . ' does not support odds mapping', ProviderException::DATA_ERROR);
+    }
+
+    public function oddsLive(?int $fixture = null, ?int $league = null, ?int $bet = null): array
+    {
+        if ($this->delegate instanceof ApiFootballProvider) return $this->delegate->oddsLive($fixture, $league, $bet);
+        throw new ProviderException('provider ' . $this->delegate->id() . ' does not support live odds', ProviderException::DATA_ERROR);
+    }
+
+    public function oddsBets(?int $id = null, ?string $search = null): array
+    {
+        if ($this->delegate instanceof ApiFootballProvider) return $this->delegate->oddsBets($id, $search);
+        throw new ProviderException('provider ' . $this->delegate->id() . ' does not expose the pre-match bet catalog', ProviderException::DATA_ERROR);
+    }
+
+    public function oddsBookmakers(?int $id = null, ?string $search = null): array
+    {
+        if ($this->delegate instanceof ApiFootballProvider) return $this->delegate->oddsBookmakers($id, $search);
+        throw new ProviderException('provider ' . $this->delegate->id() . ' does not expose the bookmaker catalog', ProviderException::DATA_ERROR);
+    }
+
+    public function oddsLiveBets(): array
+    {
+        if ($this->delegate instanceof ApiFootballProvider) return $this->delegate->oddsLiveBets();
+        throw new ProviderException('provider ' . $this->delegate->id() . ' does not expose the live bet catalog', ProviderException::DATA_ERROR);
+    }
 }

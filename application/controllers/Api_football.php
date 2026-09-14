@@ -347,6 +347,250 @@ class Api_football extends Api_controller
         $this->json($this->football()->intelligence()->health());
     }
 
+    // ------------------------------------------------- vendor odds (api-football)
+    //
+    // The /odds family exactly as the vendor's dashboard tester exercises it.
+    // These read the LIVE api-football feed (they spend provider calls) and are
+    // capability-gated: only ApiFootballProvider implements them, so when it is
+    // not configured the endpoints say so honestly instead of returning an
+    // empty list that looks like "no odds today".
+    //
+    //   GET /api/football/odds?fixture=… | league=…&season=… | date=YYYY-MM-DD
+    //       &bet=…&bookmaker=…          pre-match odds (all filters, paged)
+    //   GET /api/football/odds/bets[?id=|?search=]      pre-match bet catalog
+    //   GET /api/football/odds/bookmakers[?id=|?search=]  bookmaker catalog
+    //   GET /api/football/odds/mapping?league=…&season=…  which fixtures have odds
+    //   GET /api/football/odds/live[?fixture=|?league=|?bet=]  in-play odds
+    //   GET /api/football/odds/live/bets               live bet catalog
+    //
+    // Pre-match bet ids and live bet ids are TWO SEPARATE id spaces — the
+    // catalogs above never interchange them.
+
+    /**
+     * Pre-match odds from the live provider. At least one filter is required
+     * (fixture, league+season, date, bet or bookmaker): the vendor pages at
+     * 10 rows per page, so an unfiltered pull would walk every page and burn
+     * the daily quota. All pages are followed transparently.
+     */
+    public function odds()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        $query = [];
+        foreach (['fixture', 'league', 'season', 'bet', 'bookmaker'] as $key) {
+            $id = $this->numericId($g, $key, $error);
+            if ($error !== null) { $this->jsonError($error, 422); return; }
+            if ($id !== null) $query[$key] = $id;
+        }
+        $date = \AIWorkforce\Football\RequestParams::optionalDate($g, 'date', $notes);
+        if ($date !== null) $query['date'] = $date;
+        if (isset($g['timezone']) && is_string($g['timezone']) && $g['timezone'] !== '') $query['timezone'] = $g['timezone'];
+        if ($query === []) {
+            $this->jsonError('at least one filter is required: fixture, league+season, date, bet or bookmaker. For "all odds today" pass date=' . gmdate('Y-m-d'), 422);
+            return;
+        }
+        $provider = $this->apiFootballOddsProvider();
+        if ($provider === null) return; // already responded
+        try {
+            $rows = $provider->oddsByQuery($query);
+        } catch (\AIWorkforce\Sports\Providers\ProviderException $e) {
+            $this->respondProviderException($e);
+            return;
+        }
+        $this->json([
+            'state' => $rows === [] ? \AIWorkforce\Football\DataState::UNAVAILABLE : 'AVAILABLE',
+            'count' => count($rows),
+            'odds' => $rows,
+            'message' => $rows === [] ? 'The provider returned no pre-match odds for this query (the vendor only serves odds from 1 to 14 days before kick-off, with a 7-day history). Nothing is invented here.' : null,
+            'request' => ['query' => $query, 'notes' => array_values($notes)],
+            'generatedAt' => gmdate('c'),
+        ]);
+    }
+
+    /** Pre-match bet-market catalog (vendor reference data, ids filter /odds). */
+    public function odds_bets()
+    {
+        $this->oddsCatalog('bets');
+    }
+
+    /** Bookmaker catalog (vendor reference data, ids filter /odds). */
+    public function odds_bookmakers()
+    {
+        $this->oddsCatalog('bookmakers');
+    }
+
+    /** Live bet-market catalog (ids filter /odds/live ONLY — separate id space). */
+    public function odds_live_bets()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $provider = $this->apiFootballOddsProvider();
+        if ($provider === null) return; // already responded
+        try {
+            $rows = $provider->oddsLiveBets();
+        } catch (\AIWorkforce\Sports\Providers\ProviderException $e) {
+            $this->respondProviderException($e);
+            return;
+        }
+        $this->json([
+            'state' => $rows === [] ? \AIWorkforce\Football\DataState::UNAVAILABLE : 'AVAILABLE',
+            'count' => count($rows),
+            'bets' => $rows,
+            'idSpace' => 'live',
+            'message' => $rows === [] ? 'The provider returned no live bet markets.' : null,
+            'generatedAt' => gmdate('c'),
+        ]);
+    }
+
+    /**
+     * Which fixtures currently have pre-match odds, grouped by league+season.
+     * One page (100 fixture ids) per call with the vendor paging block, so
+     * walking the whole mapping stays an explicit decision.
+     */
+    public function odds_mapping()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        $query = [];
+        foreach (['fixture', 'league', 'season', 'bookmaker', 'bet'] as $key) {
+            $id = $this->numericId($g, $key, $error);
+            if ($error !== null) { $this->jsonError($error, 422); return; }
+            if ($id !== null) $query[$key] = $id;
+        }
+        $date = \AIWorkforce\Football\RequestParams::optionalDate($g, 'date', $notes);
+        if ($date !== null) $query['date'] = $date;
+        $page = \AIWorkforce\Football\RequestParams::int($g, 'page', 1, 1, 100, $notes);
+        $query['page'] = $page;
+        $provider = $this->apiFootballOddsProvider();
+        if ($provider === null) return; // already responded
+        try {
+            $payload = $provider->oddsMapping($query);
+        } catch (\AIWorkforce\Sports\Providers\ProviderException $e) {
+            $this->respondProviderException($e);
+            return;
+        }
+        $payload['state'] = $payload['rows'] === [] ? \AIWorkforce\Football\DataState::UNAVAILABLE : 'AVAILABLE';
+        $payload['message'] = $payload['rows'] === [] ? 'The provider returned no odds mapping for this query. Nothing is invented here.' : null;
+        $payload['request'] = ['query' => array_diff_key($query, ['page' => 1]), 'page' => $page, 'notes' => array_values($notes)];
+        $payload['generatedAt'] = gmdate('c');
+        $this->json($payload);
+    }
+
+    /**
+     * In-play odds. The vendor documents NO season parameter on /odds/live —
+     * passing one is rejected with the reason instead of being ignored (a
+     * silently-ignored filter looks exactly like "no live odds right now").
+     */
+    public function odds_live()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        if (isset($g['season']) && $g['season'] !== '') {
+            $this->jsonError('season is not a parameter of api-football /odds/live (live odds are only served while a fixture is In Play and have no history). Filter by fixture, league or bet.', 422);
+            return;
+        }
+        $live = ['fixture' => null, 'league' => null, 'bet' => null];
+        foreach (['fixture', 'league', 'bet'] as $key) {
+            $id = $this->numericId($g, $key, $error);
+            if ($error !== null) { $this->jsonError($error, 422); return; }
+            if ($id !== null) $live[$key] = $id;
+        }
+        $provider = $this->apiFootballOddsProvider();
+        if ($provider === null) return; // already responded
+        try {
+            $rows = $provider->oddsLive($live['fixture'], $live['league'], $live['bet']);
+        } catch (\AIWorkforce\Sports\Providers\ProviderException $e) {
+            $this->respondProviderException($e);
+            return;
+        }
+        $this->json([
+            'state' => $rows === [] ? \AIWorkforce\Football\DataState::UNAVAILABLE : 'AVAILABLE',
+            'count' => count($rows),
+            'odds' => $rows,
+            'message' => $rows === [] ? 'No fixtures are In Play on the provider right now — live odds only exist while a match is running and are never synthesized or replayed.' : null,
+            'request' => $live + ['notes' => array_values($notes)],
+            'generatedAt' => gmdate('c'),
+        ]);
+    }
+
+    /**
+     * An optional numeric id from the query string: absent → null (no error),
+     * present but non-numeric → $error set (the caller answers 422). Stricter
+     * than is_numeric() on purpose — '1e3' must be refused, not read as 1.
+     */
+    private function numericId(array $g, string $key, ?string &$error = null): ?int
+    {
+        $error = null;
+        if (!isset($g[$key]) || $g[$key] === '' || $g[$key] === null) return null;
+        $raw = $g[$key];
+        if (!is_int($raw) && !(is_string($raw) && preg_match('/^[+-]?\d+$/', trim($raw)) === 1)) {
+            $error = $key . ' must be a numeric api-football id (got ' . \AIWorkforce\Football\RequestParams::preview($raw) . ')';
+            return null;
+        }
+        $value = (int) trim((string) $raw);
+        if ($value < 1) {
+            $error = $key . ' must be a positive id (got ' . $value . ')';
+            return null;
+        }
+        return $value;
+    }
+
+    /**
+     * The concrete odds-capable provider, or an honest 503 when api-football
+     * is not configured. Returns null AFTER responding so callers can `return`.
+     */
+    private function apiFootballOddsProvider(): ?\AIWorkforce\Sports\Providers\ApiFootballProvider
+    {
+        $manager = $this->football()->providerManager();
+        $provider = $manager->provider('api-football');
+        if (!$provider instanceof \AIWorkforce\Sports\Providers\ApiFootballProvider) {
+            $this->jsonError(
+                'the api-football provider is not configured, so the vendor odds endpoints are unavailable. Connect it in Admin → API (service sports, driver API-Football) or set the API_FOOTBALL_KEY environment variable — other football endpoints keep reading stored rows.',
+                503,
+                ['providerStatus' => 'NOT_CONFIGURED', 'state' => \AIWorkforce\Football\DataState::UNAVAILABLE]
+            );
+            return null;
+        }
+        return $provider;
+    }
+
+    /** Map a classified provider failure to an honest HTTP answer. */
+    private function respondProviderException(\AIWorkforce\Sports\Providers\ProviderException $e): void
+    {
+        $status = in_array($e->status, [\AIWorkforce\Sports\Providers\ProviderException::OFFLINE, \AIWorkforce\Sports\Providers\ProviderException::TIMEOUT, \AIWorkforce\Sports\Providers\ProviderException::RATE_LIMITED, \AIWorkforce\Sports\Providers\ProviderException::DAILY_QUOTA_EXHAUSTED], true) ? 503 : 502;
+        $this->jsonError($e->getMessage(), $status, ['providerStatus' => $e->status] + $e->details);
+    }
+
+    /** Shared catalog endpoint body (bets / bookmakers), with id & search. */
+    private function oddsCatalog(string $kind): void
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $g = $this->input->get(NULL, true) ?: [];
+        $notes = [];
+        $id = $this->numericId($g, 'id', $error);
+        if ($error !== null) { $this->jsonError($error, 422); return; }
+        $search = isset($g['search']) && is_string($g['search']) && trim($g['search']) !== '' ? trim($g['search']) : null;
+        $provider = $this->apiFootballOddsProvider();
+        if ($provider === null) return; // already responded
+        try {
+            $rows = $kind === 'bets' ? $provider->oddsBets($id, $search) : $provider->oddsBookmakers($id, $search);
+        } catch (\AIWorkforce\Sports\Providers\ProviderException $e) {
+            $this->respondProviderException($e);
+            return;
+        }
+        $this->json([
+            'state' => $rows === [] ? \AIWorkforce\Football\DataState::UNAVAILABLE : 'AVAILABLE',
+            'count' => count($rows),
+            $kind => $rows,
+            'idSpace' => $kind === 'bets' ? 'prematch' : null,
+            'message' => $rows === [] ? 'The provider returned no ' . $kind . ' for this query.' : null,
+            'request' => ['id' => $id, 'search' => $search, 'notes' => array_values($notes)],
+            'generatedAt' => gmdate('c'),
+        ]);
+    }
+
     /**
      * Matches read straight from the selected provider.
      *
