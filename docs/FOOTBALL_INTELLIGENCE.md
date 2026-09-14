@@ -778,7 +778,23 @@ GET /api/football/dashboard            ?date=&refresh=
 GET /api/football/providers            the provider catalogue behind the Data Provider selector
 GET /api/football/providers/health     per-provider health: status, response time, rate limit, coverage, odds, what is missing
 GET /api/football/matches/fetch        ?provider=AUTO&competition=&date=&dateFrom=&dateTo=&limit=50&with=lineups&refresh=1
+GET /api/football/odds/:fixtureId       the stored bookmaker odds sheet — market → selection → each book's newest quote, best/low price, per-market freshness; a pure read, never spends provider quota
+GET /api/football/odds/:fixtureId/live  the in-play odds snapshot (API-Football /odds/live): suspended flags, handicap lines and the vendor's stopped/blocked state carried through; serves the stored snapshot until the live refresh interval passes, then fetches once (`?refresh=1` forces a fetch — sports.manage)
+GET /api/football/odds/bookmakers      the vendor bookmaker catalogue, cached seven days (`?refresh=1` — sports.manage)
+GET /api/football/odds/bets            ?scope=prematch|live — the two bet-type catalogues; ids from the pre-match catalogue filter only /odds, ids from the live catalogue filter only /odds/live (the vendor keeps them separate)
 ```
+
+Manage (`sports.manage`):
+
+```
+POST /api/football/odds/:fixtureId/refresh   fetch this fixture's pre-match odds from the provider NOW, persist them through the same normalizer the scheduled odds sync uses, return the updated sheet
+```
+
+The match page mirrors both: a "Bookmaker odds sheet" panel renders the stored
+sheet (with a CSRF-guarded *Refresh odds from provider* button for
+`sports.manage`), and when the fixture is in play a live-odds panel polls the
+stored snapshot every 30 seconds — the endpoint itself enforces the live
+cadence, so an open browser tab cannot spend the provider budget.
 
 The Live Match endpoint and console panel only return in-play statuses (`LIVE`,
 `HALFTIME`, `EXTRA_TIME`, `PENALTIES`) that were confirmed recently. When a

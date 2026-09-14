@@ -138,6 +138,10 @@ class Platform
             $model->audit,
             new \AIWorkforce\Football\FootballConfiguration($this->footballConfigOverrides($model))
         );
+        // The football odds sheet persists billed odds refreshes into the same
+        // sports_odds store the ticket engine reads, so one refresh feeds both
+        // surfaces and neither can show a price the other cannot see.
+        $this->football->bindSportsStore($model->sports);
         // Lottery provider selection (first configured wins):
         //   1. LoteriasAPI (loteriasapi.com) — real EuroMillions results feed
         //   2. Generic authorized/official feed adapter

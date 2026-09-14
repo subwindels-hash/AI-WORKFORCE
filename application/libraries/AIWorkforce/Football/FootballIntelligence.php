@@ -39,6 +39,9 @@ final class FootballIntelligence
     private ?PredictionMarkets $markets = null;
     private ?RefreshPolicy $refresh = null;
     private ?OddsIntelligence $fairValue = null;
+    private ?OddsSheetService $oddsSheet = null;
+    /** Optional sports store (odds persistence) bound by the Platform. */
+    private ?object $sportsStore = null;
     private ?StabilityMonitor $stability = null;
     private ?IntelligenceScore $scoreEngine = null;
     private ?PredictionDrivers $drivers = null;
@@ -203,6 +206,29 @@ final class FootballIntelligence
     public function fairValue(): OddsIntelligence
     {
         return $this->fairValue ??= new OddsIntelligence($this->config);
+    }
+
+    /**
+     * The complete bookmaker odds surface: the stored per-fixture odds sheet,
+     * a billed pre-match refresh, in-play (live) odds snapshots and the
+     * vendor's bookmaker / bet-type reference catalogs. Reads are free;
+     * anything that spends provider quota says so and is permission-gated at
+     * the controller.
+     */
+    public function oddsSheet(): OddsSheetService
+    {
+        if ($this->oddsSheet === null) {
+            $this->oddsSheet = new OddsSheetService($this->repo, $this->gateway(), $this->config);
+            $this->oddsSheet->bindSportsStore($this->sportsStore);
+        }
+        return $this->oddsSheet;
+    }
+
+    /** Bind the sports repository so a billed odds refresh can persist rows (Platform wiring). */
+    public function bindSportsStore(?object $store): void
+    {
+        $this->sportsStore = $store;
+        $this->oddsSheet?->bindSportsStore($store);
     }
 
     /** The movement history of a prediction, and the verdict on its stability. */

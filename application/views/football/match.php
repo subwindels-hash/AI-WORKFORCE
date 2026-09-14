@@ -199,6 +199,112 @@ $withheldBlock = is_array($intel['withheld'] ?? null) ? $intel['withheld'] : [];
         </div>
       </section>
 
+      <?php
+      $oddsSheet = is_array($oddsSheet ?? null) ? $oddsSheet : [];
+      $sheetMarkets = is_array($oddsSheet['markets'] ?? null) ? $oddsSheet['markets'] : [];
+      ?>
+      <section class="panel football-section football-match-odds" aria-labelledby="bookmaker-odds-heading">
+        <div class="football-section__heading">
+          <div class="football-section__title">
+            <div>
+              <p class="football-eyebrow">Provider odds — every market, every bookmaker</p>
+              <h3 id="bookmaker-odds-heading">Bookmaker odds sheet (as stored)</h3>
+            </div>
+          </div>
+          <?php if ($matchId > 0): ?>
+            <form method="post" action="/football/match/<?= $matchId ?>/refresh-odds" class="football-inline-form" onsubmit="return confirm('Fetch this fixture\'s bookmaker odds from the provider now? This spends provider quota.')">
+              <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+              <button class="btn small" type="submit" <?= empty($caps['sync']) ? 'title="Requires the sports.manage permission — click to see the access message"' : '' ?>>Refresh odds from provider</button>
+            </form>
+          <?php endif; ?>
+        </div>
+        <div class="body">
+          <p class="football-section-intro">Every price below was delivered by the connected data feed and stored with its bookmaker, market and timestamp — this table shows the provider's odds verbatim, separate from the modelled sheet above. Viewing this page never spends a provider request; only the refresh button does.</p>
+          <?php if ($sheetMarkets === []): ?>
+            <div class="empty-state"><p><?= e((string) ($oddsSheet['reason'] ?? 'No bookmaker odds are stored for this fixture yet.')) ?></p></div>
+          <?php else: ?>
+            <?php foreach ($sheetMarkets as $sheetMarket): ?>
+              <?php $sheetSelections = is_array($sheetMarket['selections'] ?? null) ? $sheetMarket['selections'] : []; ?>
+              <section class="football-market-card">
+                <header>
+                  <div><p>Provider market</p><h5><?= e($pretty((string) ($sheetMarket['market'] ?? 'MARKET'))) ?></h5><small><?= count($sheetSelections) ?> selection<?= count($sheetSelections) === 1 ? '' : 's' ?></small></div>
+                  <div class="football-market-card__badges">
+                    <span class="badge <?= ($sheetMarket['freshness'] ?? '') === 'FRESH' ? 'b-green' : (($sheetMarket['freshness'] ?? '') === 'STALE' ? 'b-red' : 'b-gray') ?>"><?= e((string) ($sheetMarket['freshness'] ?? 'UNKNOWN')) ?></span>
+                    <?php if (is_numeric($sheetMarket['ageSeconds'] ?? null)): ?><span class="badge b-gray mono"><?= (int) floor(((int) $sheetMarket['ageSeconds']) / 60) ?>m old</span><?php endif; ?>
+                  </div>
+                </header>
+                <div class="table-scroll">
+                  <table class="tbl football-odds-table">
+                    <thead><tr><th>Selection</th><th class="num">Best odds</th><th class="num">Range</th><th class="num">Quotes</th><th>Bookmakers</th><th>Observed</th></tr></thead>
+                    <tbody>
+                      <?php foreach ($sheetSelections as $sheetSelection): ?>
+                        <?php $quotes = is_array($sheetSelection['quotes'] ?? null) ? $sheetSelection['quotes'] : []; ?>
+                        <tr>
+                          <td><b class="mono"><?= e($pretty((string) ($sheetSelection['selection'] ?? '—'))) ?></b></td>
+                          <td class="num mono"><b><?= $odds($sheetSelection['bestOdds'] ?? null) ?></b></td>
+                          <td class="num mono"><?= $odds($sheetSelection['lowOdds'] ?? null) ?>–<?= $odds($sheetSelection['bestOdds'] ?? null) ?></td>
+                          <td class="num mono"><?= (int) ($sheetSelection['quoteCount'] ?? 0) ?></td>
+                          <td><?php $names = array_values(array_filter(array_map(static fn(array $q): string => trim((string) ($q['bookmaker'] ?? '')), $quotes))); ?>
+                            <?php if ($names === []): ?><span class="dim">Feed did not name the book</span><?php else: ?><small><?= e(implode(' · ', array_slice($names, 0, 6))) ?><?= count($names) > 6 ? ' · +' . (count($names) - 6) . ' more' : '' ?></small><?php endif; ?></td>
+                          <td class="mono dim"><small><?= e($stamp($sheetSelection['observedAt'] ?? null, 'Y-m-d H:i')) ?></small></td>
+                        </tr>
+                      <?php endforeach; ?>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            <?php endforeach; ?>
+            <p class="football-odds-sheet__note"><?= (int) ($oddsSheet['totalQuotes'] ?? 0) ?> stored quote row(s) across <?= count($sheetMarkets) ?> market(s). Best odds = the highest price any stored book offers for that selection; each book contributes only its newest quote.</p>
+          <?php endif; ?>
+          <?php if ($matchId > 0 && in_array(strtoupper((string) ($fixture['status'] ?? '')), ['LIVE', 'HALFTIME', 'EXTRA_TIME', 'PENALTIES'], true)): ?>
+            <div id="football-live-odds-panel" data-fixture-id="<?= $matchId ?>">
+              <h4>In-play odds (live snapshot)</h4>
+              <p class="football-help">This match is in play. Live prices are read from the stored snapshot and refreshed on the module's live cadence; a value the bookmaker suspended is marked, never hidden.</p>
+              <div id="football-live-odds-body" class="empty-state"><p>Loading the stored in-play odds snapshot…</p></div>
+            </div>
+            <script id="football-live-odds-js">
+            (function () {
+              var body = document.getElementById('football-live-odds-body');
+              var panel = document.getElementById('football-live-odds-panel');
+              if (!body || !panel) return;
+              var fixtureId = panel.getAttribute('data-fixture-id');
+              function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+              function render(payload) {
+                var snapshot = payload && payload.snapshot;
+                if (!snapshot || !snapshot.markets || !snapshot.markets.length) {
+                  body.innerHTML = '<p>' + esc((payload && payload.reason) || 'No in-play odds snapshot is stored yet.') + '</p>';
+                  return;
+                }
+                var html = '<p class="football-help">Snapshot from ' + esc(snapshot.provider || 'provider') + ' at ' + esc(snapshot.observedAt || '—')
+                  + (snapshot.blocked ? ' · <b>bookmaker has blocked betting</b>' : '') + (snapshot.stopped ? ' · <b>play stopped</b>' : '') + '</p>';
+                snapshot.markets.forEach(function (market) {
+                  html += '<div class="table-scroll"><table class="tbl"><thead><tr><th colspan="3">' + esc(market.providerMarket || market.market) + '</th></tr>'
+                    + '<tr><th>Selection</th><th class="num">Odds</th><th>State</th></tr></thead><tbody>';
+                  (market.values || []).forEach(function (value) {
+                    html += '<tr><td class="mono">' + esc(value.providerSelection || value.selection)
+                      + (value.handicap != null ? ' <small class="dim">(line ' + esc(value.handicap) + (value.main ? ', main' : '') + ')</small>' : '')
+                      + '</td><td class="num mono">' + esc(Number(value.odds).toFixed(2)) + '</td>'
+                      + '<td>' + (value.suspended ? '<span class="badge b-red">SUSPENDED</span>' : '<span class="badge b-green">OPEN</span>') + '</td></tr>';
+                  });
+                  html += '</tbody></table></div>';
+                });
+                body.className = '';
+                body.innerHTML = html;
+              }
+              function poll() {
+                fetch('/api/football/odds/' + fixtureId + '/live', { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } })
+                  .then(function (r) { return r.json(); })
+                  .then(render)
+                  .catch(function () { body.innerHTML = '<p>The live odds read failed; it will retry automatically.</p>'; });
+              }
+              poll();
+              setInterval(poll, 30000);
+            })();
+            </script>
+          <?php endif; ?>
+        </div>
+      </section>
+
       <section class="panel football-section" aria-labelledby="intelligence-heading">
         <div class="football-section__heading">
           <div class="football-section__title">

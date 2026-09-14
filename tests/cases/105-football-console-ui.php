@@ -258,13 +258,16 @@ test('football: the football screens own their panels — no duplication, no lef
         assert_true(substr_count($console, $markup) >= 1, 'the board reports ' . $markup);
     }
     assert_contains('30-day odds prediction ticket performance (stored settlements only)', $sports, 'the odds prediction ticket screen keeps only ticket figures');
-    // §12: the match screen never rewrites a prediction. Its one form —
-    // Analyze — only writes the row when the match has none, reuses the stored
-    // row otherwise (the controller refuses to regenerate), and carries the
-    // same CSRF token every other console mutation carries.
-    assert_equals(1, substr_count($match, 'method="post"'), 'the match view contains exactly one form: Analyze');
+    // §12: the match screen never rewrites a prediction. Its two forms —
+    // Analyze and Refresh odds — are the only mutations: Analyze only writes
+    // the row when the match has none and reuses the stored row otherwise
+    // (the controller refuses to regenerate), Refresh odds is the one billed
+    // provider action on the page, and both carry the same CSRF token every
+    // other console mutation carries.
+    assert_equals(2, substr_count($match, 'method="post"'), 'the match view contains exactly two forms: Analyze and Refresh odds');
     assert_contains('/football/match/', $match, 'posting back at the match it analyzes');
     assert_contains('/analyze', $match, 'at the analyze endpoint');
+    assert_contains('/refresh-odds', $match, 'and the billed odds refresh at its own endpoint');
     assert_contains('csrf_token', $match, 'guarded by the CSRF token');
     assert_contains('never rewritten', $match, 'and says plainly that the frozen prediction is not rewritten');
     assert_contains('Stored as separate LIVE rows', $match, 'with the live estimate kept in its own rows');

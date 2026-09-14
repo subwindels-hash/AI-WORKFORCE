@@ -266,6 +266,44 @@ function oddsJson(fixtureId) {
   }];
 }
 
+/**
+ * In-play odds snapshot (GET /odds/live?fixture=ID). Real wire shape: rows are
+ * NOT grouped by bookmaker; each value carries {odd, handicap, main, suspended};
+ * the row-level status block is {stopped, blocked, finished}.
+ */
+function liveOddsJson(fixtureId) {
+  const f = allKnownFixtures().find((x) => String(x.id) === String(fixtureId));
+  if (!f) return [];
+  const sh = TEAMS[f.home].str, sa = TEAMS[f.away].str;
+  const pH = Math.max(0.08, Math.min(0.8, 0.42 + (sh - sa) * 0.22));
+  const pD = 0.26; const pA = Math.max(0.05, 1 - pH - pD);
+  const price = (p) => (Math.round((0.96 / p) * 100) / 100).toFixed(2);
+  const iso = new Date().toISOString();
+  return [{
+    fixture: { id: f.id, status: { long: 'Second Half', elapsed: 62, seconds: '62:12' } },
+    league: { id: 39, season: SEASON },
+    teams: { home: { id: f.home, goals: 1 }, away: { id: f.away, goals: 0 } },
+    status: { stopped: false, blocked: false, finished: false },
+    update: iso,
+    odds: [
+      { id: 59, name: 'Fulltime Result', values: [
+        { value: 'Home', odd: price(pH * 1.4), handicap: null, main: null, suspended: false },
+        { value: 'Draw', odd: price(pD), handicap: null, main: null, suspended: false },
+        { value: 'Away', odd: price(pA * 0.6), handicap: null, main: null, suspended: true },
+      ] },
+      { id: 25, name: 'Over/Under Line', values: [
+        { value: 'Over', odd: '1.85', handicap: '2.5', main: true, suspended: false },
+        { value: 'Under', odd: '1.95', handicap: '2.5', main: true, suspended: false },
+        { value: 'Over', odd: '3.10', handicap: '3.5', main: false, suspended: false },
+      ] },
+      { id: 33, name: 'Asian Handicap', values: [
+        { value: 'Home', odd: '1.92', handicap: '-1', main: true, suspended: false },
+        { value: 'Away', odd: '1.88', handicap: '1', main: true, suspended: false },
+      ] },
+    ],
+  }];
+}
+
 function allKnownFixtures() {
   const out = [...todaysFixtures()];
   for (let d = 1; d <= 3; d++) out.push(...fixturesForDate(addDays(TODAY(), d)));
@@ -353,6 +391,35 @@ const server = http.createServer((req, res) => {
   if (path === '/odds') {
     const fixture = url.searchParams.get('fixture');
     return envelope(oddsJson(fixture));
+  }
+  if (path === '/odds/live') {
+    const fixture = url.searchParams.get('fixture');
+    return envelope(liveOddsJson(fixture));
+  }
+  if (path === '/odds/live/bets') {
+    return envelope([
+      { id: 1, name: 'Match Winner' },
+      { id: 25, name: 'Over/Under Line' },
+      { id: 33, name: 'Asian Handicap' },
+      { id: 21, name: 'Both Teams To Score' },
+    ]);
+  }
+  if (path === '/odds/bets') {
+    return envelope([
+      { id: 1, name: 'Match Winner' },
+      { id: 5, name: 'Goals Over/Under' },
+      { id: 8, name: 'Both Teams Score' },
+      { id: 12, name: 'Double Chance' },
+      { id: 4, name: 'Asian Handicap' },
+    ]);
+  }
+  if (path === '/odds/bookmakers') {
+    return envelope([
+      { id: 1, name: 'Bet365' },
+      { id: 2, name: 'Bwin' },
+      { id: 6, name: 'Pinnacle' },
+      { id: 8, name: 'Unibet' },
+    ]);
   }
   if (path === '/standings') return envelope(standingsJson());
   if (path === '/teams/statistics') {

@@ -144,6 +144,99 @@ class Api_football extends Api_controller
         $this->json($payload);
     }
 
+    // ------------------------------------------------------------------ odds
+
+    /**
+     * The stored bookmaker odds sheet for one fixture — every market, every
+     * selection, every book's newest quote, with per-market freshness.
+     * A pure read over stored rows: viewing it never spends provider quota.
+     *
+     * GET /api/football/odds/:fixtureId
+     */
+    public function odds_sheet(string $id = '0')
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $fixtureId = ctype_digit($id) ? (int) $id : 0;
+        if ($fixtureId <= 0) {
+            $this->jsonError('a numeric fixtureId path segment is required (GET /api/football/odds/{fixtureId})', 422);
+            return;
+        }
+        $this->json($this->football()->oddsSheet()->sheet($fixtureId));
+    }
+
+    /**
+     * Refresh one fixture's pre-match odds from the connected provider NOW and
+     * return the updated sheet. This costs provider quota, so it is a managed
+     * action (sports.manage + CSRF) exactly like a fixtures sync.
+     *
+     * POST /api/football/odds/:fixtureId/refresh
+     */
+    public function odds_refresh(string $id = '0')
+    {
+        if (!$this->requirePermission('sports.manage')) return;
+        $fixtureId = ctype_digit($id) ? (int) $id : 0;
+        if ($fixtureId <= 0) {
+            $this->jsonError('a numeric fixtureId path segment is required', 422);
+            return;
+        }
+        $this->json($this->football()->oddsSheet()->refresh($fixtureId));
+    }
+
+    /**
+     * In-play odds for a live fixture. Serves the last stored snapshot until
+     * the live refresh interval passes, then asks the provider once — the same
+     * cadence discipline the live score board follows. `?refresh=1` forces a
+     * provider call and therefore requires sports.manage.
+     *
+     * GET /api/football/odds/:fixtureId/live
+     */
+    public function odds_live(string $id = '0')
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $fixtureId = ctype_digit($id) ? (int) $id : 0;
+        if ($fixtureId <= 0) {
+            $this->jsonError('a numeric fixtureId path segment is required', 422);
+            return;
+        }
+        $force = in_array(strtolower((string) $this->input->get('refresh')), ['1', 'true', 'yes'], true);
+        if ($force && !$this->requirePermission('sports.manage', false)) return;
+        $this->json($this->football()->oddsSheet()->live($fixtureId, $force));
+    }
+
+    /**
+     * The vendor's bookmaker catalog (/odds/bookmakers) — reference data,
+     * cached for a week. `?refresh=1` re-fetches (sports.manage).
+     *
+     * GET /api/football/odds/bookmakers
+     */
+    public function odds_bookmakers()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $force = in_array(strtolower((string) $this->input->get('refresh')), ['1', 'true', 'yes'], true);
+        if ($force && !$this->requirePermission('sports.manage', false)) return;
+        $this->json($this->football()->oddsSheet()->bookmakers($force));
+    }
+
+    /**
+     * A bet-type catalog. The vendor keeps two SEPARATE id systems —
+     * /odds/bets ids only filter pre-match /odds, /odds/live/bets ids only
+     * filter /odds/live — so the scope is explicit: `?scope=live` returns the
+     * live catalog, anything else the pre-match one.
+     *
+     * GET /api/football/odds/bets?scope=prematch|live
+     */
+    public function odds_bet_types()
+    {
+        if (!$this->requirePermission('sports.view', false)) return;
+        $scope = strtolower(trim((string) $this->input->get('scope'))) === 'live' ? 'live' : 'prematch';
+        $force = in_array(strtolower((string) $this->input->get('refresh')), ['1', 'true', 'yes'], true);
+        if ($force && !$this->requirePermission('sports.manage', false)) return;
+        $payload = $this->football()->oddsSheet()->betTypes($scope, $force);
+        $payload['scope'] = $scope === 'live' ? 'LIVE' : 'PRE_MATCH';
+        $payload['note'] = 'Bet ids are scope-specific: ids from the PRE_MATCH catalog filter only /odds, ids from the LIVE catalog filter only /odds/live.';
+        $this->json($payload);
+    }
+
     /**
      * The odds-prediction markets, with whether each one can currently be
      * answered. A market that has no stored input and no quoted price is

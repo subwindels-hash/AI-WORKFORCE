@@ -185,7 +185,42 @@ class Football extends MY_Controller
         $data['analysis'] = $analysis;
         $data['prediction'] = $this->platform->football->predictionFor($fixtureId);
         $data['fixtureId'] = $fixtureId;
+        // The stored bookmaker odds sheet (market → selection → each book's
+        // newest quote). A pure read over stored rows — the page never spends
+        // provider quota; the refresh button below is the billed action.
+        $data['oddsSheet'] = $this->platform->football->oddsSheet()->sheet($fixtureId);
         $this->render('football/match', $data);
+    }
+
+    /**
+     * Refresh one fixture's bookmaker odds from the provider now
+     * (sports.manage) — the per-match odds half of "Sync": one billed
+     * provider call, persisted through the same normalizer the scheduled
+     * odds sync uses, then straight back to the match page.
+     */
+    public function refresh_odds(string $id)
+    {
+        if (!ctype_digit($id)) { show_404(); return; }
+        $fixtureId = (int) $id;
+        if ($this->input->method(true) !== 'POST') { redirect('/football/match/' . $fixtureId); return; }
+        if (!$this->requireFootballPermission('sports.manage', 'odds refresh')) return;
+        try {
+            $result = $this->platform->football->oddsSheet()->refresh($fixtureId);
+        } catch (Throwable $e) {
+            $this->flash('error', 'Odds refresh refused: ' . $e->getMessage());
+            redirect('/football/match/' . $fixtureId);
+            return;
+        }
+        $refreshed = (array) ($result['refreshed'] ?? []);
+        if (($result['state'] ?? '') === \AIWorkforce\Football\DataState::AVAILABLE && (int) ($refreshed['stored'] ?? 0) > 0) {
+            $this->flash('notice', sprintf('Odds refreshed from %s: %d price(s) fetched, %d stored, %d invalid.',
+                (string) ($refreshed['provider'] ?? 'provider'), (int) ($refreshed['fetched'] ?? 0),
+                (int) ($refreshed['stored'] ?? 0), (int) ($refreshed['invalid'] ?? 0)));
+        } else {
+            $reason = trim((string) ($result['reason'] ?? 'the provider returned no odds for this fixture.'));
+            $this->flash('error', 'No odds were stored — ' . rtrim($reason, '.') . '.');
+        }
+        redirect('/football/match/' . $fixtureId . '#bookmaker-odds-heading');
     }
 
     /**
