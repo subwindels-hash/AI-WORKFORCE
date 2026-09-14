@@ -81,9 +81,14 @@ test('football scheduled prediction job: today and tomorrow share one configured
     $today = gmdate('Y-m-d', time() + 2 * 86400);
     $tomorrow = gmdate('Y-m-d', strtotime($today . ' +1 day'));
     $fixtures = [];
-    for ($i = 0; $i < 15; $i++) {
-        $fixtures[] = fx_fb_row('fx-cron-today-' . $i, $today . 'T' . sprintf('%02d', 1 + $i) . ':00:00+00:00',
+    // A genuinely busy current date: MORE fixtures today than the 20-fixture
+    // cap, so today alone must exhaust the shared allowance and tomorrow's
+    // slice of this cycle is exactly zero.
+    for ($i = 0; $i < 23; $i++) {
+        $fixtures[] = fx_fb_row('fx-cron-today-' . $i, $today . 'T' . sprintf('%02d', 1 + ($i % 23)) . ':00:00+00:00',
             'Manchester City', 'Everton', '10', '20');
+    }
+    for ($i = 0; $i < 15; $i++) {
         $fixtures[] = fx_fb_row('fx-cron-tomorrow-' . $i, $tomorrow . 'T' . sprintf('%02d', 1 + $i) . ':00:00+00:00',
             'Manchester City', 'Everton', '10', '20');
     }
