@@ -1197,7 +1197,7 @@ class DailyTicketService
             'ticket_id' => $ticketId, 'status' => $status, 'generation_status' => $generationStatus,
             'configuration_version' => (int) $config['version'],
             'candidates_evaluated' => $evaluated, 'predictions_recorded' => $recorded,
-            'rejections' => $rejections, 'rejection_summary' => json_encode($storedSummary),
+            'rejections' => $rejections, 'rejection_summary' => self::encodeRejectionSummary($storedSummary),
             'message' => mb_substr($message, 0, 500), 'provider' => $provider, 'run_id' => $runId,
             'attempt_count' => $attemptCount, 'next_retry_at' => $nextRetryAt,
             'last_error_code' => $errorCode, 'generated_at' => $generatedAt,
@@ -1865,6 +1865,90 @@ class DailyTicketService
             'thresholds' => [],
             'pipeline' => '',
         ];
+    }
+
+    /**
+     * Encode the stored rejection summary so it can never overflow the
+     * `sports_daily_tickets.rejection_summary` column.
+     *
+     * The 2026-09-15 lock-out:
+     *
+     *   sports repository update on sports_daily_tickets failed:
+     *   [1406] Data too long for column 'rejection_summary' at row 1
+     *
+     * The diagnostics payload grew unbounded with the run: up to 100 audited
+     * rejection rows (each with a dozen numeric fields), per-candidate
+     * decisions, selection attempts and the per-failure-code run summary with
+     * five worked examples each. On a busy fixture day that JSON exceeds the
+     * 65,535-byte MySQL TEXT ceiling, MySQL in strict mode rejects the whole
+     * UPDATE, and the entire generation run fails *after* the ticket was
+     * already produced — a diagnostics blob killing a real result.
+     *
+     * Two defences, both required:
+     *   1. the column is widened to MEDIUMTEXT by SchemaInstaller;
+     *   2. this encoder budgets the payload against the SMALLEST width any
+     *      deployment can still be on (legacy TEXT, 65,535 bytes), so an
+     *      un-migrated database also stops failing. Bulk arrays are dropped
+     *      newest-cost-first, each replaced by a truthful marker recording
+     *      what was omitted and why — never silently truncated JSON, which
+     *      would decode to nothing on read-back.
+     */
+    private static function encodeRejectionSummary(array $summary, int $budgetBytes = 60000): string
+    {
+        $encode = static function (array $value): string {
+            $json = json_encode($value);
+            return $json === false ? '{}' : $json;
+        };
+        $json = $encode($summary);
+        if (strlen($json) <= $budgetBytes) return $json;
+
+        // Shed the bulkiest diagnostic collections first. Counts, the stage
+        // ledger, timings and the funnel totals are what the dashboard and the
+        // audit trail actually read back, so they are shed last (and in
+        // practice never).
+        $shed = [
+            ['candidateDecisions', 'per-candidate decision rows'],
+            ['rejectionAudit', 'per-rejection audit rows'],
+            ['runSummary', 'per-failure-code run summary with examples'],
+            ['selectionAttempts', 'selection attempt log'],
+            ['topPicks', 'top picks preview'],
+            ['rejectionReasonsByProvider', 'per-provider rejection breakdown'],
+        ];
+        $omitted = [];
+        foreach ($shed as [$key, $label]) {
+            if (!isset($summary['_diagnostics'][$key])) continue;
+            $omitted[$key] = $label;
+            $summary['_diagnostics'][$key] = ['_omitted' => true, 'reason' => 'rejection_summary size budget'];
+            $summary['_diagnostics']['diagnosticsTruncated'] = [
+                'reason' => 'payload exceeded the ' . $budgetBytes . '-byte rejection_summary budget',
+                'omitted' => array_values($omitted),
+            ];
+            $json = $encode($summary);
+            if (strlen($json) <= $budgetBytes) return $json;
+        }
+
+        // Still over budget (pathological run): keep only the counters and the
+        // stage ledger, which are small, bounded and the ones the UI needs.
+        $diagnostics = $summary['_diagnostics'] ?? [];
+        $minimal = ['_diagnostics' => [
+            'diagnosticsTruncated' => [
+                'reason' => 'payload exceeded the ' . $budgetBytes . '-byte rejection_summary budget',
+                'omitted' => ['full diagnostics payload'],
+            ],
+        ]];
+        foreach (['stageLedger', 'generationStartedAt', 'generationCompletedAt', 'durationSeconds', 'actor',
+                  'eligibleFixtures', 'fixturesWithFreshOdds', 'fixturesRejectedStaleOdds',
+                  'predictionsGenerated', 'finalQualifiedCandidates', 'correlationQualifiedCandidates',
+                  'selectedPicks'] as $keep) {
+            if (array_key_exists($keep, $diagnostics)) $minimal['_diagnostics'][$keep] = $diagnostics[$keep];
+        }
+        $json = $encode($minimal);
+        if (strlen($json) <= $budgetBytes) return $json;
+        // The stage ledger alone cannot realistically overflow, but never
+        // return oversized JSON: an empty, VALID object beats a failed run.
+        unset($minimal['_diagnostics']['stageLedger']);
+        $json = $encode($minimal);
+        return strlen($json) <= $budgetBytes ? $json : '{}';
     }
 
     private function buildDiagnostics(array $funnel, string $date, int $evaluated, int $recorded, int $rejections): array

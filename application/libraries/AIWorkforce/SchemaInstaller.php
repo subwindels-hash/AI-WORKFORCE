@@ -80,7 +80,7 @@ final class SchemaInstaller
     // Bumped again for football_fixtures.live_confirmed_at: a stamped database
     // would otherwise skip the upgrade pass and never gain the column the Live
     // Match freshness gate now reads.
-    private const STAMP_VERSION = '2026-09-13-football-live-confirmed-at-v1';
+    private const STAMP_VERSION = '2026-09-15-daily-ticket-rejection-summary-mediumtext-v1';
 
     public static function databaseDir(): string
     {
@@ -280,6 +280,16 @@ final class SchemaInstaller
                     'ALTER TABLE audit_logs ALTER COLUMN "type" TYPE VARCHAR(64)',
                 ]
                 : [
+                    // sports_daily_tickets.rejection_summary was TEXT (65,535
+                    // bytes). The run diagnostics stored with the daily row
+                    // (stage ledger, up to 100 rejection-audit rows, the
+                    // per-failure-code run summary) exceed that on a busy
+                    // fixture day, and MySQL strict mode then rejected the
+                    // whole UPDATE — [1406] Data too long for column
+                    // 'rejection_summary' — failing a generation run whose
+                    // ticket had already been produced. MEDIUMTEXT (16MB) is
+                    // the width the CREATE statements now ship.
+                    'ALTER TABLE sports_daily_tickets MODIFY rejection_summary MEDIUMTEXT NULL',
                     "ALTER TABLE sports_calibrations MODIFY method VARCHAR(32) NOT NULL DEFAULT 'platt'",
                     "ALTER TABLE audit_logs MODIFY actor VARCHAR(64) NOT NULL DEFAULT 'system'",
                     'ALTER TABLE audit_logs MODIFY type VARCHAR(64) NOT NULL',

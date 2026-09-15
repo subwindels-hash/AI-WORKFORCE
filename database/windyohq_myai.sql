@@ -1266,7 +1266,7 @@ CREATE TABLE `sports_daily_tickets` (
   `candidates_evaluated` int(11) NOT NULL DEFAULT 0,
   `predictions_recorded` int(11) NOT NULL DEFAULT 0,
   `rejections` int(11) NOT NULL DEFAULT 0,
-  `rejection_summary` text DEFAULT NULL,
+  `rejection_summary` mediumtext DEFAULT NULL,
   `message` varchar(500) DEFAULT NULL,
   `provider` varchar(64) DEFAULT NULL,
   `run_id` varchar(40) DEFAULT NULL,

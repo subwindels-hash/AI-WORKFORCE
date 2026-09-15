@@ -108,7 +108,10 @@ CREATE TABLE IF NOT EXISTS sports_daily_tickets (
   candidates_evaluated INT NOT NULL DEFAULT 0,
   predictions_recorded INT NOT NULL DEFAULT 0,
   rejections INT NOT NULL DEFAULT 0,
-  rejection_summary TEXT NULL,
+  -- MEDIUMTEXT: the diagnostics payload (stage ledger, rejection audit rows,
+  -- run summary) legitimately exceeds the 64KB TEXT ceiling on busy days,
+  -- which failed the whole run with [1406] Data too long.
+  rejection_summary MEDIUMTEXT NULL,
   message VARCHAR(500) NULL,
   provider VARCHAR(64) NULL,
   run_id VARCHAR(40) NULL,
