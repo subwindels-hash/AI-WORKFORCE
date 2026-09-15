@@ -218,12 +218,20 @@ class Sports extends MY_Controller
         // force=1 clears the day's ACTIVE candidate state (no old pass odds can
         // be carried forward) before a clean regeneration runs.
         $force = (bool) $this->input->post('force');
+        // refresh=1 rebuilds the day's ticket from current odds: the existing
+        // PENDING ticket is superseded and a new one generated. An APPROVED
+        // ticket is never replaced — the service refuses and returns it
+        // unchanged — so this can never cancel a bet the operator has taken.
+        $refresh = (bool) $this->input->post('refresh');
         $sports = $this->platform->sports;
         try {
             // Spec §1/§5: ONE service, and the run is attributed to the
             // administrator who clicked Generate — never a blanket 'system'.
             $options = ['actor' => $this->actor()];
             if ($force) $options['force'] = true;
+            // A refresh implies a fresh provider cycle: rebuilding from the
+            // odds we already stored would just reproduce the same ticket.
+            if ($refresh) { $options['refresh'] = true; $options['force'] = true; }
             $result = \AIWorkforce\Sports\GenerationResult::fromRunDaily(
                 $sports->dailyTickets->runDaily($date, null, $options)
             );

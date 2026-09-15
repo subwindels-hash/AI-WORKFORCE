@@ -50,6 +50,12 @@ class DailyTicketService
 
     public const ENV_MAX_GENERATION = 'WINDELS_SPORTS_MAX_GENERATION';
     public const TICKET_TYPE = 'ODDS_PREDICTION';
+    /**
+     * How many times one calendar day may be regenerated. Each refresh
+     * supersedes the previous ticket and takes the next identity slot; this
+     * bounds the id probe and the stored history for a single date.
+     */
+    public const MAX_DAILY_GENERATIONS = 24;
     public const RUN_STALE_AFTER_SECONDS = 900;
     public const RETRY_BASE_SECONDS = 300;
     public const RETRY_MAX_SECONDS = 3600;
@@ -139,9 +145,40 @@ class DailyTicketService
         $window = DailyTicketDate::utcWindow($date, $timezone);
         $windowTo = (new \DateTimeImmutable($date . ' 00:00:00', new \DateTimeZone($timezone)))->modify('+1 day')->format('Y-m-d');
 
+        // Spec §5: the acting administrator, never a blanket 'system'.
+        // Resolved before the refresh below so a supersede is attributed to
+        // whoever triggered it, not to the generation that follows.
+        $actor = isset($options['actor']) && trim((string) $options['actor']) !== ''
+            ? mb_substr(trim((string) $options['actor']), 0, 120)
+            : 'system:daily-ticket';
+
+        // REFRESH (operator request, 2026-09-15): the engine may run several
+        // times a day so the ticket tracks the market as prices move. A refresh
+        // supersedes the day's current ticket and builds a new one from fresh
+        // odds — "one CURRENT ticket per day", not "one generation per day".
+        //
+        // The safety rule is absolute and is enforced here rather than left to
+        // the caller: an APPROVED ticket is an operator decision, possibly a
+        // placed bet, and is NEVER superseded. Only a still-PENDING ticket can
+        // be replaced. supersedeCurrentDailyTicket() re-reads the ticket and
+        // returns false if it is not pending, so a refresh that arrives just
+        // after an approval degrades to "return the approved ticket" instead of
+        // destroying it.
+        $refresh = !empty($options['refresh']);
+        if ($refresh) {
+            $superseded = $this->supersedeCurrentDailyTicket($date, $actor);
+            if ($superseded === false) {
+                // Nothing replaceable: fall through to the ordinary path, which
+                // returns the existing (approved) ticket untouched below.
+                $refresh = false;
+            }
+        }
+
         // Idempotency is ticket-state based, never attempt based. This check is
         // deliberately first: even if somebody deletes/marks the job attempt
         // FAILED, the persisted ticket remains today's authoritative result.
+        // A refresh has just superseded the prior ticket, so this correctly
+        // finds nothing and a fresh generation proceeds.
         $existing = $this->existingTicketResult($date);
         if ($existing !== null) return $existing;
         $recovered = $this->recoverUnlinkedDailyTicket($date, $config, $timezone, $window);
@@ -198,10 +235,6 @@ class DailyTicketService
         $this->resetStages();
         $generationStartedAt = gmdate('c');
         $generationStartedMicro = microtime(true);
-        // Spec §5: the acting administrator, never a blanket 'system'.
-        $actor = isset($options['actor']) && trim((string) $options['actor']) !== ''
-            ? mb_substr(trim((string) $options['actor']), 0, 120)
-            : 'system:daily-ticket';
         // Job rows are attempt telemetry, not the idempotency authority. Create
         // the parent row before claiming the daily slot: production dumps may
         // retain fk_sports_daily_run(run_id), and a child row cannot reference
@@ -956,7 +989,10 @@ class DailyTicketService
                             // ticket/legs write but before linking the daily row
                             // recoverable. It also lets a retry safely finish a
                             // partial write without violating the daily FK.
-                            $optimized['ticketId'] = $this->dailyTicketId($date);
+                            // Refresh-aware: pass 2+ must not overwrite the
+                            // superseded ticket that pass 1 left as its audit
+                            // trail, so take the first free generation slot.
+                            $optimized['ticketId'] = $this->nextDailyTicketId($date);
                             $ticketId = $optimized['ticketId'];
                             $rec = $this->governance->record($optimized, (string) $config['version'], $modelVersionId, $config);
                             if (($rec['status'] ?? '') !== 'NO_QUALIFIED_TICKET') {
@@ -1266,11 +1302,115 @@ class DailyTicketService
     }
 
     /** Stable UUID-shaped identity for one ticket type + configured-local date. */
-    private function dailyTicketId(string $date): string
+    /**
+     * The day's ticket identity.
+     *
+     * Deterministic by design: a crash after the ticket/legs write but before
+     * the daily row is linked is recoverable precisely because the same inputs
+     * rebuild the same id (see recoverUnlinkedDailyTicket).
+     *
+     * $generation makes that identity per-PASS rather than per-DAY. Refresh
+     * runs supersede the previous ticket and build a new one, and a superseded
+     * ticket must remain readable as the audit trail of that pass — so pass 2
+     * cannot reuse pass 1's id, or saveTicket() would overwrite the very record
+     * being preserved. Generation 0 keeps the original day-only hash, so every
+     * existing ticket id in a deployed database stays exactly as it was.
+     */
+    /**
+     * The id this pass should write to: the first generation slot for the date
+     * that is not already occupied by a stored ticket.
+     *
+     * Derived from what is actually persisted rather than from a counter
+     * column, which keeps it correct without a schema change and makes it
+     * self-healing — a half-finished pass leaves its id occupied, so the next
+     * pass simply moves on. Crash recovery is unaffected: the CURRENT pass's id
+     * is stable for as long as that pass has not committed a ticket.
+     *
+     * The scan is bounded; a day that somehow exhausts it reuses the last slot
+     * rather than looping, because refusing to generate at all would be a worse
+     * failure than overwriting a very old superseded record.
+     */
+    private function nextDailyTicketId(string $date): string
     {
-        $hex = hash('sha256', self::TICKET_TYPE . '|' . $date);
+        for ($generation = 0; $generation < self::MAX_DAILY_GENERATIONS; $generation++) {
+            $candidate = $this->dailyTicketId($date, $generation);
+            if ($this->repo->findTicket($candidate) === null) return $candidate;
+        }
+        return $this->dailyTicketId($date, self::MAX_DAILY_GENERATIONS - 1);
+    }
+
+    private function dailyTicketId(string $date, int $generation = 0): string
+    {
+        $seed = self::TICKET_TYPE . '|' . $date . ($generation > 0 ? '|g' . $generation : '');
+        $hex = hash('sha256', $seed);
         return substr($hex, 0, 8) . '-' . substr($hex, 8, 4) . '-5' . substr($hex, 13, 3)
             . '-a' . substr($hex, 17, 3) . '-' . substr($hex, 20, 12);
+    }
+
+    /**
+     * Supersede the day's CURRENT ticket so a refresh can build a new one.
+     *
+     * Returns true when a ticket was superseded (a regeneration should now
+     * proceed), and false when there is nothing to replace — either no ticket
+     * exists yet, or the one that exists must be preserved.
+     *
+     * THE RULE THAT MATTERS: an APPROVED ticket is never superseded. By the
+     * time a ticket is approved the operator may have staked real money on it,
+     * so no automatic refresh — scheduled or manual — may cancel it out from
+     * underneath them. The approval state is re-read here, immediately before
+     * the write, so a refresh racing an approval loses that race safely: the
+     * approved ticket survives and the refresh becomes a no-op.
+     *
+     * Settled tickets are history and are equally untouchable.
+     */
+    private function supersedeCurrentDailyTicket(string $date, string $actor): bool
+    {
+        $daily = $this->repo->findDailyTicket($date);
+        $ticketId = is_array($daily) ? trim((string) ($daily['ticket_id'] ?? '')) : '';
+        if ($ticketId === '') return false;
+        $ticket = $this->repo->findTicket($ticketId);
+        if ($ticket === null) return false;
+
+        $approval = strtoupper(trim((string) ($ticket['approval_status'] ?? '')));
+        $settlement = strtoupper(trim((string) ($ticket['settlement_status'] ?? '')));
+        // Already superseded/cancelled: nothing to do, and the ordinary path
+        // will not return it either, so a regeneration proceeds regardless.
+        if ($approval === 'SUPERSEDED' || $settlement === 'SUPERSEDED') return false;
+        // The protection. Anything that is not an undecided, unsettled ticket
+        // belongs to the operator or to history.
+        if ($approval !== 'PENDING_USER_APPROVAL' || $settlement !== 'PENDING') {
+            $this->audit->emit(
+                'SPORTS_TICKET_REFRESH_DECLINED',
+                'Refresh for ' . $date . ' left the existing ticket in place: it is ' . ($approval ?: 'UNKNOWN')
+                    . '/' . ($settlement ?: 'UNKNOWN') . ', not an undecided pending ticket',
+                ['date' => $date, 'ticketId' => $ticketId, 'approvalStatus' => $approval, 'settlementStatus' => $settlement],
+                $actor
+            );
+            return false;
+        }
+
+        $this->repo->updateTicket($ticketId, [
+            'status' => 'CANCELLED',
+            'approval_status' => 'SUPERSEDED',
+            'settlement_status' => 'SUPERSEDED',
+            'reason' => 'Superseded by an operator-requested refresh of the ' . $date . ' odds prediction ticket',
+        ]);
+        // Detach the daily row from the superseded ticket so the idempotency
+        // check below sees an empty slot. The legs of the old ticket are kept
+        // as the audit trail of that pass — a superseded ticket stays readable.
+        $this->repo->updateDailyTicket($date, [
+            'ticket_id' => null,
+            'generation_status' => 'PENDING',
+            'status' => 'PENDING',
+            'message' => 'Superseded by a refresh; a new ticket is being generated',
+        ]);
+        $this->audit->emit(
+            'SPORTS_TICKET_REFRESHED',
+            'Ticket ' . $ticketId . ' for ' . $date . ' was superseded by a refresh; a new ticket will be generated from current odds',
+            ['date' => $date, 'supersededTicketId' => $ticketId],
+            $actor
+        );
+        return true;
     }
 
     /**

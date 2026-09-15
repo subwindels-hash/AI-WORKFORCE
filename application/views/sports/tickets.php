@@ -167,6 +167,29 @@ $heroMarketLabel = function (string $market, string $selection): string {
               <span class="dim mono">Approval: <b><?= e((string) ($heroTicket['approval_status'] ?? '—')) ?></b></span>
             <?php endif; ?>
           </div>
+          <?php
+            // Refresh rebuilds the day's ticket from current odds. Offered only
+            // while the ticket is still undecided: once APPROVED it is the
+            // operator's (possibly staked) position and the engine will refuse
+            // to supersede it, so showing the button would promise an action
+            // that cannot happen.
+            $heroRefreshable = $heroTicket !== null
+              && strtoupper((string) ($heroTicket['approval_status'] ?? '')) === 'PENDING_USER_APPROVAL'
+              && strtoupper((string) ($heroTicket['settlement_status'] ?? '')) === 'PENDING';
+          ?>
+          <?php if ($heroRefreshable && !empty($caps['sync'])): ?>
+            <div class="sports-actions">
+              <form method="post" action="/sports/generate-ticket" onsubmit="return confirm('Rebuild this ticket from current odds? The existing pending ticket is superseded (kept for audit) and replaced.')">
+                <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+                <input type="hidden" name="date" value="<?= e((string) ($ticketDateIso ?? gmdate('Y-m-d'))) ?>">
+                <input type="hidden" name="refresh" value="1">
+                <button class="btn small sports-ticket-btn">🔄 Refresh from current odds</button>
+              </form>
+              <span class="sports-note">Prices move during the day. A refresh supersedes this pending ticket and builds a new one from the latest odds. An approved ticket is never replaced.</span>
+            </div>
+          <?php elseif ($heroTicket !== null && strtoupper((string) ($heroTicket['approval_status'] ?? '')) === 'APPROVED_NOT_EXECUTED'): ?>
+            <p class="sports-note">This ticket is approved, so regeneration will not replace it — an approved ticket is treated as a position you may already have staked.</p>
+          <?php endif; ?>
     <?php if (is_array($heroRun) && !empty($caps['sync'])): ?>
       <div class="sports-subhead"><h4>Generation run</h4><span class="dim">operator view · how today&rsquo;s result was reached</span></div>
       <div class="stat-grid">
