@@ -319,29 +319,33 @@ test('confidence gate: the configured minimum is 30 and the configurable range s
     assert_false($svc->update(['min_confidence' => 100.01], 'admin')['ok'], 'above 100 is refused');
 });
 
-test('data-quality gate: 74 is rejected and 75 passes, independently of confidence', function () {
+test('data-quality gate: 29 is rejected and 30 passes, independently of confidence', function () {
     $policy = ConfidencePolicy::fromConfiguration(ConfigurationService::defaults());
 
-    // A very high confidence cannot buy a sub-75 data quality.
-    $below = $policy->evaluate(74, 99.0, 'TOTAL_GOALS', 'OVER_1_5');
-    assert_false($below['qualified'], 'quality 74 is rejected at any confidence');
+    // A very high confidence cannot buy a sub-30 data quality.
+    $below = $policy->evaluate(29, 99.0, 'TOTAL_GOALS', 'OVER_1_5');
+    assert_false($below['qualified'], 'quality 29 is rejected at any confidence');
     assert_equals(['DATA_QUALITY_BELOW_MINIMUM'], $below['reasons']);
-    assert_contains('75', $below['explanation'], 'the reason states the required minimum');
+    assert_contains('30', $below['explanation'], 'the reason states the required minimum');
 
-    $atGate = $policy->evaluate(75, 80.0, 'TOTAL_GOALS', 'OVER_1_5');
-    assert_true($atGate['tier'] !== 'REJECT', 'quality 75 is assessable');
-    assert_equals(75, ConfigurationService::MIN_DATA_QUALITY_FLOOR);
-    assert_equals(75, (int) ConfigurationService::defaults()['min_data_quality']);
+    $atGate = $policy->evaluate(30, 80.0, 'TOTAL_GOALS', 'OVER_1_5');
+    assert_true($atGate['tier'] !== 'REJECT', 'quality 30 is assessable');
+    // Quality that the OLD 75 floor would have thrown away now qualifies.
+    assert_true($policy->evaluate(74, 80.0, 'TOTAL_GOALS', 'OVER_1_5')['qualified'], 'quality 74 qualifies under the 30 floor');
+    assert_equals(30, ConfigurationService::MIN_DATA_QUALITY_FLOOR);
+    assert_equals(30, (int) ConfigurationService::defaults()['min_data_quality']);
 });
 
-test('gates are independent: the confidence floor is 30 and the quality floor is 75, never conflated', function () {
+test('gates are independent: both floors are 30, and they are never conflated', function () {
     $policy = ConfidencePolicy::fromConfiguration(ConfigurationService::defaults());
     // Good evidence, weak confidence → confidence gate only.
     $a = $policy->evaluate(95, 20.0, 'TOTAL_GOALS', 'OVER_1_5');
     assert_equals(['LOW_CONFIDENCE'], $a['reasons']);
     // Weak evidence, strong confidence → quality gate only.
-    $b = $policy->evaluate(60, 95.0, 'TOTAL_GOALS', 'OVER_1_5');
+    $b = $policy->evaluate(25, 95.0, 'TOTAL_GOALS', 'OVER_1_5');
     assert_equals(['DATA_QUALITY_BELOW_MINIMUM'], $b['reasons']);
+    // Both above their (now equal) floors → qualified on both axes.
+    assert_true($policy->evaluate(30, 30.0, 'TOTAL_GOALS', 'OVER_1_5')['qualified'], '30/30 is the qualifying corner');
 });
 
 test('the optimizer honours both hard gates and never weakens them to produce a ticket', function () {
@@ -355,19 +359,23 @@ test('the optimizer honours both hard gates and never weakens them to produce a 
         ];
     };
     $config = ['targetOddsMin' => 1.1, 'targetOddsMax' => 99, 'maxSelections' => 5,
-        'minConfidence' => 30.0, 'minDataQuality' => 75];
+        'minConfidence' => 30.0, 'minDataQuality' => 30];
 
     // Below either gate → never pooled, even though the odds are attractive.
     $out = (new TicketOptimizer())->optimize([
         $mk(1, 29.99, 95, 6.0),
-        $mk(2, 90.0, 74, 6.0),
+        $mk(2, 90.0, 29, 6.0),
     ], $config);
     assert_equals(0, $out['poolSize'], 'sub-gate candidates never enter the pool');
     assert_equals('NO_QUALIFIED_TICKET', $out['status'], 'the engine reports no ticket rather than lowering a gate');
 
     // Exactly at both gates → eligible.
-    $ok = (new TicketOptimizer())->optimize([$mk(3, 30.0, 75, 6.0)], $config);
+    $ok = (new TicketOptimizer())->optimize([$mk(3, 30.0, 30, 6.0)], $config);
     assert_equals(1, $ok['poolSize'], 'a candidate exactly at both gates qualifies');
+
+    // Mid-range evidence the OLD 75 floor discarded is now usable.
+    $mid = (new TicketOptimizer())->optimize([$mk(4, 45.0, 60, 6.0)], $config);
+    assert_equals(1, $mid['poolSize'], 'quality 60 qualifies under the 30 floor');
 });
 
 // ─────────────────────────────────────────────────────────────────────────

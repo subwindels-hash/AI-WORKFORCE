@@ -80,7 +80,7 @@ final class SchemaInstaller
     // Bumped again for football_fixtures.live_confirmed_at: a stamped database
     // would otherwise skip the upgrade pass and never gain the column the Live
     // Match freshness gate now reads.
-    private const STAMP_VERSION = '2026-09-13-football-live-confirmed-at-v1';
+    private const STAMP_VERSION = '2026-09-15-handicap-lineless-odds-purge-v1';
 
     public static function databaseDir(): string
     {
@@ -280,6 +280,16 @@ final class SchemaInstaller
                     'ALTER TABLE audit_logs ALTER COLUMN "type" TYPE VARCHAR(64)',
                 ]
                 : [
+                    // sports_daily_tickets.rejection_summary was TEXT (65,535
+                    // bytes). The run diagnostics stored with the daily row
+                    // (stage ledger, up to 100 rejection-audit rows, the
+                    // per-failure-code run summary) exceed that on a busy
+                    // fixture day, and MySQL strict mode then rejected the
+                    // whole UPDATE — [1406] Data too long for column
+                    // 'rejection_summary' — failing a generation run whose
+                    // ticket had already been produced. MEDIUMTEXT (16MB) is
+                    // the width the CREATE statements now ship.
+                    'ALTER TABLE sports_daily_tickets MODIFY rejection_summary MEDIUMTEXT NULL',
                     "ALTER TABLE sports_calibrations MODIFY method VARCHAR(32) NOT NULL DEFAULT 'platt'",
                     "ALTER TABLE audit_logs MODIFY actor VARCHAR(64) NOT NULL DEFAULT 'system'",
                     'ALTER TABLE audit_logs MODIFY type VARCHAR(64) NOT NULL',
@@ -290,12 +300,33 @@ final class SchemaInstaller
         }
 
         // Repair the built-in sports ticket policy — 30%+ confidence,
-        // quality 80, LOW correlation, at most 5 selections. Only the
+        // quality 30+, LOW correlation, at most 5 selections. Only the
         // untouched system default row is amended;
         // operator-authored configuration versions remain append-only and
         // under admin control.
         try {
-            $exec("UPDATE sports_configurations SET min_confidence = 30, min_data_quality = 80, max_correlation = 'LOW', max_selections = 5 WHERE version = 0 AND updated_by = 'system' AND reason = 'built-in defaults' AND (min_confidence <> 30 OR min_data_quality <> 80 OR max_correlation <> 'LOW' OR max_selections <> 5)");
+            $exec("UPDATE sports_configurations SET min_confidence = 30, min_data_quality = 30, max_correlation = 'LOW', max_selections = 5 WHERE version = 0 AND updated_by = 'system' AND reason = 'built-in defaults' AND (min_confidence <> 30 OR min_data_quality <> 30 OR max_correlation <> 'LOW' OR max_selections <> 5)");
+        } catch (\Throwable $e) { /* table may not exist yet on partial installs */ }
+
+        // Purge handicap odds ingested WITHOUT their line. api-football sends
+        // the line in a separate `handicap` field, and the pre-match mapper
+        // used to drop it, so "Away +2" and "Away -2" both landed as a bare
+        // AWAY: two different bets on one market:selection key, where the last
+        // row ingested won and its price was then attributed to whichever line
+        // the model priced (the 2026-09-15 "549% edge" ticket).
+        //
+        // These rows are unusable rather than merely wrong — a lineless
+        // selection cannot be priced or settled, so ScoreGridPricer already
+        // refuses them. Deleting them lets the next provider sync repopulate
+        // the same fixtures with line-qualified rows instead of leaving dead
+        // records that can only ever be skipped.
+        //
+        // Deliberately narrow: only handicap markets, only selections that are
+        // EXACTLY a bare side. A line-qualified row (AWAY_PLUS_2) and every
+        // non-handicap market (MATCH_RESULT's legitimate bare HOME/AWAY) are
+        // untouched. Prices are re-fetched from the provider, never invented.
+        try {
+            $exec("DELETE FROM sports_odds WHERE market IN ('ASIAN_HANDICAP', 'EUROPEAN_HANDICAP') AND selection IN ('HOME', 'AWAY', 'DRAW')");
         } catch (\Throwable $e) { /* table may not exist yet on partial installs */ }
 
         // Heal legacy daily rows. A ticket reference is evidence of a generated

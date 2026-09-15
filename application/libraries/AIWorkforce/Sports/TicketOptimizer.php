@@ -367,7 +367,10 @@ class TicketOptimizer
         return sprintf(
             'FALLBACK (%s): no combination cleared the %.0f%% confidence floor, so the strongest non-correlated candidates '
             . 'ranked by confidence → data quality → expected value → risk → correlation were selected instead%s. '
-            . 'Every leg is still a real prediction with 30%+ measured confidence, positive expected value, approved risk and a quoted price.',
+            // '30%+' must be escaped as '30%%+': a bare '%+' is a sprintf sign
+            // specifier, which consumed a fifth argument that does not exist
+            // and made every fallback selection throw ArgumentCountError.
+            . 'Every leg is still a real prediction with 30%%+ measured confidence, positive expected value, approved risk and a quoted price.',
             $tier, $minConfidence, $lowest === null ? '' : sprintf(' (lowest leg confidence %.2f%%)', $lowest)
         );
     }

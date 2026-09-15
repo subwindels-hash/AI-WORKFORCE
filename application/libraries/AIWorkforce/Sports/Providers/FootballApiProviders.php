@@ -300,6 +300,33 @@ trait HttpTransport
     }
 
     /**
+     * Fold a separately-supplied handicap/total LINE into the raw selection
+     * text, so the normalizer below can produce a line-qualified selection.
+     *
+     * api-football returns the line in its own `handicap` field rather than in
+     * the selection label: {"value":"Away","handicap":"+2"}. Dropping it makes
+     * "Away +2" and "Away -2" both normalise to a bare AWAY — two different
+     * bets sharing one market:selection key, where the last row ingested wins
+     * and its price is then attributed to whichever line the model priced.
+     * That is how a +2 leg (fair ~1.14) ended up displaying the -2 price of
+     * 7.40 and a ~549% phantom edge.
+     *
+     * The line is emitted with an explicit sign because the normalizer keys
+     * off it, and a bare "2" would otherwise read as the away-side token.
+     */
+    protected static function withHandicapLine(string $raw, $handicap): string
+    {
+        if ($handicap === null || $handicap === '' || !is_scalar($handicap)) return $raw;
+        $line = trim((string) $handicap);
+        if ($line === '') return $raw;
+        // Already carried in the label (e.g. "Away +2") — never duplicate it.
+        if (preg_match('/[+-]\s*\d/', $raw)) return $raw;
+        if (!is_numeric(str_replace(',', '.', $line))) return $raw;
+        if (!str_starts_with($line, '-') && !str_starts_with($line, '+')) $line = '+' . $line;
+        return trim($raw . ' ' . $line);
+    }
+
+    /**
      * Normalize a provider-specific selection name to the pipeline's canonical names.
      * For TOTAL_GOALS: OVER_1_5, UNDER_1_5, OVER_2_5, UNDER_2_5, etc.
      * For MATCH_RESULT: HOME, DRAW, AWAY
@@ -603,7 +630,9 @@ class ApiFootballProvider implements SportsDataProvider
                     // A handicapped live selection ("Home" at line -1) is only
                     // meaningful with its line; fold it into the raw text the
                     // selection normalizer already understands ("Home -1").
-                    $selection = self::normalizeSelection($market, $handicap !== null ? trim($selectionRaw . ' ' . (str_starts_with($handicap, '-') ? $handicap : '+' . $handicap)) : $selectionRaw);
+                    // Shared with the pre-match mapper so the two paths cannot
+                    // drift apart again.
+                    $selection = self::normalizeSelection($market, self::withHandicapLine($selectionRaw, $handicap));
                     $row = [
                         'market' => $market,
                         'providerMarket' => (string) ($bet['name'] ?? ''),
@@ -1155,10 +1184,23 @@ class ApiFootballProvider implements SportsDataProvider
                     foreach ($bet['values'] ?? [] as $v) {
                         if (!isset($v['odd'])) continue;
                         $market = self::normalizeMarket((string) ($bet['name'] ?? 'UNKNOWN'));
-                        $selection = self::normalizeSelection($market, (string) ($v['value'] ?? ''));
+                        // A handicap/total selection is only meaningful WITH its
+                        // line. api-football returns the line in a separate
+                        // `handicap` field, so "Away" at +2 and "Away" at -2 both
+                        // normalise to a lineless AWAY when it is ignored — two
+                        // completely different bets collapsing onto one key. The
+                        // later row then overwrites the earlier, and the model
+                        // prices one line (AWAY_PLUS_2, fair ~1.14) against the
+                        // other line's price (7.40), manufacturing an enormous
+                        // phantom edge. Fold the line into the raw text exactly
+                        // as the live path does, so the normalizer produces a
+                        // line-qualified selection.
+                        $selectionRaw = (string) ($v['value'] ?? '');
+                        $selection = self::normalizeSelection($market, self::withHandicapLine($selectionRaw, $v['handicap'] ?? null));
                         $row = [
                             'market' => $market,
                             'selection' => $selection,
+                            'providerSelection' => $selectionRaw,
                             'decimalOdds' => (float) $v['odd'],
                             'observedAt' => gmdate('c'),
                             'bookmaker' => (string) ($bookmaker['name'] ?? ''),
@@ -2170,7 +2212,15 @@ class SportMonksProvider implements SportsDataProvider
             elseif (isset($r['label']) && (string) $r['label'] !== '') $rawSelection = (string) $r['label'];
             if ($rawSelection === null) continue;
             $normalizedMarket = self::normalizeMarket((string) ($market['name'] ?? 'UNKNOWN'));
-            $normalizedSelection = self::normalizeSelection($normalizedMarket, $rawSelection);
+            // This vendor also reports the handicap/total LINE beside the
+            // label rather than inside it. Fold it in for the same reason the
+            // api-football mapper does: without the line, "Away" at +2 and
+            // "Away" at -2 collapse onto one market:selection key and the
+            // surviving row's price is attributed to the wrong bet.
+            $normalizedSelection = self::normalizeSelection(
+                $normalizedMarket,
+                self::withHandicapLine($rawSelection, $r['handicap'] ?? $r['total'] ?? null)
+            );
             $row = [
                 'market' => $normalizedMarket,
                 'selection' => $normalizedSelection,
