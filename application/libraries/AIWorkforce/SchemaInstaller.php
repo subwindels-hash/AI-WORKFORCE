@@ -80,7 +80,7 @@ final class SchemaInstaller
     // Bumped again for football_fixtures.live_confirmed_at: a stamped database
     // would otherwise skip the upgrade pass and never gain the column the Live
     // Match freshness gate now reads.
-    private const STAMP_VERSION = '2026-09-15-daily-ticket-rejection-summary-mediumtext-v1';
+    private const STAMP_VERSION = '2026-09-15-handicap-lineless-odds-purge-v1';
 
     public static function databaseDir(): string
     {
@@ -306,6 +306,27 @@ final class SchemaInstaller
         // under admin control.
         try {
             $exec("UPDATE sports_configurations SET min_confidence = 30, min_data_quality = 30, max_correlation = 'LOW', max_selections = 5 WHERE version = 0 AND updated_by = 'system' AND reason = 'built-in defaults' AND (min_confidence <> 30 OR min_data_quality <> 30 OR max_correlation <> 'LOW' OR max_selections <> 5)");
+        } catch (\Throwable $e) { /* table may not exist yet on partial installs */ }
+
+        // Purge handicap odds ingested WITHOUT their line. api-football sends
+        // the line in a separate `handicap` field, and the pre-match mapper
+        // used to drop it, so "Away +2" and "Away -2" both landed as a bare
+        // AWAY: two different bets on one market:selection key, where the last
+        // row ingested won and its price was then attributed to whichever line
+        // the model priced (the 2026-09-15 "549% edge" ticket).
+        //
+        // These rows are unusable rather than merely wrong — a lineless
+        // selection cannot be priced or settled, so ScoreGridPricer already
+        // refuses them. Deleting them lets the next provider sync repopulate
+        // the same fixtures with line-qualified rows instead of leaving dead
+        // records that can only ever be skipped.
+        //
+        // Deliberately narrow: only handicap markets, only selections that are
+        // EXACTLY a bare side. A line-qualified row (AWAY_PLUS_2) and every
+        // non-handicap market (MATCH_RESULT's legitimate bare HOME/AWAY) are
+        // untouched. Prices are re-fetched from the provider, never invented.
+        try {
+            $exec("DELETE FROM sports_odds WHERE market IN ('ASIAN_HANDICAP', 'EUROPEAN_HANDICAP') AND selection IN ('HOME', 'AWAY', 'DRAW')");
         } catch (\Throwable $e) { /* table may not exist yet on partial installs */ }
 
         // Heal legacy daily rows. A ticket reference is evidence of a generated
