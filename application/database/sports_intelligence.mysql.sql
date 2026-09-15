@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS sports_configurations (
   min_confidence DECIMAL(5,2) NOT NULL DEFAULT 30,
   min_expected_value DECIMAL(8,5) NOT NULL DEFAULT 0.02,
   max_correlation VARCHAR(8) NOT NULL DEFAULT 'LOW',
-  min_data_quality SMALLINT NOT NULL DEFAULT 80,
+  min_data_quality SMALLINT NOT NULL DEFAULT 30,
   -- Adaptive confidence tiers (JSON); NULL derives them from the two floors.
   confidence_policy TEXT NULL,
   min_liquidity DECIMAL(10,4) NULL,

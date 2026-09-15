@@ -1229,7 +1229,7 @@ CREATE TABLE `sports_configurations` (
   `min_confidence` decimal(5,2) NOT NULL DEFAULT 30.00,
   `min_expected_value` decimal(8,5) NOT NULL DEFAULT 0.02000,
   `max_correlation` varchar(8) NOT NULL DEFAULT 'MEDIUM',
-  `min_data_quality` smallint(6) NOT NULL DEFAULT 80,
+  `min_data_quality` smallint(6) NOT NULL DEFAULT 30,
   `min_liquidity` decimal(10,4) DEFAULT NULL,
   `allowed_markets` text NOT NULL,
   `allowed_leagues` text NOT NULL,
@@ -1247,7 +1247,7 @@ CREATE TABLE `sports_configurations` (
 --
 
 INSERT INTO `sports_configurations` (`id`, `version`, `module_enabled`, `ticket_engine_enabled`, `system_timezone`, `platform_mode`, `engine_mode`, `target_odds_min`, `target_odds_max`, `max_selections`, `risk_level`, `min_confidence`, `min_expected_value`, `max_correlation`, `min_data_quality`, `min_liquidity`, `allowed_markets`, `allowed_leagues`, `max_exposure`, `stake_amount`, `void_policy`, `require_calibration`, `updated_by`, `reason`, `created_at`) VALUES
-(1, 0, 1, 1, 'UTC', 'SANDBOX', 'USER_APPROVAL_REQUIRED', 5.0000, 8.0000, 5, 'CONSERVATIVE', 30.00, 0.02000, 'LOW', 80, NULL, '[]', '[]', 100.00, 10.00, 'RESTITUTE_ODDS', 1, 'system', 'built-in defaults', '2026-08-24 00:00:00');
+(1, 0, 1, 1, 'UTC', 'SANDBOX', 'USER_APPROVAL_REQUIRED', 5.0000, 8.0000, 5, 'CONSERVATIVE', 30.00, 0.02000, 'LOW', 30, NULL, '[]', '[]', 100.00, 10.00, 'RESTITUTE_ODDS', 1, 'system', 'built-in defaults', '2026-08-24 00:00:00');
 
 -- --------------------------------------------------------
 

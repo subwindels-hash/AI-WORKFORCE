@@ -33,44 +33,46 @@ use AIWorkforce\Sports\ResultVerificationEngine;
 test('adaptive policy: the stock configuration produces the required data-quality bands', function () {
     $policy = ConfidencePolicy::fromConfiguration(ConfigurationService::defaults());
 
-    // The ladder still brackets the configured quality floor, but spec §7 makes
-    // 75 a HARD gate: no tier may admit evidence below it, so the derived
-    // LIMITED band (70) is unreachable and 75 is the true reject floor.
+    // Operator policy (2026-09-15): BOTH gates run from 30 upward. The ladder
+    // still brackets the configured quality floor (30), and because the hard
+    // gate is now 30 the bands below it collapse onto the floor rather than
+    // being clamped away by a stricter platform minimum.
     $tiers = $policy->tiers();
-    assert_equals(3, count($tiers), 'three derived bands');
+    assert_true(count($tiers) >= 2, 'the derived ladder still has distinct bands');
     assert_equals('EXCELLENT', $tiers[0]['tier']);
-    assert_equals(80, (int) $tiers[0]['minDataQuality']);
+    assert_equals(35, (int) $tiers[0]['minDataQuality']);
     assert_equals(30.0, (float) $tiers[0]['minConfidence'], 'the configured floor is the requirement at the best evidence');
     assert_equals('GOOD', $tiers[1]['tier']);
-    assert_equals(70, (int) $tiers[1]['minDataQuality']);
+    assert_equals(30, (int) $tiers[1]['minDataQuality']);
     // Relief is applied per tier and clamped at the confidence gate (30),
     // which spec §6 makes the lowest requirement any band may demand.
     assert_equals(30.0, (float) $tiers[1]['minConfidence']);
-    assert_equals('LIMITED', $tiers[2]['tier']);
-    assert_equals(60, (int) $tiers[2]['minDataQuality']);
-    assert_equals(30.0, (float) $tiers[2]['minConfidence']);
-    assert_equals('SAFE', $tiers[2]['markets'], 'thin evidence is restricted to the safer markets');
-    assert_equals(75, $policy->minimumDataQuality(), 'spec §7: below the hard 75 gate nothing is predictable');
+    foreach ($tiers as $tier) {
+        assert_equals(30.0, (float) $tier['minConfidence'], 'every band requires exactly the 30% confidence floor');
+        assert_true((int) $tier['minDataQuality'] >= 30, 'no band admits data quality below the 30 floor');
+    }
+    assert_equals(30, $policy->minimumDataQuality(), 'below the hard 30 gate nothing is predictable');
 });
 
 test('adaptive policy: the ladder is configuration, not hard-coded — moving the floors moves every tier', function () {
     $strict = ConfidencePolicy::fromConfiguration(['min_confidence' => 85.0, 'min_data_quality' => 90]);
     assert_equals(85.0, $strict->highestConfidenceRequirement(), 'a stricter operator gets a stricter top tier');
     assert_equals(80.0, $strict->requiredConfidence(88), 'and a stricter middle tier');
-    // The configured min_data_quality is the ORDINARY band, and the ladder
-    // brackets it — so raising it to 90 lifts the reject floor from 65 to 75
-    // (the stock 80 configuration is what produces the requested 65 floor).
+    // The configured min_data_quality is the ORDINARY band and the ladder
+    // brackets it, so an operator who RAISES their floor still gets a
+    // correspondingly strict reject floor — raising remains fully supported.
     assert_equals(75, $strict->minimumDataQuality(), 'the reject floor rises with the configured quality floor');
     assert_null($strict->requiredConfidence(70), 'quality 70 is not predictable under a 90 quality policy');
     assert_equals('LIMITED', $strict->tierFor(78)['tier'], 'the band below the configured floor is the restricted one');
 
-    $lenient = ConfidencePolicy::fromConfiguration(['min_confidence' => 60.0, 'min_data_quality' => 60]);
+    // A lenient operator may now go all the way down to the platform gate of
+    // 30 — that is the point of the change. Nothing below 30 is ever admitted.
+    $lenient = ConfidencePolicy::fromConfiguration(['min_confidence' => 60.0, 'min_data_quality' => 40]);
     assert_equals(60.0, $lenient->highestConfidenceRequirement());
-    // Spec §7: a lenient operator can lower their own bands, but never below
-    // the hard 75 data-quality gate — 74 stays unpredictable for everyone.
-    assert_equals(75, $lenient->minimumDataQuality(), 'never below the hard data-quality gate');
-    assert_null($lenient->requiredConfidence(74), 'quality 74 is rejected however lenient the policy');
-    assert_true($lenient->requiredConfidence(75) !== null, 'quality 75 is assessable');
+    assert_equals(30, $lenient->minimumDataQuality(), 'a lenient policy reaches the 30 gate, never below it');
+    assert_null($lenient->requiredConfidence(29), 'quality 29 is rejected however lenient the policy');
+    assert_true($lenient->requiredConfidence(30) !== null, 'quality 30 is assessable');
+    assert_true($lenient->requiredConfidence(74) !== null, 'quality 74 now qualifies instead of being rejected');
 });
 
 test('adaptive policy: an explicitly authored policy overrides the derived ladder, and garbage is refused', function () {
@@ -82,9 +84,11 @@ test('adaptive policy: an explicitly authored policy overrides the derived ladde
         ]]),
     ]);
     assert_equals(82.0, $explicit->requiredConfidence(95), 'the authored tier wins over the derived one');
-    // Spec §7: an authored band below the hard 75 gate cannot admit evidence
-    // the operator's own floor forbids — 72 is refused, 76 uses HOUSE_LOW.
-    assert_null($explicit->requiredConfidence(72), 'an authored sub-75 band cannot undercut the hard gate');
+    // An authored band is honoured down to the platform gate (30). HOUSE_LOW
+    // starts at 70, so 72 now resolves to it rather than being refused by a
+    // stricter platform minimum sitting above the authored policy.
+    assert_equals(68.0, $explicit->requiredConfidence(72), 'an authored band is honoured above the 30 gate');
+    assert_null($explicit->requiredConfidence(29), 'nothing below the 30 gate is ever admitted');
     assert_equals(68.0, $explicit->requiredConfidence(76));
     assert_equals('HOUSE_LOW', $explicit->tierFor(76)['tier']);
 
@@ -123,25 +127,27 @@ test('adaptive policy: a real 68% on good data qualifies and is still reported a
 
 test('adaptive policy: below the reject band nothing qualifies, however confident the model is', function () {
     $policy = ConfidencePolicy::fromConfiguration(ConfigurationService::defaults());
-    $verdict = $policy->evaluate(41, 99.0, 'TOTAL_GOALS', 'OVER_1_5');
-    assert_false($verdict['qualified'], 'quality 41 is not predictable at any confidence');
+    // 29 is below the 30 gate; a 99% confidence reading cannot rescue it.
+    $verdict = $policy->evaluate(29, 99.0, 'TOTAL_GOALS', 'OVER_1_5');
+    assert_false($verdict['qualified'], 'quality 29 is not predictable at any confidence');
     assert_equals('REJECT', $verdict['tier']);
     assert_equals(['DATA_QUALITY_BELOW_MINIMUM'], $verdict['reasons']);
     // Requirement #13: the reason names the score AND the minimum allowed.
-    assert_contains('41', $verdict['explanation']);
-    assert_contains('75', $verdict['explanation']);
+    assert_contains('29', $verdict['explanation']);
+    assert_contains('30', $verdict['explanation']);
+
+    // …while a score at the new floor is assessable on the very same policy.
+    assert_true($policy->evaluate(30, 99.0, 'TOTAL_GOALS', 'OVER_1_5')['qualified'], 'quality 30 qualifies');
     assert_null($verdict['requiredConfidence'], 'no confidence requirement is quoted for an unpredictable fixture');
 });
 
 test('adaptive policy: the LIMITED tier admits safer markets only — thin data never prices a thin line', function () {
-    // Spec §7 makes 75 a hard gate, so under the STOCK configuration the
-    // derived LIMITED band (60) is unreachable. An operator who raises their
-    // quality floor to 90 lifts the whole ladder and makes the restricted band
-    // land at 80-84, comfortably above the gate — that is the policy under
-    // test here, and quality below the hard gate is still refused outright.
+    // An operator who raises their quality floor to 90 lifts the whole ladder
+    // and makes the restricted band land at 80-84. Raising a floor is still
+    // fully supported; quality below their own configured floor is refused.
     $policy = ConfidencePolicy::fromConfiguration(['min_confidence' => 30.0, 'min_data_quality' => 90]);
     assert_equals('LIMITED', $policy->tierFor(78)['tier']);
-    assert_null($policy->tierFor(74), 'quality 74 is below the hard data-quality gate');
+    assert_null($policy->tierFor(74), 'quality 74 is below this operator\'s own 90 floor');
 
     // Safe: two of three outcomes, or a line the game almost always clears.
     assert_true($policy->marketAllowed(78, 'DOUBLE_CHANCE', 'HOME_OR_DRAW'));

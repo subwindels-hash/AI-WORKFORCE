@@ -58,9 +58,9 @@ class ConfidencePolicy
      *                   only allowed into safer markets)
      */
     public const DEFAULT_TIERS = [
-        ['tier' => self::TIER_EXCELLENT, 'minDataQuality' => 85, 'minConfidence' => 30.0, 'markets' => 'ALL'],
-        ['tier' => self::TIER_GOOD, 'minDataQuality' => 75, 'minConfidence' => 30.0, 'markets' => 'ALL'],
-        ['tier' => self::TIER_LIMITED, 'minDataQuality' => 65, 'minConfidence' => 30.0, 'markets' => 'SAFE'],
+        ['tier' => self::TIER_EXCELLENT, 'minDataQuality' => 50, 'minConfidence' => 30.0, 'markets' => 'ALL'],
+        ['tier' => self::TIER_GOOD, 'minDataQuality' => 40, 'minConfidence' => 30.0, 'markets' => 'ALL'],
+        ['tier' => self::TIER_LIMITED, 'minDataQuality' => 30, 'minConfidence' => 30.0, 'markets' => 'SAFE'],
     ];
 
     /**
@@ -79,7 +79,7 @@ class ConfidencePolicy
     ];
 
     /** Absolute data-quality floor when no tier matches (nothing below is predictable). */
-    public const DEFAULT_MIN_DATA_QUALITY = 65;
+    public const DEFAULT_MIN_DATA_QUALITY = 30;
 
     /** @var list<array{tier:string,minDataQuality:int,minConfidence:float,markets:mixed}> */
     private array $tiers;
@@ -141,8 +141,13 @@ class ConfidencePolicy
     public const LIMITED_QUALITY_STEP = 10;  // further quality points down to LIMITED
     public const GOOD_CONFIDENCE_RELIEF = 5.0;   // confidence points relaxed at GOOD
     public const LIMITED_CONFIDENCE_RELIEF = 10.0; // …and at LIMITED
-    /** Mirrors the configuration validation range: nothing below 50 is assessable. */
-    public const ABSOLUTE_MIN_DATA_QUALITY = 50;
+    /**
+     * Mirrors the configuration validation range. Tracks the platform gate
+     * rather than restating it, so the derived ladder can never clamp itself
+     * ABOVE the configured floor — a hard-coded 50 here would have silently
+     * re-imposed a 50 quality gate after the floor moved to 30.
+     */
+    public const ABSOLUTE_MIN_DATA_QUALITY = ConfigurationService::MIN_DATA_QUALITY_FLOOR;
 
     /**
      * The derived ladder. Never below the absolute assessable floor, never

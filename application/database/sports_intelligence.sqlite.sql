@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS sports_configurations (
   min_confidence REAL NOT NULL DEFAULT 30,
   min_expected_value REAL NOT NULL DEFAULT 0.02,
   max_correlation TEXT NOT NULL DEFAULT 'LOW',
-  min_data_quality INTEGER NOT NULL DEFAULT 80,
+  min_data_quality INTEGER NOT NULL DEFAULT 30,
   -- Adaptive confidence tiers (JSON): the confidence a prediction must reach
   -- at each data-quality band. NULL = derive the ladder from min_confidence
   -- and min_data_quality above, so no threshold is hard-coded in the app.

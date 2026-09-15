@@ -34,14 +34,13 @@ test('ticket optimizer never combines same-match selections', function () {
 });
 
 test('ticket optimizer enforces WINDELS daily ticket hard floors', function () {
-    // Spec §6/§7: the confidence hard gate is 30 and the data-quality hard
-    // gate is 75. An explicit admin setting is honoured when it is STRICTER,
-    // and can never lower either gate. 29.99 / 74.99 are rejected; 30 / 75
-    // pass. Confidence is never inflated or rounded up to clear the bar.
+    // Both hard gates are 30. An explicit admin setting is honoured when it is
+    // STRICTER, and can never lower either gate. 29.99 is rejected on either
+    // axis; 30 passes. Confidence is never inflated to clear the bar.
     $out = (new TicketOptimizer())->optimize([
         fx_candidate(1, 4.9, .50),
         array_merge(fx_candidate(2, 5.5, .50), ['confidence' => ['confidence' => 29.99]]),
-        array_merge(fx_candidate(3, 5.6, .50), ['quality' => ['score' => 74]]),
+        array_merge(fx_candidate(3, 5.6, .50), ['quality' => ['score' => 29]]),
         fx_candidate(4, 8.01, .50),
         fx_candidate(5, 6.0, .50),
     ], ['targetOddsMin' => 1.1, 'targetOddsMax' => 99, 'maxSelections' => 1, 'minConfidence' => 10, 'minDataQuality' => 10]);
@@ -49,11 +48,17 @@ test('ticket optimizer enforces WINDELS daily ticket hard floors', function () {
     assert_equals(3, $out['poolSize'], 'below-gate candidates are excluded even when the caller asks for 10');
     assert_equals(1, $out['selectionCount']);
 
-    // Exactly at the gates: a measured 30.00% on quality exactly 75 qualifies.
+    // Exactly at the gates: a measured 30.00% on quality exactly 30 qualifies.
     $atGate = (new TicketOptimizer())->optimize([
-        array_merge(fx_candidate(6, 5.5, .50), ['confidence' => ['confidence' => 30.0], 'quality' => ['score' => 75]]),
+        array_merge(fx_candidate(6, 5.5, .50), ['confidence' => ['confidence' => 30.0], 'quality' => ['score' => 30]]),
     ], ['targetOddsMin' => 1.1, 'targetOddsMax' => 99, 'maxSelections' => 1, 'minConfidence' => 10, 'minDataQuality' => 10]);
-    assert_equals(1, $atGate['poolSize'], 'a measured 30% on quality 75 is eligible for consideration');
+    assert_equals(1, $atGate['poolSize'], 'a measured 30% on quality 30 is eligible for consideration');
+
+    // Mid-range evidence the old 75 floor discarded is now usable.
+    $mid = (new TicketOptimizer())->optimize([
+        array_merge(fx_candidate(7, 5.5, .50), ['confidence' => ['confidence' => 45.0], 'quality' => ['score' => 60]]),
+    ], ['targetOddsMin' => 1.1, 'targetOddsMax' => 99, 'maxSelections' => 1, 'minConfidence' => 10, 'minDataQuality' => 10]);
+    assert_equals(1, $mid['poolSize'], 'quality 60 is eligible under the 30 floor');
 
     // A stricter operator setting is honoured above the gates.
     $usable = (new TicketOptimizer())->optimize([

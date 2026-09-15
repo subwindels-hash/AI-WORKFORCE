@@ -38,10 +38,19 @@ class ConfigurationService
     public const MIN_CONFIDENCE_FLOOR = 30.0;
 
     /**
-     * The hard data-quality gate (§7): 74.99 is rejected, 75 passes. Distinct
+     * The hard data-quality gate (§7): 29.99 is rejected, 30 passes. Distinct
      * from the confidence gate above; the two are never conflated.
+     *
+     * Operator decision (2026-09-15): both gates run from 30 upward. The
+     * previous 75 floor rejected fixtures outright on evidence breadth even
+     * when the model's measured confidence was strong, which is what produced
+     * days of "N predictions → 0 qualified". Lowering the FLOOR does not lower
+     * any measurement: quality is still measured honestly, still reported on
+     * every candidate, and an administrator may still raise the configured
+     * minimum back up at any time. What changes is that the platform no longer
+     * forbids operating below 75.
      */
-    public const MIN_DATA_QUALITY_FLOOR = 75;
+    public const MIN_DATA_QUALITY_FLOOR = 30;
 
     public function __construct(private SportsRepository $repo, private AuditRepository $audit) {}
 
@@ -90,7 +99,7 @@ class ConfigurationService
             'max_selections' => 5,
             'risk_level' => 'CONSERVATIVE',
             // Qualified-ticket policy: predictions must have measured confidence
-            // >= the configured minimum (30% by default), data quality 75+,
+            // >= the configured minimum (30% by default), data quality 30+,
             // positive value and LOW correlation between legs. Anything weaker
             // is rejected and the day honestly reports NO QUALIFIED TICKET
             // instead of a forced combination. Changes remain append-only and
@@ -98,10 +107,10 @@ class ConfigurationService
             'min_confidence' => 30.0,
             'min_expected_value' => 0.02,
             'max_correlation' => 'LOW',
-            'min_data_quality' => 75,
+            'min_data_quality' => 30,
             // Adaptive confidence policy (requirements #1/#8). NULL means the
             // tiers are DERIVED from the two floors above, but every tier is
-            // still bounded by the hard gates: 30%+ confidence and 75+ data
+            // still bounded by the hard gates: 30%+ confidence and 30+ data
             // quality. Set it explicitly to author the tiers directly; nothing
             // in the engine may admit a sub-30 confidence reading.
             'confidence_policy' => null,

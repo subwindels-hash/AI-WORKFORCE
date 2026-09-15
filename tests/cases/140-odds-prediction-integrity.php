@@ -317,14 +317,15 @@ test('odds integrity E2E: fixtures without any odds evaluate fully but force no 
     assert_equals([], $repo->odds, 'no odds rows means no stored odds');
 });
 
-test('qualified policy: built-in defaults demand 30%+ confidence, 75+ quality, LOW correlation', function () {
+test('qualified policy: built-in defaults demand 30%+ confidence, 30+ quality, LOW correlation', function () {
     $defaults = ConfigurationService::defaults();
     // The shipped confidence default is 30; the adaptive ladder (see
     // 146-adaptive-confidence-policy) is what separates the data-quality
     // bands, and 30 is the lowest value an operator may configure.
     assert_equals(30.0, (float) $defaults['min_confidence'], 'the shipped default confidence floor is 30');
-    // Spec §7: the hard data-quality gate is 75 (74.99 rejected, 75 passes).
-    assert_equals(75, (int) $defaults['min_data_quality']);
+    // Operator policy (2026-09-15): the hard data-quality gate is 30
+    // (29.99 rejected, 30 passes) — the same floor as confidence.
+    assert_equals(30, (int) $defaults['min_data_quality']);
     assert_equals('LOW', $defaults['max_correlation']);
     assert_equals(5, (int) $defaults['max_selections']);
     assert_equals('CONSERVATIVE', $defaults['risk_level']);
@@ -334,12 +335,12 @@ test('qualified policy: built-in defaults demand 30%+ confidence, 75+ quality, L
     // Operators may raise the floors, or lower them back to the hard gates
     // explicitly (append-only, audited).
     $service = new ConfigurationService(new SportsRepositoryStub(), fx140_audit());
-    // Spec §6/§7: an operator may raise the floors, and the lowest values the
-    // engine accepts are exactly the two hard gates (confidence 30, quality 75).
+    // An operator may raise the floors, and the lowest values the engine
+    // accepts are the two hard gates — both now 30.
     assert_true($service->update(['min_confidence' => 55.0, 'min_data_quality' => 85], 'admin', 'test override')['ok'], 'stricter floors remain permitted');
-    assert_true($service->update(['min_confidence' => 30.0, 'min_data_quality' => 75], 'admin', 'test override')['ok'], '30 / 75 are the lowest configurable floors');
+    assert_true($service->update(['min_confidence' => 30.0, 'min_data_quality' => 30], 'admin', 'test override')['ok'], '30 / 30 are the lowest configurable floors');
     assert_false($service->update(['min_confidence' => 29.99], 'admin', 'test override')['ok'], 'below the 30% confidence gate is refused');
-    assert_false($service->update(['min_data_quality' => 74], 'admin', 'test override')['ok'], 'below the 75 data-quality gate is refused');
+    assert_false($service->update(['min_data_quality' => 29], 'admin', 'test override')['ok'], 'below the 30 data-quality gate is refused');
 });
 
 test('qualified policy: 66/68/74% confidence legs are rejected, 75%+ legs are eligible', function () {
