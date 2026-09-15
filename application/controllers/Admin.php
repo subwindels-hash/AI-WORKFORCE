@@ -1285,6 +1285,9 @@ class Admin extends App_Controller
         $data = $this->base('Cron Jobs', 'cron');
         $data['jobs'] = $scheduler->status();
         $data['autoRun'] = \AIWorkforce\Cron\CronAutoRun::isEnabled($store);
+        $data['ticketRefreshMinutes'] = \AIWorkforce\Sports\SportsCronService::ticketRefreshMinutes(
+            $store->get(\AIWorkforce\Sports\SportsCronService::TICKET_REFRESH_SETTING)
+        );
         $data['lastTrigger'] = $store->get('cron.last_trigger');
         $data['secret'] = \AIWorkforce\Cron\CronSecrets::ensure($store);
         $data['runUrl'] = $this->cronRunUrl($data['secret']);
@@ -1299,7 +1302,16 @@ class Admin extends App_Controller
         if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/cron'); return; }
         $store = new \AIWorkforce\Cron\PlatformSettingsCronStore($this->AIWorkforce_model->db);
         $scheduler = new \AIWorkforce\Cron\CronScheduler($store);
+        $rawRefreshMinutes = trim((string) $this->input->post('sports_ticket_refresh_minutes', true));
+        $validRefresh = filter_var($rawRefreshMinutes, FILTER_VALIDATE_INT) !== false
+            && ((int) $rawRefreshMinutes === 0 || ((int) $rawRefreshMinutes >= \AIWorkforce\Sports\SportsCronService::MIN_TICKET_REFRESH_MINUTES
+                && (int) $rawRefreshMinutes <= \AIWorkforce\Sports\SportsCronService::MAX_TICKET_REFRESH_MINUTES));
+        if (!$validRefresh) {
+            $this->flash('error', 'Ticket refresh interval must be 0 (off) or between 15 and 1440 minutes.');
+            redirect('/admin/cron'); return;
+        }
         $store->set(\AIWorkforce\Cron\CronAutoRun::ENABLED_KEY, $this->input->post('auto_run') === '1' ? '1' : '0');
+        $store->set(\AIWorkforce\Sports\SportsCronService::TICKET_REFRESH_SETTING, (string) (int) $rawRefreshMinutes);
         foreach (array_keys(\AIWorkforce\Cron\CronScheduler::JOBS) as $id) {
             $scheduler->setEnabled($id, $this->input->post('enabled_' . $id) === '1');
         }

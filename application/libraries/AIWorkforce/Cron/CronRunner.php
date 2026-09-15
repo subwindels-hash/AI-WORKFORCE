@@ -85,7 +85,11 @@ class CronRunner
     public static function sports(object $ci): array
     {
         $service = new \AIWorkforce\Sports\SportsCronService($ci->AIWorkforce_model->sports, $ci->AIWorkforce_model->audit, $ci->platform->sports);
-        return $service->runAll();
+        $store = new PlatformSettingsCronStore($ci->AIWorkforce_model->db);
+        $refreshMinutes = \AIWorkforce\Sports\SportsCronService::ticketRefreshMinutes(
+            $store->get(\AIWorkforce\Sports\SportsCronService::TICKET_REFRESH_SETTING)
+        );
+        return $service->runAll(null, ['ticketRefreshMinutes' => $refreshMinutes]);
     }
 
     /**

@@ -1,6 +1,7 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed');
 $jobs = $jobs ?? [];
 $autoRun = !empty($autoRun);
+$ticketRefreshMinutes = (int) ($ticketRefreshMinutes ?? 60);
 $secret = (string) ($secret ?? '');
 $runUrl = (string) ($runUrl ?? '');
 $cliCommand = (string) ($cliCommand ?? '');
@@ -63,6 +64,10 @@ $dueCount = count(array_filter($jobs, fn($j) => !empty($j['enabled']) && !empty(
       <?php foreach ($jobs as $id => $j): ?>
         <label class="choice"><input type="checkbox" name="enabled_<?= e((string) $id) ?>" value="1" <?= !empty($j['enabled']) ? 'checked' : '' ?>> <b><?= e((string) ($j['label'] ?? $id)) ?></b> <span class="dim">— <?= e((string) ($j['schedule'] ?? '')) ?> · <?= e((string) ($j['description'] ?? '')) ?></span></label>
       <?php endforeach; ?>
+      <label style="max-width:420px">Daily ticket refresh interval (minutes)
+        <input type="number" name="sports_ticket_refresh_minutes" min="0" max="1440" step="1" value="<?= $ticketRefreshMinutes ?>">
+        <span class="dim">Pending tickets are rebuilt from current odds on this cadence (default 60; minimum 15). Use 0 to disable intraday refresh while keeping the initial daily generation active. Approved and settled tickets are always protected.</span>
+      </label>
       <button class="btn primary" type="submit">Save schedule</button>
     </form>
   </div>

@@ -21,6 +21,18 @@ class SportsCronService
     public const JOBS = ['fixtures', 'odds', 'live', 'results', 'quality', 'ticket', 'settlement', 'performance', 'monitoring', 'cleanup'];
     public const ODDS_BATCH_SIZE = 50;
 
+    /**
+     * Pending daily tickets are rebuilt from current odds on this cadence.
+     * Zero disables intraday rebuilds without disabling the initial daily run.
+     * The sports sweep itself runs every 15 minutes, so shorter values would
+     * promise a cadence the scheduler cannot honour.
+     */
+    public const DEFAULT_TICKET_REFRESH_MINUTES = 60;
+    public const MIN_TICKET_REFRESH_MINUTES = 15;
+    public const MAX_TICKET_REFRESH_MINUTES = 1440;
+    public const TICKET_REFRESH_SETTING = 'cron.sports_ticket_refresh_minutes';
+    public const TICKET_REFRESH_ENV = 'WINDELS_SPORTS_TICKET_REFRESH_MINUTES';
+
     public function __construct(
         private SportsRepository $repo,
         private AuditRepository $audit,
@@ -284,12 +296,52 @@ class SportsCronService
         // sufficient to generate without a provider call. DailyTicketService
         // owns the persisted RUNNING/GENERATED/FAILED/RETRYING state and records
         // the outage if stored data cannot complete the run.
-        $dailyOptions = [
-            'scheduled' => (bool) ($options['scheduled'] ?? false),
-        ];
+        $scheduled = (bool) ($options['scheduled'] ?? false);
+        $dailyOptions = ['scheduled' => $scheduled];
         if (!empty($options['force'])) $dailyOptions['force'] = true;
+        if (!empty($options['refresh'])) $dailyOptions['refresh'] = true;
+
+        $refreshMinutes = self::ticketRefreshMinutes($options['ticketRefreshMinutes'] ?? null);
+        $refreshDue = false;
+        if ($scheduled && $refreshMinutes > 0 && empty($dailyOptions['refresh'])) {
+            $slot = $this->repo->findDailyTicket($date);
+            $ticketId = is_array($slot) ? trim((string) ($slot['ticket_id'] ?? '')) : '';
+            if ($ticketId !== '') {
+                $generatedAt = (string) ($slot['generated_at'] ?? $slot['updated_at'] ?? '');
+                $generatedTimestamp = $generatedAt !== '' ? strtotime($generatedAt) : false;
+                $refreshDue = $generatedTimestamp === false
+                    || time() - $generatedTimestamp >= $refreshMinutes * 60;
+                if ($refreshDue) {
+                    // DailyTicketService owns the safety check: approved or
+                    // settled tickets are returned intact and never superseded.
+                    $dailyOptions['refresh'] = true;
+                    $dailyOptions['force'] = true;
+                }
+            }
+        }
+
         $result = $this->sports->dailyTickets->runDaily($date, null, $dailyOptions);
+        if ($scheduled) {
+            $result['refreshIntervalMinutes'] = $refreshMinutes;
+            $result['refreshDue'] = $refreshDue;
+        }
         return $result;
+    }
+
+    /** Normalize admin/env input; invalid values fall back safely. */
+    public static function ticketRefreshMinutes(mixed $configured = null): int
+    {
+        if ($configured === null || $configured === '') $configured = getenv(self::TICKET_REFRESH_ENV);
+        if ($configured === false || $configured === null || $configured === '') {
+            return self::DEFAULT_TICKET_REFRESH_MINUTES;
+        }
+        if (filter_var($configured, FILTER_VALIDATE_INT) === false) return self::DEFAULT_TICKET_REFRESH_MINUTES;
+        $minutes = (int) $configured;
+        if ($minutes === 0) return 0;
+        if ($minutes < self::MIN_TICKET_REFRESH_MINUTES || $minutes > self::MAX_TICKET_REFRESH_MINUTES) {
+            return self::DEFAULT_TICKET_REFRESH_MINUTES;
+        }
+        return $minutes;
     }
 
     private function jobSettlement(string $date): array
