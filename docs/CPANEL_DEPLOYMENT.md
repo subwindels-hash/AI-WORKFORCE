@@ -178,6 +178,35 @@ create the first administrator — no terminal, CLI or re-import required. The
 form disappears automatically as soon as an administrator exists; after that,
 administrators are created and managed from the Admin Portal.
 
+## Updating an existing installation
+
+The ZIP **is** the release: the site runs exactly what the archive contains, so a
+merged change only reaches the server when the archive is uploaded again.
+
+1. Download the current `application-deployment.zip` (repository root, from
+   `main`) and keep a copy of your existing `.env` — File Manager → select →
+   **Download** — before touching anything.
+2. File Manager → the document root → **Upload** the ZIP → select it →
+   **Extract** → overwrite the existing files when asked. The archive
+   deliberately contains no `.env`, no `application/data/*.sqlite`, no logs, no
+   sessions and no uploaded avatars, so your configuration and live data are not
+   overwritten.
+3. Re-import `database/production.sql` in phpMyAdmin **only if that file changed
+   in this release**. Ordinary code updates need no import, no migration command
+   and no CLI.
+4. If the release changed schema or provider configuration and the site still
+   behaves as before, delete `application/cache/*.stamp.json` in File Manager;
+   the runtime rebuilds those stamps on the next request.
+5. Verify the update landed: File Manager → **Edit**
+   `application/libraries/AIWorkforce/Sports/ConfigurationService.php` and search
+   for `MIN_TARGET_ODDS_FLOOR` (present in releases after 2026-09-17). Then open
+   the site and confirm the behaviour itself.
+
+A change that is merged but missing on the site is almost always an archive that
+was published before the source change — `python3 tools/build_deployment_zip.py
+--check` (below) detects exactly that, and `tests/cases/161-deployment-bundle-freshness.php`
+fails the test suite when the tracked archive is stale.
+
 ## Release packaging (maintainers only)
 
 This is **not** a cPanel deployment step. When changing a file that belongs in
