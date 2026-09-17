@@ -176,16 +176,25 @@ test('odds integrity: ticket governance refuses legs without id, market or price
     assert_equals(0, count($repo->tickets), 'no partial ticket stored');
 });
 
-test('odds integrity: governance never persists a ticket below the 5.0 odds floor', function () {
+test('odds integrity: governance never persists a ticket below the 1.01 sanity floor', function () {
     $repo = new SportsRepositoryStub();
     $governance = new TicketGovernance($repo, fx140_audit(), new CorrelationEngine());
+    // Un-stakeable combined odds (at or below 1.01) are refused at
+    // persistence — the day returns NO_QUALIFIED_TICKET rather than a
+    // nonsensical ticket, whatever an upstream caller assembled.
+    $badLeg = ['matchId' => 7, 'market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'odds' => 1.005,
+        'oddsTimestamp' => gmdate('c'), 'value' => ['odds' => 1.005], 'match' => ['homeTeam' => 'H', 'awayTeam' => 'A']];
+    $out = $governance->record(['status' => 'QUALIFIED', 'totalOdds' => 1.005, 'selections' => [$badLeg]], 'v1');
+    assert_equals('NO_QUALIFIED_TICKET', $out['status'], 'a 1.005 ticket is refused at persistence');
+    assert_equals(0, count($repo->tickets), 'nothing below the sanity floor is ever stored');
+
+    // A 4.9 ticket — refused under the old fixed 5.0 floor — is now a valid
+    // low-variance ticket (the window is configurable from 1.01 upward).
     $leg = ['matchId' => 7, 'market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'odds' => 4.9,
         'oddsTimestamp' => gmdate('c'), 'value' => ['odds' => 4.9], 'match' => ['homeTeam' => 'H', 'awayTeam' => 'A']];
-    // Even a fully valid leg cannot be stored when the combined odds are below
-    // 5.0 — the day returns NO_QUALIFIED_TICKET rather than a sub-floor ticket.
-    $out = $governance->record(['status' => 'QUALIFIED', 'totalOdds' => 4.9, 'selections' => [$leg]], 'v1');
-    assert_equals('NO_QUALIFIED_TICKET', $out['status'], 'a 4.9 ticket is refused at persistence');
-    assert_equals(0, count($repo->tickets), 'nothing below the floor is ever stored');
+    $ok = $governance->record(['status' => 'QUALIFIED', 'ticketId' => 'tkt_140floor', 'totalOdds' => 4.9, 'selections' => [$leg]], 'v1');
+    assert_equals('PENDING_USER_APPROVAL', $ok['status'], 'a 4.9 ticket persists under the configurable window');
+    assert_equals(1, count($repo->tickets), 'the valid low-variance ticket is stored');
 });
 
 test('odds integrity: collectAll gathers every provider and isolates failures', function () {
@@ -331,20 +340,24 @@ test('odds integrity E2E: fixtures without any odds evaluate fully but force no 
     assert_equals([], $repo->odds, 'no odds rows means no stored odds');
 });
 
-test('qualified policy: built-in defaults demand 30%+ confidence, 30+ quality, LOW correlation', function () {
+test('qualified policy: built-in defaults demand 30%+ confidence, 55+ quality, LOW correlation', function () {
     $defaults = ConfigurationService::defaults();
     // The shipped confidence default is 30; the adaptive ladder (see
     // 146-adaptive-confidence-policy) is what separates the data-quality
     // bands, and 30 is the lowest value an operator may configure.
     assert_equals(30.0, (float) $defaults['min_confidence'], 'the shipped default confidence floor is 30');
-    // Operator policy (2026-09-15): the hard data-quality gate is 30
-    // (29.99 rejected, 30 passes) — the same floor as confidence.
-    assert_equals(30, (int) $defaults['min_data_quality']);
+    // Operator policy (2026-09-17): the shipped data-quality DEFAULT is 55 —
+    // a middle ground between the old 75 floor and the 30 hard gate. The
+    // configurable FLOOR remains 30 (29.99 rejected, 30 passes).
+    assert_equals(55, (int) $defaults['min_data_quality']);
     assert_equals('LOW', $defaults['max_correlation']);
-    assert_equals(5, (int) $defaults['max_selections']);
+    // Low-variance ticket structure (2026-09-17): at most two legs inside a
+    // 2.00–3.50 combined window, with a +3% de-vigged edge floor.
+    assert_equals(2, (int) $defaults['max_selections']);
     assert_equals('CONSERVATIVE', $defaults['risk_level']);
-    assert_equals(5.0, (float) $defaults['target_odds_min']);
-    assert_equals(8.0, (float) $defaults['target_odds_max']);
+    assert_equals(2.0, (float) $defaults['target_odds_min']);
+    assert_equals(3.5, (float) $defaults['target_odds_max']);
+    assert_equals(0.03, (float) $defaults['min_expected_value']);
     assert_equals('USER_APPROVAL_REQUIRED', $defaults['engine_mode']);
     // Operators may raise the floors, or lower them back to the hard gates
     // explicitly (append-only, audited).

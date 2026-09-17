@@ -40,18 +40,18 @@ class TicketGovernance
             ];
         }
         $sels = $optimized['selections'];
-        // The 5.0 combined-odds floor is enforced one last time at the moment
-        // of persistence: no ticket is ever stored below 5.0 total odds, no
-        // matter how it was optimized. This is the final backstop behind the
-        // optimizer's own floor, so a future caller that assembles an
-        // "optimized" array by hand can never slip a sub-floor ticket into the
-        // database. Nothing is padded to reach the number — a ticket that
-        // cannot honestly clear 5.0 is simply not recorded.
+        // The 1.01 combined-odds sanity floor is enforced one last time at the
+        // moment of persistence: no ticket is ever stored at un-stakeable
+        // odds, no matter how it was optimized. This is the final backstop
+        // behind the optimizer's own floor, so a future caller that assembles
+        // an "optimized" array by hand can never slip a nonsensical ticket
+        // into the database. Nothing is padded to reach a number — a ticket
+        // that cannot honestly clear the floor is simply not recorded.
         if ((float) ($optimized['totalOdds'] ?? 0) + 1e-9 < ConfigurationService::MIN_TARGET_ODDS_FLOOR) {
             return [
                 'status' => 'NO_QUALIFIED_TICKET',
                 'failureCode' => FailureTaxonomy::NO_COMBINABLE_TICKET,
-                'reason' => sprintf('combined odds %.2f are below the %.2f minimum — no ticket is generated below %.1f combined odds',
+                'reason' => sprintf('combined odds %.2f are below the %.2f sanity minimum — decimal odds at or below %.2f are not a stakeable price',
                     (float) ($optimized['totalOdds'] ?? 0), ConfigurationService::MIN_TARGET_ODDS_FLOOR, ConfigurationService::MIN_TARGET_ODDS_FLOOR),
                 'candidateDecisions' => $optimized['candidateDecisions'] ?? [],
             ];
@@ -82,6 +82,13 @@ class TicketGovernance
         }
         $automated = (($config['engine_mode'] ?? '') === 'AUTOMATED_EXECUTION');
 
+        // Stake sizing (flat unit or fractional Kelly, per configuration).
+        // The Kelly input is the ticket's CALIBRATED combined probability and
+        // the real quoted odds; the full computation is stored inside
+        // odds_calculation so the stake is reconstructable from its inputs.
+        $sizing = (new StakeSizer())->size($combined, (float) $optimized['totalOdds'], $config);
+        $oddsCalc['staking'] = $sizing;
+
         $id = $optimized['ticketId'];
         $this->repo->saveTicket([
             'id' => $id, 'created_at' => gmdate('c'), 'model_version_id' => $modelVersionId,
@@ -97,7 +104,7 @@ class TicketGovernance
             'status' => $automated ? 'APPROVED' : 'PENDING',
             'approval_status' => $automated ? 'APPROVED_NOT_EXECUTED' : 'PENDING_USER_APPROVAL',
             'settlement_status' => 'PENDING',
-            'stake' => $config['stake_amount'] ?? null,
+            'stake' => isset($config['stake_amount']) || isset($config['staking_mode']) ? $sizing['stake'] : null,
             'reason' => null,
         ]);
         foreach ($sels as $s) {

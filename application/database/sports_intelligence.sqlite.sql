@@ -13,14 +13,14 @@ CREATE TABLE IF NOT EXISTS sports_configurations (
   system_timezone TEXT NOT NULL DEFAULT 'UTC',
   platform_mode TEXT NOT NULL DEFAULT 'SANDBOX',
   engine_mode TEXT NOT NULL DEFAULT 'USER_APPROVAL_REQUIRED',
-  target_odds_min REAL NOT NULL DEFAULT 5.0,
-  target_odds_max REAL NOT NULL DEFAULT 8.0,
-  max_selections INTEGER NOT NULL DEFAULT 5,
+  target_odds_min REAL NOT NULL DEFAULT 2.0,
+  target_odds_max REAL NOT NULL DEFAULT 3.5,
+  max_selections INTEGER NOT NULL DEFAULT 2,
   risk_level TEXT NOT NULL DEFAULT 'CONSERVATIVE',
   min_confidence REAL NOT NULL DEFAULT 30,
-  min_expected_value REAL NOT NULL DEFAULT 0.02,
+  min_expected_value REAL NOT NULL DEFAULT 0.03,
   max_correlation TEXT NOT NULL DEFAULT 'LOW',
-  min_data_quality INTEGER NOT NULL DEFAULT 30,
+  min_data_quality INTEGER NOT NULL DEFAULT 55,
   -- Adaptive confidence tiers (JSON): the confidence a prediction must reach
   -- at each data-quality band. NULL = derive the ladder from min_confidence
   -- and min_data_quality above, so no threshold is hard-coded in the app.
@@ -30,6 +30,12 @@ CREATE TABLE IF NOT EXISTS sports_configurations (
   allowed_leagues TEXT NOT NULL DEFAULT '[]',
   max_exposure REAL NOT NULL DEFAULT 100,
   stake_amount REAL NOT NULL DEFAULT 10,
+  -- Staking discipline: FLAT (fixed stake_amount) or FRACTIONAL_KELLY
+  -- (kelly_fraction x full Kelly on the calibrated ticket probability,
+  -- against bankroll, capped by max_exposure and 4x stake_amount).
+  staking_mode TEXT NOT NULL DEFAULT 'FLAT',
+  bankroll REAL NOT NULL DEFAULT 1000,
+  kelly_fraction REAL NOT NULL DEFAULT 0.25,
   void_policy TEXT NOT NULL DEFAULT 'RESTITUTE_ODDS',
   require_calibration INTEGER NOT NULL DEFAULT 1,
   updated_by TEXT NOT NULL DEFAULT 'system',

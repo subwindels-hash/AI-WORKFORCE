@@ -11,12 +11,23 @@ test('configuration returns safe defaults before any admin change', function () 
     [, , $svc] = fx_config_audit();
     $c = $svc->active();
     assert_equals('USER_APPROVAL_REQUIRED', $c['engine_mode']);
-    // Qualified-ticket policy defaults: 30%+ confidence, 75+ quality. The
+    // Qualified-ticket policy defaults: 30%+ confidence, 55+ quality. The
     // shipped confidence default is 30 (see ConfigurationService::defaults());
-    // 30 is also the lowest value an operator may configure.
+    // 30 is also the lowest value an operator may configure. The data-quality
+    // DEFAULT is 55 (operator decision 2026-09-17: a middle ground between the
+    // old 75 floor and the 30 hard gate); the configurable FLOOR stays 30.
     assert_equals(30.0, (float) $c['min_confidence']);
-    // Spec §7: the hard data-quality gate is 75.
-    assert_equals(30, (int) $c['min_data_quality']);
+    assert_equals(55, (int) $c['min_data_quality']);
+    // Low-variance ticket structure defaults (2026-09-17): 2.00–3.50 combined
+    // odds over at most two legs, and a +3% de-vigged edge floor.
+    assert_equals(2.0, (float) $c['target_odds_min']);
+    assert_equals(3.5, (float) $c['target_odds_max']);
+    assert_equals(2, (int) $c['max_selections']);
+    assert_equals(0.03, (float) $c['min_expected_value']);
+    // Staking defaults: flat units unless an operator opts into Kelly.
+    assert_equals('FLAT', $c['staking_mode']);
+    assert_equals(1000.0, (float) $c['bankroll']);
+    assert_equals(0.25, (float) $c['kelly_fraction']);
     assert_equals(['MATCH_RESULT', 'TOTAL_GOALS', 'BTTS', 'DOUBLE_CHANCE', 'DRAW_NO_BET'], $c['allowed_markets'], 'every market the model can price and settle is allowed by default');
     assert_equals('RESTITUTE_ODDS', $c['void_policy']);
 });
@@ -57,25 +68,34 @@ test('configuration validation rejects malformed values', function () {
     assert_false($svc->update(['stake_amount' => 500, 'max_exposure' => 10], 'a')['ok']);
     assert_false($svc->update(['platform_mode' => 'MOON'], 'a')['ok']);
     assert_false($svc->update(['allowed_markets' => 'TOTAL_GOALS'], 'a')['ok']);
-    // The 5.0 combined-odds floor is absolute: a minimum below 5.0 is refused,
-    // exactly 5.0 is accepted, and raising it is still allowed.
-    assert_false($svc->update(['target_odds_min' => 4.9, 'target_odds_max' => 8.0], 'a')['ok'], '4.9 is below the 5.0 odds floor');
-    assert_false($svc->update(['target_odds_min' => 2.0, 'target_odds_max' => 4.0], 'a')['ok'], 'a sub-5.0 window is refused');
-    assert_true($svc->update(['target_odds_min' => 5.0, 'target_odds_max' => 8.0], 'a', 'the floor itself is valid')['ok']);
+    // The combined-odds window is configurable from the 1.01 sanity floor
+    // upward (operator decision 2026-09-17): low-variance windows such as
+    // 2.0–3.5 are valid, but decimal odds at or below 1.01 never are.
+    assert_true($svc->update(['target_odds_min' => 4.9, 'target_odds_max' => 8.0], 'a', 'sub-5 windows are configurable now')['ok'], '4.9 is a valid configurable minimum');
+    assert_true($svc->update(['target_odds_min' => 2.0, 'target_odds_max' => 4.0], 'a', 'low-variance window')['ok'], 'a 2.0–4.0 window is valid');
+    assert_false($svc->update(['target_odds_min' => 1.0, 'target_odds_max' => 4.0], 'a')['ok'], '1.0 is not a stakeable price');
+    assert_false($svc->update(['target_odds_min' => 0.5, 'target_odds_max' => 4.0], 'a')['ok'], 'sub-1.01 minimums are refused');
+    assert_true($svc->update(['target_odds_min' => 5.0, 'target_odds_max' => 8.0], 'a', 'the previous 5.0–8.0 window remains valid')['ok']);
     assert_true($svc->update(['target_odds_min' => 7.0, 'target_odds_max' => 12.0], 'a', 'a stricter minimum is allowed')['ok']);
 });
 
-test('configuration clamps a legacy sub-5.0 odds minimum up to the floor', function () {
-    // A row written before the 5.0 rule (or by any path that stored a lower
-    // minimum) must never leak a sub-floor minimum into a generation run.
+test('configuration clamps a nonsensical sub-1.01 odds minimum up to the sanity floor', function () {
+    // A row stored by any path that carries an un-stakeable minimum must
+    // never leak it into a generation run.
     $repo = new SportsRepositoryStub();
     $audit = new class implements AuditRepository { public function emit(string $t, string $s, array $d = [], string $a = 'system'): void {} public function recent(int $l = 100): array { return []; } };
     $repo->configurations[] = array_merge(ConfigurationService::defaults(), [
-        'version' => 5, 'target_odds_min' => 2.0, 'target_odds_max' => 3.0,
+        'version' => 5, 'target_odds_min' => 0.4, 'target_odds_max' => 0.9,
     ]);
     $active = (new ConfigurationService($repo, $audit))->active();
-    assert_true((float) $active['target_odds_min'] >= 5.0, 'a legacy 2.0 minimum is clamped up to 5.0');
+    assert_true((float) $active['target_odds_min'] >= 1.01, 'an un-stakeable minimum is clamped up to 1.01');
     assert_true((float) $active['target_odds_max'] >= (float) $active['target_odds_min'], 'the window stays valid (max >= min)');
+    // A legitimate low-variance window survives untouched.
+    $repo->configurations[] = array_merge(ConfigurationService::defaults(), [
+        'version' => 6, 'target_odds_min' => 2.0, 'target_odds_max' => 3.5,
+    ]);
+    $active = (new ConfigurationService($repo, $audit))->active();
+    assert_equals(2.0, (float) $active['target_odds_min'], 'a configured 2.0 minimum is honoured, never clamped to 5.0');
 });
 
 test('AUTOMATED_EXECUTION is refused without explicit authorization', function () {

@@ -320,7 +320,10 @@ test('confidence gate: the configured minimum is 30 and the configurable range s
 });
 
 test('data-quality gate: 29 is rejected and 30 passes, independently of confidence', function () {
-    $policy = ConfidencePolicy::fromConfiguration(ConfigurationService::defaults());
+    // Pinned at the configurable 30/30 corner. The SHIPPED default is 55
+    // (operator decision 2026-09-17), but the hard-gate behaviour must hold
+    // wherever an operator sets the configured floor.
+    $policy = ConfidencePolicy::fromConfiguration(['min_confidence' => 30.0, 'min_data_quality' => 30]);
 
     // A very high confidence cannot buy a sub-30 data quality.
     $below = $policy->evaluate(29, 99.0, 'TOTAL_GOALS', 'OVER_1_5');
@@ -333,11 +336,12 @@ test('data-quality gate: 29 is rejected and 30 passes, independently of confiden
     // Quality that the OLD 75 floor would have thrown away now qualifies.
     assert_true($policy->evaluate(74, 80.0, 'TOTAL_GOALS', 'OVER_1_5')['qualified'], 'quality 74 qualifies under the 30 floor');
     assert_equals(30, ConfigurationService::MIN_DATA_QUALITY_FLOOR);
-    assert_equals(30, (int) ConfigurationService::defaults()['min_data_quality']);
+    // The shipped DEFAULT is stricter than the floor: 55 (2026-09-17).
+    assert_equals(55, (int) ConfigurationService::defaults()['min_data_quality']);
 });
 
 test('gates are independent: both floors are 30, and they are never conflated', function () {
-    $policy = ConfidencePolicy::fromConfiguration(ConfigurationService::defaults());
+    $policy = ConfidencePolicy::fromConfiguration(['min_confidence' => 30.0, 'min_data_quality' => 30]);
     // Good evidence, weak confidence → confidence gate only.
     $a = $policy->evaluate(95, 20.0, 'TOTAL_GOALS', 'OVER_1_5');
     assert_equals(['LOW_CONFIDENCE'], $a['reasons']);
@@ -629,9 +633,9 @@ test('a successful generation persists the ticket, its legs and their full calcu
     assert_true(count($selections) > 0, 'the ticket has persisted legs');
     assert_equals(count($selections), (int) $result['selectedPicks'], 'the contract agrees with storage');
 
-    // Combined odds stay inside the configured 5.00-8.00 window (§15).
+    // Combined odds stay inside the configured window (default 2.00–3.50).
     $total = (float) ($ticket['total_odds'] ?? 0);
-    assert_true($total >= 5.0 - 1e-9 && $total <= 8.0 + 1e-9, 'combined odds sit inside 5.00-8.00, got ' . $total);
+    assert_true($total >= 2.0 - 1e-9 && $total <= 3.5 + 1e-9, 'combined odds sit inside 2.00-3.50, got ' . $total);
 
     // Every leg carries the real calculation trail (§16).
     foreach ($selections as $leg) {

@@ -273,6 +273,7 @@ spl_autoload_register(static function (string $class) use ($ai_workforceDir): vo
     'AIWorkforce\\Sports\\SportsMarketRegistry' => 'Sports/SportsMarketRegistry.php',
     'AIWorkforce\\Sports\\SportsResultNormalizer' => 'Sports/SportsResultNormalizer.php',
     'AIWorkforce\\Sports\\SportsSyncService' => 'Sports/SportsSyncService.php',
+    'AIWorkforce\\Sports\\StakeSizer' => 'Sports/StakeSizer.php',
     'AIWorkforce\\Sports\\TicketGovernance' => 'Sports/TicketGovernance.php',
     'AIWorkforce\\Sports\\TicketOptimizer' => 'Sports/TicketOptimizer.php',
     'AIWorkforce\\Sports\\TicketSettlementService' => 'Sports/TicketSettlementService.php',

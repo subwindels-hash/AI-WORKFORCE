@@ -536,7 +536,7 @@ test('funnel regression: the daily run reports the complete funnel and the ticke
     // The persisted ticket honours the configured odds range and is real.
     $ticket = $repo->findTicket((string) $run['ticketId']);
     assert_true(is_array($ticket), 'the ticket is persisted');
-    assert_true((float) $ticket['total_odds'] >= 5.0 && (float) $ticket['total_odds'] <= 8.0, 'combined odds inside the configured 5.00–8.00 range');
+    assert_true((float) $ticket['total_odds'] >= 2.0 && (float) $ticket['total_odds'] <= 3.5, 'combined odds inside the configured (default 2.00–3.50) range');
     $legs = $repo->ticketSelections((string) $run['ticketId']);
     assert_true(count($legs) >= 1, 'the ticket has real legs');
     $seenMatches = [];

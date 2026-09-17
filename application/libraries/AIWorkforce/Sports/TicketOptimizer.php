@@ -77,17 +77,18 @@ class TicketOptimizer
 
     public function optimize(array $candidates, array $config = []): array
     {
-        // The combined-odds floor is ABSOLUTE: a ticket is never generated
-        // below 5.0. The constant is the single source of truth, shared with
+        // The combined-odds window is CONFIGURABLE from the 1.01 sanity floor
+        // upward (operator decision 2026-09-17, superseding the fixed 5.0
+        // floor). The constant is the single source of truth, shared with
         // ConfigurationService, so the config screen and the search can never
-        // disagree — a caller may raise the minimum but never lower it.
+        // disagree — no caller may push the minimum below a stakeable price.
         $min = max(ConfigurationService::MIN_TARGET_ODDS_FLOOR, (float) ($config['targetOddsMin'] ?? ConfigurationService::MIN_TARGET_ODDS_FLOOR));
-        $max = min(8.0, (float) ($config['targetOddsMax'] ?? 8.0));
+        $max = (float) ($config['targetOddsMax'] ?? 3.5);
         // Never an impossible/empty window: if a caller's maximum lands below
-        // the enforced 5.0 floor, lift it to the floor so the search still runs
-        // over a valid 5.0+ range instead of silently returning nothing.
+        // the enforced sanity floor, lift it to the floor so the search still
+        // runs over a valid range instead of silently returning nothing.
         if ($max + 1e-9 < $min) $max = $min;
-        $limit = min(6, max(1, (int) ($config['maxSelections'] ?? 5)));
+        $limit = min(6, max(1, (int) ($config['maxSelections'] ?? 2)));
         // Absolute floors mirror the configuration validation range
         // [ConfigurationService::MIN_CONFIDENCE_FLOOR, 100]: an explicit admin
         // setting is honoured, never clamped back up to a hard-coded 70/75.
@@ -202,10 +203,11 @@ class TicketOptimizer
             ];
             if ($best === null) continue;
             // Final airtight guard: a combination is only ever accepted at or
-            // above the 5.0 floor. The search already enforces this, but the
-            // invariant is asserted here too so no future change to the walk
-            // can ever leak a sub-floor ticket. A rounding wobble at the edge
-            // (4.9999) is not a ticket — it is treated as "nothing qualified".
+            // above the configured minimum. The search already enforces this,
+            // but the invariant is asserted here too so no future change to
+            // the walk can ever leak a sub-minimum ticket. A rounding wobble
+            // at the edge is not a ticket — it is treated as "nothing
+            // qualified".
             if (round((float) $best['totalOdds'], 4) + 1e-9 < $min) {
                 $attempts[count($attempts) - 1]['found'] = false;
                 $attempts[count($attempts) - 1]['reason'] = sprintf(

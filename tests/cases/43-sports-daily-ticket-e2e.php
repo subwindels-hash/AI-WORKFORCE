@@ -92,7 +92,7 @@ test('daily ticket E2E: qualified ticket awaits user approval', function () {
     assert_equals(5, $run['predictionsRecorded']);
     $ticket = $repo->findTicket($run['ticketId']);
     assert_equals('PENDING_USER_APPROVAL', $ticket['approval_status']);
-    assert_true($ticket['total_odds'] >= 5.0 && $ticket['total_odds'] <= 8.0, 'odds inside configured range');
+    assert_true($ticket['total_odds'] >= 2.0 && $ticket['total_odds'] <= 3.5, 'odds inside configured (default 2.00–3.50) range');
     assert_true($ticket['selection_count'] >= 1 && $ticket['selection_count'] <= 5);
     assert_true($ticket['confidence'] >= 75.0, '75%+ minimum confidence enforced on the ticket');
     assert_equals(10.0, (float) $ticket['stake']);
@@ -479,7 +479,7 @@ test('daily ticket E2E: bulk round odds replaces per-fixture odds calls', functi
     assert_equals(0, $provider->oddsCalls, 'no per-fixture odds() calls when the round covers all fixtures');
     assert_not_null($run['ticketId']);
     $ticket = $repo->findTicket($run['ticketId']);
-    assert_true($ticket['total_odds'] >= 5.0 && $ticket['total_odds'] <= 8.0, 'odds inside configured range');
+    assert_true($ticket['total_odds'] >= 2.0 && $ticket['total_odds'] <= 3.5, 'odds inside configured (default 2.00–3.50) range');
     // odds were persisted for every evaluated match via the bulk fetch
     assert_true(count($repo->odds) >= 3, 'bulk round odds persisted');
 });

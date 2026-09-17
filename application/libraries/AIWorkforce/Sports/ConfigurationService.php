@@ -24,6 +24,7 @@ class ConfigurationService
     public const RISK_LEVELS = ['CONSERVATIVE', 'MODERATE', 'AGGRESSIVE'];
     public const CORRELATION_LIMITS = ['LOW', 'MEDIUM'];
     public const VOID_POLICIES = ['RESTITUTE_ODDS', 'ALL_VOID_ONLY'];
+    public const STAKING_MODES = ['FLAT', 'FRACTIONAL_KELLY'];
 
     /**
      * The lowest confidence an operator may configure as the eligibility floor.
@@ -53,17 +54,20 @@ class ConfigurationService
     public const MIN_DATA_QUALITY_FLOOR = 30;
 
     /**
-     * The hard combined-odds floor (operator decision 2026-09-17): NO ticket
-     * is ever generated below 5.0 total odds. Five is the LOWEST a ticket may
-     * be — every generation is 5.0 and above. An administrator may raise the
-     * configured minimum, but no configuration path may lower it below this,
-     * and TicketOptimizer enforces the same constant on the combination search
-     * so the two surfaces can never disagree. This is a bound on the ODDS
+     * The absolute combined-odds sanity floor (operator decision 2026-09-17,
+     * superseding the fixed 5.0 floor of the same date): the odds WINDOW is
+     * now fully configurable, and the only bound the platform itself imposes
+     * is that decimal odds must exceed 1.0 — a "ticket" at or below 1.01 total
+     * odds is not a bet at all. Administrators may configure any window from
+     * 1.01 upward (2.0–3.5 for low-variance singles/doubles, 5.0–8.0 for the
+     * previous behaviour), append-only and audited like every other value.
+     * TicketOptimizer and TicketGovernance enforce the same constant so no
+     * surface can ever accept a sub-1.01 window. This is a bound on the ODDS
      * WINDOW only; it never pads a ticket with an extra leg or a fake market to
-     * reach the number — a day that cannot reach 5.0 with real, confident,
-     * positive-value legs honestly returns NO QUALIFIED TICKET.
+     * reach a number — a day that cannot reach the configured minimum with
+     * real, confident, positive-value legs honestly returns NO QUALIFIED TICKET.
      */
-    public const MIN_TARGET_ODDS_FLOOR = 5.0;
+    public const MIN_TARGET_ODDS_FLOOR = 1.01;
 
     public function __construct(private SportsRepository $repo, private AuditRepository $audit) {}
 
@@ -92,14 +96,23 @@ class ConfigurationService
         $row['version'] = (int) $row['version'];
         $row['allowed_markets'] = $row['allowed_markets'] ?? [];
         $row['allowed_leagues'] = $row['allowed_leagues'] ?? [];
-        // The 5.0 combined-odds floor is absolute and retroactive: a row
-        // written before the rule (or by a path that stored a lower minimum)
-        // is clamped up here so no generation can ever read a sub-5.0 minimum.
-        // The maximum is lifted with it when a legacy window would otherwise
-        // collapse (min > max), so the engine keeps a usable 5.0+ range instead
-        // of silently generating nothing.
+        // The 1.01 combined-odds sanity floor is absolute and retroactive: a
+        // row written by any path that stored a nonsensical minimum (<= 1.0)
+        // is clamped up here so no generation can ever read a sub-1.01
+        // minimum. The maximum is lifted with it when a legacy window would
+        // otherwise collapse (min > max), so the engine keeps a usable range
+        // instead of silently generating nothing.
         $row['target_odds_min'] = max(self::MIN_TARGET_ODDS_FLOOR, (float) $row['target_odds_min']);
         $row['target_odds_max'] = max((float) $row['target_odds_max'], $row['target_odds_min']);
+        // Staking discipline keys may be absent on rows written before they
+        // existed; array_merge above already filled the defaults, so only
+        // normalize the types here (an unknown stored mode falls back FLAT —
+        // the safe behaviour — rather than throwing on a legacy row).
+        $row['staking_mode'] = in_array(strtoupper((string) ($row['staking_mode'] ?? 'FLAT')), self::STAKING_MODES, true)
+            ? strtoupper((string) $row['staking_mode']) : 'FLAT';
+        $row['bankroll'] = (float) ($row['bankroll'] ?? 1000.0) > 0 ? (float) $row['bankroll'] : 1000.0;
+        $kf = (float) ($row['kelly_fraction'] ?? 0.25);
+        $row['kelly_fraction'] = ($kf > 0 && $kf <= 1.0) ? $kf : 0.25;
         return $row;
     }
 
@@ -115,20 +128,35 @@ class ConfigurationService
             'system_timezone' => DailyTicketDate::configuredTimezone(),
             'platform_mode' => 'SANDBOX',
             'engine_mode' => 'USER_APPROVAL_REQUIRED',
-            'target_odds_min' => 5.0,
-            'target_odds_max' => 8.0,
-            'max_selections' => 5,
+            // Operator decision (2026-09-17): the shipped window targets
+            // low-variance tickets — 2.00–3.50 combined odds over at most two
+            // legs. Multi-leg accumulators compound the bookmaker margin
+            // (1-(1-margin)^N) and variance with every extra leg; singles and
+            // doubles keep the realized edge closest to the modelled edge.
+            // Administrators may configure any window from 1.01 upward.
+            'target_odds_min' => 2.0,
+            'target_odds_max' => 3.5,
+            'max_selections' => 2,
             'risk_level' => 'CONSERVATIVE',
             // Qualified-ticket policy: predictions must have measured confidence
-            // >= the configured minimum (30% by default), data quality 30+,
+            // >= the configured minimum (30% by default), data quality 55+,
             // positive value and LOW correlation between legs. Anything weaker
             // is rejected and the day honestly reports NO QUALIFIED TICKET
             // instead of a forced combination. Changes remain append-only and
             // audited.
             'min_confidence' => 30.0,
-            'min_expected_value' => 0.02,
+            // Value floor (operator decision 2026-09-17): +3% edge after the
+            // FairValueEngine strips the bookmaker margin. A high-probability
+            // leg that is still -EV after de-vigging must never qualify.
+            'min_expected_value' => 0.03,
             'max_correlation' => 'LOW',
-            'min_data_quality' => 30,
+            // Data-quality default (operator decision 2026-09-17): the shipped
+            // gate is 55 — a middle ground between the old 75 floor (which
+            // produced "N predictions → 0 qualified" days) and the 30 hard
+            // gate. The FLOOR stays 30: an administrator may still lower the
+            // configured value back to 30, or raise it toward QUALIFIED (70+),
+            // append-only and audited.
+            'min_data_quality' => 55,
             // Adaptive confidence policy (requirements #1/#8). NULL means the
             // tiers are DERIVED from the two floors above, but every tier is
             // still bounded by the hard gates: 30%+ confidence and 30+ data
@@ -144,6 +172,16 @@ class ConfigurationService
             'allowed_leagues' => [],
             'max_exposure' => 100.0,
             'stake_amount' => 10.0,
+            // Staking discipline (operator decision 2026-09-17). FLAT keeps
+            // the fixed stake_amount per ticket. FRACTIONAL_KELLY sizes the
+            // stake as kelly_fraction × full-Kelly on the ticket's calibrated
+            // probability and quoted odds, against the configured bankroll —
+            // never above max_exposure, never above stake_amount × 4, and a
+            // non-positive Kelly edge stakes NOTHING (the ticket is still
+            // recorded, with stake 0, so the day's record stays honest).
+            'staking_mode' => 'FLAT',
+            'bankroll' => 1000.0,
+            'kelly_fraction' => 0.25,
             'void_policy' => 'RESTITUTE_ODDS',
             'require_calibration' => 1,
             'updated_by' => 'system',
@@ -165,6 +203,7 @@ class ConfigurationService
             'confidence_policy',
             'min_liquidity', 'allowed_markets', 'allowed_leagues', 'max_exposure',
             'stake_amount', 'void_policy', 'require_calibration',
+            'staking_mode', 'bankroll', 'kelly_fraction',
         ])));
 
         $error = $this->validate($next, $allowAutomatedExecution);
@@ -196,6 +235,9 @@ class ConfigurationService
             'allowed_leagues' => json_encode(array_values((array) $next['allowed_leagues'])),
             'max_exposure' => (float) $next['max_exposure'],
             'stake_amount' => (float) $next['stake_amount'],
+            'staking_mode' => strtoupper((string) $next['staking_mode']),
+            'bankroll' => (float) $next['bankroll'],
+            'kelly_fraction' => (float) $next['kelly_fraction'],
             'void_policy' => (string) $next['void_policy'],
             'require_calibration' => (int) (bool) $next['require_calibration'],
             'updated_by' => $actor,
@@ -244,13 +286,13 @@ class ConfigurationService
         if (!in_array($c['max_correlation'], self::CORRELATION_LIMITS, true)) return 'max_correlation must be LOW or MEDIUM';
         if (!in_array($c['void_policy'], self::VOID_POLICIES, true)) return 'void_policy must be one of ' . implode(', ', self::VOID_POLICIES);
         $min = (float) $c['target_odds_min']; $max = (float) $c['target_odds_max'];
-        // The combined-odds floor is absolute: a ticket is never generated
-        // below 5.0. An admin may raise the minimum but never set it lower.
+        // The combined-odds sanity floor is absolute: decimal odds at or
+        // below 1.01 are not a bet. Any window from 1.01 upward is valid.
         if ($min + 1e-9 < self::MIN_TARGET_ODDS_FLOOR) {
-            return 'target_odds_min must be at least ' . number_format(self::MIN_TARGET_ODDS_FLOOR, 1)
-                . ' — no ticket is ever generated below ' . number_format(self::MIN_TARGET_ODDS_FLOOR, 1) . ' combined odds';
+            return 'target_odds_min must be at least ' . number_format(self::MIN_TARGET_ODDS_FLOOR, 2)
+                . ' — decimal odds at or below ' . number_format(self::MIN_TARGET_ODDS_FLOOR, 2) . ' are not a stakeable price';
         }
-        if ($max <= $min) return 'target odds range must satisfy min <= max (min at least ' . number_format(self::MIN_TARGET_ODDS_FLOOR, 1) . ')';
+        if ($max <= $min) return 'target odds range must satisfy min <= max (min at least ' . number_format(self::MIN_TARGET_ODDS_FLOOR, 2) . ')';
         $maxSel = (int) $c['max_selections'];
         if ($maxSel < 1 || $maxSel > 12) return 'max_selections must be within [1, 12]';
         // The configurable floor is 30: a legitimately measured 29.99%
@@ -279,6 +321,14 @@ class ConfigurationService
         if ((float) $c['max_exposure'] <= 0) return 'max_exposure must be > 0';
         if ((float) $c['stake_amount'] <= 0) return 'stake_amount must be > 0';
         if ((float) $c['stake_amount'] > (float) $c['max_exposure']) return 'stake_amount cannot exceed max_exposure';
+        if (!in_array(strtoupper((string) ($c['staking_mode'] ?? 'FLAT')), self::STAKING_MODES, true)) {
+            return 'staking_mode must be one of ' . implode(', ', self::STAKING_MODES);
+        }
+        if ((float) ($c['bankroll'] ?? 0) <= 0) return 'bankroll must be > 0';
+        $kf = (float) ($c['kelly_fraction'] ?? 0);
+        // Full Kelly (1.0) is the mathematical ceiling; disciplined deployments
+        // run 0.1–0.5. Zero or negative would silently stake nothing forever.
+        if ($kf <= 0 || $kf > 1.0) return 'kelly_fraction must be within (0, 1]';
         if ($c['min_liquidity'] !== null && (float) $c['min_liquidity'] < 0) return 'min_liquidity must be >= 0';
         foreach (['allowed_markets', 'allowed_leagues'] as $listKey) {
             $list = $c[$listKey];
