@@ -166,6 +166,10 @@ $kickoffStamp = static function (mixed $iso): string {
         <form method="post" action="/sports/generate-ticket">
           <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
           <input type="hidden" name="date" value="<?= e($ticketDateIso) ?>">
+          <?php // Every click regenerates: refresh supersedes the day's PENDING
+                // ticket (kept for audit) and rebuilds from current odds. An
+                // APPROVED ticket is never replaced — the service refuses. ?>
+          <input type="hidden" name="refresh" value="1">
           <button class="btn small sports-ticket-btn" type="submit">🎯 Generate Odds Predictions</button>
         </form>
       <?php else: ?>
@@ -313,9 +317,13 @@ $kickoffStamp = static function (mixed $iso): string {
         </section>
         <div class="sports-controls">
           <?php if (!empty($caps['sync'])): ?>
-            <form method="post" action="/sports/generate-ticket" class="sports-controls__form" onsubmit="return confirm('Generate odds prediction ticket for <?= e($viewDateIso) ?> from stored data?')">
+            <form method="post" action="/sports/generate-ticket" class="sports-controls__form" onsubmit="return confirm('Generate a fresh odds prediction ticket for <?= e($viewDateIso) ?> from current odds? A pending ticket is superseded (kept for audit); an approved ticket is never replaced.')">
               <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
               <input type="hidden" name="date" value="<?= e($ticketDateIso) ?>">
+              <?php // Every click regenerates: refresh supersedes the day's
+                    // PENDING ticket (kept for audit) and rebuilds from current
+                    // odds. An APPROVED ticket is never replaced. ?>
+              <input type="hidden" name="refresh" value="1">
               <button class="btn small sports-generate-btn" type="submit">
                 🎯 Generate Odds Predictions
               </button>
