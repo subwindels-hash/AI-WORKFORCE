@@ -340,24 +340,24 @@ test('odds integrity E2E: fixtures without any odds evaluate fully but force no 
     assert_equals([], $repo->odds, 'no odds rows means no stored odds');
 });
 
-test('qualified policy: built-in defaults demand 30%+ confidence, 55+ quality, LOW correlation', function () {
+test('qualified policy: built-in defaults demand 30%+ confidence, 60+ quality, LOW correlation', function () {
     $defaults = ConfigurationService::defaults();
     // The shipped confidence default is 30; the adaptive ladder (see
     // 146-adaptive-confidence-policy) is what separates the data-quality
     // bands, and 30 is the lowest value an operator may configure.
     assert_equals(30.0, (float) $defaults['min_confidence'], 'the shipped default confidence floor is 30');
-    // Operator policy (2026-09-17): the shipped data-quality DEFAULT is 55 —
-    // a middle ground between the old 75 floor and the 30 hard gate. The
-    // configurable FLOOR remains 30 (29.99 rejected, 30 passes).
-    assert_equals(55, (int) $defaults['min_data_quality']);
+    // Operator policy (2026-09-17, revised): the shipped data-quality
+    // DEFAULT is 60 — fixtures with missing statistics or thin records are
+    // discarded. The configurable FLOOR remains 30 (29.99 rejected, 30 passes).
+    assert_equals(60, (int) $defaults['min_data_quality']);
     assert_equals('LOW', $defaults['max_correlation']);
-    // Low-variance ticket structure (2026-09-17): at most two legs inside a
-    // 2.00–3.50 combined window, with a +3% de-vigged edge floor.
+    // Low-variance ticket structure (2026-09-17, revised): at most two legs
+    // inside a 1.85–3.50 combined window, with a +5% de-vigged edge floor.
     assert_equals(2, (int) $defaults['max_selections']);
     assert_equals('CONSERVATIVE', $defaults['risk_level']);
-    assert_equals(2.0, (float) $defaults['target_odds_min']);
+    assert_equals(1.85, (float) $defaults['target_odds_min']);
     assert_equals(3.5, (float) $defaults['target_odds_max']);
-    assert_equals(0.03, (float) $defaults['min_expected_value']);
+    assert_equals(0.05, (float) $defaults['min_expected_value']);
     assert_equals('USER_APPROVAL_REQUIRED', $defaults['engine_mode']);
     // Operators may raise the floors, or lower them back to the hard gates
     // explicitly (append-only, audited).
@@ -390,13 +390,16 @@ test('qualified policy: 66/68/74% confidence legs are rejected, 75%+ legs are el
     assert_equals(2, $ok['poolSize']);
 });
 
-test('qualified policy E2E: same-league singles below 5.00 cannot combine under LOW correlation', function () {
+test('qualified policy E2E: same-league singles below the window cannot combine under LOW correlation', function () {
+    // Every single sits below the 1.85 window minimum, and any pair that
+    // WOULD multiply into the window shares the league — LOW correlation
+    // forbids it. The honest outcome is NO ticket, never a forced combo.
     $repo = new SportsRepositoryStub();
     $audit = fx140_audit();
     $providers = new SportsProviderManager();
     $fixtures = [];
     $odds = [];
-    foreach ([1.55, 1.75, 1.9] as $i => $decimal) {
+    foreach ([1.55, 1.75, 1.8] as $i => $decimal) {
         $fixtures[] = fx140_fixture('s' . $i, 'SameHome' . $i, 'SameAway' . $i, gmdate('Y-m-d\\TH:i:00\\+00:00', strtotime('+1 day ' . (15 + $i) . ':00:00')));
         $odds['s' . $i] = [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => $decimal, 'observedAt' => gmdate('c')]];
     }

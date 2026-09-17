@@ -33,17 +33,17 @@ use AIWorkforce\Sports\ResultVerificationEngine;
 test('adaptive policy: the stock configuration produces the required data-quality bands', function () {
     $policy = ConfidencePolicy::fromConfiguration(ConfigurationService::defaults());
 
-    // The shipped quality default is 55 (operator decision 2026-09-17), so
-    // the derived ladder brackets it: EXCELLENT one step above (60), GOOD one
-    // step below (50), LIMITED a further step down (40). Confidence relief is
-    // clamped at the 30% hard gate.
+    // The shipped quality default is 60 (operator decision 2026-09-17,
+    // revised), so the derived ladder brackets it: EXCELLENT one step above
+    // (65), GOOD one step below (55), LIMITED a further step down (45).
+    // Confidence relief is clamped at the 30% hard gate.
     $tiers = $policy->tiers();
     assert_true(count($tiers) >= 2, 'the derived ladder still has distinct bands');
     assert_equals('EXCELLENT', $tiers[0]['tier']);
-    assert_equals(60, (int) $tiers[0]['minDataQuality']);
+    assert_equals(65, (int) $tiers[0]['minDataQuality']);
     assert_equals(30.0, (float) $tiers[0]['minConfidence'], 'the configured floor is the requirement at the best evidence');
     assert_equals('GOOD', $tiers[1]['tier']);
-    assert_equals(50, (int) $tiers[1]['minDataQuality']);
+    assert_equals(55, (int) $tiers[1]['minDataQuality']);
     // Relief is applied per tier and clamped at the confidence gate (30),
     // which spec §6 makes the lowest requirement any band may demand.
     assert_equals(30.0, (float) $tiers[1]['minConfidence']);
@@ -51,7 +51,7 @@ test('adaptive policy: the stock configuration produces the required data-qualit
         assert_equals(30.0, (float) $tier['minConfidence'], 'every band requires exactly the 30% confidence floor');
         assert_true((int) $tier['minDataQuality'] >= 30, 'no band admits data quality below the 30 floor');
     }
-    assert_equals(40, $policy->minimumDataQuality(), 'the stock reject band sits one LIMITED step under the 55 default');
+    assert_equals(45, $policy->minimumDataQuality(), 'the stock reject band sits one LIMITED step under the 60 default');
 
     // The 30/30 corner is still CONFIGURABLE: an operator who lowers the
     // configured value back to the floor gets the old collapsed ladder.
@@ -147,10 +147,10 @@ test('adaptive policy: below the reject band nothing qualifies, however confiden
     assert_true($policy->evaluate(30, 99.0, 'TOTAL_GOALS', 'OVER_1_5')['qualified'], 'quality 30 qualifies');
     assert_null($verdict['requiredConfidence'], 'no confidence requirement is quoted for an unpredictable fixture');
 
-    // The SHIPPED default (55) rejects thin evidence one LIMITED step below
-    // it: quality 39 is under the stock reject band even at 99% confidence.
+    // The SHIPPED default (60) rejects thin evidence one LIMITED step below
+    // it: quality 44 is under the stock reject band even at 99% confidence.
     $stock = ConfidencePolicy::fromConfiguration(ConfigurationService::defaults());
-    assert_false($stock->evaluate(39, 99.0, 'TOTAL_GOALS', 'OVER_1_5')['qualified'], 'quality 39 is under the stock 55-default ladder');
+    assert_false($stock->evaluate(44, 99.0, 'TOTAL_GOALS', 'OVER_1_5')['qualified'], 'quality 44 is under the stock 60-default ladder');
 });
 
 test('adaptive policy: the LIMITED tier admits safer markets only — thin data never prices a thin line', function () {

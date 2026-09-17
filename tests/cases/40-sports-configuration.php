@@ -14,19 +14,21 @@ test('configuration returns safe defaults before any admin change', function () 
     // Qualified-ticket policy defaults: 30%+ confidence, 55+ quality. The
     // shipped confidence default is 30 (see ConfigurationService::defaults());
     // 30 is also the lowest value an operator may configure. The data-quality
-    // DEFAULT is 55 (operator decision 2026-09-17: a middle ground between the
-    // old 75 floor and the 30 hard gate); the configurable FLOOR stays 30.
+    // DEFAULT is 60 (operator decision 2026-09-17, revised: discard fixtures
+    // with missing statistics or thin records); the configurable FLOOR stays 30.
     assert_equals(30.0, (float) $c['min_confidence']);
-    assert_equals(55, (int) $c['min_data_quality']);
-    // Low-variance ticket structure defaults (2026-09-17): 2.00–3.50 combined
-    // odds over at most two legs, and a +3% de-vigged edge floor.
-    assert_equals(2.0, (float) $c['target_odds_min']);
+    assert_equals(60, (int) $c['min_data_quality']);
+    // Low-variance ticket structure defaults (2026-09-17, revised): 1.85–3.50
+    // combined odds over at most two legs, and a +5% de-vigged edge floor.
+    assert_equals(1.85, (float) $c['target_odds_min']);
     assert_equals(3.5, (float) $c['target_odds_max']);
     assert_equals(2, (int) $c['max_selections']);
-    assert_equals(0.03, (float) $c['min_expected_value']);
-    // Staking defaults: flat units unless an operator opts into Kelly.
-    assert_equals('FLAT', $c['staking_mode']);
+    assert_equals(0.05, (float) $c['min_expected_value']);
+    // Staking defaults: 1.5% of bankroll per ticket (the disciplined 1–2%
+    // band); FLAT and FRACTIONAL_KELLY remain opt-in alternatives.
+    assert_equals('FLAT_PERCENT', $c['staking_mode']);
     assert_equals(1000.0, (float) $c['bankroll']);
+    assert_equals(1.5, (float) $c['stake_percent']);
     assert_equals(0.25, (float) $c['kelly_fraction']);
     assert_equals(['MATCH_RESULT', 'TOTAL_GOALS', 'BTTS', 'DOUBLE_CHANCE', 'DRAW_NO_BET'], $c['allowed_markets'], 'every market the model can price and settle is allowed by default');
     assert_equals('RESTITUTE_ODDS', $c['void_policy']);

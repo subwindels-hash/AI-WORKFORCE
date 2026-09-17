@@ -23,16 +23,17 @@
 use AIWorkforce\Sports\ConfidencePolicy;
 use AIWorkforce\Sports\ConfigurationService;
 
-test('floors: both hard gates are 30; the shipped quality default is the 55 middle ground', function () {
+test('floors: both hard gates are 30; the shipped quality default is 60', function () {
     assert_equals(30.0, (float) ConfigurationService::MIN_CONFIDENCE_FLOOR, 'confidence hard gate');
     assert_equals(30, (int) ConfigurationService::MIN_DATA_QUALITY_FLOOR, 'data-quality hard gate');
 
     $defaults = ConfigurationService::defaults();
     assert_equals(30.0, (float) $defaults['min_confidence'], 'shipped confidence default');
-    // Operator decision 2026-09-17: the shipped DEFAULT moved up to 55 to keep
-    // low-data outliers out of the candidate pool, while the configurable
-    // FLOOR stays 30 so an operator may still open the gate back up.
-    assert_equals(55, (int) $defaults['min_data_quality'], 'shipped data-quality default');
+    // Operator decision 2026-09-17 (revised): the shipped DEFAULT is 60 to
+    // keep fixtures with missing statistics or thin records out of the
+    // candidate pool, while the configurable FLOOR stays 30 so an operator
+    // may still open the gate back up.
+    assert_equals(60, (int) $defaults['min_data_quality'], 'shipped data-quality default');
 });
 
 test('floors: 30 and above qualifies on BOTH axes; 29.99 never does', function () {
@@ -119,6 +120,6 @@ test('floors: the shipped SQL defaults and the schema heal all agree on 30', fun
 
     // The request-time heal must not rewrite the live row back to 80.
     $installer = (string) file_get_contents(APPPATH . 'libraries/AIWorkforce/SchemaInstaller.php');
-    assert_contains('min_data_quality = 55', $installer, 'the default-row heal targets the shipped 55 default');
+    assert_contains('min_data_quality = 60', $installer, 'the default-row heal targets the shipped 60 default');
     assert_not_contains('min_data_quality = 80', $installer, 'the old 80 heal is gone');
 });

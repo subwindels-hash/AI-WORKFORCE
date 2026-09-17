@@ -1,12 +1,16 @@
 <?php
 /**
- * Stake sizing — flat units and fractional Kelly (operator decision 2026-09-17).
+ * Stake sizing — flat units, flat percent-of-bankroll and fractional Kelly
+ * (operator decision 2026-09-17).
  *
  * The stake on a ticket is a RECOMMENDATION derived from configuration; no
  * money moves (there is no external execution connector). What these cases
  * pin:
  *
  *   • FLAT mode keeps the fixed stake_amount, capped by max_exposure;
+ *   • FLAT_PERCENT — the shipped default — stakes stake_percent of the
+ *     configured bankroll per ticket (1.5% by default, inside the
+ *     disciplined 1–2% band), capped by max_exposure;
  *   • FRACTIONAL_KELLY stakes kelly_fraction × full Kelly on the CALIBRATED
  *     combined probability and the real quoted odds, against bankroll;
  *   • a non-positive Kelly edge stakes NOTHING — no token minimum is
@@ -44,6 +48,27 @@ test('flat staking returns the configured unit, capped by max_exposure', functio
     // An unknown/absent mode behaves as FLAT — the safe default.
     $default = $sizer->size(0.55, 2.4, ['stake_amount' => 10.0, 'max_exposure' => 100.0]);
     assert_equals('FLAT', $default['mode']);
+});
+
+test('flat-percent staking takes the configured percent of bankroll, capped by max_exposure', function () {
+    $sizer = new StakeSizer();
+    // 1.5% of a 1000 bankroll = 15.00 — the shipped defaults.
+    $out = $sizer->size(0.55, 2.4, ['staking_mode' => 'FLAT_PERCENT', 'bankroll' => 1000.0, 'stake_percent' => 1.5, 'max_exposure' => 100.0]);
+    assert_equals('FLAT_PERCENT', $out['mode']);
+    assert_equals(15.0, $out['stake'], '1.5% of 1000 is 15');
+    assert_equals(1.5, (float) $out['detail']['stakePercent'], 'the percent used is stored beside the stake');
+
+    // 2% of 20000 would be 400 — max_exposure still caps the ticket.
+    $capped = $sizer->size(0.55, 2.4, ['staking_mode' => 'FLAT_PERCENT', 'bankroll' => 20000.0, 'stake_percent' => 2.0, 'max_exposure' => 100.0]);
+    assert_equals(100.0, $capped['stake'], 'max_exposure caps the percent stake');
+
+    // An out-of-band percent (0 or > 5) falls back to the disciplined 1.5.
+    $fallback = $sizer->size(0.55, 2.4, ['staking_mode' => 'FLAT_PERCENT', 'bankroll' => 1000.0, 'stake_percent' => 50.0, 'max_exposure' => 1000.0]);
+    assert_equals(15.0, $fallback['stake'], 'a reckless percent is never honoured');
+
+    // No bankroll figure → nothing staked, never a guessed amount.
+    $none = $sizer->size(0.55, 2.4, ['staking_mode' => 'FLAT_PERCENT', 'bankroll' => 0.0, 'stake_percent' => 1.5, 'max_exposure' => 100.0]);
+    assert_equals(0.0, $none['stake'], 'a zero bankroll stakes nothing');
 });
 
 test('fractional Kelly stakes the configured fraction of the full-Kelly edge', function () {
@@ -101,16 +126,22 @@ test('a non-positive Kelly edge stakes nothing — never a token minimum bet', f
 test('configuration validates and persists the staking discipline keys', function () {
     $svc = new ConfigurationService(new SportsRepositoryStub(), fx162_audit());
     $defaults = ConfigurationService::defaults();
-    assert_equals('FLAT', $defaults['staking_mode'], 'the shipped default is flat units');
+    assert_equals('FLAT_PERCENT', $defaults['staking_mode'], 'the shipped default is a flat percent of bankroll');
     assert_equals(1000.0, (float) $defaults['bankroll']);
+    assert_equals(1.5, (float) $defaults['stake_percent'], 'the shipped percent sits inside the 1-2% band');
     assert_equals(0.25, (float) $defaults['kelly_fraction'], 'quarter Kelly when an operator opts in');
 
     $ok = $svc->update(['staking_mode' => 'FRACTIONAL_KELLY', 'bankroll' => 2500.0, 'kelly_fraction' => 0.2], 'admin', 'enable kelly');
     assert_true($ok['ok'], 'a valid Kelly configuration is accepted');
     assert_equals('FRACTIONAL_KELLY', $ok['configuration']['staking_mode']);
 
-    assert_false($svc->update(['staking_mode' => 'MARTINGALE'], 'admin', 'x')['ok'], 'unknown staking modes are refused');
+    $pct = $svc->update(['staking_mode' => 'FLAT_PERCENT', 'stake_percent' => 2.0], 'admin', 'two percent flat');
+    assert_true($pct['ok'], 'a valid flat-percent configuration is accepted');
+
+    assert_false($svc->update(['staking_mode' => 'MARTINGALE'], 'admin', 'x')['ok'], 'unknown staking modes are refused — no chase systems');
     assert_false($svc->update(['bankroll' => 0], 'admin', 'x')['ok'], 'a zero bankroll is refused');
+    assert_false($svc->update(['stake_percent' => 0], 'admin', 'x')['ok'], 'a zero percent would silently stake nothing forever');
+    assert_false($svc->update(['stake_percent' => 10.0], 'admin', 'x')['ok'], 'beyond the 5% ceiling is refused — bankroll protection');
     assert_false($svc->update(['kelly_fraction' => 0], 'admin', 'x')['ok'], 'a zero fraction would silently stake nothing forever');
     assert_false($svc->update(['kelly_fraction' => 1.5], 'admin', 'x')['ok'], 'beyond full Kelly is refused');
 });

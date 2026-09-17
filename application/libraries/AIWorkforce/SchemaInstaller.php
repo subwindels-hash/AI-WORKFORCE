@@ -197,6 +197,7 @@ final class SchemaInstaller
             // staking behaviour.
             $pick("ALTER TABLE sports_configurations ADD COLUMN staking_mode TEXT NOT NULL DEFAULT 'FLAT'", "ALTER TABLE sports_configurations ADD COLUMN staking_mode VARCHAR(20) NOT NULL DEFAULT 'FLAT'", "ALTER TABLE sports_configurations ADD COLUMN IF NOT EXISTS staking_mode VARCHAR(20) NOT NULL DEFAULT 'FLAT'"),
             $pick('ALTER TABLE sports_configurations ADD COLUMN bankroll REAL NOT NULL DEFAULT 1000', 'ALTER TABLE sports_configurations ADD COLUMN bankroll DECIMAL(14,2) NOT NULL DEFAULT 1000', 'ALTER TABLE sports_configurations ADD COLUMN IF NOT EXISTS bankroll DECIMAL(14,2) NOT NULL DEFAULT 1000'),
+            $pick('ALTER TABLE sports_configurations ADD COLUMN stake_percent REAL NOT NULL DEFAULT 1.5', 'ALTER TABLE sports_configurations ADD COLUMN stake_percent DECIMAL(5,2) NOT NULL DEFAULT 1.5', 'ALTER TABLE sports_configurations ADD COLUMN IF NOT EXISTS stake_percent DECIMAL(5,2) NOT NULL DEFAULT 1.5'),
             $pick('ALTER TABLE sports_configurations ADD COLUMN kelly_fraction REAL NOT NULL DEFAULT 0.25', 'ALTER TABLE sports_configurations ADD COLUMN kelly_fraction DECIMAL(5,4) NOT NULL DEFAULT 0.25', 'ALTER TABLE sports_configurations ADD COLUMN IF NOT EXISTS kelly_fraction DECIMAL(5,4) NOT NULL DEFAULT 0.25'),
             $pick('ALTER TABLE sports_tickets ADD COLUMN stake REAL', 'ALTER TABLE sports_tickets ADD COLUMN stake DECIMAL(12,2) NULL', 'ALTER TABLE sports_tickets ADD COLUMN IF NOT EXISTS stake DECIMAL(12,2)'),
             $pick('ALTER TABLE sports_tickets ADD COLUMN pnl REAL', 'ALTER TABLE sports_tickets ADD COLUMN pnl DECIMAL(14,4) NULL', 'ALTER TABLE sports_tickets ADD COLUMN IF NOT EXISTS pnl DECIMAL(14,4)'),
@@ -307,14 +308,14 @@ final class SchemaInstaller
             }
         }
 
-        // Repair the built-in sports ticket policy (2026-09-17) — 30%+
-        // confidence, quality 55+, +3% minimum edge, LOW correlation, at most
-        // 2 selections inside a 2.00–3.50 combined-odds window. Only the
+        // Repair the built-in sports ticket policy (2026-09-17, revised) —
+        // 30%+ confidence, quality 60+, +5% minimum edge, LOW correlation, at
+        // most 2 selections inside a 1.85–3.50 combined-odds window. Only the
         // untouched system default row is amended;
         // operator-authored configuration versions remain append-only and
         // under admin control.
         try {
-            $exec("UPDATE sports_configurations SET min_confidence = 30, min_data_quality = 55, min_expected_value = 0.03, max_correlation = 'LOW', max_selections = 2, target_odds_min = 2.0, target_odds_max = 3.5 WHERE version = 0 AND updated_by = 'system' AND reason = 'built-in defaults' AND (min_confidence <> 30 OR min_data_quality <> 55 OR min_expected_value <> 0.03 OR max_correlation <> 'LOW' OR max_selections <> 2 OR target_odds_min <> 2.0 OR target_odds_max <> 3.5)");
+            $exec("UPDATE sports_configurations SET min_confidence = 30, min_data_quality = 60, min_expected_value = 0.05, max_correlation = 'LOW', max_selections = 2, target_odds_min = 1.85, target_odds_max = 3.5 WHERE version = 0 AND updated_by = 'system' AND reason = 'built-in defaults' AND (min_confidence <> 30 OR min_data_quality <> 60 OR min_expected_value <> 0.05 OR max_correlation <> 'LOW' OR max_selections <> 2 OR target_odds_min <> 1.85 OR target_odds_max <> 3.5)");
         } catch (\Throwable $e) { /* table may not exist yet on partial installs */ }
 
         // Purge handicap odds ingested WITHOUT their line. api-football sends

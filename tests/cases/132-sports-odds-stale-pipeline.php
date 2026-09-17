@@ -162,7 +162,7 @@ test('odds TTL: a once-a-day sync 3h old is FRESH — no re-fetch, no STALE_ODDS
     assert_equals('PENDING_USER_APPROVAL', $run['status']);
     assert_not_null($run['ticketId']);
     $ticket = $repo->findTicket($run['ticketId']);
-    assert_true($ticket['total_odds'] >= 2.0 && $ticket['total_odds'] <= 3.5, 'odds inside the configured (default 2.00–3.50) range');
+    assert_true($ticket['total_odds'] >= 1.85 && $ticket['total_odds'] <= 3.5, 'odds inside the configured (default 1.85–3.50) range');
     assert_true((float) $ticket['confidence'] >= 30.0, '30%+ confidence gate enforced on the WINDELS confidence');
     // Diagnostics funnel is exposed with the full shape.
     $diag = $run['diagnostics'];

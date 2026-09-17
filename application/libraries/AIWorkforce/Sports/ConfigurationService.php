@@ -24,7 +24,7 @@ class ConfigurationService
     public const RISK_LEVELS = ['CONSERVATIVE', 'MODERATE', 'AGGRESSIVE'];
     public const CORRELATION_LIMITS = ['LOW', 'MEDIUM'];
     public const VOID_POLICIES = ['RESTITUTE_ODDS', 'ALL_VOID_ONLY'];
-    public const STAKING_MODES = ['FLAT', 'FRACTIONAL_KELLY'];
+    public const STAKING_MODES = ['FLAT', 'FLAT_PERCENT', 'FRACTIONAL_KELLY'];
 
     /**
      * The lowest confidence an operator may configure as the eligibility floor.
@@ -111,6 +111,8 @@ class ConfigurationService
         $row['staking_mode'] = in_array(strtoupper((string) ($row['staking_mode'] ?? 'FLAT')), self::STAKING_MODES, true)
             ? strtoupper((string) $row['staking_mode']) : 'FLAT';
         $row['bankroll'] = (float) ($row['bankroll'] ?? 1000.0) > 0 ? (float) $row['bankroll'] : 1000.0;
+        $sp = (float) ($row['stake_percent'] ?? 1.5);
+        $row['stake_percent'] = ($sp > 0 && $sp <= 5.0) ? $sp : 1.5;
         $kf = (float) ($row['kelly_fraction'] ?? 0.25);
         $row['kelly_fraction'] = ($kf > 0 && $kf <= 1.0) ? $kf : 0.25;
         return $row;
@@ -128,13 +130,14 @@ class ConfigurationService
             'system_timezone' => DailyTicketDate::configuredTimezone(),
             'platform_mode' => 'SANDBOX',
             'engine_mode' => 'USER_APPROVAL_REQUIRED',
-            // Operator decision (2026-09-17): the shipped window targets
-            // low-variance tickets — 2.00–3.50 combined odds over at most two
-            // legs. Multi-leg accumulators compound the bookmaker margin
-            // (1-(1-margin)^N) and variance with every extra leg; singles and
-            // doubles keep the realized edge closest to the modelled edge.
-            // Administrators may configure any window from 1.01 upward.
-            'target_odds_min' => 2.0,
+            // Operator decision (2026-09-17, revised same day): the shipped
+            // window targets low-variance tickets — 1.85–3.50 combined odds
+            // over at most two legs. Multi-leg accumulators compound the
+            // bookmaker margin (1-(1-margin)^N) and variance with every extra
+            // leg; singles and doubles keep the realized edge closest to the
+            // modelled edge. Administrators may configure any window from
+            // 1.01 upward.
+            'target_odds_min' => 1.85,
             'target_odds_max' => 3.5,
             'max_selections' => 2,
             'risk_level' => 'CONSERVATIVE',
@@ -145,18 +148,19 @@ class ConfigurationService
             // instead of a forced combination. Changes remain append-only and
             // audited.
             'min_confidence' => 30.0,
-            // Value floor (operator decision 2026-09-17): +3% edge after the
-            // FairValueEngine strips the bookmaker margin. A high-probability
-            // leg that is still -EV after de-vigging must never qualify.
-            'min_expected_value' => 0.03,
+            // Value floor (operator decision 2026-09-17, revised same day):
+            // +5% edge after the FairValueEngine strips the bookmaker margin.
+            // A high-probability leg that is still thin-EV after de-vigging
+            // must never qualify — only genuinely mispriced selections do.
+            'min_expected_value' => 0.05,
             'max_correlation' => 'LOW',
-            // Data-quality default (operator decision 2026-09-17): the shipped
-            // gate is 55 — a middle ground between the old 75 floor (which
-            // produced "N predictions → 0 qualified" days) and the 30 hard
-            // gate. The FLOOR stays 30: an administrator may still lower the
-            // configured value back to 30, or raise it toward QUALIFIED (70+),
-            // append-only and audited.
-            'min_data_quality' => 55,
+            // Data-quality default (operator decision 2026-09-17, revised
+            // same day): the shipped gate is 60 — fixtures with missing team
+            // statistics, thin head-to-head records or unverified venue
+            // splits are discarded. The FLOOR stays 30: an administrator may
+            // still lower the configured value back to 30, or raise it toward
+            // QUALIFIED (70+), append-only and audited.
+            'min_data_quality' => 60,
             // Adaptive confidence policy (requirements #1/#8). NULL means the
             // tiers are DERIVED from the two floors above, but every tier is
             // still bounded by the hard gates: 30%+ confidence and 30+ data
@@ -172,15 +176,23 @@ class ConfigurationService
             'allowed_leagues' => [],
             'max_exposure' => 100.0,
             'stake_amount' => 10.0,
-            // Staking discipline (operator decision 2026-09-17). FLAT keeps
-            // the fixed stake_amount per ticket. FRACTIONAL_KELLY sizes the
-            // stake as kelly_fraction × full-Kelly on the ticket's calibrated
+            // Staking discipline (operator decision 2026-09-17, revised same
+            // day). FLAT_PERCENT — the shipped default — stakes stake_percent
+            // of the configured bankroll on every ticket (1.5% by default,
+            // inside the disciplined 1–2% band), which survives the 5–10 bet
+            // drawdowns normal variance produces. FLAT keeps the fixed
+            // stake_amount per ticket. FRACTIONAL_KELLY sizes the stake as
+            // kelly_fraction × full-Kelly on the ticket's calibrated
             // probability and quoted odds, against the configured bankroll —
             // never above max_exposure, never above stake_amount × 4, and a
             // non-positive Kelly edge stakes NOTHING (the ticket is still
             // recorded, with stake 0, so the day's record stays honest).
-            'staking_mode' => 'FLAT',
+            // Every mode is a sizing rule applied at generation time; the
+            // bankroll figure is configuration, never a wallet — no stake is
+            // ever increased after a losing day (no chase logic exists).
+            'staking_mode' => 'FLAT_PERCENT',
             'bankroll' => 1000.0,
+            'stake_percent' => 1.5,
             'kelly_fraction' => 0.25,
             'void_policy' => 'RESTITUTE_ODDS',
             'require_calibration' => 1,
@@ -203,7 +215,7 @@ class ConfigurationService
             'confidence_policy',
             'min_liquidity', 'allowed_markets', 'allowed_leagues', 'max_exposure',
             'stake_amount', 'void_policy', 'require_calibration',
-            'staking_mode', 'bankroll', 'kelly_fraction',
+            'staking_mode', 'bankroll', 'stake_percent', 'kelly_fraction',
         ])));
 
         $error = $this->validate($next, $allowAutomatedExecution);
@@ -237,6 +249,7 @@ class ConfigurationService
             'stake_amount' => (float) $next['stake_amount'],
             'staking_mode' => strtoupper((string) $next['staking_mode']),
             'bankroll' => (float) $next['bankroll'],
+            'stake_percent' => (float) $next['stake_percent'],
             'kelly_fraction' => (float) $next['kelly_fraction'],
             'void_policy' => (string) $next['void_policy'],
             'require_calibration' => (int) (bool) $next['require_calibration'],
@@ -325,6 +338,11 @@ class ConfigurationService
             return 'staking_mode must be one of ' . implode(', ', self::STAKING_MODES);
         }
         if ((float) ($c['bankroll'] ?? 0) <= 0) return 'bankroll must be > 0';
+        $sp = (float) ($c['stake_percent'] ?? 0);
+        // Disciplined flat-percent staking runs 1–2% of bankroll; the engine
+        // accepts up to 5% so an explicit operator choice is still honoured,
+        // but never a stake that could deplete the bankroll in one bad week.
+        if ($sp <= 0 || $sp > 5.0) return 'stake_percent must be within (0, 5] percent of bankroll';
         $kf = (float) ($c['kelly_fraction'] ?? 0);
         // Full Kelly (1.0) is the mathematical ceiling; disciplined deployments
         // run 0.1–0.5. Zero or negative would silently stake nothing forever.

@@ -2,13 +2,21 @@
 namespace AIWorkforce\Sports;
 
 /**
- * Stake sizing — flat units or fractional Kelly (operator decision 2026-09-17).
+ * Stake sizing — flat units, flat percent-of-bankroll, or fractional Kelly
+ * (operator decision 2026-09-17).
  *
  * WHY THIS EXISTS
  * ---------------
- * A fixed stake per ticket ignores both the edge and the odds: it bets the
- * same on a thin +1% edge at 3.40 as on a wide +9% edge at 2.05. The Kelly
- * criterion sizes the bet to the edge the model actually measured:
+ * Survivability first: even a genuinely +EV model walks through 5–10 bet
+ * losing runs under normal variance, and a stake that is too large relative
+ * to the bankroll turns an ordinary drawdown into depletion. Three modes:
+ *
+ *   FLAT          — the fixed stake_amount per ticket (legacy behaviour).
+ *   FLAT_PERCENT  — stake_percent of the configured bankroll per ticket
+ *                   (default 1.5%, validated within the disciplined (0,5]
+ *                   band). The shipped default: simple, predictable, and it
+ *                   survives losing runs by construction.
+ *   FRACTIONAL_KELLY — sizes the bet to the edge the model actually measured:
  *
  *     f* = (b·p − q) / b        b = decimal odds − 1, p = calibrated
  *                               probability, q = 1 − p
@@ -16,6 +24,10 @@ namespace AIWorkforce\Sports;
  * Full Kelly is famously volatile, so the platform only ever stakes a
  * configured FRACTION of it (0.25 by default — quarter Kelly), against a
  * configured bankroll figure.
+ *
+ * No mode ever raises a stake in response to losses: the inputs are the
+ * configuration and this ticket's own numbers, never yesterday's results —
+ * loss-chasing is structurally impossible here.
  *
  * HONESTY RULES, in the spirit of every other engine here:
  *   • the probability used is the ticket's CALIBRATED combined probability —
@@ -50,6 +62,20 @@ class StakeSizer
         $mode = strtoupper((string) ($config['staking_mode'] ?? 'FLAT'));
         $flat = (float) ($config['stake_amount'] ?? 10.0);
         $maxExposure = (float) ($config['max_exposure'] ?? 100.0);
+        $bankroll = (float) ($config['bankroll'] ?? 1000.0);
+
+        if ($mode === 'FLAT_PERCENT') {
+            // A disciplined percent of bankroll per ticket (default 1.5%,
+            // inside the 1–2% guidance). Still bounded by max_exposure so a
+            // large configured bankroll cannot push a single ticket past the
+            // operator's absolute exposure ceiling.
+            $percent = (float) ($config['stake_percent'] ?? 1.5);
+            if ($percent <= 0 || $percent > 5.0) $percent = 1.5;
+            $stake = $bankroll > 0 ? min($bankroll * $percent / 100.0, $maxExposure) : 0.0;
+            return ['stake' => round($stake, 2), 'mode' => 'FLAT_PERCENT', 'detail' => [
+                'stakePercent' => $percent, 'bankroll' => $bankroll, 'maxExposure' => $maxExposure,
+            ]];
+        }
 
         if ($mode !== 'FRACTIONAL_KELLY') {
             $stake = min($flat, $maxExposure);
@@ -57,8 +83,6 @@ class StakeSizer
                 'flatStake' => $flat, 'maxExposure' => $maxExposure,
             ]];
         }
-
-        $bankroll = (float) ($config['bankroll'] ?? 1000.0);
         $fraction = (float) ($config['kelly_fraction'] ?? 0.25);
         $p = max(0.0, min(1.0, $combinedProbability));
         $b = $totalOdds - 1.0;

@@ -336,8 +336,8 @@ test('data-quality gate: 29 is rejected and 30 passes, independently of confiden
     // Quality that the OLD 75 floor would have thrown away now qualifies.
     assert_true($policy->evaluate(74, 80.0, 'TOTAL_GOALS', 'OVER_1_5')['qualified'], 'quality 74 qualifies under the 30 floor');
     assert_equals(30, ConfigurationService::MIN_DATA_QUALITY_FLOOR);
-    // The shipped DEFAULT is stricter than the floor: 55 (2026-09-17).
-    assert_equals(55, (int) ConfigurationService::defaults()['min_data_quality']);
+    // The shipped DEFAULT is stricter than the floor: 60 (2026-09-17, revised).
+    assert_equals(60, (int) ConfigurationService::defaults()['min_data_quality']);
 });
 
 test('gates are independent: both floors are 30, and they are never conflated', function () {
@@ -633,9 +633,9 @@ test('a successful generation persists the ticket, its legs and their full calcu
     assert_true(count($selections) > 0, 'the ticket has persisted legs');
     assert_equals(count($selections), (int) $result['selectedPicks'], 'the contract agrees with storage');
 
-    // Combined odds stay inside the configured window (default 2.00–3.50).
+    // Combined odds stay inside the configured window (default 1.85–3.50).
     $total = (float) ($ticket['total_odds'] ?? 0);
-    assert_true($total >= 2.0 - 1e-9 && $total <= 3.5 + 1e-9, 'combined odds sit inside 2.00-3.50, got ' . $total);
+    assert_true($total >= 1.85 - 1e-9 && $total <= 3.5 + 1e-9, 'combined odds sit inside 1.85-3.50, got ' . $total);
 
     // Every leg carries the real calculation trail (§16).
     foreach ($selections as $leg) {
