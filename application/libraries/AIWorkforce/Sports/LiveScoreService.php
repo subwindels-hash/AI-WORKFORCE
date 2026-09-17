@@ -15,9 +15,21 @@ use AIWorkforce\Sports\Providers\SportsProviderManager;
  * (default 60) no matter how many browsers are open — between sweeps every
  * consumer reads the stored state. So a goal appears on the board
  * automatically, at worst one refresh interval after the provider reported it.
- * When no stored match can be in play (nothing LIVE, no kickoff in the last
- * 3 h / next 10 min) the sweep is skipped outright: zero provider requests,
- * so an idle clock never eats a small daily quota.
+ *
+ * TWO CADENCES share the one sweep so live matches always reach users:
+ *  - IN PLAY: when a stored match can be on the pitch (something LIVE, or a
+ *    kickoff in the last 3 h / next 10 min) the provider is polled fast — once
+ *    per WINDELS_SPORTS_LIVE_REFRESH_SECONDS — so goals land quickly.
+ *  - DISCOVERY: when NOTHING stored is in play the provider is still polled,
+ *    but only once per WINDELS_SPORTS_LIVE_DISCOVERY_SECONDS (default 900 =
+ *    15 min). This is what surfaces live matches the stored fixtures do not
+ *    yet know about — a day whose fixtures were never synced, or an in-play
+ *    game the fixture feed missed — instead of an idle gate hiding live play
+ *    from users forever. The first discovered LIVE row opens the in-play
+ *    window, so fast polling takes over automatically; when every match ends
+ *    the window closes and the slow discovery cadence resumes. Set the
+ *    discovery interval to 0 to disable discovery entirely (strict quota: the
+ *    sweep is skipped whenever nothing stored is in play, as before).
  *
  * Goal detection lives in SportsSyncService::syncLive(): every sweep that sees
  * a higher total score than the stored one audits a SPORTS_GOAL_SCORED event;
@@ -31,6 +43,15 @@ class LiveScoreService
     public const DEFAULT_REFRESH_SECONDS = 60;
     public const MIN_REFRESH_SECONDS = 10;
     public const MAX_REFRESH_SECONDS = 86400;
+    /**
+     * How often the provider is polled to DISCOVER live matches when nothing
+     * stored is in play (seconds). Slower than the in-play cadence so an idle
+     * clock costs only a few requests an hour, but non-zero so live play is
+     * never hidden from users. 0 disables discovery (strict quota mode).
+     */
+    public const DEFAULT_DISCOVERY_SECONDS = 900;
+    public const MIN_DISCOVERY_SECONDS = 60;
+    public const MAX_DISCOVERY_SECONDS = 86400;
     /** Canonical statuses that mean the match is currently in progress. */
     public const LIVE_STATUSES = ['LIVE', 'HALFTIME', 'EXTRA_TIME', 'PENALTIES'];
 
@@ -55,6 +76,36 @@ class LiveScoreService
     }
 
     /**
+     * Discovery poll interval in seconds, from WINDELS_SPORTS_LIVE_DISCOVERY_SECONDS.
+     * This is how often the provider's live endpoint is checked WHILE nothing
+     * stored is in play, so live matches the stored fixtures do not know about
+     * are found and shown to users instead of being hidden by the in-play gate.
+     *
+     * A default of 15 minutes keeps idle-hour cost tiny (a handful of requests
+     * an hour) while never leaving live play invisible. An explicit 0 (or any
+     * negative value) disables discovery: the sweep then reverts to the strict
+     * quota behaviour and is skipped whenever nothing stored is in play.
+     * Any positive value is clamped to [MIN, MAX]; it is never forced above the
+     * in-play cadence, so discovery can be slower — never faster — than fast polling.
+     *
+     * @return int seconds between discovery polls, or 0 when disabled.
+     */
+    public function discoveryIntervalSeconds(): int
+    {
+        $raw = getenv('WINDELS_SPORTS_LIVE_DISCOVERY_SECONDS');
+        // Unset → default cadence. An explicit "0" (or negative) → disabled.
+        if ($raw === false || trim((string) $raw) === '') {
+            $seconds = self::DEFAULT_DISCOVERY_SECONDS;
+        } else {
+            $seconds = (int) $raw;
+            if ($seconds <= 0) return 0;
+        }
+        $seconds = max(self::MIN_DISCOVERY_SECONDS, min(self::MAX_DISCOVERY_SECONDS, $seconds));
+        // Discovery is the SLOW cadence — never poll more often than in-play.
+        return max($seconds, $this->refreshIntervalSeconds());
+    }
+
+    /**
      * How long a stored live match may remain on the board without a fresh
      * provider confirmation before it is considered stale and hidden.
      * Three poll intervals, clamped to 5-10 minutes so a low interval does not
@@ -72,10 +123,12 @@ class LiveScoreService
      * every goal event this sweep detected.
      *
      * Outcome statuses:
-     *  - SKIPPED_NO_MATCHES_IN_PLAY — no stored match can currently be on the
-     *    pitch (nothing LIVE, no kickoff in the last 3 h / next 10 min), so
-     *    the sweep spends ZERO provider requests: an idle clock never eats a
-     *    small daily quota;
+     *  - SKIPPED_NO_MATCHES_IN_PLAY — nothing stored is in play (nothing LIVE,
+     *    no kickoff in the last 3 h / next 10 min) AND a discovery poll is not
+     *    yet due (or discovery is disabled). The sweep spends ZERO provider
+     *    requests so an idle clock never eats a small daily quota; the next
+     *    discovery poll still runs on the discovery cadence, so live matches
+     *    the stored fixtures do not know about are found and shown to users;
      *  - THROTTLED — stored state is younger than the refresh interval; serve
      *    the board from storage. Concurrent callers inside one interval
      *    bucket are deduplicated by the sweep's execution key, so a page full
@@ -91,22 +144,38 @@ class LiveScoreService
             return ['status' => 'NO_PROVIDER', 'providers' => [], 'goalEvents' => [], 'errors' => [],
                 'retryInSeconds' => $interval, 'refreshIntervalSeconds' => $interval];
         }
-        if (!$this->matchWindowOpen($now)) {
+        // Two cadences share one sweep. When a stored match can be on the pitch
+        // we poll fast (the in-play interval) so goals land quickly. When
+        // nothing stored is in play we still poll — but only on the slow
+        // discovery cadence — so live matches the stored fixtures do not yet
+        // know about are found and shown, instead of being hidden forever.
+        $inPlay = $this->matchWindowOpen($now);
+        $discoveryInterval = $this->discoveryIntervalSeconds();
+        if (!$inPlay && $discoveryInterval <= 0) {
+            // Discovery disabled (strict quota): behave as before and skip.
             return ['status' => 'SKIPPED_NO_MATCHES_IN_PLAY', 'providers' => [], 'goalEvents' => [], 'errors' => [],
                 'retryInSeconds' => 60, 'refreshIntervalSeconds' => $interval];
         }
+        // The active throttle: fast while in play, slow while only discovering.
+        $effectiveInterval = $inPlay ? $interval : $discoveryInterval;
         $last = $this->repo->listSyncRuns('LIVE', 1)[0] ?? null;
         if ($last !== null && ($last['status'] ?? '') !== 'FAILED') {
             $at = strtotime((string) ($last['started_at'] ?? ''));
             if ($at !== false) {
                 $age = max(0, $now - $at);
-                if ($age < $interval) {
-                    return ['status' => 'THROTTLED', 'retryInSeconds' => max(1, $interval - $age),
-                        'providers' => [], 'goalEvents' => [], 'errors' => [], 'refreshIntervalSeconds' => $interval];
+                if ($age < $effectiveInterval) {
+                    // While only discovering, a throttled tick reports the honest
+                    // "nothing in play yet" state so callers do not read it as a
+                    // live board — the next discovery poll is still due later.
+                    $status = $inPlay ? 'THROTTLED' : 'SKIPPED_NO_MATCHES_IN_PLAY';
+                    return ['status' => $status, 'retryInSeconds' => max(1, $effectiveInterval - $age),
+                        'providers' => [], 'goalEvents' => [], 'errors' => [],
+                        'refreshIntervalSeconds' => $interval, 'discoveryIntervalSeconds' => $discoveryInterval,
+                        'mode' => $inPlay ? 'IN_PLAY' : 'DISCOVERY'];
                 }
             }
         }
-        $bucket = intdiv($now, $interval);
+        $bucket = intdiv($now, $effectiveInterval);
         $providers = []; $goalEvents = []; $errors = [];
         $attempted = 0; $completed = 0; $failed = 0;
         foreach ($this->providers->all() as $provider) {
@@ -132,7 +201,9 @@ class LiveScoreService
         };
         return ['status' => $status, 'providers' => $providers, 'goalEvents' => $goalEvents, 'errors' => $errors,
             'processed' => array_sum(array_map(fn($p) => (int) ($p['processed'] ?? 0), $providers)),
-            'syncedAt' => gmdate('c', $now), 'refreshIntervalSeconds' => $interval];
+            'mode' => $inPlay ? 'IN_PLAY' : 'DISCOVERY',
+            'syncedAt' => gmdate('c', $now), 'refreshIntervalSeconds' => $interval,
+            'discoveryIntervalSeconds' => $discoveryInterval];
     }
 
     /**
