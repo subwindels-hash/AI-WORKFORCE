@@ -161,7 +161,7 @@ test('fair value: a complete market gets its margin removed — STRONG_VALUE wit
     assert_close(7.5, (float) $a['edgePoints'], 0.001, 'edge vs the quoted price');
     assert_close(9.02, (float) $a['edgeAgainstFairPoints'], 0.02, 'edge vs the de-vigged price');
     assert_close(0.12, (float) $a['expectedValue'], 0.001, 'expected value per unit (0.70 × 1.60 − 1)');
-    // Strong value must survive de-vigging: 7.5pp ≥ 4pp and 9.02pp ≥ 1pp.
+    // Strong value must survive de-vigging: 7.5pp ≥ 4pp and 9.02pp ≥ 2pp.
     assert_equals('STRONG_VALUE', $a['valueClass']);
     assert_equals('Strong value', $a['valueLabel']);
     assert_true(str_contains((string) $a['disclaimer'], 'no selection is guaranteed'), 'the disclaimer travels with the verdict');
@@ -191,7 +191,7 @@ test('fair value: no prices at all → DATA_UNAVAILABLE, nothing judged or inven
 test('fair value: the engine does not flatter the model — FAIR and NEGATIVE_VALUE verdicts', function () {
     $engine = new FairValueEngine();
     $prices = ['OVER_1_5' => ['odds' => 1.60, 'observedAt' => gmdate('c')], 'UNDER_1_5' => ['odds' => 2.50, 'observedAt' => gmdate('c')]];
-    // Exactly the implied share (62.5%) → inside the ±1-point noise band.
+    // Exactly the implied share (62.5%) → inside the ±2-point noise band.
     assert_equals('FAIR', $engine->assessMarket('TOTAL_GOALS', $prices, 'OVER_1_5', 0.625)['valueClass']);
     // 3 points below the price (−3pp, above the −4pp avoid line).
     assert_equals('NEGATIVE_VALUE', $engine->assessMarket('TOTAL_GOALS', $prices, 'OVER_1_5', 0.595)['valueClass']);

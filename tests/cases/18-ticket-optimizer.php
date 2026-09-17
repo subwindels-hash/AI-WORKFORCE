@@ -99,3 +99,30 @@ test('ticket optimizer enforces WINDELS daily ticket hard floors', function () {
     assert_equals(2, $usable['poolSize'], 'candidates clearing BOTH stricter floors enter the pool');
     assert_equals('QUALIFIED', $usable['status']);
 });
+
+test('ticket optimizer prefers lower-variance markets only as a final tie-break', function () {
+    // Operator decision 2026-09-18: DOUBLE_CHANCE / DRAW_NO_BET rank ahead of
+    // TOTAL_GOALS, which ranks ahead of everything else — but ONLY between
+    // candidates the measured criteria (confidence, quality, EV, risk) cannot
+    // separate. Identical scores, identical freshness: the DOUBLE_CHANCE leg
+    // must win the single-slot ticket over the MATCH_RESULT leg.
+    $dc = array_merge(fx_candidate(1, 2.0, .10, 'L1'), ['market' => 'DOUBLE_CHANCE', 'selection' => 'HOME_OR_DRAW', 'oddsAgeSeconds' => 60]);
+    $mr = array_merge(fx_candidate(2, 2.0, .10, 'L2'), ['market' => 'MATCH_RESULT', 'selection' => 'HOME', 'oddsAgeSeconds' => 60]);
+    $out = (new TicketOptimizer())->optimize([$mr, $dc], ['targetOddsMin' => 2, 'targetOddsMax' => 3, 'maxSelections' => 1]);
+    assert_equals('QUALIFIED', $out['status']);
+    assert_equals(1, (int) $out['selections'][0]['matchId'], 'equal-score tie lands on the lower-variance DOUBLE_CHANCE leg');
+
+    // TOTAL_GOALS outranks an unlisted market at a tie, but DRAW_NO_BET
+    // outranks TOTAL_GOALS.
+    $tg = array_merge(fx_candidate(3, 2.0, .10, 'L3'), ['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'oddsAgeSeconds' => 60]);
+    $dnb = array_merge(fx_candidate(4, 2.0, .10, 'L4'), ['market' => 'DRAW_NO_BET', 'selection' => 'HOME', 'oddsAgeSeconds' => 60]);
+    $out2 = (new TicketOptimizer())->optimize([$tg, $dnb], ['targetOddsMin' => 2, 'targetOddsMax' => 3, 'maxSelections' => 1]);
+    assert_equals(4, (int) $out2['selections'][0]['matchId'], 'DRAW_NO_BET wins the tie over TOTAL_GOALS');
+
+    // Never a substitute for edge: a higher-EV MATCH_RESULT leg still beats a
+    // lower-EV DOUBLE_CHANCE one — the priority is a tie-break, not a filter.
+    $dcWeak = array_merge(fx_candidate(5, 2.0, .05, 'L5'), ['market' => 'DOUBLE_CHANCE', 'selection' => 'HOME_OR_DRAW', 'oddsAgeSeconds' => 60]);
+    $mrStrong = array_merge(fx_candidate(6, 2.0, .20, 'L6'), ['market' => 'MATCH_RESULT', 'selection' => 'HOME', 'oddsAgeSeconds' => 60]);
+    $out3 = (new TicketOptimizer())->optimize([$dcWeak, $mrStrong], ['targetOddsMin' => 2, 'targetOddsMax' => 3, 'maxSelections' => 1]);
+    assert_equals(6, (int) $out3['selections'][0]['matchId'], 'measured EV still outranks market priority');
+});

@@ -122,6 +122,16 @@ test('football: the value classes are a scale, and none of them is a promise', f
     assert_equals(OddsIntelligence::CLASS_STRONG_VALUE, $classify(0.08, 0.05, 0.16)['class'], 'a wide, robust gap is strong value');
     assert_equals(OddsIntelligence::CLASS_POSITIVE_VALUE, $classify(0.03, 0.02, 0.06)['class'], 'a narrow gap is still positive');
     assert_equals(OddsIntelligence::CLASS_FAIR, $classify(0.002, 0.0, 0.004)['class'], 'a gap inside the noise band is fair');
+    // The positive floor's default is 2.0 points (operator decision
+    // 2026-09-18, raised from 1.0): a 1.5-point gap is inside the vig's own
+    // noise and must read FAIR, not POSITIVE_VALUE, unless an operator
+    // explicitly loosens WINDELS_FOOTBALL_VALUE_POSITIVE_PP.
+    assert_equals(OddsIntelligence::CLASS_FAIR, $classify(0.015, 0.01, 0.03)['class'], 'a sub-2-point gap is noise, not value');
+    $thresholds = (new FootballConfiguration([]))->valueThresholds();
+    assert_close(0.02, (float) $thresholds['positive'], 1e-9, 'the default positive floor is 2.0 points');
+    $loosened = (new OddsIntelligence(new FootballConfiguration(['WINDELS_FOOTBALL_VALUE_POSITIVE_PP' => '1'])))
+        ->classify(0.015, 0.01, OddsIntelligence::PRICE_COMPLETE, 0.03);
+    assert_equals(OddsIntelligence::CLASS_POSITIVE_VALUE, $loosened['class'], 'an operator may loosen the floor back to 1 point explicitly');
     assert_equals(OddsIntelligence::CLASS_NEGATIVE_VALUE, $classify(-0.03, -0.02, -0.06)['class'], 'a small shortfall is negative');
     assert_equals(OddsIntelligence::CLASS_AVOID, $classify(-0.12, -0.09, -0.2)['class'], 'a large one is avoid');
     // Strong value must survive de-vigging: looking good only against a padded

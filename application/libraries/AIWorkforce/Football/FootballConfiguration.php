@@ -244,12 +244,18 @@ final class FootballConfiguration
      * ticket layer so the same price cannot be "value" on one screen and
      * "fair" on another.
      *
+     * The `positive` default is 2.0 points (operator decision 2026-09-18,
+     * raised from 1.0): a book's own margin routinely puts 1–2 points of
+     * noise on a single selection, so a sub-2-point gap is more often the
+     * vig than the football. Operators wanting the looser reading can set
+     * WINDELS_FOOTBALL_VALUE_POSITIVE_PP=1 back explicitly.
+     *
      * @return array{strong:float,positive:float,avoid:float}
      */
     public function valueThresholds(): array
     {
         $strong = max(0.0, (float) $this->num('WINDELS_FOOTBALL_VALUE_STRONG_PP', 4.0)) / 100.0;
-        $positive = max(0.0, (float) $this->num('WINDELS_FOOTBALL_VALUE_POSITIVE_PP', 1.0)) / 100.0;
+        $positive = max(0.0, (float) $this->num('WINDELS_FOOTBALL_VALUE_POSITIVE_PP', 2.0)) / 100.0;
         $avoid = max(0.0, (float) $this->num('WINDELS_FOOTBALL_VALUE_AVOID_PP', 4.0)) / 100.0;
         // A positive floor above the strong line would invert the scale; the
         // narrower of the two wins so a misconfiguration degrades rather than
