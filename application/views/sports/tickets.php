@@ -24,11 +24,15 @@ $ticketDateShown = gmdate('m/d/Y', (int) strtotime($ticketDateIso . ' 00:00:00 U
 
   <section class="sports-actionbar" aria-label="Ticket generation controls">
     <?php if (!empty($caps['sync'])): ?>
-      <form method="post" action="/sports/generate-ticket" class="sports-date-form" onsubmit="return confirm('Generate odds prediction ticket for today from stored fixtures &amp; odds?')">
+      <form method="post" action="/sports/generate-ticket" class="sports-date-form" onsubmit="return confirm('Generate a fresh odds prediction ticket from current odds? A pending ticket is superseded (kept for audit); an approved ticket is never replaced.')">
         <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
         <label for="ticket-generate-date">Ticket date (UTC)</label>
         <input class="sel" type="date" id="ticket-generate-date" name="date" value="<?= e($ticketDateIso) ?>" title="Ticket date (UTC) <?= e($ticketDateShown) ?>">
         <span class="mono sports-chip-strong"><?= e($ticketDateShown) ?></span>
+        <?php // Every click regenerates: refresh supersedes the day's PENDING
+              // ticket (kept for audit) and rebuilds from current odds. An
+              // APPROVED ticket is never replaced. ?>
+        <input type="hidden" name="refresh" value="1">
         <button class="btn small sports-ticket-btn">🎯 Odds Prediction Ticket</button>
       </form>
     <?php else: ?>
@@ -512,12 +516,16 @@ $heroMarketLabel = function (string $market, string $selection): string {
           <p class="sports-section-intro">Every ticket persisted so far, with its approval state, settlement state and profit/loss. Prediction accuracy, Brier, ECE and the 30-day settlement window are reported once, on <a href="/football">Football Intelligence</a> — they are not repeated here.<?php if (!empty($perf['demoBanner'])): ?> <b><?= e((string) $perf['demoBanner']) ?></b><?php endif; ?></p>
       <?php if (!empty($caps['sync'])): ?>
         <div class="sports-actions">
-          <form method="post" action="/sports/generate-ticket" onsubmit="return confirm('Generate odds prediction ticket now?')">
+          <form method="post" action="/sports/generate-ticket" onsubmit="return confirm('Generate a fresh odds prediction ticket now from current odds? A pending ticket is superseded (kept for audit); an approved ticket is never replaced.')">
             <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
             <input type="hidden" name="date" value="<?= e(gmdate('Y-m-d')) ?>">
+            <?php // Every click regenerates: refresh supersedes the day's
+                  // PENDING ticket (kept for audit) and rebuilds from current
+                  // odds. An APPROVED ticket is never replaced. ?>
+            <input type="hidden" name="refresh" value="1">
             <button class="btn small primary sports-ticket-btn">🎯 Odds Prediction Ticket</button>
           </form>
-          <span class="sports-note">Optional manual run/retry. Existing tickets are returned; missing tickets are generated without duplicates.</span>
+          <span class="sports-note">Every click generates a fresh ticket from current odds — a pending ticket is superseded (kept for audit) and rebuilt. An approved ticket is never replaced.</span>
         </div>
       <?php endif; ?>
       <?php if (empty($tickets)): ?>

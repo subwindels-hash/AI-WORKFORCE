@@ -77,8 +77,16 @@ class TicketOptimizer
 
     public function optimize(array $candidates, array $config = []): array
     {
-        $min = max(5.0, (float) ($config['targetOddsMin'] ?? 5.0));
+        // The combined-odds floor is ABSOLUTE: a ticket is never generated
+        // below 5.0. The constant is the single source of truth, shared with
+        // ConfigurationService, so the config screen and the search can never
+        // disagree — a caller may raise the minimum but never lower it.
+        $min = max(ConfigurationService::MIN_TARGET_ODDS_FLOOR, (float) ($config['targetOddsMin'] ?? ConfigurationService::MIN_TARGET_ODDS_FLOOR));
         $max = min(8.0, (float) ($config['targetOddsMax'] ?? 8.0));
+        // Never an impossible/empty window: if a caller's maximum lands below
+        // the enforced 5.0 floor, lift it to the floor so the search still runs
+        // over a valid 5.0+ range instead of silently returning nothing.
+        if ($max + 1e-9 < $min) $max = $min;
         $limit = min(6, max(1, (int) ($config['maxSelections'] ?? 5)));
         // Absolute floors mirror the configuration validation range
         // [ConfigurationService::MIN_CONFIDENCE_FLOOR, 100]: an explicit admin
@@ -193,6 +201,18 @@ class TicketOptimizer
                 'reason' => $best !== null ? null : $this->tierFailureReason($pool, $min, $max, $limit, $tierCorrelation),
             ];
             if ($best === null) continue;
+            // Final airtight guard: a combination is only ever accepted at or
+            // above the 5.0 floor. The search already enforces this, but the
+            // invariant is asserted here too so no future change to the walk
+            // can ever leak a sub-floor ticket. A rounding wobble at the edge
+            // (4.9999) is not a ticket — it is treated as "nothing qualified".
+            if (round((float) $best['totalOdds'], 4) + 1e-9 < $min) {
+                $attempts[count($attempts) - 1]['found'] = false;
+                $attempts[count($attempts) - 1]['reason'] = sprintf(
+                    'the strongest combination totalled %.4f, below the %.2f minimum combined odds — no sub-floor ticket is generated',
+                    (float) $best['totalOdds'], $min);
+                continue;
+            }
 
             $fallbackUsed = $tier !== self::TIER_PREFERRED;
             $selections = array_map(fn(array $r): array => $r['candidate'], $best['selections']);

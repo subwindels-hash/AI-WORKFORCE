@@ -33,6 +33,29 @@ test('ticket optimizer never combines same-match selections', function () {
     assert_equals('NO_QUALIFIED_TICKET', $out['status']);
 });
 
+test('ticket optimizer never generates below the 5.0 combined-odds floor', function () {
+    // A single 4.9 leg cannot make a ticket: 4.9 < 5.0, so the day honestly
+    // returns nothing rather than a sub-floor ticket.
+    $low = (new TicketOptimizer())->optimize([fx_candidate(1, 4.9, .50)], ['targetOddsMin' => 5, 'targetOddsMax' => 8, 'maxSelections' => 1]);
+    assert_equals('NO_QUALIFIED_TICKET', $low['status'], '4.9 is below the floor — no ticket');
+
+    // Exactly 5.0 is allowed — five is the LOWEST a ticket may be.
+    $atFloor = (new TicketOptimizer())->optimize([fx_candidate(1, 5.0, .50)], ['targetOddsMin' => 5, 'targetOddsMax' => 8, 'maxSelections' => 1]);
+    assert_equals('QUALIFIED', $atFloor['status'], '5.0 exactly is a valid ticket');
+    assert_close(5.0, (float) $atFloor['totalOdds'], 0.001);
+    assert_true((float) $atFloor['totalOdds'] >= 5.0, 'the generated ticket is 5.0 and above');
+
+    // A caller asking for a LOWER minimum cannot lower the floor: 2.0 is
+    // clamped up to 5.0, so a 3.0 leg still cannot make a ticket.
+    $cannotLower = (new TicketOptimizer())->optimize([fx_candidate(1, 3.0, .50)], ['targetOddsMin' => 2.0, 'targetOddsMax' => 4.0, 'maxSelections' => 1]);
+    assert_equals('NO_QUALIFIED_TICKET', $cannotLower['status'], 'the 5.0 floor cannot be lowered by config');
+
+    // Two legs that multiply to >= 5.0 qualify; the total is never below 5.0.
+    $combo = (new TicketOptimizer())->optimize([fx_candidate(1, 2.4, .10, 'L1'), fx_candidate(2, 2.3, .10, 'L2')], ['targetOddsMin' => 5, 'targetOddsMax' => 8, 'maxSelections' => 3]);
+    assert_equals('QUALIFIED', $combo['status']);
+    assert_true((float) $combo['totalOdds'] >= 5.0, 'a multi-leg ticket is still 5.0 and above');
+});
+
 test('ticket optimizer enforces WINDELS daily ticket hard floors', function () {
     // Both hard gates are 30. An explicit admin setting is honoured when it is
     // STRICTER, and can never lower either gate. 29.99 is rejected on either

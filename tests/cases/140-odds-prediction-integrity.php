@@ -167,11 +167,25 @@ test('odds integrity: ticket governance refuses legs without id, market or price
         'absurd price' => array_merge($good, ['odds' => 5000.0, 'value' => ['odds' => 5000.0]]),
         'no odds timestamp' => array_merge($good, ['oddsTimestamp' => null]),
     ] as $label => $leg) {
+        // totalOdds 6.0 clears the 5.0 combined-odds floor so the record()
+        // path reaches per-leg validation — the behaviour under test here.
         assert_throws(InvalidArgumentException::class,
-            fn() => $governance->record(['status' => 'QUALIFIED', 'selections' => [$leg]], 'v1'),
+            fn() => $governance->record(['status' => 'QUALIFIED', 'totalOdds' => 6.0, 'selections' => [$leg]], 'v1'),
             $label . ' aborts the ticket');
     }
     assert_equals(0, count($repo->tickets), 'no partial ticket stored');
+});
+
+test('odds integrity: governance never persists a ticket below the 5.0 odds floor', function () {
+    $repo = new SportsRepositoryStub();
+    $governance = new TicketGovernance($repo, fx140_audit(), new CorrelationEngine());
+    $leg = ['matchId' => 7, 'market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'odds' => 4.9,
+        'oddsTimestamp' => gmdate('c'), 'value' => ['odds' => 4.9], 'match' => ['homeTeam' => 'H', 'awayTeam' => 'A']];
+    // Even a fully valid leg cannot be stored when the combined odds are below
+    // 5.0 — the day returns NO_QUALIFIED_TICKET rather than a sub-floor ticket.
+    $out = $governance->record(['status' => 'QUALIFIED', 'totalOdds' => 4.9, 'selections' => [$leg]], 'v1');
+    assert_equals('NO_QUALIFIED_TICKET', $out['status'], 'a 4.9 ticket is refused at persistence');
+    assert_equals(0, count($repo->tickets), 'nothing below the floor is ever stored');
 });
 
 test('odds integrity: collectAll gathers every provider and isolates failures', function () {

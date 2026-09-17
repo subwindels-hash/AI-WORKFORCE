@@ -18,13 +18,17 @@ class Cron extends MY_Controller
         }
         @set_time_limit(600);
         $scheduler = new \AIWorkforce\Cron\CronScheduler($store);
-        $runners = \AIWorkforce\Cron\CronRunner::runners($this);
         $only = $isCli ? trim((string) ($_SERVER['argv'][3] ?? '')) : trim((string) $this->input->get('job', true));
         try {
             if ($only !== '') {
+                // A single-job request is an explicit "run this now": force it so
+                // the live sweep polls the provider instead of self-gating.
+                $runners = \AIWorkforce\Cron\CronRunner::runners($this, true);
                 if (!isset($runners[$only])) throw new \InvalidArgumentException('unknown cron job: ' . $only);
                 $result = [$only => $scheduler->runJob($only, $runners[$only])];
             } else {
+                // The every-minute due sweep keeps each job self-gated.
+                $runners = \AIWorkforce\Cron\CronRunner::runners($this);
                 $result = $scheduler->runDue(fn(string $id) => $runners[$id] ?? null);
             }
         } catch (\InvalidArgumentException $e) {

@@ -6,14 +6,19 @@ class CronRunner
 {
     /**
      * @param object $ci CodeIgniter instance (platform + AIWorkforce_model)
+     * @param bool $manual true for an explicit operator "Run now" (or a
+     *   single-job cron URL). The live sweep then FORCES an immediate provider
+     *   poll — bypassing the idle gate and throttle — so a manual run can never
+     *   report SKIPPED_NO_MATCHES_IN_PLAY while a match is on. The every-minute
+     *   scheduled sweep passes false and keeps its quota discipline.
      * @return array<string,callable>
      */
-    public static function runners(object $ci): array
+    public static function runners(object $ci, bool $manual = false): array
     {
         return [
             'ops' => fn() => self::ops($ci),
             'sports' => fn() => self::sports($ci),
-            'sports-live' => fn() => self::sportsLive($ci),
+            'sports-live' => fn() => self::sportsLive($ci, $manual),
             'football' => fn() => self::football($ci),
             'lottery' => fn() => self::lottery($ci),
             'protection' => fn() => self::protection($ci),
@@ -95,12 +100,13 @@ class CronRunner
     /**
      * Live goal-score sweep. Self-gated by LiveScoreService's refresh
      * interval, so a minute tick is harmless when the interval has not
-     * elapsed: it reports THROTTLED and never touches the provider.
+     * elapsed: it reports THROTTLED and never touches the provider. A manual
+     * "Run now" ($manual=true) forces an immediate provider poll instead.
      */
-    public static function sportsLive(object $ci): array
+    public static function sportsLive(object $ci, bool $manual = false): array
     {
         $service = new \AIWorkforce\Sports\SportsCronService($ci->AIWorkforce_model->sports, $ci->AIWorkforce_model->audit, $ci->platform->sports);
-        return $service->run('live');
+        return $service->run('live', null, $manual ? ['force' => true] : []);
     }
 
     /**

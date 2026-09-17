@@ -1325,7 +1325,9 @@ class Admin extends App_Controller
         $actor = $this->gate('admin.settings.manage'); if (!$actor) return;
         if (!$this->validCsrf()) { $this->flash('error', 'Invalid security token.'); redirect('/admin/cron'); return; }
         $job = (string) $job;
-        $runners = \AIWorkforce\Cron\CronRunner::runners($this);
+        // A manual "Run now" forces its job: the live sweep polls the provider
+        // immediately instead of self-gating to SKIPPED/THROTTLED.
+        $runners = \AIWorkforce\Cron\CronRunner::runners($this, true);
         if (!isset($runners[$job])) { $this->flash('error', 'Unknown cron job.'); redirect('/admin/cron'); return; }
         @set_time_limit(600);
         $store = new \AIWorkforce\Cron\PlatformSettingsCronStore($this->AIWorkforce_model->db);
