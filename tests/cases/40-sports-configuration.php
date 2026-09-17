@@ -57,6 +57,25 @@ test('configuration validation rejects malformed values', function () {
     assert_false($svc->update(['stake_amount' => 500, 'max_exposure' => 10], 'a')['ok']);
     assert_false($svc->update(['platform_mode' => 'MOON'], 'a')['ok']);
     assert_false($svc->update(['allowed_markets' => 'TOTAL_GOALS'], 'a')['ok']);
+    // The 5.0 combined-odds floor is absolute: a minimum below 5.0 is refused,
+    // exactly 5.0 is accepted, and raising it is still allowed.
+    assert_false($svc->update(['target_odds_min' => 4.9, 'target_odds_max' => 8.0], 'a')['ok'], '4.9 is below the 5.0 odds floor');
+    assert_false($svc->update(['target_odds_min' => 2.0, 'target_odds_max' => 4.0], 'a')['ok'], 'a sub-5.0 window is refused');
+    assert_true($svc->update(['target_odds_min' => 5.0, 'target_odds_max' => 8.0], 'a', 'the floor itself is valid')['ok']);
+    assert_true($svc->update(['target_odds_min' => 7.0, 'target_odds_max' => 12.0], 'a', 'a stricter minimum is allowed')['ok']);
+});
+
+test('configuration clamps a legacy sub-5.0 odds minimum up to the floor', function () {
+    // A row written before the 5.0 rule (or by any path that stored a lower
+    // minimum) must never leak a sub-floor minimum into a generation run.
+    $repo = new SportsRepositoryStub();
+    $audit = new class implements AuditRepository { public function emit(string $t, string $s, array $d = [], string $a = 'system'): void {} public function recent(int $l = 100): array { return []; } };
+    $repo->configurations[] = array_merge(ConfigurationService::defaults(), [
+        'version' => 5, 'target_odds_min' => 2.0, 'target_odds_max' => 3.0,
+    ]);
+    $active = (new ConfigurationService($repo, $audit))->active();
+    assert_true((float) $active['target_odds_min'] >= 5.0, 'a legacy 2.0 minimum is clamped up to 5.0');
+    assert_true((float) $active['target_odds_max'] >= (float) $active['target_odds_min'], 'the window stays valid (max >= min)');
 });
 
 test('AUTOMATED_EXECUTION is refused without explicit authorization', function () {

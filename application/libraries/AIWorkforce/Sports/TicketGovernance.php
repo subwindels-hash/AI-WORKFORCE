@@ -40,6 +40,22 @@ class TicketGovernance
             ];
         }
         $sels = $optimized['selections'];
+        // The 5.0 combined-odds floor is enforced one last time at the moment
+        // of persistence: no ticket is ever stored below 5.0 total odds, no
+        // matter how it was optimized. This is the final backstop behind the
+        // optimizer's own floor, so a future caller that assembles an
+        // "optimized" array by hand can never slip a sub-floor ticket into the
+        // database. Nothing is padded to reach the number — a ticket that
+        // cannot honestly clear 5.0 is simply not recorded.
+        if ((float) ($optimized['totalOdds'] ?? 0) + 1e-9 < ConfigurationService::MIN_TARGET_ODDS_FLOOR) {
+            return [
+                'status' => 'NO_QUALIFIED_TICKET',
+                'failureCode' => FailureTaxonomy::NO_COMBINABLE_TICKET,
+                'reason' => sprintf('combined odds %.2f are below the %.2f minimum — no ticket is generated below %.1f combined odds',
+                    (float) ($optimized['totalOdds'] ?? 0), ConfigurationService::MIN_TARGET_ODDS_FLOOR, ConfigurationService::MIN_TARGET_ODDS_FLOOR),
+                'candidateDecisions' => $optimized['candidateDecisions'] ?? [],
+            ];
+        }
         // A ticket is only as honest as its legs. Every selection is validated
         // BEFORE anything is persisted: a real internal match id (never 0 or
         // missing), a supported market/selection from verified odds data, a

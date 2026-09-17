@@ -52,6 +52,19 @@ class ConfigurationService
      */
     public const MIN_DATA_QUALITY_FLOOR = 30;
 
+    /**
+     * The hard combined-odds floor (operator decision 2026-09-17): NO ticket
+     * is ever generated below 5.0 total odds. Five is the LOWEST a ticket may
+     * be — every generation is 5.0 and above. An administrator may raise the
+     * configured minimum, but no configuration path may lower it below this,
+     * and TicketOptimizer enforces the same constant on the combination search
+     * so the two surfaces can never disagree. This is a bound on the ODDS
+     * WINDOW only; it never pads a ticket with an extra leg or a fake market to
+     * reach the number — a day that cannot reach 5.0 with real, confident,
+     * positive-value legs honestly returns NO QUALIFIED TICKET.
+     */
+    public const MIN_TARGET_ODDS_FLOOR = 5.0;
+
     public function __construct(private SportsRepository $repo, private AuditRepository $audit) {}
 
     /** Current active configuration (latest version), or a safe default when none exists yet. */
@@ -79,6 +92,14 @@ class ConfigurationService
         $row['version'] = (int) $row['version'];
         $row['allowed_markets'] = $row['allowed_markets'] ?? [];
         $row['allowed_leagues'] = $row['allowed_leagues'] ?? [];
+        // The 5.0 combined-odds floor is absolute and retroactive: a row
+        // written before the rule (or by a path that stored a lower minimum)
+        // is clamped up here so no generation can ever read a sub-5.0 minimum.
+        // The maximum is lifted with it when a legacy window would otherwise
+        // collapse (min > max), so the engine keeps a usable 5.0+ range instead
+        // of silently generating nothing.
+        $row['target_odds_min'] = max(self::MIN_TARGET_ODDS_FLOOR, (float) $row['target_odds_min']);
+        $row['target_odds_max'] = max((float) $row['target_odds_max'], $row['target_odds_min']);
         return $row;
     }
 
@@ -223,7 +244,13 @@ class ConfigurationService
         if (!in_array($c['max_correlation'], self::CORRELATION_LIMITS, true)) return 'max_correlation must be LOW or MEDIUM';
         if (!in_array($c['void_policy'], self::VOID_POLICIES, true)) return 'void_policy must be one of ' . implode(', ', self::VOID_POLICIES);
         $min = (float) $c['target_odds_min']; $max = (float) $c['target_odds_max'];
-        if ($min <= 1.0 || $max <= $min) return 'target odds range must satisfy 1.0 < min <= max';
+        // The combined-odds floor is absolute: a ticket is never generated
+        // below 5.0. An admin may raise the minimum but never set it lower.
+        if ($min + 1e-9 < self::MIN_TARGET_ODDS_FLOOR) {
+            return 'target_odds_min must be at least ' . number_format(self::MIN_TARGET_ODDS_FLOOR, 1)
+                . ' — no ticket is ever generated below ' . number_format(self::MIN_TARGET_ODDS_FLOOR, 1) . ' combined odds';
+        }
+        if ($max <= $min) return 'target odds range must satisfy min <= max (min at least ' . number_format(self::MIN_TARGET_ODDS_FLOOR, 1) . ')';
         $maxSel = (int) $c['max_selections'];
         if ($maxSel < 1 || $maxSel > 12) return 'max_selections must be within [1, 12]';
         // The configurable floor is 30: a legitimately measured 29.99%
