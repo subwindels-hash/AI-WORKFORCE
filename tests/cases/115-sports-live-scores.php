@@ -290,6 +290,77 @@ test('live scores: refresh throttles to one provider sweep per interval for ever
     assert_equals(1, $provider->liveCalls - $callsAfterFirst, 'exactly one provider request for the due sweep');
 });
 
+test('live scores: force=true polls the provider even with discovery DISABLED and nothing in play', function () {
+    // Operator "Run now": the idle gate must never make a manual run report a
+    // skip. Even with discovery off and no stored fixtures, force polls.
+    putenv('WINDELS_SPORTS_LIVE_REFRESH_SECONDS=10');
+    putenv('WINDELS_SPORTS_LIVE_DISCOVERY_SECONDS=0');
+    $repo = new SportsRepositoryStub();
+    $audit = fx_live_audit();
+    $sync = new SportsSyncService($repo, $audit, new DataQualityEngine());
+    $provider = fx_live_provider([fx_live_row(2, 1, 55)]);
+    $manager = new SportsProviderManager();
+    $manager->register($provider);
+    $service = new LiveScoreService($repo, $audit, $sync, $manager);
+
+    // A normal (unforced) tick skips — proving the gate is closed.
+    assert_equals('SKIPPED_NO_MATCHES_IN_PLAY', $service->refresh()['status']);
+    assert_equals(0, $provider->liveCalls, 'the unforced tick spent no request');
+
+    // Run now: forces an immediate provider poll regardless of the gate.
+    $forced = $service->refresh(null, true);
+    assert_equals('COMPLETED', $forced['status'], 'a forced run polls the provider');
+    assert_equals(1, $provider->liveCalls, 'exactly one forced request');
+    $board = $service->board();
+    assert_equals('LIVE', $board['status'], 'the match a manual run found is shown to users');
+    assert_equals(1, count($board['matches']));
+    putenv('WINDELS_SPORTS_LIVE_DISCOVERY_SECONDS');
+    putenv('WINDELS_SPORTS_LIVE_REFRESH_SECONDS');
+});
+
+test('live scores: force=true bypasses the throttle so a manual run is never THROTTLED', function () {
+    // Two fast scheduled ticks would throttle the second; a forced Run now in
+    // the same window still polls.
+    [, $service, , , $provider] = fx_live_stack([fx_live_row(0, 0, 5)], 600);
+    $first = $service->refresh();
+    assert_equals('COMPLETED', $first['status']);
+    $callsAfterFirst = $provider->liveCalls;
+
+    // An immediate unforced tick is throttled (interval is 600s).
+    assert_equals('THROTTLED', $service->refresh()['status']);
+    assert_equals($callsAfterFirst, $provider->liveCalls, 'throttled tick spent no request');
+
+    // Run now: forces through the throttle and polls again.
+    $provider->liveRows = [fx_live_row(1, 0, 12)];
+    $forced = $service->refresh(null, true);
+    assert_equals('COMPLETED', $forced['status'], 'a forced run is never throttled');
+    assert_equals($callsAfterFirst + 1, $provider->liveCalls, 'the forced run spent exactly one request');
+    assert_equals(1, count($forced['goalEvents']), 'and it detected the new goal immediately');
+});
+
+test('live scores: cron sports-live job forces a provider poll on a manual run', function () {
+    // The Admin "Run now" path: CronRunner::runners($ci, true) → sportsLive
+    // forces, so SportsCronService::run('live', …, ['force' => true]) polls.
+    putenv('WINDELS_SPORTS_LIVE_REFRESH_SECONDS=10');
+    putenv('WINDELS_SPORTS_LIVE_DISCOVERY_SECONDS=0');
+    $repo = ci()->AIWorkforce_model->sports;   // fresh test DB — nothing in play
+    $audit = ci()->AIWorkforce_model->audit;
+    $sports = new \AIWorkforce\Sports\SportsIntelligence($repo, $audit);
+    $provider = fx_live_provider([fx_live_row(1, 1, 40)]);
+    $sports->providers->register($provider);
+    $cron = new \AIWorkforce\Sports\SportsCronService($repo, $audit, $sports);
+
+    $skipped = $cron->run('live');
+    assert_equals('SKIPPED_NO_MATCHES_IN_PLAY', $skipped['status'], 'the scheduled tick self-gates');
+    assert_equals(0, $provider->liveCalls, 'the scheduled tick spent no provider request');
+
+    $forced = $cron->run('live', null, ['force' => true]);
+    assert_equals('COMPLETED', $forced['status'], 'a manual run forces the poll');
+    assert_equals(1, $provider->liveCalls, 'exactly one forced provider request');
+    putenv('WINDELS_SPORTS_LIVE_DISCOVERY_SECONDS');
+    putenv('WINDELS_SPORTS_LIVE_REFRESH_SECONDS');
+});
+
 test('live scores: board serves stored scores and replays goal events since a timestamp', function () {
     [, $service, , , $provider] = fx_live_stack([fx_live_row(0, 0, 1)]);
     $service->refresh();
@@ -405,6 +476,6 @@ test('live scores: live endpoint, route, console panel and cron jobs are wired',
     $cron = file_get_contents(FCPATH . 'application/libraries/AIWorkforce/Cron/CronScheduler.php');
     assert_contains("'sports-live'", $cron, 'self-gated sports-live cron job registered');
     $runner = file_get_contents(FCPATH . 'application/libraries/AIWorkforce/Cron/CronRunner.php');
-    assert_contains("'sports-live' => fn() => self::sportsLive(\$ci)", $runner, 'cron runner executes the live sweep');
+    assert_contains("'sports-live' => fn() => self::sportsLive(\$ci, \$manual)", $runner, 'cron runner executes the live sweep');
     assert_in_array('live', \AIWorkforce\Sports\SportsCronService::JOBS, 'live is a sports-cron job');
 });

@@ -64,7 +64,7 @@ class SportsCronService
         return match ($job) {
             'fixtures' => $this->jobFixtures($date),
             'odds' => $this->jobOdds($date),
-            'live' => $this->jobLive($date),
+            'live' => $this->jobLive($date, $options),
             'results' => $this->jobResults($date),
             'quality' => $this->jobQuality($date),
             'ticket' => $this->jobTicket($date, $options),
@@ -213,13 +213,16 @@ class SportsCronService
      * when WINDELS_SPORTS_LIVE_REFRESH_SECONDS (default 60) has elapsed, and
      * records a SPORTS_GOAL_SCORED audit event per goal it observes.
      */
-    private function jobLive(string $date): array
+    private function jobLive(string $date, array $options = []): array
     {
-        $result = $this->sports->liveScores->refresh();
+        // An operator "Run now" (force=true) polls the provider immediately,
+        // bypassing the idle gate and throttle; automatic ticks stay self-gated.
+        $result = $this->sports->liveScores->refresh(null, !empty($options['force']));
         return [
             'status' => $result['status'],
             'providers' => $result['providers'] ?? [],
             'goals' => count($result['goalEvents'] ?? []),
+            'mode' => $result['mode'] ?? null,
             'errors' => $result['errors'] ?? [],
         ];
     }

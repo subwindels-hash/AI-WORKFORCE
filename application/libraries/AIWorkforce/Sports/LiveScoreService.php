@@ -135,8 +135,15 @@ class LiveScoreService
      *    of viewers costs one provider request per interval — not one each;
      *  - COMPLETED / PARTIAL / FAILED / SKIPPED / NO_PROVIDER — the sweep
      *    itself (per-provider detail in `providers`).
+     *
+     * @param int|null $now  test seam; defaults to the wall clock.
+     * @param bool $force     operator "Run now": bypass BOTH the idle gate and
+     *                        the throttle so the provider is polled immediately.
+     *                        A busy live window still shares its bucket key, so
+     *                        a forced poll can never double-charge quota against
+     *                        a scheduled sweep in the same interval.
      */
-    public function refresh(?int $now = null): array
+    public function refresh(?int $now = null, bool $force = false): array
     {
         $now = $now ?? time();
         $interval = $this->refreshIntervalSeconds();
@@ -151,31 +158,39 @@ class LiveScoreService
         // know about are found and shown, instead of being hidden forever.
         $inPlay = $this->matchWindowOpen($now);
         $discoveryInterval = $this->discoveryIntervalSeconds();
-        if (!$inPlay && $discoveryInterval <= 0) {
-            // Discovery disabled (strict quota): behave as before and skip.
-            return ['status' => 'SKIPPED_NO_MATCHES_IN_PLAY', 'providers' => [], 'goalEvents' => [], 'errors' => [],
-                'retryInSeconds' => 60, 'refreshIntervalSeconds' => $interval];
-        }
-        // The active throttle: fast while in play, slow while only discovering.
-        $effectiveInterval = $inPlay ? $interval : $discoveryInterval;
-        $last = $this->repo->listSyncRuns('LIVE', 1)[0] ?? null;
-        if ($last !== null && ($last['status'] ?? '') !== 'FAILED') {
-            $at = strtotime((string) ($last['started_at'] ?? ''));
-            if ($at !== false) {
-                $age = max(0, $now - $at);
-                if ($age < $effectiveInterval) {
-                    // While only discovering, a throttled tick reports the honest
-                    // "nothing in play yet" state so callers do not read it as a
-                    // live board — the next discovery poll is still due later.
-                    $status = $inPlay ? 'THROTTLED' : 'SKIPPED_NO_MATCHES_IN_PLAY';
-                    return ['status' => $status, 'retryInSeconds' => max(1, $effectiveInterval - $age),
-                        'providers' => [], 'goalEvents' => [], 'errors' => [],
-                        'refreshIntervalSeconds' => $interval, 'discoveryIntervalSeconds' => $discoveryInterval,
-                        'mode' => $inPlay ? 'IN_PLAY' : 'DISCOVERY'];
+        // An explicit operator "Run now" always polls: skip the idle gate and
+        // the throttle below so a manual click can never report a skip while a
+        // live match is on. Automatic ticks keep their quota discipline.
+        if (!$force) {
+            if (!$inPlay && $discoveryInterval <= 0) {
+                // Discovery disabled (strict quota): behave as before and skip.
+                return ['status' => 'SKIPPED_NO_MATCHES_IN_PLAY', 'providers' => [], 'goalEvents' => [], 'errors' => [],
+                    'retryInSeconds' => 60, 'refreshIntervalSeconds' => $interval];
+            }
+            // The active throttle: fast while in play, slow while only discovering.
+            $effectiveInterval = $inPlay ? $interval : $discoveryInterval;
+            $last = $this->repo->listSyncRuns('LIVE', 1)[0] ?? null;
+            if ($last !== null && ($last['status'] ?? '') !== 'FAILED') {
+                $at = strtotime((string) ($last['started_at'] ?? ''));
+                if ($at !== false) {
+                    $age = max(0, $now - $at);
+                    if ($age < $effectiveInterval) {
+                        // While only discovering, a throttled tick reports the honest
+                        // "nothing in play yet" state so callers do not read it as a
+                        // live board — the next discovery poll is still due later.
+                        $status = $inPlay ? 'THROTTLED' : 'SKIPPED_NO_MATCHES_IN_PLAY';
+                        return ['status' => $status, 'retryInSeconds' => max(1, $effectiveInterval - $age),
+                            'providers' => [], 'goalEvents' => [], 'errors' => [],
+                            'refreshIntervalSeconds' => $interval, 'discoveryIntervalSeconds' => $discoveryInterval,
+                            'mode' => $inPlay ? 'IN_PLAY' : 'DISCOVERY'];
+                    }
                 }
             }
         }
-        $bucket = intdiv($now, $effectiveInterval);
+        // Bucket key: forced polls get their own second-granularity key so a
+        // manual "Run now" is never deduplicated against a scheduled sweep, yet
+        // two forced clicks in the same second still share one provider request.
+        $bucket = $force ? 'force:' . $now : (string) intdiv($now, max(1, $inPlay ? $interval : max($interval, $discoveryInterval)));
         $providers = []; $goalEvents = []; $errors = [];
         $attempted = 0; $completed = 0; $failed = 0;
         foreach ($this->providers->all() as $provider) {
