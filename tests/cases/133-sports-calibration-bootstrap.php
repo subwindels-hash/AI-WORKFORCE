@@ -77,7 +77,7 @@ function cb_provider(): SportsDataProvider
         public function fixtures(array $q): array { return $this->fixtures; }
         public function odds(string $e): array
         {
-            return [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.9, 'observedAt' => gmdate('c')]];
+            return [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.3, 'observedAt' => gmdate('c')]];
         }
         public function results(string $e): array { return []; }
     };
@@ -395,7 +395,7 @@ test('partial form coverage names the exhausted lookup budget in the message', f
         }
         public function odds(string $e): array
         {
-            return [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.9, 'observedAt' => gmdate('c')]];
+            return [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.3, 'observedAt' => gmdate('c')]];
         }
         public function results(string $e): array { return []; }
         /** League 39 only — and a ONE-lookup budget means league 40 is never asked. */
@@ -439,7 +439,7 @@ test('no-form runs explain themselves in the stored message', function () {
                 'status' => 'SCHEDULED',
             ]];
         }
-        public function odds(string $e): array { return [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.9, 'observedAt' => gmdate('c')]]; }
+        public function odds(string $e): array { return [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.3, 'observedAt' => gmdate('c')]]; }
         public function results(string $e): array { return []; }
     };
     $providers = new SportsProviderManager();

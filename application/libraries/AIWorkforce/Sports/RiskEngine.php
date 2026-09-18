@@ -31,7 +31,7 @@ class RiskEngine
     public function assess(array $value, array $quality, array $config = [], array $context = []): array
     {
         $minQuality = (int) ($config['min_data_quality'] ?? $config['minDataQuality'] ?? 80);
-        $minEv = (float) ($config['min_expected_value'] ?? $config['minExpectedValue'] ?? 0.02);
+        $minEv = (float) ($config['min_expected_value'] ?? $config['minExpectedValue'] ?? 0.05);
         $minLiquidity = $config['min_liquidity'] ?? $config['minLiquidity'] ?? null;
         $reasons = [];
         if (!empty($context['marketSuspended'])) $reasons[] = 'MARKET_SUSPENDED';

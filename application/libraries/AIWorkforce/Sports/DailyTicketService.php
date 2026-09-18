@@ -573,7 +573,7 @@ class DailyTicketService
                     $allCandidates = [];        // every generated candidate, qualified or not (Top Picks pool)
                     $minConfidence = (float) $config['min_confidence'];
                     $minQuality = (int) $config['min_data_quality'];
-                    $minEv = (float) ($config['min_expected_value'] ?? 0.02);
+                    $minEv = (float) ($config['min_expected_value'] ?? 0.05);
                     // The adaptive confidence ladder for this run, resolved
                     // once from configuration and used by every gate below so
                     // the same policy governs screening, the pipeline, the

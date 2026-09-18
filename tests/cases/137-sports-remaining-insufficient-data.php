@@ -108,7 +108,7 @@ function carry_provider(int &$standingsCalls): SportsDataProvider
         }
         public function odds(string $e): array
         {
-            return [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.9, 'observedAt' => gmdate('c')]];
+            return [['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'decimalOdds' => 1.3, 'observedAt' => gmdate('c')]];
         }
         public function results(string $e): array { return []; }
         public function standings(string $leagueId, string $season): array

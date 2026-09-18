@@ -73,21 +73,37 @@ class TicketOptimizer
     private const CORRELATION_ORDER = ['LOW' => 0, 'MEDIUM' => 1, 'HIGH' => 2];
     private const RISK_RANK = ['LOW' => 0, 'MEDIUM' => 1, 'HIGH' => 2, 'REJECTED' => 3];
 
+    /**
+     * Market-priority TIE-BREAK (operator decision 2026-09-18): when two
+     * candidates are indistinguishable on confidence, data quality, expected
+     * value AND risk, the lower-variance two-outcome-style markets are
+     * preferred — DOUBLE_CHANCE and DRAW_NO_BET cover two of the three match
+     * results (or refund one), and a totals line is independent of the match
+     * result entirely, so a coin-flip between equals lands on the leg whose
+     * worst case is mildest. This is deliberately the LAST quality criterion:
+     * it can never outrank a measured edge, only order true ties, so a
+     * higher-EV MATCH_RESULT leg still beats a lower-EV DOUBLE_CHANCE one.
+     * Unlisted markets rank behind the listed ones.
+     */
+    private const MARKET_PRIORITY = ['DOUBLE_CHANCE' => 0, 'DRAW_NO_BET' => 0, 'TOTAL_GOALS' => 1];
+    private const MARKET_PRIORITY_DEFAULT = 2;
+
     public function __construct(private CorrelationEngine $correlation = new CorrelationEngine()) {}
 
     public function optimize(array $candidates, array $config = []): array
     {
-        // The combined-odds floor is ABSOLUTE: a ticket is never generated
-        // below 5.0. The constant is the single source of truth, shared with
+        // The combined-odds window is CONFIGURABLE from the 1.01 sanity floor
+        // upward (operator decision 2026-09-17, superseding the fixed 5.0
+        // floor). The constant is the single source of truth, shared with
         // ConfigurationService, so the config screen and the search can never
-        // disagree — a caller may raise the minimum but never lower it.
+        // disagree — no caller may push the minimum below a stakeable price.
         $min = max(ConfigurationService::MIN_TARGET_ODDS_FLOOR, (float) ($config['targetOddsMin'] ?? ConfigurationService::MIN_TARGET_ODDS_FLOOR));
-        $max = min(8.0, (float) ($config['targetOddsMax'] ?? 8.0));
+        $max = (float) ($config['targetOddsMax'] ?? 3.5);
         // Never an impossible/empty window: if a caller's maximum lands below
-        // the enforced 5.0 floor, lift it to the floor so the search still runs
-        // over a valid 5.0+ range instead of silently returning nothing.
+        // the enforced sanity floor, lift it to the floor so the search still
+        // runs over a valid range instead of silently returning nothing.
         if ($max + 1e-9 < $min) $max = $min;
-        $limit = min(6, max(1, (int) ($config['maxSelections'] ?? 5)));
+        $limit = min(6, max(1, (int) ($config['maxSelections'] ?? 2)));
         // Absolute floors mirror the configuration validation range
         // [ConfigurationService::MIN_CONFIDENCE_FLOOR, 100]: an explicit admin
         // setting is honoured, never clamped back up to a hard-coded 70/75.
@@ -202,10 +218,11 @@ class TicketOptimizer
             ];
             if ($best === null) continue;
             // Final airtight guard: a combination is only ever accepted at or
-            // above the 5.0 floor. The search already enforces this, but the
-            // invariant is asserted here too so no future change to the walk
-            // can ever leak a sub-floor ticket. A rounding wobble at the edge
-            // (4.9999) is not a ticket — it is treated as "nothing qualified".
+            // above the configured minimum. The search already enforces this,
+            // but the invariant is asserted here too so no future change to
+            // the walk can ever leak a sub-minimum ticket. A rounding wobble
+            // at the edge is not a ticket — it is treated as "nothing
+            // qualified".
             if (round((float) $best['totalOdds'], 4) + 1e-9 < $min) {
                 $attempts[count($attempts) - 1]['found'] = false;
                 $attempts[count($attempts) - 1]['reason'] = sprintf(
@@ -290,8 +307,9 @@ class TicketOptimizer
      * Requirement #10's ranking order, applied literally: confidence, then
      * data quality, then positive expected value, then risk, then market
      * correlation potential (a leg in a competition already represented is
-     * worth less), with deterministic tie-breaks so two indistinguishable
-     * candidates never swap between runs.
+     * worth less), with deterministic tie-breaks — market priority (lower
+     * variance first), odds freshness, then a stable key — so two
+     * indistinguishable candidates never swap between runs.
      */
     private function rank(array $rows): array
     {
@@ -304,6 +322,12 @@ class TicketOptimizer
             if ($ev !== 0) return $ev;
             $risk = (self::RISK_RANK[$a['risk']] ?? 2) <=> (self::RISK_RANK[$b['risk']] ?? 2);
             if ($risk !== 0) return $risk;
+            // Among true equals, the lower-variance market family wins
+            // (see MARKET_PRIORITY): never a substitute for edge, only the
+            // order between candidates the measured criteria cannot separate.
+            $marketRankOf = fn(array $r): int => self::MARKET_PRIORITY[(string) ($r['candidate']['market'] ?? '')] ?? self::MARKET_PRIORITY_DEFAULT;
+            $market = $marketRankOf($a) <=> $marketRankOf($b);
+            if ($market !== 0) return $market;
             $ageOf = fn(array $r): float => is_numeric($r['candidate']['oddsAgeSeconds'] ?? null) ? (float) $r['candidate']['oddsAgeSeconds'] : PHP_INT_MAX;
             $age = $ageOf($a) <=> $ageOf($b);
             if ($age !== 0) return $age;

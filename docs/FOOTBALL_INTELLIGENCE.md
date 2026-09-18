@@ -1033,7 +1033,7 @@ WINDELS_FOOTBALL_FIRST_HALF_SHARE=0.45       goal expectancy attributed to the f
 WINDELS_FOOTBALL_MAX_AGE_ODDS=1800         how old a quoted price may be before the board labels it aged; read by the
                                            fair-value sheet (`priceStale`) and by the "odds refreshed" clock
 WINDELS_FOOTBALL_VALUE_STRONG_PP=4         edge in probability points that reads STRONG_VALUE
-WINDELS_FOOTBALL_VALUE_POSITIVE_PP=1       the smaller edge that still reads POSITIVE_VALUE; below it, FAIR
+WINDELS_FOOTBALL_VALUE_POSITIVE_PP=2       the smaller edge that still reads POSITIVE_VALUE; below it, FAIR
 WINDELS_FOOTBALL_VALUE_AVOID_PP=4          how negative (in points) before the price reads AVOID
 WINDELS_FOOTBALL_STABILITY_MOVED_PP=2      movement that earns a "prediction moved" note
 WINDELS_FOOTBALL_STABILITY_UNSTABLE_PP=8   movement that earns "prediction unstable"

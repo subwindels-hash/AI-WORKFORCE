@@ -297,7 +297,7 @@ class PredictionPipeline
 
         // ── Stage 7: value / edge (model probability vs real market odds) ─
         $value = $this->value->assess($prediction ?? ['decision' => 'NO_PREDICTION'], $odds !== null ? ['decimalOdds' => (float) ($odds['decimalOdds'] ?? $odds['decimal_odds'] ?? 0), 'market' => (string) $candidate['market']] : ['decimalOdds' => 0]);
-        $factors['minExpectedValue'] = isset($config['min_expected_value']) && is_numeric($config['min_expected_value']) ? (float) $config['min_expected_value'] : 0.02;
+        $factors['minExpectedValue'] = isset($config['min_expected_value']) && is_numeric($config['min_expected_value']) ? (float) $config['min_expected_value'] : 0.05;
         if (!$predictionReady) {
             $stage('valueEdge', 'SKIPPED', null);
         } else {

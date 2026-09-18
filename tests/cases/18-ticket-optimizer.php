@@ -33,27 +33,33 @@ test('ticket optimizer never combines same-match selections', function () {
     assert_equals('NO_QUALIFIED_TICKET', $out['status']);
 });
 
-test('ticket optimizer never generates below the 5.0 combined-odds floor', function () {
-    // A single 4.9 leg cannot make a ticket: 4.9 < 5.0, so the day honestly
-    // returns nothing rather than a sub-floor ticket.
+test('ticket optimizer honours the configured window down to the 1.01 sanity floor', function () {
+    // The configured window is respected exactly: a 4.9 leg under a 5.0–8.0
+    // window cannot make a ticket — the day honestly returns nothing rather
+    // than a below-window ticket.
     $low = (new TicketOptimizer())->optimize([fx_candidate(1, 4.9, .50)], ['targetOddsMin' => 5, 'targetOddsMax' => 8, 'maxSelections' => 1]);
-    assert_equals('NO_QUALIFIED_TICKET', $low['status'], '4.9 is below the floor — no ticket');
+    assert_equals('NO_QUALIFIED_TICKET', $low['status'], '4.9 is below the configured minimum — no ticket');
 
-    // Exactly 5.0 is allowed — five is the LOWEST a ticket may be.
+    // Exactly the configured minimum is allowed.
     $atFloor = (new TicketOptimizer())->optimize([fx_candidate(1, 5.0, .50)], ['targetOddsMin' => 5, 'targetOddsMax' => 8, 'maxSelections' => 1]);
-    assert_equals('QUALIFIED', $atFloor['status'], '5.0 exactly is a valid ticket');
+    assert_equals('QUALIFIED', $atFloor['status'], '5.0 exactly is a valid ticket under a 5.0+ window');
     assert_close(5.0, (float) $atFloor['totalOdds'], 0.001);
-    assert_true((float) $atFloor['totalOdds'] >= 5.0, 'the generated ticket is 5.0 and above');
 
-    // A caller asking for a LOWER minimum cannot lower the floor: 2.0 is
-    // clamped up to 5.0, so a 3.0 leg still cannot make a ticket.
-    $cannotLower = (new TicketOptimizer())->optimize([fx_candidate(1, 3.0, .50)], ['targetOddsMin' => 2.0, 'targetOddsMax' => 4.0, 'maxSelections' => 1]);
-    assert_equals('NO_QUALIFIED_TICKET', $cannotLower['status'], 'the 5.0 floor cannot be lowered by config');
+    // Low-variance windows are now CONFIGURABLE (operator decision
+    // 2026-09-17): a 2.0–4.0 window admits a single 3.0 leg.
+    $lowVariance = (new TicketOptimizer())->optimize([fx_candidate(1, 3.0, .50)], ['targetOddsMin' => 2.0, 'targetOddsMax' => 4.0, 'maxSelections' => 1]);
+    assert_equals('QUALIFIED', $lowVariance['status'], 'a 2.0–4.0 window is honoured, not clamped to 5.0');
+    assert_close(3.0, (float) $lowVariance['totalOdds'], 0.001);
 
-    // Two legs that multiply to >= 5.0 qualify; the total is never below 5.0.
+    // The 1.01 sanity floor is absolute: a caller cannot configure a window
+    // that would accept un-stakeable odds. A "leg" at 1.005 makes no ticket.
+    $insane = (new TicketOptimizer())->optimize([fx_candidate(1, 1.005, .50)], ['targetOddsMin' => 0.5, 'targetOddsMax' => 1.008, 'maxSelections' => 1]);
+    assert_equals('NO_QUALIFIED_TICKET', $insane['status'], 'odds at or below 1.01 are never a ticket');
+
+    // Two legs that multiply into the window qualify.
     $combo = (new TicketOptimizer())->optimize([fx_candidate(1, 2.4, .10, 'L1'), fx_candidate(2, 2.3, .10, 'L2')], ['targetOddsMin' => 5, 'targetOddsMax' => 8, 'maxSelections' => 3]);
     assert_equals('QUALIFIED', $combo['status']);
-    assert_true((float) $combo['totalOdds'] >= 5.0, 'a multi-leg ticket is still 5.0 and above');
+    assert_true((float) $combo['totalOdds'] >= 5.0, 'a multi-leg ticket lands inside the configured window');
 });
 
 test('ticket optimizer enforces WINDELS daily ticket hard floors', function () {
@@ -92,4 +98,31 @@ test('ticket optimizer enforces WINDELS daily ticket hard floors', function () {
     // the second leg is explicitly 80), so both enter the pool.
     assert_equals(2, $usable['poolSize'], 'candidates clearing BOTH stricter floors enter the pool');
     assert_equals('QUALIFIED', $usable['status']);
+});
+
+test('ticket optimizer prefers lower-variance markets only as a final tie-break', function () {
+    // Operator decision 2026-09-18: DOUBLE_CHANCE / DRAW_NO_BET rank ahead of
+    // TOTAL_GOALS, which ranks ahead of everything else — but ONLY between
+    // candidates the measured criteria (confidence, quality, EV, risk) cannot
+    // separate. Identical scores, identical freshness: the DOUBLE_CHANCE leg
+    // must win the single-slot ticket over the MATCH_RESULT leg.
+    $dc = array_merge(fx_candidate(1, 2.0, .10, 'L1'), ['market' => 'DOUBLE_CHANCE', 'selection' => 'HOME_OR_DRAW', 'oddsAgeSeconds' => 60]);
+    $mr = array_merge(fx_candidate(2, 2.0, .10, 'L2'), ['market' => 'MATCH_RESULT', 'selection' => 'HOME', 'oddsAgeSeconds' => 60]);
+    $out = (new TicketOptimizer())->optimize([$mr, $dc], ['targetOddsMin' => 2, 'targetOddsMax' => 3, 'maxSelections' => 1]);
+    assert_equals('QUALIFIED', $out['status']);
+    assert_equals(1, (int) $out['selections'][0]['matchId'], 'equal-score tie lands on the lower-variance DOUBLE_CHANCE leg');
+
+    // TOTAL_GOALS outranks an unlisted market at a tie, but DRAW_NO_BET
+    // outranks TOTAL_GOALS.
+    $tg = array_merge(fx_candidate(3, 2.0, .10, 'L3'), ['market' => 'TOTAL_GOALS', 'selection' => 'OVER_1_5', 'oddsAgeSeconds' => 60]);
+    $dnb = array_merge(fx_candidate(4, 2.0, .10, 'L4'), ['market' => 'DRAW_NO_BET', 'selection' => 'HOME', 'oddsAgeSeconds' => 60]);
+    $out2 = (new TicketOptimizer())->optimize([$tg, $dnb], ['targetOddsMin' => 2, 'targetOddsMax' => 3, 'maxSelections' => 1]);
+    assert_equals(4, (int) $out2['selections'][0]['matchId'], 'DRAW_NO_BET wins the tie over TOTAL_GOALS');
+
+    // Never a substitute for edge: a higher-EV MATCH_RESULT leg still beats a
+    // lower-EV DOUBLE_CHANCE one — the priority is a tie-break, not a filter.
+    $dcWeak = array_merge(fx_candidate(5, 2.0, .05, 'L5'), ['market' => 'DOUBLE_CHANCE', 'selection' => 'HOME_OR_DRAW', 'oddsAgeSeconds' => 60]);
+    $mrStrong = array_merge(fx_candidate(6, 2.0, .20, 'L6'), ['market' => 'MATCH_RESULT', 'selection' => 'HOME', 'oddsAgeSeconds' => 60]);
+    $out3 = (new TicketOptimizer())->optimize([$dcWeak, $mrStrong], ['targetOddsMin' => 2, 'targetOddsMax' => 3, 'maxSelections' => 1]);
+    assert_equals(6, (int) $out3['selections'][0]['matchId'], 'measured EV still outranks market priority');
 });
