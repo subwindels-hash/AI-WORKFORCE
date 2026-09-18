@@ -286,7 +286,18 @@ final class IntelligenceReport
                 continue;
             }
             if (($row['analysisState'] ?? '') !== 'ANALYZED' || $intelligence === []) {
-                $excluded[] = $identity + ['reason' => 'Not analyzed — no stored prediction to rank.'];
+                // "Never asked" and "asked and refused" are different findings
+                // and a reader acts on them differently: the first is answered
+                // by generating the page, the second cannot be — the evidence
+                // itself is missing and no amount of re-running will conjure
+                // it. When the engine already answered, its own sentence (which
+                // names the data that was absent) is published instead of the
+                // blanket "not analyzed" that hid the real reason.
+                $withheldBlock = (array) ($intelligence['withheld'] ?? []);
+                $refusedReason = trim((string) ($withheldBlock['reason'] ?? ''));
+                $excluded[] = $identity + ['reason' => ($withheldBlock['withheld'] ?? false) === true && $refusedReason !== ''
+                    ? 'Prediction withheld — ' . lcfirst(ltrim($refusedReason, ' '))
+                    : 'Not analyzed — no stored prediction to rank.'];
                 continue;
             }
             $band = (string) ($intelligence['quality']['band'] ?? QualityBand::REJECTED);
@@ -302,6 +313,20 @@ final class IntelligenceReport
             if (($market['state'] ?? '') !== PredictionMarkets::STATE_AVAILABLE || ($market['selection'] ?? null) === null) {
                 $excluded[] = $identity + ['reason' => 'The selected market has no answer for this match: '
                     . (string) ($market['reason'] ?? 'no stored input models it') . '.'];
+                continue;
+            }
+            // A ranked pick must be OUR reading of the match, not a repetition
+            // of the bookmaker's. A provider-price-only market carries a real
+            // quote and a real selection but no model probability — the score
+            // grid never produced one — so its edge and expected value are
+            // unknown and the row cannot be ranked against anything. Listing it
+            // as "eligible" would publish a recommendation whose central number
+            // was never generated, which is precisely what the pick list must
+            // not do. It is named and excluded instead.
+            if (!is_numeric($market['probability'] ?? null)
+                || (string) ($market['basis'] ?? '') === 'PROVIDER_QUOTES_ONLY') {
+                $excluded[] = $identity + ['reason' => 'No WINDELS probability was generated for the selected market '
+                    . 'on this match — only provider quotes are stored, so there is no model reading to rank.'];
                 continue;
             }
             $stabilityState = (string) ($intelligence['stability']['state'] ?? StabilityMonitor::UNKNOWN);
@@ -382,9 +407,10 @@ final class IntelligenceReport
             'excluded' => $excluded,
             'limit' => $limit,
             'rule' => [
-                'eligibility' => 'Only matches on this page whose data quality is ' . QualityBand::QUALIFIED . ' or '
-                    . QualityBand::LIMITED . ', whose selected market has an actual selection, which are not withheld '
-                    . 'and whose prediction is not flagged unstable.',
+                'eligibility' => 'Only matches on this page that are still to be played, whose data quality is '
+                    . QualityBand::QUALIFIED . ' or ' . QualityBand::LIMITED . ', whose selected market has an actual '
+                    . 'selection backed by a generated WINDELS probability, which are not withheld and whose '
+                    . 'prediction is not flagged unstable.',
                 'ranking' => 'Evidence band first (QUALIFIED before LIMITED), then the intelligence score, then the edge against the quoted price, then model confidence.',
                 'limit' => 'The top list is capped at ' . $limit . ' picks; every eligible match is still ranked and published (allPicks), and the console lists them all with the top ' . $limit . ' marked.',
             ],

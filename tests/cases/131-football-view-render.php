@@ -310,7 +310,15 @@ test('football: the Ranked reading prints eligibility, every pick figure and the
     assert_true(str_contains($picksHtml, '2 matches were not eligible on this page'), 'the exclusions are counted in the open');
     assert_true(str_contains($picksHtml, 'Show reasons'), 'behind a disclosure');
     assert_true(str_contains($picksHtml, 'Home United vs Away Rovers'), 'the excluded match is named');
-    assert_true(str_contains($picksHtml, 'Not analyzed — no stored prediction to rank.'), 'with the reason that kept it out');
+    // This match WAS analyzed: the engine ran, scored its evidence below the
+    // floor and refused to store a row. It is therefore named with the refusal
+    // and the score that caused it, not with the "not analyzed" sentence that
+    // belongs to a match nobody has asked about yet — the two are different
+    // findings and only one of them is answered by generating the page.
+    assert_true(str_contains($picksHtml, 'Prediction withheld — data quality'),
+        'a match the engine analyzed and refused is named as withheld, not as unanalyzed');
+    assert_true(preg_match('/data quality \d+\/100 is below the 50-point minimum/', $picksHtml) === 1,
+        'with the score that kept it out');
     assert_true(str_contains($picksHtml, 'Match status is POSTPONED'), 'including the terminal-status reason');
     assert_true(str_contains($picksHtml, '9 matches were considered on this page · 7 eligible · all 7 listed (top 5 marked, +2 ranked below it)'),
         'and the one-line accounting beneath the table');

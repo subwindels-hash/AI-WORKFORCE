@@ -522,12 +522,26 @@ page says so instead of letting the two blur.
 
 A ranking of the page that is on screen, not of the season:
 
-* **Eligibility** first, and it is a stated filter: analyzed, `QUALIFIED` data
-  quality, not withheld, an actual selection in the chosen market, and not
-  `UNSTABLE`.
-* **Order**: intelligence score, then the edge in probability points, then
-  confidence — value alone cannot put a thinly-evidenced match at the top, and
-  confidence alone cannot put a well-evidenced no-gap match there.
+* **Eligibility** first, and it is a stated filter: still to be played (a
+  finished, postponed, cancelled or suspended match is never a pick), analyzed,
+  `QUALIFIED` or `LIMITED` data quality, not withheld, an actual selection in the
+  chosen market **backed by a generated WINDELS probability**, and not
+  `UNSTABLE`. That last clause is what keeps the count honest: a market carrying
+  only provider quotes (`PROVIDER_QUOTES_ONLY`, no model probability, so no edge
+  and no expected value) has a price but no reading of our own to rank, and it is
+  excluded by name rather than counted as eligible. Nothing is ever listed as
+  eligible on data the module did not generate.
+* **Order**: evidence band first (`QUALIFIED` before `LIMITED`), then the
+  intelligence score, then the edge in probability points, then confidence —
+  value alone cannot put a thinly-evidenced match at the top, and confidence
+  alone cannot put a well-evidenced no-gap match there.
+* **Exclusions are named, and they distinguish two different findings.** A match
+  nobody has put to the engine yet reads "Not analyzed — no stored prediction to
+  rank." A match the engine *did* analyze and refuse reads "Prediction withheld —
+  data quality N/100 is below the 50-point minimum…", quoting the engine's own
+  sentence. Generating the page answers the first; only better stored evidence
+  answers the second. Conflating them is what made a page report the same fixture
+  twice, once as withheld and once as awaiting analysis.
 * **Size**: `picksLimit()` (default 5, capped at 10) caps the **top list** (`picks`)
   — the headline a compact consumer asks for. The complete ranking is never
   truncated: `allPicks` publishes every eligible pick in rank order, and the

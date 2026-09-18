@@ -245,9 +245,18 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         $selectionState = (string) ($selectedCompetition['state'] ?? '');
         $selectionName = in_array($selectionState, ['NARROWED', 'PREMIUM_LEAGUES'], true)
             ? (string) ($selectedCompetition['name'] ?? '') : '';
-        $awaitingAnalysis = max(0, (int) ($summary['fixtures'] ?? 0) - (int) ($summary['analyzed'] ?? 0));
         $withheldOnPage = (int) ($pageBlock['withheld'] ?? 0);
         $pageFixtures = (int) ($pagination['returned'] ?? 0);
+        /* "Withheld" and "Awaiting analysis" must not describe the same match
+           twice. A withheld match HAS been analyzed — the engine ran, scored the
+           evidence below the floor and refused to store a row — so counting it
+           again as "no prediction row yet" reported six fixtures as twelve
+           states. Everything this read already answered for (withheld, closed,
+           failed) is therefore taken out of the waiting count, which is left
+           meaning exactly what it says: nobody has asked the engine yet. */
+        $unanalyzed = max(0, (int) ($summary['fixtures'] ?? 0) - (int) ($summary['analyzed'] ?? 0));
+        $answeredOnPage = min($unanalyzed, $withheldOnPage + (int) ($pageBlock['frozen'] ?? 0) + (int) ($pageBlock['failed'] ?? 0));
+        $awaitingAnalysis = max(0, $unanalyzed - $answeredOnPage);
       ?>
       <section class="panel football-section" id="football-overview" aria-labelledby="day-overview-heading">
         <div class="football-section__heading">
@@ -270,7 +279,9 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
             <div class="stat"><div class="k">Qualified</div><div class="v up"><?= (int) ($summary['qualified'] ?? 0) ?></div><div class="trend">verified data quality</div></div>
             <div class="stat"><div class="k">Limited evidence</div><div class="v warn"><?= (int) ($summary['limited'] ?? 0) ?></div><div class="trend">usable with caution</div></div>
             <div class="stat"><div class="k">Withheld</div><div class="v down"><?= $withheldOnPage ?></div><div class="trend">evidence below the floor · this page</div></div>
-            <div class="stat"><div class="k">Awaiting analysis</div><div class="v"><?= $awaitingAnalysis ?></div><div class="trend">no prediction row yet · whole selection</div></div>
+            <div class="stat"><div class="k">Awaiting analysis</div><div class="v"><?= $awaitingAnalysis ?></div><div class="trend"><?= $answeredOnPage > 0
+              ? 'no prediction row yet · excludes ' . $answeredOnPage . ' answered on this page'
+              : 'no prediction row yet · whole selection' ?></div></div>
           </div>
           <?php if ($pagination !== []): ?>
             <div class="football-section__divider"></div>
