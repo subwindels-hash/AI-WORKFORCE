@@ -8,6 +8,17 @@ use AIWorkforce\Persistence\SportsRepository;
  * Ticket settlement (spec §22) — settles ONLY from verified persisted
  * provider results.
  *
+ * Verification has two paths with one standard (see PersistedResultVerifier):
+ * an explicit sports.settle API call, and the corroboration path used here —
+ * before settling, a stored result that has passed the ResultVerification
+ * Engine's evidence bar and has been final for longer than the corroboration
+ * window (WINDELS_SPORTS_RESULT_CORROBORATION_SECONDS, default 600) is
+ * promoted to verified, audited as SPORTS_RESULT_VERIFIED. Without that path
+ * a deployment where nobody calls the verify API by hand can never settle a
+ * ticket, and the measured-results panel stays empty forever even though real
+ * final results are stored. A result that is fresh, non-terminal or
+ * score-invalid is never promoted — the ticket honestly stays PENDING.
+ *
  * VOID handling is configurable:
  *  - RESTITUTE_ODDS (default): a VOID/CANCELLED selection is refunded — its
  *    odds count as 1.0. The ticket wins at the reduced effective odds when
@@ -19,7 +30,17 @@ use AIWorkforce\Persistence\SportsRepository;
  */
 class TicketSettlementService
 {
-    public function __construct(private SportsRepository $repo, private ResultVerificationEngine $verifier, private AuditRepository $audit) {}
+    public function __construct(
+        private SportsRepository $repo,
+        private ResultVerificationEngine $verifier,
+        private AuditRepository $audit,
+        private ?PersistedResultVerifier $promoter = null
+    )
+    {
+        // Optional dependency so existing constructions keep working; the
+        // default promoter shares this service's repository and audit trail.
+        $this->promoter ??= new PersistedResultVerifier($repo, $audit);
+    }
 
     /** Settle one selection's match from the stored verified provider result. */
     public function applyStoredResult(string $ticketId, int $matchId, int $providerId): array
@@ -51,9 +72,16 @@ class TicketSettlementService
     /**
      * Sweep: settle every PENDING selection of a ticket for which a verified
      * result exists (any provider), then finalize. Safe to run repeatedly.
+     *
+     * Before settling, each PENDING selection's stored result is given the
+     * chance to EARN verification (PersistedResultVerifier::promoteEligible):
+     * terminal status, valid score, corroborated past the window. The $actor
+     * names the identity any such promotion is audited under — the settlement
+     * cron ('system:settlement'), or the operator who clicked Settle.
      */
-    public function settlePending(string $ticketId): array
+    public function settlePending(string $ticketId, ?string $actor = null): array
     {
+        $actor ??= 'system:settlement';
         $ticket = $this->repo->findTicket($ticketId);
         if (!$ticket) throw new \InvalidArgumentException('ticket not found');
         if (in_array($ticket['settlement_status'] ?? '', ['WON', 'LOST', 'VOID'], true) && count(array_filter($this->repo->ticketSelections($ticketId), fn($s) => $s['status'] === 'PENDING')) === 0) {
@@ -63,8 +91,12 @@ class TicketSettlementService
             if ($s['status'] !== 'PENDING') continue;
             $stored = $this->repo->findResultByMatch((int) $s['match_id']);
             if ($stored === null) continue; // results unavailable → selection stays PENDING
+            if (empty($stored['verified'])) {
+                $promotion = $this->promoter->promoteEligible($stored, $actor);
+                if (empty($promotion['promoted'])) continue;  // fresh / non-terminal / invalid → stays PENDING
+            }
             $this->applyVerifiedResult($ticketId, (int) $s['match_id'], [
-                'verified' => (bool) $stored['verified'], 'status' => $stored['status'],
+                'verified' => true, 'status' => $stored['status'],
                 'homeScore' => $stored['home_score'] === null ? null : (int) $stored['home_score'],
                 'awayScore' => $stored['away_score'] === null ? null : (int) $stored['away_score'],
             ]);
@@ -75,12 +107,12 @@ class TicketSettlementService
 
 
     /** Settle every currently pending ticket; idempotent and safe to re-run. */
-    public function settleAllPending(int $limit = 200): array
+    public function settleAllPending(int $limit = 200, ?string $actor = null): array
     {
         $settled = 0; $pending = 0; $errors = [];
         foreach ($this->repo->listTickets(['status' => 'PENDING'], min(500, max(1, $limit))) as $ticket) {
             try {
-                $res = $this->settlePending((string) $ticket['id']);
+                $res = $this->settlePending((string) $ticket['id'], $actor);
                 if (($res['status'] ?? 'PENDING') === 'PENDING') $pending++;
                 else $settled++;
             } catch (\Throwable $e) {

@@ -284,8 +284,25 @@ class SportsRepositoryStub implements \AIWorkforce\Persistence\SportsRepository
     public function saveQuality(int $matchId, array $a): void { $this->quality[] = array_merge($a, ['match_id' => $matchId, 'assessed_at' => gmdate('c')]); }
     public function saveResult(int $matchId, int $providerId, array $r): void
     {
-        foreach ($this->results as &$row) if ((int) $row['match_id'] === $matchId && (int) $row['provider_id'] === $providerId) { $row = array_merge($row, ['home_score' => $r['homeScore'], 'away_score' => $r['awayScore'], 'status' => $r['status'], 'verified' => 0, 'source_timestamp' => $r['sourceTimestamp'], 'verified_at' => null, 'payload' => $r['payload']]); return; }
+        foreach ($this->results as &$row) if ((int) $row['match_id'] === $matchId && (int) $row['provider_id'] === $providerId) {
+            // Mirrors the production rule: a re-observed result that states
+            // exactly what the stored row states keeps an earned verification;
+            // a CHANGED result resets it (the correction must re-verify).
+            $unchanged = (string) $row['status'] === (string) $r['status']
+                && self::sameResultScore($row['home_score'] ?? null, $r['homeScore'] ?? null)
+                && self::sameResultScore($row['away_score'] ?? null, $r['awayScore'] ?? null);
+            $keepVerified = $unchanged && !empty($row['verified']);
+            $row = array_merge($row, ['home_score' => $r['homeScore'], 'away_score' => $r['awayScore'], 'status' => $r['status'], 'verified' => $keepVerified ? 1 : 0, 'source_timestamp' => $r['sourceTimestamp'], 'verified_at' => $keepVerified ? ($row['verified_at'] ?? null) : null, 'payload' => $r['payload']]);
+            return;
+        }
         $this->results[] = ['id' => ++$this->autoId, 'match_id' => $matchId, 'provider_id' => $providerId, 'home_score' => $r['homeScore'], 'away_score' => $r['awayScore'], 'status' => $r['status'], 'verified' => 0, 'source_timestamp' => $r['sourceTimestamp'], 'verified_at' => null, 'payload' => $r['payload']];
+    }
+    private static function sameResultScore($a, $b): bool
+    {
+        $aNull = $a === null || $a === '';
+        $bNull = $b === null || $b === '';
+        if ($aNull || $bNull) return $aNull && $bNull;
+        return is_numeric($a) && is_numeric($b) && (int) $a === (int) $b;
     }
     public function findResult(int $matchId, int $providerId): ?array { foreach ($this->results as $r) if ((int) $r['match_id'] === $matchId && (int) $r['provider_id'] === $providerId) return $r; return null; }
     public function findResultByMatch(int $matchId): ?array { $rows = array_values(array_filter($this->results, fn($r) => (int) $r['match_id'] === $matchId)); if (!$rows) return null; usort($rows, fn($a, $b) => ($b['verified'] ?? 0) <=> ($a['verified'] ?? 0)); return $rows[0]; }

@@ -313,7 +313,12 @@ class SportsIntelligence
             $outcomes = array_values(array_filter($outcomes, fn($o) => ($o['created_at'] ?? '') >= $since));
         }
         $report = $this->performance->report($tickets, $selections, $outcomes, ['mode' => $this->mode(), 'totalPredictions' => count($this->repository->listPredictions($filter, 1000))]);
-        return array_merge($report, ['filter' => $filter]);
+        // Tickets still awaiting settlement in this window: what the console's
+        // measured-results panel explains itself with when nothing is settled
+        // yet (and what its Settle-all action targets). Counted from the same
+        // window-scoped ticket list the report itself used.
+        $pendingTickets = count(array_filter($tickets, static fn(array $t): bool => ($t['settlement_status'] ?? $t['status'] ?? '') === 'PENDING'));
+        return array_merge($report, ['pendingTickets' => $pendingTickets, 'filter' => $filter]);
     }
 
     /**

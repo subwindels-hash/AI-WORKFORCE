@@ -654,8 +654,26 @@ $kickoffStamp = static function (mixed $iso): string {
           <div class="stat"><div class="k">Max drawdown</div><div class="v"><?= ($perf['maxDrawdown'] ?? null) !== null ? e(number_format((float) $perf['maxDrawdown'], 2)) : '—' ?></div></div>
           <div class="stat"><div class="k">Avg odds</div><div class="v"><?= ($perf['averageOdds'] ?? null) !== null ? e(number_format((float) $perf['averageOdds'], 2)) : '—' ?></div></div>
         </div>
+        <?php $pendingTickets = (int) ($perf['pendingTickets'] ?? 0); ?>
         <?php if (empty($perf['dataAvailable'])): ?>
-          <p class="sports-empty">No settled records or selections yet — metrics are intentionally unavailable rather than invented.</p>
+          <?php if ($pendingTickets > 0): ?>
+            <p class="sports-empty"><?= e(number_format($pendingTickets)) ?> ticket<?= $pendingTickets === 1 ? '' : 's' ?> from this window <?= $pendingTickets === 1 ? 'is' : 'are' ?> still awaiting settlement. <?= $pendingTickets === 1 ? 'It settles' : 'They settle' ?> automatically (hourly sports cron) once each match's final result is stored and corroborated — the metrics below appear the moment the first ticket settles. Nothing is projected in the meantime.</p>
+          <?php else: ?>
+            <p class="sports-empty">No settled records or selections yet — metrics are intentionally unavailable rather than invented.</p>
+          <?php endif; ?>
+        <?php endif; ?>
+        <?php if ($pendingTickets > 0): ?>
+          <?php if (!empty($caps['settle'])): ?>
+            <div class="sports-actions">
+              <form method="post" action="/sports/settle-all">
+                <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+                <button class="btn small" type="submit">Settle all pending tickets from verified results (sports.settle)</button>
+              </form>
+              <p class="sports-note">Runs the same sweep as the hourly settlement cron: final, corroborated results are verified first (audited as <span class="mono">SPORTS_RESULT_VERIFIED</span>), then every pending ticket is settled from them. Tickets whose results are not yet final or corroborated stay pending.</p>
+            </div>
+          <?php else: ?>
+            <p class="sports-note">Settlement stays with identities holding <b>sports.settle</b>.</p>
+          <?php endif; ?>
         <?php endif; ?>
         <p class="sports-note">Prediction accuracy, Brier, ECE and model/calibration state are reported once, on <a href="/football">Football Intelligence</a> and <a href="/football/models">Models &amp; calibration</a>.</p>
       </div>
