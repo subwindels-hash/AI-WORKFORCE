@@ -151,7 +151,11 @@ test('football: an awaiting fixture shows real fixture and odds information inst
     assert_true(!str_contains($html, '>NOT_ANALYZED<'), 'internal state names are not presented to the reader');
     assert_contains('2.10', $html, 'the selected real bookmaker quote remains visible before model analysis');
     assert_contains('47.6%', $html, 'its implied probability is calculated from that real quote');
-    assert_contains('No WINDELS probability, category, edge or risk is invented.', $html,
+    // This fixture HAS a stored provider price but no analysis, so the card must
+    // say precisely that: the price is real, the model verdict is absent, and the
+    // one is not allowed to pass for the other.
+    assert_contains('Not scored', $html, 'the model comparison is openly unscored');
+    assert_contains('the fixture is not analyzed, so no WINDELS probability, edge or risk is invented', $html,
         'the boundary between provider information and missing model analysis is explicit');
 });
 

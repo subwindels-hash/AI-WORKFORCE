@@ -271,6 +271,7 @@ $route['football/match/(:num)'] = 'football/match/$1';
 $route['football/live'] = 'football/live';
 $route['football/models'] = 'football/models';
 $route['football/sync'] = 'football/sync';
+$route['football/refresh-odds'] = 'football/refresh_board_odds';
 // Generate the missing predictions for one page of matches (max 50).
 $route['football/predict'] = 'football/predict';
 $route['football/settle'] = 'football/settle';

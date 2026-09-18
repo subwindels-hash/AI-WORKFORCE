@@ -646,6 +646,19 @@ final class FootballIntelligence
     }
 
     /**
+     * Operator-triggered odds sweep for a date: price every open fixture the
+     * board is already holding, in one budgeted pass.
+     *
+     * `$force` re-requests even a price that is still inside its freshness
+     * window, which is what an operator means by "refresh the prices now".
+     * Without it the sweep reuses fresh quotes and spends nothing on them.
+     */
+    public function syncOddsForDay(string $date, bool $force = false, ?int $limit = null): array
+    {
+        return $this->oddsSheet()->refreshDay($date, $limit, $force);
+    }
+
+    /**
      * @param callable(object):array $fetch
      */
     public function syncWith(callable $fetch, string $jobType = 'FIXTURES', string $capability = 'fixtures', ?string $providerId = null): array

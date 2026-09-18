@@ -26,6 +26,7 @@ final class RefreshPolicy
         'football-live' => ['live', 'live'],
         'football-results' => ['results', 'pending-results'],
         'football-statistics' => ['statistics', 'statistics'],
+        'football-odds' => ['odds', 'priceable'],
         'football-predict' => ['predict', 'predictable'],
         'football-settle' => ['settle', 'settleable'],
         'football-performance' => ['performance', 'measurable'],
@@ -41,7 +42,7 @@ final class RefreshPolicy
      * window, which is how a transient provider error could leave the day's
      * board empty even though the fixtures were sitting in the database.
      */
-    private const PROVIDER_PRECONDITIONS = ['today', 'window', 'live', 'pending-results', 'statistics'];
+    private const PROVIDER_PRECONDITIONS = ['today', 'window', 'live', 'pending-results', 'statistics', 'priceable'];
 
     /**
      * The provider capability each provider-facing job actually calls. Backoff
@@ -55,6 +56,7 @@ final class RefreshPolicy
         'live' => 'live',
         'pending-results' => 'results',
         'statistics' => 'teamStatistics',
+        'priceable' => 'odds',
     ];
 
     /** A failed run is retried after at most this many seconds (see evaluate()). */
@@ -240,6 +242,24 @@ final class RefreshPolicy
                     if ((string) ($fixture['data_state'] ?? '') !== DataState::AVAILABLE) $uncollected++;
                 }
                 return ['present' => $due !== [], 'count' => count($due), 'note' => $uncollected . ' without complete statistics coverage'];
+            case 'priceable':
+                // Fixtures that can still be bet on, inside the window the odds
+                // sweep actually covers (today + tomorrow). A finished match is
+                // the settlement job's business and is never priced, so it must
+                // not hold this job open either.
+                $openable = $this->repo->listFixtures([
+                    'from' => gmdate('c', $now - 3 * 3600),
+                    'to' => gmdate('c', $now + 2 * 86400),
+                ], 400);
+                $bettable = 0;
+                foreach ($openable as $fixture) {
+                    $status = strtoupper((string) ($fixture['status'] ?? ''));
+                    if (in_array($status, ['FINISHED', 'CANCELLED', 'POSTPONED', FixtureSyncService::STALE_LIVE_STATUS], true)) continue;
+                    if ((string) ($fixture['external_id'] ?? '') === '') continue;
+                    $bettable++;
+                }
+                return ['present' => $bettable > 0, 'count' => $bettable,
+                    'note' => $bettable . ' open fixture(s) within the odds window that a bookmaker could have priced'];
             case 'predictable':
                 $fixtures = $this->repo->listFixtures(['status' => 'SCHEDULED', 'from' => gmdate('c', $now), 'to' => gmdate('c', $now + 72 * 3600)], max(1, $this->config->analysisLimit()));
                 $predictions = $this->repo->listPredictions(['from' => gmdate('c', $now - 12 * 3600), 'kind' => PredictionService::KIND_PRE_MATCH], 2000);
@@ -282,6 +302,7 @@ final class RefreshPolicy
             'football-live' => 'LIVE',
             'football-results' => 'RESULTS',
             'football-statistics' => 'STATISTICS',
+            'football-odds' => 'ODDS',
             'football-predict' => 'PREDICT',
             'football-settle' => 'SETTLE',
             'football-performance' => 'PERFORMANCE',
