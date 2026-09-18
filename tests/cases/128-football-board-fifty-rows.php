@@ -16,6 +16,7 @@
 require_once TESTSPATH . 'football_support.php';
 
 use AIWorkforce\Football\DataState;
+use AIWorkforce\Football\PredictionMarkets;
 use AIWorkforce\Football\MatchFeed;
 
 /** Sixty scheduled fixtures on one future date. Returns [repo, module, day]. */
@@ -58,8 +59,16 @@ test('football board: a page holds 50 rows even when only a few matches are anal
     }
     foreach ($waiting as $row) {
         assert_null($row['prediction'] ?? null, 'an unanalyzed row carries no prediction');
-        assert_equals(DataState::UNAVAILABLE, (string) ($row['market']['state'] ?? ''),
-            'and its market block states the absence rather than inventing a price');
+        assert_null($row['market']['probability'] ?? null, 'and its market block never invents a model probability');
+        if (($row['market']['state'] ?? '') === PredictionMarkets::STATE_AVAILABLE) {
+            assert_true(is_numeric($row['market']['odds'] ?? null), 'a provider-only market is available only when a real quote exists');
+            assert_equals(PredictionMarkets::SOURCE_ODDS, (string) ($row['market']['source'] ?? ''),
+                'the real quote is explicitly provider-only');
+        } else {
+            assert_equals(DataState::UNAVAILABLE, (string) ($row['market']['state'] ?? ''),
+                'a market with no stored quote states the absence instead of inventing a price');
+            assert_null($row['market']['odds'] ?? null);
+        }
     }
 
     $second = $module->board()->forDate($day, false, 2, 50);

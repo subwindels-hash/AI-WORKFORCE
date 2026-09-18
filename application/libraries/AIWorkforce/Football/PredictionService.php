@@ -20,6 +20,13 @@ final class PredictionService
 {
     public const KIND_PRE_MATCH = 'PRE_MATCH';
     public const KIND_LIVE = 'LIVE';
+    /**
+     * A durable record of an engine attempt that could not publish a pre-match
+     * prediction. This uses the generic fixture-statistics store so a rejected
+     * assessment survives the redirect after "Generate this page" without
+     * pretending that a prediction row exists.
+     */
+    public const ASSESSMENT_KIND = 'PREDICTION_ASSESSMENT';
 
     /** How a match was treated by a (bounded) generation request. */
     public const MISSING_GENERATED = 'GENERATED';   // a new prediction was written
@@ -118,6 +125,14 @@ final class PredictionService
         ]);
         if (($payload['status'] ?? '') !== 'PREDICTED') {
             $payload['stored'] = ['written' => false, 'reason' => 'NO_PREDICTION'];
+            // A quality-gated answer is still an assessment. Persist that answer
+            // separately from football_match_predictions so the next read can
+            // show the measured DQ score and the exact refusal reason instead of
+            // falling back to the fictitious-looking "0/100 / NOT_ANALYZED"
+            // placeholders. A read-only prediction never writes this snapshot.
+            if ($persist && $kind === self::KIND_PRE_MATCH) {
+                $payload['assessment'] = $this->storeAssessment($fixture, $payload, $model);
+            }
             return $payload;
         }
         if (!$persist) {
@@ -195,6 +210,67 @@ final class PredictionService
             'xgMethod' => $payload['xgMethod'],
         ], 'system');
         return $payload;
+    }
+
+    /**
+     * Store an honest, non-prediction assessment for a fixture.
+     *
+     * The generic fixture-statistics table is appropriate here because the row
+     * records measured input coverage, not an outcome forecast. The payload is
+     * deliberately small and contains no invented probability, confidence,
+     * category or risk value.
+     *
+     * @param array<string,mixed> $fixture
+     * @param array<string,mixed> $payload
+     * @param array<string,mixed> $model usable() response from ModelRegistry
+     * @return array{stored:bool,kind:string,generatedAt:?string}
+     */
+    private function storeAssessment(array $fixture, array $payload, array $model): array
+    {
+        $fixtureId = (int) ($fixture['id'] ?? 0);
+        $providerId = (int) ($fixture['provider_id'] ?? 0);
+        $generatedAt = isset($payload['generatedAt']) && trim((string) $payload['generatedAt']) !== ''
+            ? (string) $payload['generatedAt'] : gmdate('c');
+        if ($fixtureId <= 0 || $providerId <= 0) {
+            return ['stored' => false, 'kind' => self::ASSESSMENT_KIND, 'generatedAt' => $generatedAt];
+        }
+        $quality = is_array($payload['dataQuality'] ?? null) ? $payload['dataQuality'] : [];
+        $score = is_numeric($quality['score'] ?? null) ? (int) $quality['score'] : null;
+        $band = isset($quality['status']) && trim((string) $quality['status']) !== ''
+            ? (string) $quality['status'] : null;
+        $reasoning = array_values(array_filter((array) ($payload['reasoning'] ?? []), static fn($reason): bool => is_string($reason) && trim($reason) !== ''));
+        $snapshot = [
+            'status' => 'ASSESSED_NO_PREDICTION',
+            'code' => (string) ($payload['code'] ?? 'NO_PREDICTION'),
+            'reason' => mb_substr((string) ($payload['reason'] ?? 'The engine did not publish a prediction.'), 0, 600),
+            'reasoning' => array_map(static fn(string $reason): string => mb_substr($reason, 0, 240), array_slice($reasoning, 0, 8)),
+            'dataQuality' => [
+                'score' => $score,
+                'status' => $band,
+                'band' => $band,
+                'components' => is_array($quality['components'] ?? null) ? $quality['components'] : [],
+            ],
+            'predictionKind' => self::KIND_PRE_MATCH,
+            'modelVersionId' => (int) ($model['model']['id'] ?? 0) ?: null,
+            'modelVersion' => $model['model']['model_version'] ?? null,
+            'generatedAt' => $generatedAt,
+        ];
+        try {
+            $this->repo->saveFixtureStatistics($fixtureId, $providerId, self::ASSESSMENT_KIND, $snapshot, [
+                // AVAILABLE means the assessment itself was stored successfully;
+                // the separate quality band still says whether its inputs were
+                // sufficient for a prediction.
+                'state' => DataState::AVAILABLE,
+                'qualityScore' => $score,
+                'qualityBand' => $band,
+            ]);
+            return ['stored' => true, 'kind' => self::ASSESSMENT_KIND, 'generatedAt' => $generatedAt];
+        } catch (\Throwable) {
+            // The prediction refusal remains the truthful response even if its
+            // convenience snapshot cannot be written. Never turn missing data
+            // into a 500 or fabricate a row to hide a persistence failure.
+            return ['stored' => false, 'kind' => self::ASSESSMENT_KIND, 'generatedAt' => $generatedAt];
+        }
     }
 
     /**
@@ -577,12 +653,28 @@ final class PredictionService
             $stored = $this->existing($fixture, $modelVersionId, $kind, true);
             $band = (string) ($payload['dataQuality']['status'] ?? ($stored['data_quality_band'] ?? QualityBand::REJECTED));
             if ($stored === null) {
-                // The engine answered without writing a row — the quality gate
-                // refused it, or the data was too thin. That is a result, not an
-                // error: the match stays "not analyzed" and is retried later.
+                // The engine answered without writing a prediction row — the
+                // quality gate refused it, or a required model input was absent.
+                // Preserve the measured assessment in this request as well as in
+                // the durable PREDICTION_ASSESSMENT snapshot. Dropping the score
+                // here was what made an actually measured rejection render as
+                // the made-up default "DQ 0/100" immediately afterwards.
                 $out['refused']++;
+                $quality = is_array($payload['dataQuality'] ?? null) ? $payload['dataQuality'] : [];
+                $score = is_numeric($quality['score'] ?? null) ? (int) $quality['score'] : null;
                 $out['matches'][$index] = $identity + ['state' => self::MISSING_REFUSED, 'source' => MatchFeed::SOURCE_REFUSED,
                     'code' => (string) ($payload['code'] ?? 'DATA_QUALITY_' . $band), 'band' => $band,
+                    'score' => $score,
+                    'assessment' => [
+                        'status' => 'ASSESSED_NO_PREDICTION',
+                        'code' => (string) ($payload['code'] ?? 'DATA_QUALITY_' . $band),
+                        'reason' => (string) ($payload['reason'] ?? ('The stored data for this match is ' . $band . '; no prediction row was written.')),
+                        'reasoning' => array_values((array) ($payload['reasoning'] ?? [])),
+                        'dataQuality' => ['score' => $score, 'status' => $band, 'band' => $band,
+                            'components' => is_array($quality['components'] ?? null) ? $quality['components'] : []],
+                        'modelVersionId' => $modelVersionId ?: null,
+                        'generatedAt' => $payload['generatedAt'] ?? gmdate('c'),
+                    ],
                     // The engine's own reason, which names the missing data —
                     // more actionable than restating the band.
                     'reason' => (string) ($payload['reason'] ?? ('The stored data for this match is ' . $band . '; no prediction row was written.'))];

@@ -712,6 +712,23 @@ class FootballRepositoryDatabase implements FootballRepository
         return $row ? $this->decode($row) : null;
     }
 
+    public function listFixtureStatisticsFor(array $fixtureIds, ?string $kind = null): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $fixtureIds), static fn(int $id): bool => $id > 0)));
+        if ($ids === []) return [];
+        $this->db->where_in('fixture_id', $ids);
+        if ($kind !== null) $this->db->where('kind', $kind);
+        $rows = $this->db->order_by('fetched_at', 'DESC')->order_by('id', 'DESC')
+            ->get('football_fixture_statistics')->result_array();
+        $out = [];
+        foreach ($rows as $row) {
+            $fixtureId = (int) ($row['fixture_id'] ?? 0);
+            if ($fixtureId <= 0 || isset($out[$fixtureId])) continue;
+            $out[$fixtureId] = $this->decode($row);
+        }
+        return $out;
+    }
+
     public function saveHeadToHead(int $providerId, array $row): array
     {
         $homeId = (string) ($row['homeTeamExternalId'] ?? '');

@@ -652,20 +652,22 @@ final class MatchFeed
         $odds = $this->repo->listMarketOdds($matchIds);
         $out = [];
         foreach ($entries as $entry) {
-            $prediction = $entry['prediction'] ?? null;
-            if (!is_array($prediction)) {
-                // The shape is identical to an evaluated market — an empty slot
-                // is the same object with an empty answer, not another format.
-                $out[] = ['key' => (string) $market['key'], 'label' => (string) $market['label'],
-                    'state' => DataState::UNAVAILABLE, 'reason' => 'No prediction is stored for this match, so no market can be derived from it.',
-                    'selection' => null, 'selectionLabel' => null, 'probability' => null, 'odds' => null,
-                    'impliedProbability' => null, 'edge' => null, 'outcomes' => [], 'coverage' => 0.0,
-                    'riskLevel' => PredictionMarkets::RISK_HIGH,
-                    'riskFactors' => ['No prediction is stored, so there is nothing to assess.']];
-                continue;
-            }
-            $out[] = $this->markets->evaluate($prediction, $grids[(string) ($prediction['id'] ?? '')] ?? [],
-                $odds[(string) ($entry['matchId'] ?? '')] ?? [], $market, $line);
+            $storedPrediction = $entry['prediction'] ?? null;
+            $hasPrediction = is_array($storedPrediction);
+            $prediction = $hasPrediction ? $storedPrediction : [];
+            // Evaluate the provider's selected-market rows even before a model
+            // prediction exists. PredictionMarkets keeps their probability,
+            // fair odds, edge and value null and labels the source PROVIDER_ODDS,
+            // while preserving the real bookmaker quote. The previous early
+            // return hid that quote in the fixture overview even though the same
+            // price was visible after opening the full sheet.
+            $out[] = $this->markets->evaluate(
+                $prediction,
+                $hasPrediction ? ($grids[(string) ($prediction['id'] ?? '')] ?? []) : [],
+                $odds[(string) ($entry['matchId'] ?? '')] ?? [],
+                $market,
+                $line,
+            );
         }
         return $out;
     }

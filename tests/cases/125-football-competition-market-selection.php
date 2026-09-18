@@ -449,6 +449,11 @@ test('football: real odds remain visible before a model prediction exists', func
 
     $board = $module->board()->forDate($day, false, 1, 50, ['competition' => '39']);
     assert_equals('NOT_ANALYZED', (string) ($board['rows'][0]['predictionStatus'] ?? ''), 'no model result was generated as a side effect');
+    $overview = (array) ($board['rows'][0]['market'] ?? []);
+    assert_equals(2.10, (float) ($overview['odds'] ?? 0), 'the selected-market overview shows the provider quote before model analysis too');
+    assert_null($overview['probability'] ?? null, 'the overview does not invent a WINDELS probability beside that quote');
+    assert_null($overview['dataQuality'] ?? null, 'missing model quality stays null instead of becoming zero');
+    assert_equals(PredictionMarkets::SOURCE_ODDS, (string) ($overview['source'] ?? ''), 'and labels the overview as provider-only');
     $markets = array_column((array) ($board['rows'][0]['marketCandidates'] ?? []), null, 'key');
     assert_true(isset($markets['MATCH_WINNER'], $markets['TEAM_TO_SCORE_FIRST']), 'every quoted provider family remains available');
     $home = (array) ($markets['MATCH_WINNER']['outcomes'][0] ?? []);

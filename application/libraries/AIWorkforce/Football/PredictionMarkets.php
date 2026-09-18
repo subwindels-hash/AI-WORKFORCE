@@ -565,6 +565,12 @@ final class PredictionMarkets
             $rows = $this->providerOnlyOutcomes($odds, $key, $line);
             $providerOnlyFallback = $rows !== [];
         } elseif (!array_reduce($rows, static fn(bool $has, array $row): bool => $has || is_numeric($row['probability'] ?? null), false)) {
+            // Some modelled families (notably 1X2) have a fixed selection list,
+            // but an empty prediction supplies null probabilities for all of
+            // them. In provider-only mode those empty shells are not evidence
+            // that the market is available: replace them with the selections
+            // the provider actually quoted, or with no rows when it quoted none.
+            $rows = $this->providerOnlyOutcomes($odds, $key, $line);
             $providerOnlyFallback = true;
         }
         $state = $rows === [] ? self::STATE_UNAVAILABLE : self::STATE_AVAILABLE;
@@ -697,9 +703,12 @@ final class PredictionMarkets
                 'disclaimer' => OddsIntelligence::DISCLAIMER,
             ],
 
-            'confidence' => isset($prediction['confidence']) ? round((float) $prediction['confidence'], 1) : null,
-            'dataQuality' => (int) ($prediction['data_quality_score'] ?? 0),
-            'band' => (string) ($prediction['data_quality_band'] ?? QualityBand::REJECTED),
+            'confidence' => isset($prediction['confidence']) && is_numeric($prediction['confidence'])
+                ? round((float) $prediction['confidence'], 1) : null,
+            'dataQuality' => is_numeric($prediction['data_quality_score'] ?? null)
+                ? (int) $prediction['data_quality_score'] : null,
+            'band' => isset($prediction['data_quality_band']) && trim((string) $prediction['data_quality_band']) !== ''
+                ? (string) $prediction['data_quality_band'] : null,
             'outcomes' => $rows,
         ];
     }

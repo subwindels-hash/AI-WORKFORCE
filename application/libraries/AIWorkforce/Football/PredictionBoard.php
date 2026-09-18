@@ -102,6 +102,25 @@ final class PredictionBoard
             ? $this->predictions->predictMissing($fixtures, $limit, PredictionService::KIND_PRE_MATCH)
             : $this->predictions->reportOnly($fixtures, $limit, PredictionService::KIND_PRE_MATCH);
 
+        // A rejected engine attempt is stored as a fixture assessment rather
+        // than as a prediction. Read all page assessments in one query so the
+        // measured DQ score and refusal reason survive redirects and read-only
+        // revisits; never turn fifty fixtures into fifty database queries.
+        $assessmentRows = $this->repo->listFixtureStatisticsFor(
+            array_map(static fn(array $row): int => (int) ($row['id'] ?? 0), $fixtures),
+            PredictionService::ASSESSMENT_KIND,
+        );
+        $assessments = [];
+        foreach ($assessmentRows as $fixtureId => $assessmentRow) {
+            $assessment = is_array($assessmentRow['payload'] ?? null) ? $assessmentRow['payload'] : [];
+            // Assessments belong to the model version that made them. A stale
+            // refusal from an older model must not label the current slot.
+            $assessmentModelId = (int) ($assessment['modelVersionId'] ?? 0);
+            if ($assessment !== [] && $assessmentModelId === $modelVersionId) {
+                $assessments[(int) $fixtureId] = $assessment;
+            }
+        }
+
         // Counts over the selection — the day, or the day narrowed to the chosen
         // competition — so the panel describes what the page is showing rather
         // than every league the provider sent that day. `eligibility` stores the
@@ -152,7 +171,12 @@ final class PredictionBoard
             // One table row per match on the page, analyzed or not: a match
             // without a prediction is a row that says so, not a row that is
             // missing.
-            $row = $this->row($fixtures[$index] ?? [], $prediction, $block);
+            $fixture = $fixtures[$index] ?? [];
+            $outcome = is_array($generation['matches'][$index] ?? null) ? $generation['matches'][$index] : [];
+            $assessment = is_array($outcome['assessment'] ?? null)
+                ? $outcome['assessment']
+                : ($assessments[(int) ($fixture['id'] ?? 0)] ?? []);
+            $row = $this->row($fixture, $prediction, $block, $outcome, $assessment);
             // Attach multiple verified market candidates (only those with real provider odds)
             $row['marketCandidates'] = $multiMarkets[$index] ?? [];
             $rows[] = $row;
@@ -182,13 +206,22 @@ final class PredictionBoard
             // exclude it from `withheld`. Anything else is a real answer.
             $outcomeCode = (string) ($outcome['code'] ?? '');
             $engineAnswered = $outcomeCode !== '' && $outcomeCode !== 'NOT_GENERATED';
+            $assessment = is_array($outcome['assessment'] ?? null)
+                ? $outcome['assessment']
+                : ($assessments[(int) ($fixture['id'] ?? 0)] ?? []);
+            $storedAssessmentAnswered = $prediction === null && $assessment !== []
+                && (string) ($assessment['status'] ?? '') === 'ASSESSED_NO_PREDICTION';
             $intelligenceEntries[] = [
                 'fixture' => (array) $fixture,
                 'prediction' => $prediction,
                 'market' => (array) ($markets[$index] ?? []),
-                'predictionRefusal' => $prediction === null && $engineAnswered
-                    ? ['code' => $outcomeCode, 'reason' => (string) ($outcome['reason'] ?? '')]
+                'predictionRefusal' => $prediction === null && ($engineAnswered || $storedAssessmentAnswered)
+                    ? [
+                        'code' => $engineAnswered ? $outcomeCode : (string) ($assessment['code'] ?? 'NO_PREDICTION'),
+                        'reason' => $engineAnswered ? (string) ($outcome['reason'] ?? '') : (string) ($assessment['reason'] ?? ''),
+                    ]
                     : [],
+                'assessment' => $prediction === null ? $assessment : [],
             ];
         }
         $blocks = $this->report->forPage($intelligenceEntries);
@@ -288,23 +321,24 @@ final class PredictionBoard
             $message = self::EMPTY_QUALIFIERS;
         }
         $first = $totalFixtures === 0 ? 0 : (($page - 1) * $limit) + 1;
-        // What this read did with the page's fixtures, so the Day overview can
-        // say it instead of leaving an unanalyzed slot unexplained. `withheld`
-        // is the engine's own refusal (evidence below the quality floor — the
-        // engine answered and chose not to store), `frozen` is a slot that can
-        // never be predicted (kickoff passed, postponed, cancelled), `deferred`
-        // ran out of this cycle's batch, and `notAttempted` is everything the
-        // read did not evaluate — the whole unanalyzed page in a read-only
-        // view, and normally nothing once generation ran.
+        // The current state of the page's fixtures, so the Day overview can say
+        // why each empty prediction slot is empty. `withheld` includes durable
+        // engine refusals from an earlier generating request; `frozen` is a slot
+        // that can never be predicted (kickoff passed, postponed, cancelled),
+        // `deferred` ran out of this cycle's batch, and `notAttempted` is what has
+        // no current assessment.
         $pageWithheld = 0; $pageFrozen = 0; $pageDeferred = 0; $pageNotAttempted = 0; $pageFailed = 0;
-        foreach ((array) ($generation['matches'] ?? []) as $outcome) {
-            $state = (string) ($outcome['state'] ?? '');
-            $code = (string) ($outcome['code'] ?? '');
-            if ($state === PredictionService::MISSING_REFUSED && $code !== 'NOT_GENERATED') $pageWithheld++;
-            elseif ($state === PredictionService::MISSING_FROZEN) $pageFrozen++;
-            elseif ($state === PredictionService::MISSING_DEFERRED) $pageDeferred++;
-            elseif ($state === PredictionService::MISSING_FAILED) $pageFailed++;
-            elseif ($state === PredictionService::MISSING_REFUSED) $pageNotAttempted++;
+        // Count the resolved row states rather than only this request's actions.
+        // That keeps a persisted refusal classified as withheld after the POST
+        // redirect instead of reverting the page overview to "not attempted."
+        foreach ($rows as $row) {
+            if (($row['predictionStatus'] ?? '') === 'ANALYZED') continue;
+            $state = (string) ($row['assessmentState'] ?? 'AWAITING_ANALYSIS');
+            if ($state === 'PREDICTION_WITHHELD') $pageWithheld++;
+            elseif ($state === 'PRE_MATCH_CLOSED') $pageFrozen++;
+            elseif ($state === 'ANALYSIS_QUEUED') $pageDeferred++;
+            elseif ($state === 'ANALYSIS_FAILED') $pageFailed++;
+            else $pageNotAttempted++;
         }
         return [
             'heading' => "TODAY'S FOOTBALL PREDICTIONS",
@@ -422,20 +456,81 @@ final class PredictionBoard
      * @param array<string,mixed> $fixture
      * @param array<string,mixed>|null $prediction
      * @param array<string,mixed> $market
+     * @param array<string,mixed> $outcome treatment in this generation/read pass
+     * @param array<string,mixed> $assessment last stored non-prediction assessment
      * @return array<string,mixed>
      */
-    private function row(array $fixture, ?array $prediction, array $market): array
+    private function row(array $fixture, ?array $prediction, array $market, array $outcome = [], array $assessment = []): array
     {
         $kickoff = (string) ($fixture['kickoff_at'] ?? '');
         $confidence = $prediction !== null && is_numeric($prediction['confidence'] ?? null)
             ? round((float) $prediction['confidence'], 1) : null;
-        $band = (string) ($prediction['data_quality_band'] ?? QualityBand::REJECTED);
+        $assessmentQuality = is_array($assessment['dataQuality'] ?? null) ? $assessment['dataQuality'] : [];
+        $qualityScore = $prediction !== null && is_numeric($prediction['data_quality_score'] ?? null)
+            ? (int) $prediction['data_quality_score']
+            : (is_numeric($assessmentQuality['score'] ?? null) ? (int) $assessmentQuality['score'] : null);
+        $band = $prediction !== null
+            ? (string) ($prediction['data_quality_band'] ?? QualityBand::REJECTED)
+            : (isset($assessmentQuality['status']) && trim((string) $assessmentQuality['status']) !== ''
+                ? (string) $assessmentQuality['status'] : null);
         $expectedGoals = $prediction === null
             ? ['home' => null, 'away' => null, 'method' => null, 'source' => null]
             : PredictionService::expectedGoalsSummary($prediction);
-        $category = $prediction === null
-            ? $this->config->predictionCategory(null, $band)
-            : PredictionService::storedCategory($prediction, $this->config);
+
+        $outcomeState = (string) ($outcome['state'] ?? '');
+        $outcomeCode = (string) ($outcome['code'] ?? '');
+        $hasStoredAssessment = $prediction === null && $assessment !== []
+            && (string) ($assessment['status'] ?? '') === 'ASSESSED_NO_PREDICTION';
+        $assessmentState = 'ANALYZED';
+        $assessmentLabel = 'Analysis complete';
+        $assessmentReason = '';
+        if ($prediction === null) {
+            if ($outcomeState === PredictionService::MISSING_FROZEN) {
+                $assessmentState = 'PRE_MATCH_CLOSED';
+                $assessmentLabel = 'Pre-match analysis closed';
+            } elseif ($outcomeState === PredictionService::MISSING_DEFERRED) {
+                $assessmentState = 'ANALYSIS_QUEUED';
+                $assessmentLabel = 'Analysis queued';
+            } elseif ($outcomeState === PredictionService::MISSING_FAILED) {
+                $assessmentState = 'ANALYSIS_FAILED';
+                $assessmentLabel = 'Analysis failed';
+            } elseif ($hasStoredAssessment || ($outcomeState === PredictionService::MISSING_REFUSED && $outcomeCode !== '' && $outcomeCode !== 'NOT_GENERATED')) {
+                $assessmentState = 'PREDICTION_WITHHELD';
+                $assessmentLabel = 'Prediction withheld';
+            } else {
+                $assessmentState = 'AWAITING_ANALYSIS';
+                $assessmentLabel = 'Awaiting analysis';
+            }
+            $outcomeReason = trim((string) ($outcome['reason'] ?? ''));
+            $storedAssessmentReason = trim((string) ($assessment['reason'] ?? ''));
+            // A current terminal/deferred/error state supersedes the historical
+            // assessment note. For a withheld prediction the stored assessment
+            // remains the durable source of its refusal reason.
+            $assessmentReason = in_array($assessmentState, ['PRE_MATCH_CLOSED', 'ANALYSIS_QUEUED', 'ANALYSIS_FAILED'], true)
+                ? ($outcomeReason !== '' ? $outcomeReason : $storedAssessmentReason)
+                : ($storedAssessmentReason !== '' ? $storedAssessmentReason : $outcomeReason);
+            if ($assessmentReason === '') {
+                $assessmentReason = $assessmentState === 'AWAITING_ANALYSIS'
+                    ? 'No model assessment is stored yet. Generate this page to analyze the fixture from its stored data.'
+                    : 'No published prediction is stored for this fixture.';
+            }
+        }
+
+        if ($prediction !== null) {
+            $category = PredictionService::storedCategory($prediction, $this->config);
+        } elseif ($assessmentState === 'PREDICTION_WITHHELD') {
+            $category = ['code' => null, 'label' => 'No published prediction', 'tier' => 'Insufficient Evidence',
+                'reason' => $assessmentReason];
+        } elseif ($assessmentState === 'PRE_MATCH_CLOSED') {
+            $category = ['code' => null, 'label' => 'Pre-match analysis closed', 'tier' => 'Closed',
+                'reason' => $assessmentReason];
+        } elseif ($assessmentState === 'ANALYSIS_FAILED') {
+            $category = ['code' => null, 'label' => 'Analysis failed', 'tier' => 'Unavailable',
+                'reason' => $assessmentReason];
+        } else {
+            $category = ['code' => null, 'label' => $assessmentLabel, 'tier' => 'Pending',
+                'reason' => $assessmentReason];
+        }
         $predictionSummary = $prediction === null ? null : MatchFeed::predictionSummary($prediction);
         if ($predictionSummary !== null) $predictionSummary['category'] = $category;
         $fixtureId = (int) ($fixture['id'] ?? 0);
@@ -464,8 +559,17 @@ final class PredictionBoard
             'kickoffLabel' => $kickoff !== '' ? gmdate('H:i', (int) strtotime($kickoff)) . ' UTC' : DataState::UNAVAILABLE,
             'status' => (string) ($fixture['status'] ?? 'UNKNOWN'),
             'matchState' => (string) ($fixture['match_state'] ?? 'PRE_MATCH'),
+            // `analysisState` is retained for feed compatibility: only a stored
+            // prediction is ANALYZED. `assessmentState` distinguishes a genuine
+            // engine refusal, a queued match and a fixture nobody evaluated yet.
             'analysisState' => $prediction === null ? 'NOT_ANALYZED' : 'ANALYZED',
             'predictionStatus' => $prediction === null ? 'NOT_ANALYZED' : 'ANALYZED',
+            'assessmentState' => $assessmentState,
+            'assessmentLabel' => $assessmentLabel,
+            'assessmentReason' => $assessmentReason,
+            'assessmentCode' => $prediction === null
+                ? (string) ($assessment['code'] ?? ($outcomeCode !== 'NOT_GENERATED' ? $outcomeCode : '')) : null,
+            'assessment' => $prediction === null && $assessment !== [] ? $assessment : null,
             'prediction' => $predictionSummary,
             'resultLabel' => $prediction === null ? null : self::resultLabel($prediction, $fixture),
             'expectedGoals' => $expectedGoals,
@@ -474,13 +578,17 @@ final class PredictionBoard
             'category' => $category,
             'confidence' => $confidence,
             'band' => $band,
-            'dataQuality' => (int) ($prediction['data_quality_score'] ?? 0),
-            'dataQualityScore' => (int) ($prediction['data_quality_score'] ?? 0),
-            // Risk is derived, not invented: it names the two stored facts it
-            // was derived from so the label can never be read as a judgment the
-            // data does not support.
-            'risk' => $this->risk($band, $confidence),
-            'riskStatus' => $this->risk($band, $confidence)['level'] ?? 'UNKNOWN',
+            // No assessment means no score. Null is materially different from
+            // a measured zero and must remain so in both JSON and HTML.
+            'dataQuality' => $qualityScore,
+            'dataQualityScore' => $qualityScore,
+            'fixtureDataState' => (string) ($fixture['data_state'] ?? DataState::UNAVAILABLE),
+            'dataState' => (string) ($fixture['data_state'] ?? DataState::UNAVAILABLE),
+            // Risk exists only for a stored prediction. A missing prediction is
+            // not "UNKNOWN risk"; it is simply not scored yet (or was withheld).
+            'risk' => $prediction === null ? ['level' => null, 'basis' => 'No published prediction exists, so risk is not scored.']
+                : $this->risk((string) $band, $confidence),
+            'riskStatus' => $prediction === null ? null : ($this->risk((string) $band, $confidence)['level'] ?? null),
             'market' => $market,
             'marketCandidates' => [],
         ];

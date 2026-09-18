@@ -104,6 +104,7 @@ final class IntelligenceReport
                 $prediction === null ? null : $this->stability->read($prediction, $history),
                 $lastSweep,
                 (array) ($entry['predictionRefusal'] ?? []),
+                (array) ($entry['assessment'] ?? []),
             );
         }
         return $out;
@@ -118,10 +119,12 @@ final class IntelligenceReport
      * @param array<string,mixed>|null $stability the pre-read stability verdict
      * @param array<string,mixed> $refusal why this match has no prediction, when
      *        the feed already knows (it is passed through, never invented here)
+     * @param array<string,mixed> $assessment stored measured input coverage from
+     *        an engine attempt that did not publish a prediction
      * @return array<string,mixed>
      */
     public function forMatch(array $fixture, ?array $prediction, array $market = [], ?array $stability = null,
-        ?array $lastSweep = null, array $refusal = []): array
+        ?array $lastSweep = null, array $refusal = [], array $assessment = []): array
     {
         if ($prediction === null) {
             // No row means no estimate to score. "Not analyzed" and "withheld"
@@ -140,12 +143,20 @@ final class IntelligenceReport
                     . 'Analyze — a match whose stored data falls below the ' . QualityBand::LIMITED_MIN
                     . '-point quality floor is then left without a prediction rather than given a thin one.';
             }
+            $assessmentQuality = is_array($assessment['dataQuality'] ?? null) ? $assessment['dataQuality'] : [];
+            $assessmentScore = is_numeric($assessmentQuality['score'] ?? null) ? (int) $assessmentQuality['score'] : null;
+            $assessmentBand = isset($assessmentQuality['status']) && trim((string) $assessmentQuality['status']) !== ''
+                ? (string) $assessmentQuality['status'] : null;
             return [
                 'state' => self::STATE_NOT_ANALYZED,
                 'score' => $this->scores->compute([]),
-                'quality' => ['score' => null, 'band' => QualityBand::REJECTED, 'checklist' => [],
-                    'note' => 'No data-quality assessment is stored for this match: the prediction engine has not '
-                        . 'run over it, so there is nothing to grade.'],
+                'quality' => ['score' => $assessmentScore, 'band' => $assessmentBand, 'checklist' => [],
+                    'components' => is_array($assessmentQuality['components'] ?? null) ? $assessmentQuality['components'] : [],
+                    'note' => $assessmentScore === null
+                        ? 'No data-quality assessment is stored for this match: the prediction engine has not run over it, so there is nothing to grade.'
+                        : 'The prediction engine assessed this fixture at ' . $assessmentScore . '/100 (' . ($assessmentBand ?? 'unbanded')
+                            . ') but did not publish a prediction.'],
+                'assessment' => $assessment === [] ? null : $assessment,
                 'drivers' => ['drivers' => [], 'headline' => null, 'counts' => [],
                     'disclaimer' => PredictionDrivers::DISCLAIMER],
                 'fairValue' => self::unpricedValue('No prediction is stored for this match, so there is no estimate '
