@@ -190,39 +190,57 @@ final class FootballConfiguration
     }
 
     /**
-     * A conservative A/B/C classification for a *stored* football prediction.
+     * Outcome-based A/B/C classification. A means a clear home advantage, B
+     * means a balanced/draw-significant match, and C means a clear away
+     * advantage. Thresholds are admin/environment configurable.
      *
-     * A/B/C only describe predictions with QUALIFIED data.  LIMITED or
-     * genuinely low-confidence readings are deliberately UNRATED rather than
-     * promoted into Category C: a category must not hide a data-quality caveat.
-     * The cut lines use confidenceTiers(), so changing the configured bands
-     * changes the category consistently on the board, match page and API.
-     *
+     * @param array{home:mixed,draw:mixed,away:mixed}|null $probabilities
      * @return array{code:?string,label:string,tier:string,reason:string}
      */
-    public function predictionCategory(?float $confidence, string $dataQualityBand): array
+    public function predictionCategory(?array $probabilities, string $dataQualityBand): array
     {
-        if ($confidence === null) {
+        if (strtoupper($dataQualityBand) === QualityBand::REJECTED) {
+            return ['code' => null, 'label' => 'Unrated — insufficient data', 'tier' => 'Insufficient Data',
+                'reason' => 'No category is assigned when the prediction is withheld by the data-quality gate.'];
+        }
+        if ($probabilities === null || !is_numeric($probabilities['home'] ?? null)
+            || !is_numeric($probabilities['draw'] ?? null) || !is_numeric($probabilities['away'] ?? null)) {
             return ['code' => null, 'label' => 'Unrated', 'tier' => 'Unrated',
-                'reason' => 'No measured confidence is stored for this fixture.'];
+                'reason' => 'A complete measured home/draw/away probability vector is required.'];
         }
-        if (strtoupper($dataQualityBand) !== QualityBand::QUALIFIED) {
-            return ['code' => null, 'label' => 'Unrated — limited data', 'tier' => 'Limited Data',
-                'reason' => 'A/B/C is reserved for qualified data; this prediction is reported with its data-quality limit.'];
+        $home = (float) $probabilities['home'];
+        $draw = (float) $probabilities['draw'];
+        $away = (float) $probabilities['away'];
+        // Stored probabilities are normally fractions. Accept percentages too
+        // so this boundary remains safe for imports and admin tooling.
+        if (max($home, $draw, $away) > 1.0) { $home /= 100; $draw /= 100; $away /= 100; }
+        $thresholds = $this->categoryThresholds();
+        $gap = abs($home - $away);
+        if ($draw >= $thresholds['drawSignificant'] || $gap <= $thresholds['balancedGap']) {
+            return ['code' => 'B', 'label' => 'B — Balanced / Competitive Match', 'tier' => 'Balanced',
+                'reason' => $draw >= $thresholds['drawSignificant']
+                    ? 'Draw probability meets the configured significance threshold.'
+                    : 'Home and away probabilities are within the configured competitive margin.'];
         }
-        $codes = ['highest' => 'A', 'strong' => 'B', 'standard' => 'C'];
-        foreach ($this->confidenceTiers() as $tier) {
-            $key = (string) ($tier['key'] ?? '');
-            if ($confidence >= (float) ($tier['min'] ?? 101) && $confidence <= (float) ($tier['max'] ?? -1)) {
-                $code = $codes[$key] ?? null;
-                if ($code !== null) {
-                    return ['code' => $code, 'label' => 'Category ' . $code, 'tier' => (string) ($tier['label'] ?? ''),
-                        'reason' => 'Qualified data and measured confidence fall in the ' . (string) ($tier['label'] ?? '') . ' band.'];
-                }
-            }
+        if ($home > $away && $home > $draw) {
+            return ['code' => 'A', 'label' => 'A — Home Advantage', 'tier' => 'Home Advantage',
+                'reason' => 'Home win has the strongest probability outside the balanced-match thresholds.'];
         }
-        return ['code' => null, 'label' => 'Unrated — developing', 'tier' => 'Developing',
-            'reason' => 'Qualified data is present, but measured confidence is below the Category C cut line.'];
+        if ($away > $home && $away > $draw) {
+            return ['code' => 'C', 'label' => 'C — Away Advantage', 'tier' => 'Away Advantage',
+                'reason' => 'Away win has the strongest probability outside the balanced-match thresholds.'];
+        }
+        return ['code' => 'B', 'label' => 'B — Balanced / Competitive Match', 'tier' => 'Balanced',
+            'reason' => 'Neither home nor away win is the clear strongest outcome.'];
+    }
+
+    /** @return array{balancedGap:float,drawSignificant:float} */
+    public function categoryThresholds(): array
+    {
+        return [
+            'balancedGap' => max(0.0, min(1.0, (float) $this->num('WINDELS_FOOTBALL_CATEGORY_BALANCED_GAP_PP', 8.0) / 100.0)),
+            'drawSignificant' => max(0.0, min(1.0, (float) $this->num('WINDELS_FOOTBALL_CATEGORY_DRAW_SIGNIFICANT_PP', 30.0) / 100.0)),
+        ];
     }
 
     // ── fair value, stability and the intelligence score ──────────────────────

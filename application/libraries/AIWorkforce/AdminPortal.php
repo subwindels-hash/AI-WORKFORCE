@@ -59,6 +59,8 @@ class AdminPortal
             // one cycle. It is bounded again in FootballConfiguration and the
             // prediction services, so a tampered form cannot exceed 50.
             'football_analysis_batch_size' => '50',
+            'football_category_balanced_gap_pp' => '8',
+            'football_category_draw_significant_pp' => '30',
         ],
     ];
 

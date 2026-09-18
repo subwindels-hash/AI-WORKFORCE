@@ -310,7 +310,7 @@ final class PredictionService
             ];
         }
         return $config->predictionCategory(
-            is_numeric($prediction['confidence'] ?? null) ? (float) $prediction['confidence'] : null,
+            ['home' => $prediction['probability_home'] ?? null, 'draw' => $prediction['probability_draw'] ?? null, 'away' => $prediction['probability_away'] ?? null],
             (string) ($prediction['data_quality_band'] ?? QualityBand::REJECTED),
         );
     }
