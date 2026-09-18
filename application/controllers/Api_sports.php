@@ -90,6 +90,11 @@ class Api_sports extends Api_controller
             $seen[$key] = true;
             return true;
         }));
+        // This endpoint is polled by an open scoreboard. Explicitly disable
+        // intermediary caching so a CDN or shared-host proxy cannot replay an
+        // old score after the throttled provider sweep has stored a new one.
+        $this->output->set_header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        $this->output->set_header('Pragma: no-cache');
         $this->json([
             'status' => $board['status'],
             'matches' => $board['matches'],
