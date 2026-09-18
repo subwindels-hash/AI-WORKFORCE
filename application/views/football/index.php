@@ -179,7 +179,9 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
             <span class="badge <?= strtoupper($providerMode) === 'MANUAL' ? 'b-amber' : 'b-green' ?>"><?= e($providerMode) ?> · <?= strtoupper($providerMode) === 'MANUAL' ? 'operator selection' : 'admin managed' ?></span>
           </div>
           <div class="body">
-            <p class="football-section-intro">These controls change what the three board sections below display. They only reorganize saved fixtures and stored odds — no provider request is spent and no prediction is created.</p>
+            <p class="football-section-intro">These controls change what the three board sections below display. They only reorganize saved fixtures and stored odds — no provider request is spent. <?= !empty($refresh)
+              ? 'The board read generates the missing predictions for the page in view (at most the configured batch); stored predictions are reused, never regenerated.'
+              : 'This deployment reads without generating (?refresh=0 or WINDELS_FOOTBALL_GENERATE_ON_READ=false); the Generate this page action creates the missing predictions.' ?></p>
             <form method="get" action="/football" class="football-filter-form">
               <input type="hidden" name="page" value="1">
               <?php if ($isAdmin): ?>
@@ -207,9 +209,10 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
               <label class="fld">Premium league
                 <select class="sel" name="premium" onchange="this.form.competition.value=this.value">
                   <option value="">No premium-only filter</option>
+                  <option value="<?= e($premiumAllKeyword) ?>" <?= $premiumAllScope ? 'selected' : '' ?>>All premium leagues</option>
                   <?php foreach ($premiumOptions as $entry): ?>
                     <?php $value = (string) ($entry['externalId'] ?? ''); ?>
-                    <option value="<?= e($value) ?>" <?= !$premiumAllScope && $selectedExternal === $value ? 'selected' : '' ?>><?= e((string) ($entry['name'] ?? 'Premium league')) ?><?= $value === (string) ($premium['externalId'] ?? '') ? ' · featured' : '' ?></option>
+                    <option value="<?= e($value) ?>" <?= !$premiumAllScope && $selectedExternal === $value ? 'selected' : '' ?>><?= e((string) ($entry['name'] ?? 'Premium league')) ?> · <?= (int) ($entry['matches'] ?? 0) ?> match<?= (int) ($entry['matches'] ?? 0) === 1 ? '' : 'es' ?><?= $value === (string) ($premium['externalId'] ?? '') ? ' · featured' : '' ?></option>
                   <?php endforeach; ?>
                 </select>
               </label>
@@ -225,35 +228,66 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
               <label class="fld">Date <input class="sel" type="date" name="date" value="<?= e((string) ($date ?? gmdate('Y-m-d'))) ?>"></label>
               <button class="btn primary" type="submit">Apply view</button>
             </form>
-            <p class="football-help">Filters only reorganize saved fixtures and stored odds. They do not spend a provider request or create a new prediction. The complete odds sheet remains available for every match below.</p>
+            <p class="football-help">Filters only reorganize saved fixtures and stored odds — they spend no provider request. The complete odds sheet remains available for every match below.</p>
           </div>
         </section>
 
+      <?php
+        /* The Day overview prints three scopes, each labeled as itself: the
+           summary counts (the whole selection — the date, or the date narrowed
+           to the chosen competition), the page block (what THIS read evaluated
+           for the page in view), and the read stamp (when the payload was
+           generated). A page-scoped figure is never dressed up as a
+           date-wide one, and "withheld" is the engine's own refusal — the
+           quality gate answered and chose not to store — not a gap. */
+        $pageBlock = is_array($board['page'] ?? null) ? $board['page'] : [];
+        $pagination = is_array($board['pagination'] ?? null) ? $board['pagination'] : [];
+        $selectionState = (string) ($selectedCompetition['state'] ?? '');
+        $selectionName = in_array($selectionState, ['NARROWED', 'PREMIUM_LEAGUES'], true)
+            ? (string) ($selectedCompetition['name'] ?? '') : '';
+        $awaitingAnalysis = max(0, (int) ($summary['fixtures'] ?? 0) - (int) ($summary['analyzed'] ?? 0));
+        $withheldOnPage = (int) ($pageBlock['withheld'] ?? 0);
+        $pageFixtures = (int) ($pagination['returned'] ?? 0);
+      ?>
       <section class="panel football-section" id="football-overview" aria-labelledby="day-overview-heading">
         <div class="football-section__heading">
           <div class="football-section__title">
             <span class="football-step" aria-hidden="true">1</span>
             <div>
               <p class="football-eyebrow">Day overview</p>
-              <h3 id="day-overview-heading">What is stored for <?= e((string) ($board['date'] ?? $date ?? 'this date')) ?></h3>
+              <h3 id="day-overview-heading">What is stored for <?= e((string) ($board['dateLabel'] ?? $board['date'] ?? $date ?? 'this date')) ?><?php if ((string) ($board['date'] ?? $date ?? '') !== ''): ?> (<?= e((string) ($board['date'] ?? $date)) ?>)<?php endif; ?><?= $selectionName !== '' ? ' — ' . e($selectionName) : '' ?></h3>
             </div>
           </div>
-          <span class="football-section__meta">Board read <?= e($kickoff($d['generatedAt'] ?? null, 'H:i')) ?></span>
+          <span class="football-section__meta" title="When this page read its stored board payload (UTC). Reload re-reads storage; no provider request is spent.">Board read <?= e($kickoff($d['generatedAt'] ?? null, 'D j M Y · H:i')) ?></span>
         </div>
         <div class="body">
-          <p class="football-section-intro">The counts below describe saved rows for this date only. A fixture is <b>qualified</b> when its stored evidence clears the data-quality floor, <b>limited</b> when it is usable with caution, and <b>withheld</b> when the evidence is too thin to publish a prediction.</p>
+          <p class="football-section-intro">The counts below describe saved rows for <?= $selectionName !== '' ? 'this selection — <b>' . e($selectionName) . '</b> on ' : '' ?>this date. A fixture is <b>qualified</b> when its stored evidence clears the data-quality floor, <b>limited</b> when it is usable with caution, and <b>withheld</b> when the engine refused to write a prediction because the evidence was too thin. <?= !empty($refresh)
+            ? 'Reading this board generates the missing predictions for the page in view — at most the configured batch, stored ones are reused, never regenerated, and no provider request is spent.'
+            : 'This read generated nothing: generation on read is off (?refresh=0 or WINDELS_FOOTBALL_GENERATE_ON_READ=false), so the Generate this page action stays the way predictions are created.' ?></p>
           <div class="stat-grid football-stat-grid">
-            <div class="stat"><div class="k">Fixtures found</div><div class="v"><?= (int) ($summary['fixtures'] ?? 0) ?></div><div class="trend">stored for this date</div></div>
+            <div class="stat"><div class="k">Fixtures found</div><div class="v"><?= (int) ($summary['fixtures'] ?? 0) ?></div><div class="trend">stored for this date<?= $selectionName !== '' ? ' · ' . e($selectionName) : '' ?></div></div>
             <div class="stat"><div class="k">Analyzed</div><div class="v"><?= (int) ($summary['analyzed'] ?? 0) ?></div><div class="trend">prediction rows saved</div></div>
             <div class="stat"><div class="k">Qualified</div><div class="v up"><?= (int) ($summary['qualified'] ?? 0) ?></div><div class="trend">verified data quality</div></div>
             <div class="stat"><div class="k">Limited evidence</div><div class="v warn"><?= (int) ($summary['limited'] ?? 0) ?></div><div class="trend">usable with caution</div></div>
-            <div class="stat"><div class="k">Withheld</div><div class="v down"><?= (int) ($summary['rejected'] ?? 0) ?></div><div class="trend">below evidence floor</div></div>
+            <div class="stat"><div class="k">Withheld</div><div class="v down"><?= $withheldOnPage ?></div><div class="trend">evidence below the floor · this page</div></div>
+            <div class="stat"><div class="k">Awaiting analysis</div><div class="v"><?= $awaitingAnalysis ?></div><div class="trend">no prediction row yet · whole selection</div></div>
           </div>
-          <?php $pagination = is_array($board['pagination'] ?? null) ? $board['pagination'] : []; ?>
           <?php if ($pagination !== []): ?>
             <div class="football-section__divider"></div>
             <?= $pager($pagination, (string) ($date ?? gmdate('Y-m-d')), $carry) ?>
-            <p class="football-help">This page contains <?= (int) ($pagination['returned'] ?? 0) ?> stored fixture<?= (int) ($pagination['returned'] ?? 0) === 1 ? '' : 's' ?>. Paging only reads saved rows; it never refreshes prices or regenerates a prediction.</p>
+            <?php
+              // What this read made of the page's own fixtures, in the same
+              // words the table below uses. Zero-valued clauses stay silent so
+              // the line reads as a sentence, not a spreadsheet.
+              $pageParts = [(int) ($pageBlock['predicted'] ?? 0) . ' with a stored prediction'];
+              if ($withheldOnPage > 0) $pageParts[] = $withheldOnPage . ' withheld (evidence below the floor)';
+              if ((int) ($pageBlock['frozen'] ?? 0) > 0) $pageParts[] = (int) $pageBlock['frozen'] . ' closed (kickoff already passed)';
+              if ((int) ($pageBlock['deferred'] ?? 0) > 0) $pageParts[] = (int) $pageBlock['deferred'] . ' deferred to the next cycle';
+              if ((int) ($pageBlock['failed'] ?? 0) > 0) $pageParts[] = (int) $pageBlock['failed'] . ' failed';
+            ?>
+            <p class="football-help">This page contains <?= $pageFixtures ?> stored fixture<?= $pageFixtures === 1 ? '' : 's' ?> — <?= implode(', ', $pageParts) ?>. <?= !empty($refresh)
+              ? 'Reading a page generates only its own missing predictions (at most the configured batch); paging never refreshes prices and never regenerates a stored prediction.'
+              : 'Paging only reads saved rows; it never refreshes prices and never generates a prediction.' ?></p>
           <?php endif; ?>
           <?php if (in_array((string) ($board['state'] ?? ''), ['NO_FIXTURES_STORED', 'NO_PREDICTIONS_STORED', 'PAGE_BEYOND_LAST'], true)): ?>
             <div class="empty-state"><p><?= e((string) ($board['message'] ?? 'No stored fixtures are available for this selection.')) ?></p></div>
@@ -261,7 +295,29 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         </div>
       </section>
 
-      <?php $picksBlock = is_array($board['picks'] ?? null) ? $board['picks'] : []; $picks = is_array($picksBlock['picks'] ?? null) ? $picksBlock['picks'] : []; ?>
+      <?php
+        /* Section 2 — the ranked reading. The picks payload publishes the full
+           accounting (considered / eligible / shown / beyondList / excluded
+           with reasons, and per-pick evidence, confidence, risk, value class
+           and warnings); this section prints all of it, so "5 of 9 eligible"
+           is read off the page rather than implied, and every match the list
+           did not take is named with the sentence that kept it out. */
+        $picksBlock = is_array($board['picks'] ?? null) ? $board['picks'] : [];
+        $picks = is_array($picksBlock['picks'] ?? null) ? $picksBlock['picks'] : [];
+        // The complete ranked list: every eligible match on the page, ranked.
+        // The console renders this — the configured top list (`picks`) is the
+        // headline, not the whole table — so no eligible match is reduced to a
+        // "+N beyond the list" counter.
+        $picksAll = is_array($picksBlock['allPicks'] ?? null) ? $picksBlock['allPicks'] : $picks;
+        $picksConsidered = (int) ($picksBlock['considered'] ?? 0);
+        $picksEligible = (int) ($picksBlock['eligible'] ?? 0);
+        $picksBeyond = (int) ($picksBlock['beyondList'] ?? 0);
+        $picksLimit = (int) ($picksBlock['limit'] ?? 0);
+        $picksExcludedRaw = is_array($picksBlock['excluded'] ?? null) ? $picksBlock['excluded'] : [];
+        $picksExcluded = array_values(array_filter($picksExcludedRaw, 'is_array'));
+        $picksMarketLabel = (string) ($picksBlock['market'] ?? '');
+        $picksRule = is_array($picksBlock['rule'] ?? null) ? $picksBlock['rule'] : [];
+      ?>
       <section class="panel football-section" id="football-picks" aria-labelledby="top-picks-heading">
         <div class="football-section__heading">
           <div class="football-section__title">
@@ -271,34 +327,64 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
               <h3 id="top-picks-heading">Top WINDELS Picks</h3>
             </div>
           </div>
-          <span class="football-section__meta"><?= (int) ($picksBlock['eligible'] ?? 0) ?> eligible on this page</span>
+          <span class="football-section__meta" title="<?= e((string) ($picksRule['eligibility'] ?? 'Eligible matches on this page: analyzed, QUALIFIED or LIMITED data quality, an actual selection in the selected market, not withheld, not unstable.')) ?>"><?= $picksEligible ?> eligible on this page<?= $picksEligible > 0 ? ' · all ' . count($picksAll) . ' listed' : '' ?><?= $picksBeyond > 0 ? ' · top ' . $picksLimit . ' marked' : '' ?></span>
         </div>
         <div class="body">
-          <p class="football-section-intro">The strongest comparisons drawn from the fixtures in section 3, ordered by intelligence score. Each row keeps the model probability and the bookmaker price in their own columns so the two readings are never confused.</p>
-          <?php if ($picks === []): ?>
+          <p class="football-section-intro">The strongest comparisons drawn from the fixtures in section 3, ordered by intelligence score. Each row keeps the model probability and the bookmaker price in their own columns so the two readings are never confused. Every pick is the selected market's answer<?= $picksMarketLabel !== '' ? ' — <b>' . e($picksMarketLabel) . '</b>' : '' ?> — ranked evidence band first, then intelligence score, then the edge against the quoted price, then model confidence.</p>
+          <?php if ($picksAll === []): ?>
             <p class="football-help">No fixtures currently satisfy the required prediction and data-quality thresholds. This is a finding, not a gap filled with a forced selection.</p>
           <?php else: ?>
             <div class="table-scroll">
-              <table class="tbl football-table">
-                <thead><tr><th>#</th><th>Match &amp; pick</th><th class="num">WINDELS probability</th><th class="num">Market odds</th><th class="num">WINDELS fair odds</th><th class="num">Value</th><th class="num">Intelligence</th><th>Movement</th></tr></thead>
+              <table class="tbl football-table football-picks-table">
+                <thead><tr><th>#</th><th>Match &amp; pick</th><th class="num">WINDELS probability</th><th class="num">Market odds</th><th class="num">WINDELS fair odds</th><th>Value</th><th>Evidence</th><th class="num">Confidence</th><th class="num">Intelligence</th><th>Risk</th><th>Movement</th></tr></thead>
                 <tbody>
-                  <?php foreach ($picks as $pick): ?>
-                    <?php $cardPageId = (int) ($pick['fixtureId'] ?? 0); $move = (string) ($pick['stabilityState'] ?? ''); ?>
+                  <?php foreach ($picksAll as $pick): ?>
+                    <?php
+                      $cardPageId = (int) ($pick['fixtureId'] ?? 0);
+                      $move = (string) ($pick['stabilityState'] ?? '');
+                      $pickBand = (string) ($pick['band'] ?? '');
+                      $valueClass = (string) ($pick['valueClass'] ?? 'UNPRICED');
+                      $valueTone = in_array($valueClass, ['STRONG_VALUE', 'POSITIVE_VALUE'], true) ? 'b-green'
+                          : (in_array($valueClass, ['NEGATIVE_VALUE', 'AVOID'], true) ? 'b-red' : 'b-gray');
+                      $riskLevel = strtoupper((string) ($pick['risk'] ?? 'UNKNOWN'));
+                      $riskTone = $riskLevel === 'LOW' ? 'b-green' : ($riskLevel === 'MEDIUM' ? 'b-amber' : ($riskLevel === 'HIGH' ? 'b-red' : 'b-gray'));
+                      $pickWarnings = is_array($pick['warnings'] ?? null) ? array_values(array_filter($pick['warnings'], static fn($w): bool => is_string($w) && trim($w) !== '')) : [];
+                    ?>
                     <tr>
                       <td class="mono"><?= (int) ($pick['rank'] ?? 0) ?></td>
-                      <td><?php if ($cardPageId > 0): ?><a href="/football/match/<?= $cardPageId ?>" class="football-match-link"><?php endif; ?><?= crest($pick['homeTeamLogo'] ?? null) ?><?= e((string) ($pick['homeTeam'] ?? '—')) ?> vs <?= crest($pick['awayTeamLogo'] ?? null) ?><?= e((string) ($pick['awayTeam'] ?? '—')) ?><?php if ($cardPageId > 0): ?></a><?php endif; ?><div class="dim football-cell-note"><?= e((string) ($pick['selectionLabel'] ?? '—')) ?> · <?= e((string) ($pick['kickoffLabel'] ?? '')) ?></div></td>
+                      <td><?php if ($cardPageId > 0): ?><a href="/football/match/<?= $cardPageId ?>" class="football-match-link"><?php endif; ?><?= crest($pick['homeTeamLogo'] ?? null) ?><?= e((string) ($pick['homeTeam'] ?? '—')) ?> vs <?= crest($pick['awayTeamLogo'] ?? null) ?><?= e((string) ($pick['awayTeam'] ?? '—')) ?><?php if ($cardPageId > 0): ?></a><?php endif; ?><div class="dim football-cell-note"><?= e((string) ($pick['selectionLabel'] ?? '—')) ?> · <?= e((string) ($pick['kickoffLabel'] ?? '')) ?> · <?= e((string) ($pick['market'] ?? '')) ?></div></td>
                       <td class="num mono"><?= $pct($pick['probability'] ?? null) ?></td>
                       <td class="num mono"><?= $odds($pick['odds'] ?? null) ?></td>
                       <td class="num mono"><?= $odds($pick['fairOdds'] ?? null) ?></td>
-                      <td class="num mono <?= (float) ($pick['expectedValue'] ?? -1) >= 0 ? 'up' : 'down' ?>"><?= $signedPct($pick['expectedValue'] ?? null) ?></td>
-                      <td class="num mono"><?= is_numeric($pick['score'] ?? null) ? (int) $pick['score'] . '/100' : '—' ?></td>
-                      <td><?php if ($move === \AIWorkforce\Football\StabilityMonitor::UNSTABLE): ?><span class="badge b-red" title="This prediction moved materially between stored readings.">Prediction unstable — significant model movement</span><?php elseif ($move === \AIWorkforce\Football\StabilityMonitor::MOVED): ?><span class="badge b-amber">Moved</span><?php else: ?><span class="badge b-gray">Stable / first reading</span><?php endif; ?></td>
+                      <td><span class="badge <?= $valueTone ?>"><?= e((string) ($pick['valueLabel'] ?? 'No price to compare')) ?></span><div class="dim football-cell-note"><?= is_numeric($pick['expectedValue'] ?? null) ? 'Expected return ' . $signedPct($pick['expectedValue']) : 'Expected return —' ?><?= is_numeric($pick['edgePoints'] ?? null) ? ' · edge ' . ((float) $pick['edgePoints'] >= 0 ? '+' : '') . number_format((float) $pick['edgePoints'], 1) . 'pp' : '' ?></div></td>
+                      <td><span class="badge <?= $pickBand === 'QUALIFIED' ? 'b-green' : 'b-amber' ?>"><?= e($pickBand !== '' ? $pickBand : '—') ?></span><div class="dim football-cell-note">quality <?= is_numeric($pick['dataQuality'] ?? null) ? (int) $pick['dataQuality'] . '/100' : '—' ?></div></td>
+                      <td class="num mono"><?= is_numeric($pick['confidence'] ?? null) ? number_format((float) $pick['confidence'], 1) . '%' : '—' ?></td>
+                      <td class="num mono"><?= is_numeric($pick['score'] ?? null) ? (int) $pick['score'] . '/100' : '—' ?><?php if ((string) ($pick['scoreBand'] ?? '') !== ''): ?><div class="dim football-cell-note"><?= e((string) $pick['scoreBand']) ?></div><?php endif; ?></td>
+                      <td><span class="badge <?= $riskTone ?>"><?= e($riskLevel !== '' ? $riskLevel : 'UNKNOWN') ?></span></td>
+                      <td><?php if ($move === \AIWorkforce\Football\StabilityMonitor::UNSTABLE): ?><span class="badge b-red" title="This prediction moved materially between stored readings.">Prediction unstable — significant model movement</span><?php elseif ($move === \AIWorkforce\Football\StabilityMonitor::MOVED): ?><span class="badge b-amber">Moved</span><?php else: ?><span class="badge b-gray"><?= e((string) ($pick['stabilityLabel'] ?? 'Stable / first reading')) ?></span><?php endif; ?><?php foreach ($pickWarnings as $pickWarning): ?><div class="dim football-cell-note"><?= e($pickWarning) ?></div><?php endforeach; ?></td>
                     </tr>
+                    <?php if ($picksLimit > 0 && (int) ($pick['rank'] ?? 0) === $picksLimit && count($picksAll) > $picksLimit): ?>
+                      <tr class="football-picks-divider"><td colspan="11">Beyond the top <?= $picksLimit ?> — still eligible on this page, ranked below the marked list</td></tr>
+                    <?php endif; ?>
                   <?php endforeach; ?>
                 </tbody>
               </table>
             </div>
           <?php endif; ?>
+          <?php if ($picksExcluded !== []): ?>
+            <details class="football-odds-disclosure football-picks-exclusions">
+              <summary>
+                <span><b><?= count($picksExcluded) ?> match<?= count($picksExcluded) === 1 ? ' was' : 'es were' ?> not eligible on this page</b> <span class="dim">· each with the reason that kept it out</span></span>
+                <span class="football-disclosure-action">Show reasons</span>
+              </summary>
+              <ul class="football-picks-exclusions__list">
+                <?php foreach ($picksExcluded as $excludedPick): ?>
+                  <li><b><?= e((string) ($excludedPick['homeTeam'] ?? '—')) ?> vs <?= e((string) ($excludedPick['awayTeam'] ?? '—')) ?></b><span class="dim mono"><?= e((string) ($excludedPick['kickoffLabel'] ?? '')) ?></span><span><?= e((string) ($excludedPick['reason'] ?? 'Not eligible.')) ?></span></li>
+                <?php endforeach; ?>
+              </ul>
+            </details>
+          <?php endif; ?>
+          <p class="football-help"><?= $picksConsidered ?> match<?= $picksConsidered === 1 ? ' was' : 'es were' ?> considered on this page · <?= $picksEligible ?> eligible · all <?= count($picksAll) ?> listed<?= $picksLimit > 0 ? ' (top ' . $picksLimit . ' marked' . ($picksBeyond > 0 ? ', +' . $picksBeyond . ' ranked below it' : '') . ')' : '' ?>. <?= e((string) ($picksRule['ranking'] ?? 'Ranked by evidence band, then intelligence score, then edge against the quoted price, then model confidence.')) ?></p>
           <p class="football-help"><?= e((string) ($picksBlock['disclaimer'] ?? 'Rankings are analytical comparisons, not a promise of a result.')) ?></p>
         </div>
       </section>

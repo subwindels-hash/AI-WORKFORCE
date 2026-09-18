@@ -1726,7 +1726,7 @@ a.btn[aria-disabled="true"] {
   border-color: var(--line2);
   color: var(--text);
 }
-.football-stat-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.football-stat-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
 .football-stat-grid .stat { padding: 10px 11px; }
 .football-stat-grid .stat .v { font-size: 20px; }
 .football-stat-grid .trend { margin-top: 2px; font-size: 10px; color: var(--dim); line-height: 1.25; }
@@ -1792,6 +1792,12 @@ a.btn[aria-disabled="true"] {
 .football-value-explanation { margin-top: 6px; color: var(--dim); font-size: 9px; }
 .football-value-explanation summary { cursor: pointer; color: var(--brand); font-weight: 700; }
 .football-value-explanation p { margin: 4px 0 0; padding: 6px 7px; border-left: 2px solid var(--line2); color: var(--muted); line-height: 1.4; }
+.football-picks-table { min-width: 980px; }
+.football-picks-divider > td { padding: 7px 10px; background: var(--brand-soft); color: var(--dim); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; border-top: 1px solid var(--line2); border-bottom: 1px solid var(--line2); }
+.football-picks-exclusions__list { margin: 0; padding: 12px; background: #090f19; list-style: none; display: grid; gap: 8px; }
+.football-picks-exclusions__list li { display: grid; grid-template-columns: minmax(140px, auto) auto 1fr; gap: 10px; align-items: baseline; font-size: 11px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.football-picks-exclusions__list li:last-child { border-bottom: none; padding-bottom: 0; }
+.football-picks-exclusions__list li span:last-child { color: var(--muted); line-height: 1.4; }
 .football-odds-status { display: flex; align-items: center; gap: 10px; padding: 10px 11px; border: 1px solid #f5a6233d; border-radius: 7px; background: #f5a6230a; }
 .football-odds-status p { margin: 0; color: var(--muted); font-size: 10px; }
 .football-market-card > footer { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 7px 10px; border-top: 1px solid var(--line); color: var(--dim); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 9px; }

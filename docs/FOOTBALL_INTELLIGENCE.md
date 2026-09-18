@@ -53,7 +53,7 @@ each panel exists exactly once in the product.
 | `PredictionService.php` | prediction storage, the §output contract, the post-kickoff freeze; `predictMissing()` generates only matches that have no prediction, while `predictDay()` advances through the next configured 1–50 stored fixtures per cycle |
 | `MatchFeed.php` | the paginated feed: 50 matches per read page, up to the configured 1–50 NEW predictions per generation request, `match_id` de-duplication, competition and premium-league selection |
 | `PredictionMarkets.php` | the odds-prediction markets: the catalogue, the evaluation of one market from the stored score distribution, and the odds a feed actually quoted |
-| `PredictionBoard.php` | the daily board for one page: date-wide summary counts, confidence categories, match cards, pager |
+| `PredictionBoard.php` | the daily board for one page: date-wide summary counts, a page block (predicted / withheld / frozen / deferred by this read), confidence categories, match cards, pager |
 | `LiveMatchService.php` | in-play board and `LIVE` estimate rows, never rewriting the pre-match row |
 | `SettlementService.php` | grading on `FINISHED`, voiding on postponement, idempotent sweeps |
 | `PerformanceService.php` | 30-day metrics from stored settlements, snapshots, per-model evaluation |
@@ -235,7 +235,7 @@ The rules, and where each one is enforced:
 | 50 matches per page; `limit > 50` is clamped | `MatchFeed::MAX_PAGE_SIZE`, `MatchFeed::resolve()`, `RequestParams::int()` in the endpoints |
 | at most 50 **new** predictions per generation request | `PredictionService::predictMissing()` — a `$limit` of 9,999 still yields 50, and the rest are reported `DEFERRED` |
 | a match that already has a prediction is never regenerated | `PredictionService::existing()` → the stored row is returned; `predictDay()` counts it as `skipped` |
-| moving between pages costs nothing | the read path touches only `listFixtures`/`listPredictionsForFixtures`/`countFixtures` |
+| moving between pages costs no provider request | the read path touches only `listFixtures`/`listPredictionsForFixtures`/`countFixtures`; generate-on-read runs the same bounded, stored-rows-only pass `refresh=1` runs — never a provider call |
 | one prediction per match | `UNIQUE(fixture_id, prediction_kind, model_version_id)` in every schema, plus `UNIQUE(provider_id, external_id)` on fixtures |
 
 **`match_id`.** A match is identified by `providerCode:externalId`
@@ -289,10 +289,23 @@ Select Odds Prediction        (one market, or All markets = the default odds vie
         ↓
 Select date
         ↓
-Generate predictions          (at most 50 NEW matches, inside the selected competition(s))
+Read the board                (generates the page's missing predictions by default)
+        ↓
+Generate predictions          (the explicit action: at most 50 NEW matches, inside the selected competition(s))
         ↓
 Page 1 → Next → Page 2        (stored rows; nothing is regenerated)
 ```
+
+**Generate-on-read.** Opening the console runs the same bounded pass
+`refresh=1` and the **Generate this page** action run: the missing predictions
+for the *page in view* are generated from stored rows — at most the page size
+and the analysis batch, stored predictions are reused (never regenerated), and
+no provider request is spent. It is on by default so the board a signed-in
+viewer opens is already generated for the page in view; an operator can restore
+the fully read-only console with `WINDELS_FOOTBALL_GENERATE_ON_READ=false`, and
+`?refresh=0` makes one read read-only either way (an explicit `?refresh=1`
+still generates). The scheduled `predict` job and the API stay exactly as they
+were — the flag changes only the console's default.
 
 Every selector also offers its **all-value**, so the page can list every fixture
 at once instead of one league or market at a time:
@@ -515,12 +528,26 @@ A ranking of the page that is on screen, not of the season:
 * **Order**: intelligence score, then the edge in probability points, then
   confidence — value alone cannot put a thinly-evidenced match at the top, and
   confidence alone cannot put a well-evidenced no-gap match there.
-* **Size**: `picksLimit()` (default 5, capped at 10). `considered`, `eligible`,
-  `shown` and `beyondList` are all published, so "5 of 9 eligible" is checkable
-  rather than implied.
+* **Size**: `picksLimit()` (default 5, capped at 10) caps the **top list** (`picks`)
+  — the headline a compact consumer asks for. The complete ranking is never
+  truncated: `allPicks` publishes every eligible pick in rank order, and the
+  console renders `allPicks`, so all eligible matches on the page are listed —
+  the top list marked, the remainder ranked below a stated divider.
+  `considered`, `eligible`, `shown` and `beyondList` are all published, so
+  "5 of 9 eligible" is checkable rather than implied.
 * **Exclusions are listed with their reason** — an unstable, limited-data or
   unanalyzed match appears in `excluded` with the sentence that kept it out, so
   the absence can be audited.
+
+The console's **Ranked reading** section prints all of it: the caption reads
+"N eligible on this page · all M listed · top K marked", every eligible pick is
+in the table (the top list ends at a stated divider, the remainder ranked below
+it), each pick row carries the market it is answered in, the value
+classification (not just the expected-return percentage), the evidence band
+with its quality score, the model confidence, the risk level and any warnings,
+and the matches that did not qualify are listed behind a "Show reasons"
+disclosure, each with the sentence that kept it out — the same data the API
+publishes.
 
 The panel's caption is fixed by `IntelligenceReport::PICKS_DISCLAIMER`: these are
 model-based selections ranked by how well evidenced they are, not guarantees, and
@@ -623,13 +650,20 @@ this deployment classifies as premium — names or provider competition ids:
 WINDELS_FOOTBALL_PREMIUM_COMPETITIONS=Premier League, UEFA Champions League, La Liga, Serie A, Bundesliga, Ligue 1
 ```
 
+Unset, the list defaults to that whole premium group — the (English) Premier
+League, UEFA Champions League, La Liga, Serie A, the Bundesliga and Ligue 1 —
+so every premium league is offered without configuration; setting it narrows
+the classification to exactly the named leagues.
+
 A league is premium because it was classified, and names match loosely, so one
 feed's "English Premier League" and another's "Premier League" are the same
 premium competition — and the same internal competition id. The Premium League
 selector offers every premium league that has a match on the date, with the
-featured one marked; a league that was not classified is never offered as
-premium, and a configured premium league with no match on the date is
-substituted by the featured competition with that stated, never silently.
+featured one marked, plus an **All premium leagues** option that pages and
+generates across the whole group at once; a league that was not classified is
+never offered as premium, and a configured premium league with no match on the
+date is substituted by the featured competition with that stated, never
+silently.
 
 ### API calls: database first
 
@@ -774,7 +808,7 @@ GET /api/football/models/active
 GET /api/football/calibrations           ?modelVersionId= (defaults to the model in use)
 GET /api/football/provider/status
 GET /api/football/status
-GET /api/football/dashboard            ?date=&refresh=
+GET /api/football/dashboard            ?date=&refresh=   (the API stays explicit: refresh generates, its absence reads)
 GET /api/football/providers            the provider catalogue behind the Data Provider selector
 GET /api/football/providers/health     per-provider health: status, response time, rate limit, coverage, odds, what is missing
 GET /api/football/matches/fetch        ?provider=AUTO&competition=&date=&dateFrom=&dateTo=&limit=50&with=lineups&refresh=1
@@ -1022,12 +1056,17 @@ WINDELS_FOOTBALL_MIN_REQUEST_SPACING_MS=250  spacing between provider requests
 WINDELS_FOOTBALL_DAILY_REQUEST_CEILING=0     fallback daily ceiling when a feed reports none
 WINDELS_FOOTBALL_ANALYSIS_BATCH_SIZE=50     stored fixtures one prediction cycle may evaluate (1..50; Admin → System Settings → Football overrides)
 WINDELS_FOOTBALL_ANALYSIS_LIMIT=50            legacy alias for ANALYSIS_BATCH_SIZE; still supported and capped at 50
+WINDELS_FOOTBALL_GENERATE_ON_READ=true        opening /football generates the page's missing predictions (the refresh=1 pass);
+                                             false = fully read-only console, ?refresh=0 opts out one read, ?refresh=1 forces it on
 WINDELS_FOOTBALL_MATCH_PAGE_SIZE=50           matches per read page (1..50, hard-capped in code); generation also honours ANALYSIS_BATCH_SIZE
 WINDELS_FOOTBALL_PREMIUM_COMPETITION=English Premier League   the featured ("Premium") league the console offers first
 WINDELS_FOOTBALL_PREMIUM_COMPETITION_ID=39   optional: pin it to a provider competition id instead of matching the name
 WINDELS_FOOTBALL_PREMIUM_COMPETITIONS=English Premier League  comma-separated list of leagues classified premium (names or
                                              provider competition ids); matches loosely, so "English Premier League"
-                                             and "Premier League" are one premium competition
+                                             and "Premier League" are one premium competition. Default when unset:
+                                             Premier League, UEFA Champions League, La Liga, Serie A, Bundesliga,
+                                             Ligue 1 — every premium league, offered in the Premium League selector
+                                             alongside its All premium leagues option
 WINDELS_FOOTBALL_DEFAULT_MARKET=MATCH_WINNER the market a request is answered in when it names none
 WINDELS_FOOTBALL_FIRST_HALF_SHARE=0.45       goal expectancy attributed to the first half (0.20..0.80); named in the market basis
 WINDELS_FOOTBALL_MAX_AGE_ODDS=1800         how old a quoted price may be before the board labels it aged; read by the

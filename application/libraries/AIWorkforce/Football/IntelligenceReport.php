@@ -359,18 +359,26 @@ final class IntelligenceReport
         ] <=> [
             $bandRank($b), (int) ($a['score'] ?? 0), round((float) ($a['edgePoints'] ?? 0), 6), round((float) ($a['confidence'] ?? 0), 1),
         ]);
+        // Every eligible pick is ranked — the ranking is never truncated, only
+        // separated: `picks` is the configured top list (the headline an API
+        // consumer or a compact panel asks for), `allPicks` is the complete
+        // ranked list, and the console renders `allPicks` so no eligible match
+        // is hidden behind a "+N beyond the list" counter.
         $ranked = [];
-        foreach (array_slice($picks, 0, $limit) as $index => $pick) $ranked[] = ['rank' => $index + 1] + $pick;
+        foreach ($picks as $index => $pick) $ranked[] = ['rank' => $index + 1] + $pick;
+        $top = array_values(array_slice($ranked, 0, $limit));
         return [
             'state' => $ranked === [] ? DataState::UNAVAILABLE : 'AVAILABLE',
             'market' => $marketLabel,
-            'picks' => $ranked,
+            'picks' => $top,
+            'allPicks' => $ranked,
             'considered' => count($rows),
             'eligible' => count($picks),
-            'shown' => count($ranked),
-            // Qualifying matches the page holds but the limit does not show. They
-            // are counted, not hidden: "5 of 9 eligible" is the honest caption.
-            'beyondList' => max(0, count($picks) - $limit),
+            'shown' => count($top),
+            // Eligible matches beyond the top list. They are counted AND
+            // published in `allPicks` — the console lists them ranked below
+            // the top list rather than hiding them behind the number.
+            'beyondList' => max(0, count($ranked) - count($top)),
             'excluded' => $excluded,
             'limit' => $limit,
             'rule' => [
@@ -378,7 +386,7 @@ final class IntelligenceReport
                     . QualityBand::LIMITED . ', whose selected market has an actual selection, which are not withheld '
                     . 'and whose prediction is not flagged unstable.',
                 'ranking' => 'Evidence band first (QUALIFIED before LIMITED), then the intelligence score, then the edge against the quoted price, then model confidence.',
-                'limit' => 'At most ' . $limit . ' picks are listed, whatever the page holds.',
+                'limit' => 'The top list is capped at ' . $limit . ' picks; every eligible match is still ranked and published (allPicks), and the console lists them all with the top ' . $limit . ' marked.',
             ],
             'disclaimer' => self::PICKS_DISCLAIMER,
             'generatedAt' => gmdate('c'),

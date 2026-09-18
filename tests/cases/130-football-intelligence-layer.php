@@ -483,6 +483,54 @@ test('football: picks rank evidence, exclude what is not fit, and never promise'
         'the eligibility rule is published, not left as a mood');
 });
 
+test('football: every eligible pick is ranked and published — the limit caps the top list, not the ranking', function () {
+    // Seven eligible matches against the default top-list limit of five: the
+    // ranking itself is never truncated. `picks` keeps the configured top
+    // list for consumers that ask for the headline, `allPicks` carries the
+    // complete ranked list the console renders, and the counters stay
+    // consistent with both.
+    $row = static fn(int $fixtureId, int $score): array => [
+        'analysisState' => 'ANALYZED', 'matchId' => 'm' . $fixtureId, 'fixtureId' => $fixtureId,
+        'homeTeam' => 'A' . $fixtureId, 'awayTeam' => 'B' . $fixtureId, 'kickoffLabel' => 'today',
+        'confidence' => 80.0, 'dataQuality' => 91.0, 'status' => 'SCHEDULED',
+        'risk' => ['level' => 'LOW'],
+        'market' => ['state' => PredictionMarkets::STATE_AVAILABLE, 'key' => 'MATCH_WINNER', 'label' => 'Match Winner — 1X2',
+            'selection' => 'HOME', 'selectionLabel' => 'Home win', 'probability' => 0.61],
+        'intelligence' => [
+            'state' => IntelligenceReport::STATE_SCORED,
+            'score' => ['score' => $score, 'band' => IntelligenceScore::BAND_STRONG, 'available' => true],
+            'quality' => ['score' => 91.0, 'band' => QualityBand::QUALIFIED, 'checklist' => [], 'missing' => []],
+            'fairValue' => ['state' => 'AVAILABLE', 'valueClass' => OddsIntelligence::CLASS_POSITIVE_VALUE,
+                'valueLabel' => 'Positive value', 'expectedValue' => 0.1, 'edgePoints' => 7.0, 'odds' => 1.85,
+                'windelsFairOdds' => 1.64],
+            'stability' => ['state' => StabilityMonitor::STABLE, 'reason' => ''],
+            'freshness' => ['state' => FreshnessTracker::CURRENT],
+            'withheld' => ['withheld' => false],
+        ],
+    ];
+    $report = new IntelligenceReport(new FootballRepositoryStub(), new FootballConfiguration([]),
+        new StabilityMonitor(new FootballRepositoryStub(), new FootballConfiguration([])),
+        new IntelligenceScore(new FootballConfiguration([])), new PredictionDrivers(),
+        new FreshnessTracker(new FootballConfiguration([])));
+
+    $picks = $report->picks([
+        $row(1, 70), $row(2, 71), $row(3, 72), $row(4, 73), $row(5, 74), $row(6, 75), $row(7, 76),
+    ], 'Match Winner — 1X2');
+
+    assert_equals(7, (int) $picks['eligible'], 'all seven matches are eligible');
+    assert_equals(5, count((array) $picks['picks']), 'the top list is capped at the configured five');
+    assert_equals(7, count((array) $picks['allPicks']), 'allPicks publishes every eligible pick');
+    $ranks = array_map(static fn(array $pick): int => (int) ($pick['rank'] ?? 0), (array) $picks['allPicks']);
+    assert_equals([1, 2, 3, 4, 5, 6, 7], $ranks, 'ranked 1 through 7 with no truncation');
+    assert_equals(7, (int) ($picks['allPicks'][0]['fixtureId'] ?? 0), 'the best score is ranked first');
+    assert_equals(1, (int) ($picks['allPicks'][6]['fixtureId'] ?? 0), 'the lowest score is ranked last, still listed');
+    assert_equals(5, (int) $picks['shown'], 'shown counts the top list');
+    assert_equals(2, (int) $picks['beyondList'], 'beyondList counts the remainder');
+    assert_equals(array_slice($ranks, 0, 5), array_map(static fn(array $pick): int => (int) ($pick['rank'] ?? 0), (array) $picks['picks']),
+        'the top list is the head of the same ranking, never a different order');
+    assert_true(str_contains((string) $picks['rule']['limit'], 'allPicks'), 'the limit rule names where the full ranking lives');
+});
+
 test('football: a finished match never appears in Top Picks, whatever its score', function () {
     // A match that has already been played has nothing left to pick — Top
     // Picks is forward-looking, so a terminal status excludes it even when

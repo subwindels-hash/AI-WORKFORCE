@@ -369,6 +369,22 @@ final class FootballConfiguration
     }
 
     /**
+     * Generate-on-read: whether opening the football console fills in the
+     * missing predictions for the page in view, from the rows that are
+     * already stored — the same bounded pass the refresh=1 parameter and the
+     * "Generate this page" action run (at most the page size and the analysis
+     * batch; stored predictions are reused, never regenerated; no provider
+     * request is spent). Default true, so the board a signed-in viewer opens
+     * is already generated for the page in view; an operator can restore the
+     * fully read-only console with WINDELS_FOOTBALL_GENERATE_ON_READ=false,
+     * and ?refresh=0 makes a single read read-only either way.
+     */
+    public function generateOnRead(): bool
+    {
+        return $this->flag('WINDELS_FOOTBALL_GENERATE_ON_READ', true);
+    }
+
+    /**
      * The premium (featured) competition — the league the console offers first
      * and processes by default. It is configuration, not a constant, so an
      * operator running a different flagship league does not have to fork the
@@ -387,6 +403,29 @@ final class FootballConfiguration
     }
 
     /**
+     * The built-in premium classification: the leagues this deployment means
+     * by "all premium leagues" when the operator has not classified any
+     * itself. The featured league (premiumCompetition(), the English Premier
+     * League by default) leads the list; the rest are the group "premium" has
+     * always named in this module — the Champions League, La Liga, Serie A,
+     * the Bundesliga and Ligue 1 — so the Premium League selector offers every
+     * premium league by default, not only the flagship one.
+     *
+     * @return list<string>
+     */
+    public function defaultPremiumCompetitions(): array
+    {
+        return array_values(array_unique([
+            $this->premiumCompetition()['name'],
+            'UEFA Champions League',
+            'Spanish La Liga',
+            'Italian Serie A',
+            'German Bundesliga',
+            'French Ligue 1',
+        ]));
+    }
+
+    /**
      * The premium (featured) competitions — the leagues the Premium League
      * selector offers. Premium is an *application-level* classification: no
      * provider numbers competitions the same way, so a league is premium
@@ -395,7 +434,9 @@ final class FootballConfiguration
      * The list is configuration, and it is a list rather than a single value
      * because "premium" in football means a group of leagues — the Premier
      * League, the Champions League, La Liga, Serie A, the Bundesliga, Ligue 1
-     * — not one flagship. Matching is by name or by provider competition id.
+     * — not one flagship. Unset, it defaults to that whole group
+     * (defaultPremiumCompetitions()); set, exactly the named leagues are
+     * premium. Matching is by name or by provider competition id.
      *
      * @return list<string> names and/or provider competition ids, as configured
      */
@@ -407,7 +448,7 @@ final class FootballConfiguration
             $entry = trim($entry);
             if ($entry !== '') $out[] = $entry;
         }
-        return $out === [] ? [$this->premiumCompetition()['name']] : $out;
+        return $out === [] ? $this->defaultPremiumCompetitions() : $out;
     }
 
     /**
