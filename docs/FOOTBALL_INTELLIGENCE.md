@@ -528,20 +528,26 @@ A ranking of the page that is on screen, not of the season:
 * **Order**: intelligence score, then the edge in probability points, then
   confidence — value alone cannot put a thinly-evidenced match at the top, and
   confidence alone cannot put a well-evidenced no-gap match there.
-* **Size**: `picksLimit()` (default 5, capped at 10). `considered`, `eligible`, `shown`
-  and `beyondList` are all published, so "5 of 9 eligible" is checkable
-  rather than implied.
+* **Size**: `picksLimit()` (default 5, capped at 10) caps the **top list** (`picks`)
+  — the headline a compact consumer asks for. The complete ranking is never
+  truncated: `allPicks` publishes every eligible pick in rank order, and the
+  console renders `allPicks`, so all eligible matches on the page are listed —
+  the top list marked, the remainder ranked below a stated divider.
+  `considered`, `eligible`, `shown` and `beyondList` are all published, so
+  "5 of 9 eligible" is checkable rather than implied.
 * **Exclusions are listed with their reason** — an unstable, limited-data or
   unanalyzed match appears in `excluded` with the sentence that kept it out, so
   the absence can be audited.
 
 The console's **Ranked reading** section prints all of it: the caption reads
-"N eligible on this page · M listed · +K beyond the list", each pick row
-carries the market it is answered in, the value classification (not just the
-expected-return percentage), the evidence band with its quality score, the
-model confidence, the risk level and any warnings, and the matches that did
-not qualify are listed behind a "Show reasons" disclosure, each with the
-sentence that kept it out — the same data the API publishes.
+"N eligible on this page · all M listed · top K marked", every eligible pick is
+in the table (the top list ends at a stated divider, the remainder ranked below
+it), each pick row carries the market it is answered in, the value
+classification (not just the expected-return percentage), the evidence band
+with its quality score, the model confidence, the risk level and any warnings,
+and the matches that did not qualify are listed behind a "Show reasons"
+disclosure, each with the sentence that kept it out — the same data the API
+publishes.
 
 The panel's caption is fixed by `IntelligenceReport::PICKS_DISCLAIMER`: these are
 model-based selections ranked by how well evidenced they are, not guarantees, and

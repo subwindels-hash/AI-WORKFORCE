@@ -223,12 +223,14 @@ test('football: the Day overview prints the full date, the selection, both scope
 
 test('football: the Ranked reading prints eligibility, every pick figure and the exclusions', function () {
     // A generating read over a mixed day: 7 predictable fixtures across two
-    // premium leagues (default list limit 5, so 2 sit beyond it), one thin
-    // fixture the quality gate refuses and one postponed fixture. The section
-    // must print the full accounting the picks payload publishes — the
-    // considered/eligible/listed/beyond caption, the per-pick market, value
-    // classification, evidence, confidence, risk and warnings — and every
-    // match that did not qualify, with the reason that kept it out.
+    // premium leagues (top list limit 5, so 2 are ranked below the marked
+    // list), one thin fixture the quality gate refuses and one postponed
+    // fixture. The section must print the full accounting the picks payload
+    // publishes — the considered/eligible/listed caption with every eligible
+    // pick listed (top list marked, the remainder ranked below a divider),
+    // the per-pick market, value classification, evidence, confidence, risk
+    // and warnings — and every match that did not qualify, with the reason
+    // that kept it out.
     $day = gmdate('Y-m-d', time() + 2 * 86400);
     $base = (int) strtotime($day . 'T00:30:00+00:00');
     $rows = [];
@@ -265,8 +267,10 @@ test('football: the Ranked reading prints eligibility, every pick figure and the
     $dashboard = $module->dashboard($day, true, 1, 50, []);
     $block = (array) ($dashboard['board']['picks'] ?? []);
     assert_true((int) ($block['eligible'] ?? 0) === 7, 'the generating read makes seven matches eligible');
-    assert_equals(5, (int) ($block['shown'] ?? 0), 'the default list limit shows five');
+    assert_equals(5, (int) ($block['shown'] ?? 0), 'the configured top list still shows five');
     assert_equals(2, (int) ($block['beyondList'] ?? 0), 'and counts the two beyond it');
+    assert_equals(5, count((array) ($block['picks'] ?? [])), 'picks stays the capped top list for API consumers');
+    assert_equals(7, count((array) ($block['allPicks'] ?? [])), 'allPicks publishes every eligible pick, ranked');
     assert_equals(2, count((array) ($block['excluded'] ?? [])), 'the two ineligible matches are published with reasons');
 
     $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard, 'refresh' => true]));
@@ -278,9 +282,16 @@ test('football: the Ranked reading prints eligibility, every pick figure and the
         'the Ranked reading section renders');
     $picksHtml = $section[0];
 
-    // The caption carries the whole accounting, not only the eligible count.
-    assert_true(str_contains($picksHtml, '7 eligible on this page · 5 listed · +2 beyond the list'),
-        'the caption reads considered eligibility, listed and beyond-the-list together');
+    // The caption carries the whole accounting — and every eligible pick is
+    // listed, the top list marked, the remainder ranked below a divider.
+    assert_true(str_contains($picksHtml, '7 eligible on this page · all 7 listed · top 5 marked'),
+        'the caption reads eligibility, all-listed and the marked top list together');
+    foreach (range(1, 7) as $pickRank) {
+        assert_true(str_contains($picksHtml, '<td class="mono">' . $pickRank . '</td>'),
+            'rank ' . $pickRank . ' is rendered — every eligible pick is listed');
+    }
+    assert_true(str_contains($picksHtml, 'Beyond the top 5 — still eligible on this page, ranked below the marked list'),
+        'the divider states where the configured top list ends');
     // The intro names the market the picks are answered in.
     assert_true(str_contains($picksHtml, 'Match Winner — 1X2'), 'the selected market is named');
     // Every column the payload publishes is on the row.
@@ -301,7 +312,7 @@ test('football: the Ranked reading prints eligibility, every pick figure and the
     assert_true(str_contains($picksHtml, 'Home United vs Away Rovers'), 'the excluded match is named');
     assert_true(str_contains($picksHtml, 'Not analyzed — no stored prediction to rank.'), 'with the reason that kept it out');
     assert_true(str_contains($picksHtml, 'Match status is POSTPONED'), 'including the terminal-status reason');
-    assert_true(str_contains($picksHtml, '9 matches were considered on this page · 7 eligible · 5 listed (list limit 5) · +2 beyond the limit'),
+    assert_true(str_contains($picksHtml, '9 matches were considered on this page · 7 eligible · all 7 listed (top 5 marked, +2 ranked below it)'),
         'and the one-line accounting beneath the table');
     assert_true(str_contains($picksHtml, 'not guarantees and not a staking instruction'), 'the disclaimer stays');
 

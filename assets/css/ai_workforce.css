@@ -1793,6 +1793,7 @@ a.btn[aria-disabled="true"] {
 .football-value-explanation summary { cursor: pointer; color: var(--brand); font-weight: 700; }
 .football-value-explanation p { margin: 4px 0 0; padding: 6px 7px; border-left: 2px solid var(--line2); color: var(--muted); line-height: 1.4; }
 .football-picks-table { min-width: 980px; }
+.football-picks-divider > td { padding: 7px 10px; background: var(--brand-soft); color: var(--dim); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; border-top: 1px solid var(--line2); border-bottom: 1px solid var(--line2); }
 .football-picks-exclusions__list { margin: 0; padding: 12px; background: #090f19; list-style: none; display: grid; gap: 8px; }
 .football-picks-exclusions__list li { display: grid; grid-template-columns: minmax(140px, auto) auto 1fr; gap: 10px; align-items: baseline; font-size: 11px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
 .football-picks-exclusions__list li:last-child { border-bottom: none; padding-bottom: 0; }

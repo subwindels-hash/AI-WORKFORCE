@@ -304,9 +304,13 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
            did not take is named with the sentence that kept it out. */
         $picksBlock = is_array($board['picks'] ?? null) ? $board['picks'] : [];
         $picks = is_array($picksBlock['picks'] ?? null) ? $picksBlock['picks'] : [];
+        // The complete ranked list: every eligible match on the page, ranked.
+        // The console renders this — the configured top list (`picks`) is the
+        // headline, not the whole table — so no eligible match is reduced to a
+        // "+N beyond the list" counter.
+        $picksAll = is_array($picksBlock['allPicks'] ?? null) ? $picksBlock['allPicks'] : $picks;
         $picksConsidered = (int) ($picksBlock['considered'] ?? 0);
         $picksEligible = (int) ($picksBlock['eligible'] ?? 0);
-        $picksShown = (int) ($picksBlock['shown'] ?? count($picks));
         $picksBeyond = (int) ($picksBlock['beyondList'] ?? 0);
         $picksLimit = (int) ($picksBlock['limit'] ?? 0);
         $picksExcludedRaw = is_array($picksBlock['excluded'] ?? null) ? $picksBlock['excluded'] : [];
@@ -323,18 +327,18 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
               <h3 id="top-picks-heading">Top WINDELS Picks</h3>
             </div>
           </div>
-          <span class="football-section__meta" title="<?= e((string) ($picksRule['eligibility'] ?? 'Eligible matches on this page: analyzed, QUALIFIED or LIMITED data quality, an actual selection in the selected market, not withheld, not unstable.')) ?>"><?= $picksEligible ?> eligible on this page<?= $picksEligible > 0 ? ' · ' . $picksShown . ' listed' : '' ?><?= $picksBeyond > 0 ? ' · +' . $picksBeyond . ' beyond the list' : '' ?></span>
+          <span class="football-section__meta" title="<?= e((string) ($picksRule['eligibility'] ?? 'Eligible matches on this page: analyzed, QUALIFIED or LIMITED data quality, an actual selection in the selected market, not withheld, not unstable.')) ?>"><?= $picksEligible ?> eligible on this page<?= $picksEligible > 0 ? ' · all ' . count($picksAll) . ' listed' : '' ?><?= $picksBeyond > 0 ? ' · top ' . $picksLimit . ' marked' : '' ?></span>
         </div>
         <div class="body">
           <p class="football-section-intro">The strongest comparisons drawn from the fixtures in section 3, ordered by intelligence score. Each row keeps the model probability and the bookmaker price in their own columns so the two readings are never confused. Every pick is the selected market's answer<?= $picksMarketLabel !== '' ? ' — <b>' . e($picksMarketLabel) . '</b>' : '' ?> — ranked evidence band first, then intelligence score, then the edge against the quoted price, then model confidence.</p>
-          <?php if ($picks === []): ?>
+          <?php if ($picksAll === []): ?>
             <p class="football-help">No fixtures currently satisfy the required prediction and data-quality thresholds. This is a finding, not a gap filled with a forced selection.</p>
           <?php else: ?>
             <div class="table-scroll">
               <table class="tbl football-table football-picks-table">
                 <thead><tr><th>#</th><th>Match &amp; pick</th><th class="num">WINDELS probability</th><th class="num">Market odds</th><th class="num">WINDELS fair odds</th><th>Value</th><th>Evidence</th><th class="num">Confidence</th><th class="num">Intelligence</th><th>Risk</th><th>Movement</th></tr></thead>
                 <tbody>
-                  <?php foreach ($picks as $pick): ?>
+                  <?php foreach ($picksAll as $pick): ?>
                     <?php
                       $cardPageId = (int) ($pick['fixtureId'] ?? 0);
                       $move = (string) ($pick['stabilityState'] ?? '');
@@ -359,6 +363,9 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
                       <td><span class="badge <?= $riskTone ?>"><?= e($riskLevel !== '' ? $riskLevel : 'UNKNOWN') ?></span></td>
                       <td><?php if ($move === \AIWorkforce\Football\StabilityMonitor::UNSTABLE): ?><span class="badge b-red" title="This prediction moved materially between stored readings.">Prediction unstable — significant model movement</span><?php elseif ($move === \AIWorkforce\Football\StabilityMonitor::MOVED): ?><span class="badge b-amber">Moved</span><?php else: ?><span class="badge b-gray"><?= e((string) ($pick['stabilityLabel'] ?? 'Stable / first reading')) ?></span><?php endif; ?><?php foreach ($pickWarnings as $pickWarning): ?><div class="dim football-cell-note"><?= e($pickWarning) ?></div><?php endforeach; ?></td>
                     </tr>
+                    <?php if ($picksLimit > 0 && (int) ($pick['rank'] ?? 0) === $picksLimit && count($picksAll) > $picksLimit): ?>
+                      <tr class="football-picks-divider"><td colspan="11">Beyond the top <?= $picksLimit ?> — still eligible on this page, ranked below the marked list</td></tr>
+                    <?php endif; ?>
                   <?php endforeach; ?>
                 </tbody>
               </table>
@@ -377,7 +384,7 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
               </ul>
             </details>
           <?php endif; ?>
-          <p class="football-help"><?= $picksConsidered ?> match<?= $picksConsidered === 1 ? ' was' : 'es were' ?> considered on this page · <?= $picksEligible ?> eligible · <?= $picksShown ?> listed<?= $picksLimit > 0 ? ' (list limit ' . $picksLimit . ')' : '' ?><?= $picksBeyond > 0 ? ' · +' . $picksBeyond . ' beyond the limit — counted, not hidden' : '' ?>. <?= e((string) ($picksRule['ranking'] ?? 'Ranked by evidence band, then intelligence score, then edge against the quoted price, then model confidence.')) ?></p>
+          <p class="football-help"><?= $picksConsidered ?> match<?= $picksConsidered === 1 ? ' was' : 'es were' ?> considered on this page · <?= $picksEligible ?> eligible · all <?= count($picksAll) ?> listed<?= $picksLimit > 0 ? ' (top ' . $picksLimit . ' marked' . ($picksBeyond > 0 ? ', +' . $picksBeyond . ' ranked below it' : '') . ')' : '' ?>. <?= e((string) ($picksRule['ranking'] ?? 'Ranked by evidence band, then intelligence score, then edge against the quoted price, then model confidence.')) ?></p>
           <p class="football-help"><?= e((string) ($picksBlock['disclaimer'] ?? 'Rankings are analytical comparisons, not a promise of a result.')) ?></p>
         </div>
       </section>
