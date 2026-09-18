@@ -295,7 +295,25 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         </div>
       </section>
 
-      <?php $picksBlock = is_array($board['picks'] ?? null) ? $board['picks'] : []; $picks = is_array($picksBlock['picks'] ?? null) ? $picksBlock['picks'] : []; ?>
+      <?php
+        /* Section 2 — the ranked reading. The picks payload publishes the full
+           accounting (considered / eligible / shown / beyondList / excluded
+           with reasons, and per-pick evidence, confidence, risk, value class
+           and warnings); this section prints all of it, so "5 of 9 eligible"
+           is read off the page rather than implied, and every match the list
+           did not take is named with the sentence that kept it out. */
+        $picksBlock = is_array($board['picks'] ?? null) ? $board['picks'] : [];
+        $picks = is_array($picksBlock['picks'] ?? null) ? $picksBlock['picks'] : [];
+        $picksConsidered = (int) ($picksBlock['considered'] ?? 0);
+        $picksEligible = (int) ($picksBlock['eligible'] ?? 0);
+        $picksShown = (int) ($picksBlock['shown'] ?? count($picks));
+        $picksBeyond = (int) ($picksBlock['beyondList'] ?? 0);
+        $picksLimit = (int) ($picksBlock['limit'] ?? 0);
+        $picksExcludedRaw = is_array($picksBlock['excluded'] ?? null) ? $picksBlock['excluded'] : [];
+        $picksExcluded = array_values(array_filter($picksExcludedRaw, 'is_array'));
+        $picksMarketLabel = (string) ($picksBlock['market'] ?? '');
+        $picksRule = is_array($picksBlock['rule'] ?? null) ? $picksBlock['rule'] : [];
+      ?>
       <section class="panel football-section" id="football-picks" aria-labelledby="top-picks-heading">
         <div class="football-section__heading">
           <div class="football-section__title">
@@ -305,34 +323,61 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
               <h3 id="top-picks-heading">Top WINDELS Picks</h3>
             </div>
           </div>
-          <span class="football-section__meta"><?= (int) ($picksBlock['eligible'] ?? 0) ?> eligible on this page</span>
+          <span class="football-section__meta" title="<?= e((string) ($picksRule['eligibility'] ?? 'Eligible matches on this page: analyzed, QUALIFIED or LIMITED data quality, an actual selection in the selected market, not withheld, not unstable.')) ?>"><?= $picksEligible ?> eligible on this page<?= $picksEligible > 0 ? ' · ' . $picksShown . ' listed' : '' ?><?= $picksBeyond > 0 ? ' · +' . $picksBeyond . ' beyond the list' : '' ?></span>
         </div>
         <div class="body">
-          <p class="football-section-intro">The strongest comparisons drawn from the fixtures in section 3, ordered by intelligence score. Each row keeps the model probability and the bookmaker price in their own columns so the two readings are never confused.</p>
+          <p class="football-section-intro">The strongest comparisons drawn from the fixtures in section 3, ordered by intelligence score. Each row keeps the model probability and the bookmaker price in their own columns so the two readings are never confused. Every pick is the selected market's answer<?= $picksMarketLabel !== '' ? ' — <b>' . e($picksMarketLabel) . '</b>' : '' ?> — ranked evidence band first, then intelligence score, then the edge against the quoted price, then model confidence.</p>
           <?php if ($picks === []): ?>
             <p class="football-help">No fixtures currently satisfy the required prediction and data-quality thresholds. This is a finding, not a gap filled with a forced selection.</p>
           <?php else: ?>
             <div class="table-scroll">
-              <table class="tbl football-table">
-                <thead><tr><th>#</th><th>Match &amp; pick</th><th class="num">WINDELS probability</th><th class="num">Market odds</th><th class="num">WINDELS fair odds</th><th class="num">Value</th><th class="num">Intelligence</th><th>Movement</th></tr></thead>
+              <table class="tbl football-table football-picks-table">
+                <thead><tr><th>#</th><th>Match &amp; pick</th><th class="num">WINDELS probability</th><th class="num">Market odds</th><th class="num">WINDELS fair odds</th><th>Value</th><th>Evidence</th><th class="num">Confidence</th><th class="num">Intelligence</th><th>Risk</th><th>Movement</th></tr></thead>
                 <tbody>
                   <?php foreach ($picks as $pick): ?>
-                    <?php $cardPageId = (int) ($pick['fixtureId'] ?? 0); $move = (string) ($pick['stabilityState'] ?? ''); ?>
+                    <?php
+                      $cardPageId = (int) ($pick['fixtureId'] ?? 0);
+                      $move = (string) ($pick['stabilityState'] ?? '');
+                      $pickBand = (string) ($pick['band'] ?? '');
+                      $valueClass = (string) ($pick['valueClass'] ?? 'UNPRICED');
+                      $valueTone = in_array($valueClass, ['STRONG_VALUE', 'POSITIVE_VALUE'], true) ? 'b-green'
+                          : (in_array($valueClass, ['NEGATIVE_VALUE', 'AVOID'], true) ? 'b-red' : 'b-gray');
+                      $riskLevel = strtoupper((string) ($pick['risk'] ?? 'UNKNOWN'));
+                      $riskTone = $riskLevel === 'LOW' ? 'b-green' : ($riskLevel === 'MEDIUM' ? 'b-amber' : ($riskLevel === 'HIGH' ? 'b-red' : 'b-gray'));
+                      $pickWarnings = is_array($pick['warnings'] ?? null) ? array_values(array_filter($pick['warnings'], static fn($w): bool => is_string($w) && trim($w) !== '')) : [];
+                    ?>
                     <tr>
                       <td class="mono"><?= (int) ($pick['rank'] ?? 0) ?></td>
-                      <td><?php if ($cardPageId > 0): ?><a href="/football/match/<?= $cardPageId ?>" class="football-match-link"><?php endif; ?><?= crest($pick['homeTeamLogo'] ?? null) ?><?= e((string) ($pick['homeTeam'] ?? '—')) ?> vs <?= crest($pick['awayTeamLogo'] ?? null) ?><?= e((string) ($pick['awayTeam'] ?? '—')) ?><?php if ($cardPageId > 0): ?></a><?php endif; ?><div class="dim football-cell-note"><?= e((string) ($pick['selectionLabel'] ?? '—')) ?> · <?= e((string) ($pick['kickoffLabel'] ?? '')) ?></div></td>
+                      <td><?php if ($cardPageId > 0): ?><a href="/football/match/<?= $cardPageId ?>" class="football-match-link"><?php endif; ?><?= crest($pick['homeTeamLogo'] ?? null) ?><?= e((string) ($pick['homeTeam'] ?? '—')) ?> vs <?= crest($pick['awayTeamLogo'] ?? null) ?><?= e((string) ($pick['awayTeam'] ?? '—')) ?><?php if ($cardPageId > 0): ?></a><?php endif; ?><div class="dim football-cell-note"><?= e((string) ($pick['selectionLabel'] ?? '—')) ?> · <?= e((string) ($pick['kickoffLabel'] ?? '')) ?> · <?= e((string) ($pick['market'] ?? '')) ?></div></td>
                       <td class="num mono"><?= $pct($pick['probability'] ?? null) ?></td>
                       <td class="num mono"><?= $odds($pick['odds'] ?? null) ?></td>
                       <td class="num mono"><?= $odds($pick['fairOdds'] ?? null) ?></td>
-                      <td class="num mono <?= (float) ($pick['expectedValue'] ?? -1) >= 0 ? 'up' : 'down' ?>"><?= $signedPct($pick['expectedValue'] ?? null) ?></td>
-                      <td class="num mono"><?= is_numeric($pick['score'] ?? null) ? (int) $pick['score'] . '/100' : '—' ?></td>
-                      <td><?php if ($move === \AIWorkforce\Football\StabilityMonitor::UNSTABLE): ?><span class="badge b-red" title="This prediction moved materially between stored readings.">Prediction unstable — significant model movement</span><?php elseif ($move === \AIWorkforce\Football\StabilityMonitor::MOVED): ?><span class="badge b-amber">Moved</span><?php else: ?><span class="badge b-gray">Stable / first reading</span><?php endif; ?></td>
+                      <td><span class="badge <?= $valueTone ?>"><?= e((string) ($pick['valueLabel'] ?? 'No price to compare')) ?></span><div class="dim football-cell-note"><?= is_numeric($pick['expectedValue'] ?? null) ? 'Expected return ' . $signedPct($pick['expectedValue']) : 'Expected return —' ?><?= is_numeric($pick['edgePoints'] ?? null) ? ' · edge ' . ((float) $pick['edgePoints'] >= 0 ? '+' : '') . number_format((float) $pick['edgePoints'], 1) . 'pp' : '' ?></div></td>
+                      <td><span class="badge <?= $pickBand === 'QUALIFIED' ? 'b-green' : 'b-amber' ?>"><?= e($pickBand !== '' ? $pickBand : '—') ?></span><div class="dim football-cell-note">quality <?= is_numeric($pick['dataQuality'] ?? null) ? (int) $pick['dataQuality'] . '/100' : '—' ?></div></td>
+                      <td class="num mono"><?= is_numeric($pick['confidence'] ?? null) ? number_format((float) $pick['confidence'], 1) . '%' : '—' ?></td>
+                      <td class="num mono"><?= is_numeric($pick['score'] ?? null) ? (int) $pick['score'] . '/100' : '—' ?><?php if ((string) ($pick['scoreBand'] ?? '') !== ''): ?><div class="dim football-cell-note"><?= e((string) $pick['scoreBand']) ?></div><?php endif; ?></td>
+                      <td><span class="badge <?= $riskTone ?>"><?= e($riskLevel !== '' ? $riskLevel : 'UNKNOWN') ?></span></td>
+                      <td><?php if ($move === \AIWorkforce\Football\StabilityMonitor::UNSTABLE): ?><span class="badge b-red" title="This prediction moved materially between stored readings.">Prediction unstable — significant model movement</span><?php elseif ($move === \AIWorkforce\Football\StabilityMonitor::MOVED): ?><span class="badge b-amber">Moved</span><?php else: ?><span class="badge b-gray"><?= e((string) ($pick['stabilityLabel'] ?? 'Stable / first reading')) ?></span><?php endif; ?><?php foreach ($pickWarnings as $pickWarning): ?><div class="dim football-cell-note"><?= e($pickWarning) ?></div><?php endforeach; ?></td>
                     </tr>
                   <?php endforeach; ?>
                 </tbody>
               </table>
             </div>
           <?php endif; ?>
+          <?php if ($picksExcluded !== []): ?>
+            <details class="football-odds-disclosure football-picks-exclusions">
+              <summary>
+                <span><b><?= count($picksExcluded) ?> match<?= count($picksExcluded) === 1 ? ' was' : 'es were' ?> not eligible on this page</b> <span class="dim">· each with the reason that kept it out</span></span>
+                <span class="football-disclosure-action">Show reasons</span>
+              </summary>
+              <ul class="football-picks-exclusions__list">
+                <?php foreach ($picksExcluded as $excludedPick): ?>
+                  <li><b><?= e((string) ($excludedPick['homeTeam'] ?? '—')) ?> vs <?= e((string) ($excludedPick['awayTeam'] ?? '—')) ?></b><span class="dim mono"><?= e((string) ($excludedPick['kickoffLabel'] ?? '')) ?></span><span><?= e((string) ($excludedPick['reason'] ?? 'Not eligible.')) ?></span></li>
+                <?php endforeach; ?>
+              </ul>
+            </details>
+          <?php endif; ?>
+          <p class="football-help"><?= $picksConsidered ?> match<?= $picksConsidered === 1 ? ' was' : 'es were' ?> considered on this page · <?= $picksEligible ?> eligible · <?= $picksShown ?> listed<?= $picksLimit > 0 ? ' (list limit ' . $picksLimit . ')' : '' ?><?= $picksBeyond > 0 ? ' · +' . $picksBeyond . ' beyond the limit — counted, not hidden' : '' ?>. <?= e((string) ($picksRule['ranking'] ?? 'Ranked by evidence band, then intelligence score, then edge against the quoted price, then model confidence.')) ?></p>
           <p class="football-help"><?= e((string) ($picksBlock['disclaimer'] ?? 'Rankings are analytical comparisons, not a promise of a result.')) ?></p>
         </div>
       </section>

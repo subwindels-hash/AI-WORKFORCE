@@ -221,6 +221,107 @@ test('football: the Day overview prints the full date, the selection, both scope
     assert_true(str_contains($readonly['html'], 'This read generated nothing'), 'the read-only mode is stated');
 });
 
+test('football: the Ranked reading prints eligibility, every pick figure and the exclusions', function () {
+    // A generating read over a mixed day: 7 predictable fixtures across two
+    // premium leagues (default list limit 5, so 2 sit beyond it), one thin
+    // fixture the quality gate refuses and one postponed fixture. The section
+    // must print the full accounting the picks payload publishes — the
+    // considered/eligible/listed/beyond caption, the per-pick market, value
+    // classification, evidence, confidence, risk and warnings — and every
+    // match that did not qualify, with the reason that kept it out.
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    $base = (int) strtotime($day . 'T00:30:00+00:00');
+    $rows = [];
+    for ($i = 0; $i < 4; $i++) {
+        $rows[] = fx_fb_row('fx-pk-' . $i, gmdate('c', $base + $i * 60), 'Manchester City', 'Everton', '10', '20');
+    }
+    for ($i = 0; $i < 3; $i++) {
+        $rows[] = fx_fb_row('fx-pk-l' . $i, gmdate('c', $base + 240 + $i * 60), 'Brighton', 'Burnley', '30', '40',
+            'SCHEDULED', null, null, null, ['leagueId' => '140', 'competition' => 'La Liga', 'country' => 'Spain']);
+    }
+    $rows[] = fx_fb_row('fx-pk-frozen', gmdate('c', $base + 500), 'Manchester City', 'Everton', '10', '20', 'POSTPONED');
+    [$repo, , $module] = fx_fb_harness($rows);
+    fx_fb_sync_today($module, $day);
+    $repo->saveFixture((int) ($repo->listProviders()[0]['id'] ?? 1), [
+        'externalId' => 'fx-pk-thin', 'competition' => 'Unknown Cup', 'leagueId' => '99', 'season' => '2026',
+        'kickoff' => gmdate('c', $base + 400), 'status' => 'SCHEDULED',
+        'homeTeam' => 'Home United', 'awayTeam' => 'Away Rovers', 'homeTeamId' => '900', 'awayTeamId' => '901',
+    ]);
+    // Real quotes for the first three matches, so the value classification and
+    // the expected-return figure are exercised beside the unpriced rows.
+    $priming = $module->board()->forDate($day, false, 1, 50, []);
+    foreach (array_slice($priming['rows'] ?? [], 0, 3) as $priced) {
+        $matchId = (string) ($priced['matchId'] ?? '');
+        if ($matchId === '') continue;
+        $repo->marketOdds = array_merge($repo->marketOdds ?? [], [
+            ['matchId' => $matchId, 'market' => 'Match Winner', 'selection' => 'Home', 'decimalOdds' => 1.85, 'observedAt' => gmdate('c')],
+            ['matchId' => $matchId, 'market' => 'Match Winner', 'selection' => 'Draw', 'decimalOdds' => 3.40, 'observedAt' => gmdate('c')],
+            ['matchId' => $matchId, 'market' => 'Match Winner', 'selection' => 'Away', 'decimalOdds' => 4.60, 'observedAt' => gmdate('c')],
+        ]);
+    }
+
+    // The console's default read: generation runs, so the eligibility data is
+    // generated for the page in view.
+    $dashboard = $module->dashboard($day, true, 1, 50, []);
+    $block = (array) ($dashboard['board']['picks'] ?? []);
+    assert_true((int) ($block['eligible'] ?? 0) === 7, 'the generating read makes seven matches eligible');
+    assert_equals(5, (int) ($block['shown'] ?? 0), 'the default list limit shows five');
+    assert_equals(2, (int) ($block['beyondList'] ?? 0), 'and counts the two beyond it');
+    assert_equals(2, count((array) ($block['excluded'] ?? [])), 'the two ineligible matches are published with reasons');
+
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard, 'refresh' => true]));
+    assert_true($render['notices'] === [], 'the picks section reaches for no key the payload does not publish'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    $html = $render['html'];
+    $section = [];
+    assert_true(preg_match('/<section class="panel football-section" id="football-picks".*?<\\/section>/s', $html, $section) === 1,
+        'the Ranked reading section renders');
+    $picksHtml = $section[0];
+
+    // The caption carries the whole accounting, not only the eligible count.
+    assert_true(str_contains($picksHtml, '7 eligible on this page · 5 listed · +2 beyond the list'),
+        'the caption reads considered eligibility, listed and beyond-the-list together');
+    // The intro names the market the picks are answered in.
+    assert_true(str_contains($picksHtml, 'Match Winner — 1X2'), 'the selected market is named');
+    // Every column the payload publishes is on the row.
+    foreach (['Value', 'Evidence', 'Confidence', 'Intelligence', 'Risk', 'Movement'] as $column) {
+        assert_true(str_contains($picksHtml, '>' . $column . '</th>'), 'the ' . $column . ' column renders');
+    }
+    assert_true(str_contains($picksHtml, 'No price to compare'), 'an unpriced pick says so instead of a bare dash');
+    assert_true(str_contains($picksHtml, 'Expected return +'), 'a priced pick shows its expected return');
+    assert_true(preg_match('/edge \+\d+\.\dpp/', $picksHtml) === 1, 'and its edge in probability points');
+    assert_true(str_contains($picksHtml, 'quality 90/100'), 'the evidence band carries its quality score');
+    assert_true(str_contains($picksHtml, '>QUALIFIED</span>'), 'and its band');
+    assert_true(preg_match('/\d+\.\d%<\/td>/', $picksHtml) === 1, 'model confidence is printed');
+    assert_true(str_contains($picksHtml, '>LOW</span>'), 'the risk level is printed');
+    assert_true(str_contains($picksHtml, 'value is unjudged'), 'a pick\'s warnings are printed');
+    // The matches that did not qualify are listed with their reasons.
+    assert_true(str_contains($picksHtml, '2 matches were not eligible on this page'), 'the exclusions are counted in the open');
+    assert_true(str_contains($picksHtml, 'Show reasons'), 'behind a disclosure');
+    assert_true(str_contains($picksHtml, 'Home United vs Away Rovers'), 'the excluded match is named');
+    assert_true(str_contains($picksHtml, 'Not analyzed — no stored prediction to rank.'), 'with the reason that kept it out');
+    assert_true(str_contains($picksHtml, 'Match status is POSTPONED'), 'including the terminal-status reason');
+    assert_true(str_contains($picksHtml, '9 matches were considered on this page · 7 eligible · 5 listed (list limit 5) · +2 beyond the limit'),
+        'and the one-line accounting beneath the table');
+    assert_true(str_contains($picksHtml, 'not guarantees and not a staking instruction'), 'the disclaimer stays');
+
+    // A read-only read over a fresh, unanalyzed copy of the same day names
+    // the same accounting honestly: nothing eligible, every unanalyzed match
+    // listed with its reason.
+    [, , $module2] = fx_fb_harness($rows);
+    fx_fb_sync_today($module2, $day);
+    $readonly = $module2->dashboard($day, false, 1, 50, []);
+    $render2 = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $readonly, 'refresh' => false]));
+    $section2 = [];
+    assert_true(preg_match('/<section class="panel football-section" id="football-picks".*?<\\/section>/s', $render2['html'], $section2) === 1);
+    assert_true(str_contains($section2[0], '0 eligible on this page'), 'an unanalyzed page reports zero eligible');
+    assert_true(str_contains($section2[0], 'No fixtures currently satisfy the required prediction and data-quality thresholds'),
+        'keeps the honest empty state');
+    assert_true(str_contains($section2[0], 'matches were not eligible on this page'), 'and still lists why');
+    assert_true(substr_count($section2[0], 'Not analyzed — no stored prediction to rank.') >= 7,
+        'every unanalyzed match is named with its reason');
+});
+
 test('football: the board renders an unanalyzed date without inventing a score', function () {
     [$repo, , $module] = fx_fb_harness([], ['skipHistory' => true]);
     $day = gmdate('Y-m-d', time() + 4 * 3600);
