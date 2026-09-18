@@ -42,9 +42,13 @@ final class PredictionBoard
      *
      * Pagination is the difference between "the board" and "the feed": the
      * summary counts describe the *whole* date (they are `COUNT`s, not the
-     * length of a page), while the cards are the page's matches only. `refresh`
-     * generates at most one page's worth of missing predictions — it never
-     * rebuilds matches that already have one.
+     * length of a page), while the cards are the page's matches only. The
+     * `page` block is the third scope: what this one read evaluated for the
+     * page in view — predicted, withheld by the quality gate, frozen,
+     * deferred, not attempted. `refresh` generates at most one page's worth
+     * of missing predictions — it never rebuilds matches that already have
+     * one, and the console passes it by default (generate-on-read), so the
+     * board a viewer opens is already generated for the page in view.
      *
      * `options` narrow the board the same way the feed narrows a page:
      * `competition` (an external id, a name, `premium` for the featured
@@ -57,7 +61,7 @@ final class PredictionBoard
      * @return array{heading:string, date:string, dateLabel:string, status:string, state:string,
      *               summary:array<string,int>, categories:list<array>, emptyReason:?string,
      *               message:?string, model:array, performance:array, generatedAt:string,
-     *               pagination:array<string,mixed>}
+     *               pagination:array<string,mixed>, page:array<string,int>}
      */
     public function forDate(string $date, bool $refresh = false, int $page = 1, int $limit = MatchFeed::MAX_PAGE_SIZE, array $options = []): array
     {
@@ -88,11 +92,15 @@ final class PredictionBoard
             $modelVersionId,
             PredictionService::KIND_PRE_MATCH,
         );
-        if ($refresh) {
-            // Bounded to the page on screen: at most `limit` NEW predictions,
-            // and only for matches that have none.
-            $this->predictions->predictMissing($fixtures, $limit, PredictionService::KIND_PRE_MATCH);
-        }
+        // The page's evaluation, captured so the overview can report what this
+        // read actually did with each fixture. `refresh` runs the bounded
+        // generation pass (at most `limit` NEW predictions, and only for
+        // matches that have none); a read without it classifies the page's
+        // unanalyzed fixtures without writing anything — reportOnly never runs
+        // the engine, so a read-only board stays exactly that.
+        $generation = $refresh
+            ? $this->predictions->predictMissing($fixtures, $limit, PredictionService::KIND_PRE_MATCH)
+            : $this->predictions->reportOnly($fixtures, $limit, PredictionService::KIND_PRE_MATCH);
 
         // Counts over the selection — the day, or the day narrowed to the chosen
         // competition — so the panel describes what the page is showing rather
@@ -261,6 +269,24 @@ final class PredictionBoard
             $message = self::EMPTY_QUALIFIERS;
         }
         $first = $totalFixtures === 0 ? 0 : (($page - 1) * $limit) + 1;
+        // What this read did with the page's fixtures, so the Day overview can
+        // say it instead of leaving an unanalyzed slot unexplained. `withheld`
+        // is the engine's own refusal (evidence below the quality floor — the
+        // engine answered and chose not to store), `frozen` is a slot that can
+        // never be predicted (kickoff passed, postponed, cancelled), `deferred`
+        // ran out of this cycle's batch, and `notAttempted` is everything the
+        // read did not evaluate — the whole unanalyzed page in a read-only
+        // view, and normally nothing once generation ran.
+        $pageWithheld = 0; $pageFrozen = 0; $pageDeferred = 0; $pageNotAttempted = 0; $pageFailed = 0;
+        foreach ((array) ($generation['matches'] ?? []) as $outcome) {
+            $state = (string) ($outcome['state'] ?? '');
+            $code = (string) ($outcome['code'] ?? '');
+            if ($state === PredictionService::MISSING_REFUSED && $code !== 'NOT_GENERATED') $pageWithheld++;
+            elseif ($state === PredictionService::MISSING_FROZEN) $pageFrozen++;
+            elseif ($state === PredictionService::MISSING_DEFERRED) $pageDeferred++;
+            elseif ($state === PredictionService::MISSING_FAILED) $pageFailed++;
+            elseif ($state === PredictionService::MISSING_REFUSED) $pageNotAttempted++;
+        }
         return [
             'heading' => "TODAY'S FOOTBALL PREDICTIONS",
             'date' => $date,
@@ -334,6 +360,19 @@ final class PredictionBoard
             'request' => ['date' => $date, 'page' => $page, 'limit' => $limit, 'refresh' => $refresh,
                 'competition' => $competition['requested'], 'market' => $market['key'], 'line' => $line,
                 'notes' => array_values($notes)],
+            // What the read evaluated on the page in view — the figures the
+            // Day overview prints beside the date-wide summary counts, each
+            // one labeled with its own scope so a page figure can never be
+            // read as a whole-selection one.
+            'page' => [
+                'fixtures' => count($fixtures),
+                'predicted' => $onPagePredicted,
+                'withheld' => $pageWithheld,
+                'frozen' => $pageFrozen,
+                'deferred' => $pageDeferred,
+                'failed' => $pageFailed,
+                'notAttempted' => $pageNotAttempted,
+            ],
             'generatedAt' => gmdate('c'),
         ];
     }

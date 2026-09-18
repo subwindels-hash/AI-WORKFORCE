@@ -53,7 +53,7 @@ each panel exists exactly once in the product.
 | `PredictionService.php` | prediction storage, the §output contract, the post-kickoff freeze; `predictMissing()` generates only matches that have no prediction, while `predictDay()` advances through the next configured 1–50 stored fixtures per cycle |
 | `MatchFeed.php` | the paginated feed: 50 matches per read page, up to the configured 1–50 NEW predictions per generation request, `match_id` de-duplication, competition and premium-league selection |
 | `PredictionMarkets.php` | the odds-prediction markets: the catalogue, the evaluation of one market from the stored score distribution, and the odds a feed actually quoted |
-| `PredictionBoard.php` | the daily board for one page: date-wide summary counts, confidence categories, match cards, pager |
+| `PredictionBoard.php` | the daily board for one page: date-wide summary counts, a page block (predicted / withheld / frozen / deferred by this read), confidence categories, match cards, pager |
 | `LiveMatchService.php` | in-play board and `LIVE` estimate rows, never rewriting the pre-match row |
 | `SettlementService.php` | grading on `FINISHED`, voiding on postponement, idempotent sweeps |
 | `PerformanceService.php` | 30-day metrics from stored settlements, snapshots, per-model evaluation |
@@ -235,7 +235,7 @@ The rules, and where each one is enforced:
 | 50 matches per page; `limit > 50` is clamped | `MatchFeed::MAX_PAGE_SIZE`, `MatchFeed::resolve()`, `RequestParams::int()` in the endpoints |
 | at most 50 **new** predictions per generation request | `PredictionService::predictMissing()` — a `$limit` of 9,999 still yields 50, and the rest are reported `DEFERRED` |
 | a match that already has a prediction is never regenerated | `PredictionService::existing()` → the stored row is returned; `predictDay()` counts it as `skipped` |
-| moving between pages costs nothing | the read path touches only `listFixtures`/`listPredictionsForFixtures`/`countFixtures` |
+| moving between pages costs no provider request | the read path touches only `listFixtures`/`listPredictionsForFixtures`/`countFixtures`; generate-on-read runs the same bounded, stored-rows-only pass `refresh=1` runs — never a provider call |
 | one prediction per match | `UNIQUE(fixture_id, prediction_kind, model_version_id)` in every schema, plus `UNIQUE(provider_id, external_id)` on fixtures |
 
 **`match_id`.** A match is identified by `providerCode:externalId`
@@ -289,10 +289,23 @@ Select Odds Prediction        (one market, or All markets = the default odds vie
         ↓
 Select date
         ↓
-Generate predictions          (at most 50 NEW matches, inside the selected competition(s))
+Read the board                (generates the page's missing predictions by default)
+        ↓
+Generate predictions          (the explicit action: at most 50 NEW matches, inside the selected competition(s))
         ↓
 Page 1 → Next → Page 2        (stored rows; nothing is regenerated)
 ```
+
+**Generate-on-read.** Opening the console runs the same bounded pass
+`refresh=1` and the **Generate this page** action run: the missing predictions
+for the *page in view* are generated from stored rows — at most the page size
+and the analysis batch, stored predictions are reused (never regenerated), and
+no provider request is spent. It is on by default so the board a signed-in
+viewer opens is already generated for the page in view; an operator can restore
+the fully read-only console with `WINDELS_FOOTBALL_GENERATE_ON_READ=false`, and
+`?refresh=0` makes one read read-only either way (an explicit `?refresh=1`
+still generates). The scheduled `predict` job and the API stay exactly as they
+were — the flag changes only the console's default.
 
 Every selector also offers its **all-value**, so the page can list every fixture
 at once instead of one league or market at a time:
@@ -781,7 +794,7 @@ GET /api/football/models/active
 GET /api/football/calibrations           ?modelVersionId= (defaults to the model in use)
 GET /api/football/provider/status
 GET /api/football/status
-GET /api/football/dashboard            ?date=&refresh=
+GET /api/football/dashboard            ?date=&refresh=   (the API stays explicit: refresh generates, its absence reads)
 GET /api/football/providers            the provider catalogue behind the Data Provider selector
 GET /api/football/providers/health     per-provider health: status, response time, rate limit, coverage, odds, what is missing
 GET /api/football/matches/fetch        ?provider=AUTO&competition=&date=&dateFrom=&dateTo=&limit=50&with=lineups&refresh=1
@@ -1029,6 +1042,8 @@ WINDELS_FOOTBALL_MIN_REQUEST_SPACING_MS=250  spacing between provider requests
 WINDELS_FOOTBALL_DAILY_REQUEST_CEILING=0     fallback daily ceiling when a feed reports none
 WINDELS_FOOTBALL_ANALYSIS_BATCH_SIZE=50     stored fixtures one prediction cycle may evaluate (1..50; Admin → System Settings → Football overrides)
 WINDELS_FOOTBALL_ANALYSIS_LIMIT=50            legacy alias for ANALYSIS_BATCH_SIZE; still supported and capped at 50
+WINDELS_FOOTBALL_GENERATE_ON_READ=true        opening /football generates the page's missing predictions (the refresh=1 pass);
+                                             false = fully read-only console, ?refresh=0 opts out one read, ?refresh=1 forces it on
 WINDELS_FOOTBALL_MATCH_PAGE_SIZE=50           matches per read page (1..50, hard-capped in code); generation also honours ANALYSIS_BATCH_SIZE
 WINDELS_FOOTBALL_PREMIUM_COMPETITION=English Premier League   the featured ("Premium") league the console offers first
 WINDELS_FOOTBALL_PREMIUM_COMPETITION_ID=39   optional: pin it to a provider competition id instead of matching the name

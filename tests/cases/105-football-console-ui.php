@@ -691,7 +691,7 @@ test('football UI: every section on every football screen is the same numbered, 
     assert_contains('.football-inline-form', $css, 'the forms that used inline styles have a class');
 
     // 6. The write-ups themselves: a reader is told what each section is for.
-    foreach (['The counts below describe saved rows for this date only',
+    foreach (['The counts below describe saved rows for',
         'The strongest comparisons drawn from the fixtures in section 3',
         'Measured from stored settlements only'] as $writeUp) {
         assert_contains($writeUp, $views['board'], 'the board explains its section: ' . $writeUp);

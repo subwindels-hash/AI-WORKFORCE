@@ -68,8 +68,16 @@ class Football extends MY_Controller
         $data['tomorrow'] = gmdate('Y-m-d', strtotime($date . ' +1 day'));
         // `refresh=1` fills in the missing predictions for the page on screen,
         // from the rows already stored. It never pulls the provider: that stays
-        // an explicit, permission-checked action.
-        $data['refresh'] = !empty($get['refresh']);
+        // an explicit, permission-checked action. Reading the console runs this
+        // pass by default (WINDELS_FOOTBALL_GENERATE_ON_READ, on unless an
+        // operator opts out), so the board a signed-in viewer opens is already
+        // generated for the page in view. An explicit parameter always wins:
+        // `?refresh=0` makes one read fully read-only, `?refresh=1` generates
+        // even when the deployment default is off.
+        $refreshExplicit = array_key_exists('refresh', $get) ? trim((string) $get['refresh']) : null;
+        $data['refresh'] = $refreshExplicit !== null
+            ? in_array(strtolower($refreshExplicit), ['1', 'true', 'yes', 'on'], true)
+            : $this->platform->football->config()->generateOnRead();
         // Competition and market are selections over stored rows: narrowing the
         // page to one league or reading it in another market re-reads the same
         // predictions, so neither one regenerates a match.

@@ -369,6 +369,22 @@ final class FootballConfiguration
     }
 
     /**
+     * Generate-on-read: whether opening the football console fills in the
+     * missing predictions for the page in view, from the rows that are
+     * already stored — the same bounded pass the refresh=1 parameter and the
+     * "Generate this page" action run (at most the page size and the analysis
+     * batch; stored predictions are reused, never regenerated; no provider
+     * request is spent). Default true, so the board a signed-in viewer opens
+     * is already generated for the page in view; an operator can restore the
+     * fully read-only console with WINDELS_FOOTBALL_GENERATE_ON_READ=false,
+     * and ?refresh=0 makes a single read read-only either way.
+     */
+    public function generateOnRead(): bool
+    {
+        return $this->flag('WINDELS_FOOTBALL_GENERATE_ON_READ', true);
+    }
+
+    /**
      * The premium (featured) competition — the league the console offers first
      * and processes by default. It is configuration, not a constant, so an
      * operator running a different flagship league does not have to fork the

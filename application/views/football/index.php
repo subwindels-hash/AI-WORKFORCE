@@ -179,7 +179,9 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
             <span class="badge <?= strtoupper($providerMode) === 'MANUAL' ? 'b-amber' : 'b-green' ?>"><?= e($providerMode) ?> · <?= strtoupper($providerMode) === 'MANUAL' ? 'operator selection' : 'admin managed' ?></span>
           </div>
           <div class="body">
-            <p class="football-section-intro">These controls change what the three board sections below display. They only reorganize saved fixtures and stored odds — no provider request is spent and no prediction is created.</p>
+            <p class="football-section-intro">These controls change what the three board sections below display. They only reorganize saved fixtures and stored odds — no provider request is spent. <?= !empty($refresh)
+              ? 'The board read generates the missing predictions for the page in view (at most the configured batch); stored predictions are reused, never regenerated.'
+              : 'This deployment reads without generating (?refresh=0 or WINDELS_FOOTBALL_GENERATE_ON_READ=false); the Generate this page action creates the missing predictions.' ?></p>
             <form method="get" action="/football" class="football-filter-form">
               <input type="hidden" name="page" value="1">
               <?php if ($isAdmin): ?>
@@ -226,35 +228,66 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
               <label class="fld">Date <input class="sel" type="date" name="date" value="<?= e((string) ($date ?? gmdate('Y-m-d'))) ?>"></label>
               <button class="btn primary" type="submit">Apply view</button>
             </form>
-            <p class="football-help">Filters only reorganize saved fixtures and stored odds. They do not spend a provider request or create a new prediction. The complete odds sheet remains available for every match below.</p>
+            <p class="football-help">Filters only reorganize saved fixtures and stored odds — they spend no provider request. The complete odds sheet remains available for every match below.</p>
           </div>
         </section>
 
+      <?php
+        /* The Day overview prints three scopes, each labeled as itself: the
+           summary counts (the whole selection — the date, or the date narrowed
+           to the chosen competition), the page block (what THIS read evaluated
+           for the page in view), and the read stamp (when the payload was
+           generated). A page-scoped figure is never dressed up as a
+           date-wide one, and "withheld" is the engine's own refusal — the
+           quality gate answered and chose not to store — not a gap. */
+        $pageBlock = is_array($board['page'] ?? null) ? $board['page'] : [];
+        $pagination = is_array($board['pagination'] ?? null) ? $board['pagination'] : [];
+        $selectionState = (string) ($selectedCompetition['state'] ?? '');
+        $selectionName = in_array($selectionState, ['NARROWED', 'PREMIUM_LEAGUES'], true)
+            ? (string) ($selectedCompetition['name'] ?? '') : '';
+        $awaitingAnalysis = max(0, (int) ($summary['fixtures'] ?? 0) - (int) ($summary['analyzed'] ?? 0));
+        $withheldOnPage = (int) ($pageBlock['withheld'] ?? 0);
+        $pageFixtures = (int) ($pagination['returned'] ?? 0);
+      ?>
       <section class="panel football-section" id="football-overview" aria-labelledby="day-overview-heading">
         <div class="football-section__heading">
           <div class="football-section__title">
             <span class="football-step" aria-hidden="true">1</span>
             <div>
               <p class="football-eyebrow">Day overview</p>
-              <h3 id="day-overview-heading">What is stored for <?= e((string) ($board['date'] ?? $date ?? 'this date')) ?></h3>
+              <h3 id="day-overview-heading">What is stored for <?= e((string) ($board['dateLabel'] ?? $board['date'] ?? $date ?? 'this date')) ?><?php if ((string) ($board['date'] ?? $date ?? '') !== ''): ?> (<?= e((string) ($board['date'] ?? $date)) ?>)<?php endif; ?><?= $selectionName !== '' ? ' — ' . e($selectionName) : '' ?></h3>
             </div>
           </div>
-          <span class="football-section__meta">Board read <?= e($kickoff($d['generatedAt'] ?? null, 'H:i')) ?></span>
+          <span class="football-section__meta" title="When this page read its stored board payload (UTC). Reload re-reads storage; no provider request is spent.">Board read <?= e($kickoff($d['generatedAt'] ?? null, 'D j M Y · H:i')) ?></span>
         </div>
         <div class="body">
-          <p class="football-section-intro">The counts below describe saved rows for this date only. A fixture is <b>qualified</b> when its stored evidence clears the data-quality floor, <b>limited</b> when it is usable with caution, and <b>withheld</b> when the evidence is too thin to publish a prediction.</p>
+          <p class="football-section-intro">The counts below describe saved rows for <?= $selectionName !== '' ? 'this selection — <b>' . e($selectionName) . '</b> on ' : '' ?>this date. A fixture is <b>qualified</b> when its stored evidence clears the data-quality floor, <b>limited</b> when it is usable with caution, and <b>withheld</b> when the engine refused to write a prediction because the evidence was too thin. <?= !empty($refresh)
+            ? 'Reading this board generates the missing predictions for the page in view — at most the configured batch, stored ones are reused, never regenerated, and no provider request is spent.'
+            : 'This read generated nothing: generation on read is off (?refresh=0 or WINDELS_FOOTBALL_GENERATE_ON_READ=false), so the Generate this page action stays the way predictions are created.' ?></p>
           <div class="stat-grid football-stat-grid">
-            <div class="stat"><div class="k">Fixtures found</div><div class="v"><?= (int) ($summary['fixtures'] ?? 0) ?></div><div class="trend">stored for this date</div></div>
+            <div class="stat"><div class="k">Fixtures found</div><div class="v"><?= (int) ($summary['fixtures'] ?? 0) ?></div><div class="trend">stored for this date<?= $selectionName !== '' ? ' · ' . e($selectionName) : '' ?></div></div>
             <div class="stat"><div class="k">Analyzed</div><div class="v"><?= (int) ($summary['analyzed'] ?? 0) ?></div><div class="trend">prediction rows saved</div></div>
             <div class="stat"><div class="k">Qualified</div><div class="v up"><?= (int) ($summary['qualified'] ?? 0) ?></div><div class="trend">verified data quality</div></div>
             <div class="stat"><div class="k">Limited evidence</div><div class="v warn"><?= (int) ($summary['limited'] ?? 0) ?></div><div class="trend">usable with caution</div></div>
-            <div class="stat"><div class="k">Withheld</div><div class="v down"><?= (int) ($summary['rejected'] ?? 0) ?></div><div class="trend">below evidence floor</div></div>
+            <div class="stat"><div class="k">Withheld</div><div class="v down"><?= $withheldOnPage ?></div><div class="trend">evidence below the floor · this page</div></div>
+            <div class="stat"><div class="k">Awaiting analysis</div><div class="v"><?= $awaitingAnalysis ?></div><div class="trend">no prediction row yet · whole selection</div></div>
           </div>
-          <?php $pagination = is_array($board['pagination'] ?? null) ? $board['pagination'] : []; ?>
           <?php if ($pagination !== []): ?>
             <div class="football-section__divider"></div>
             <?= $pager($pagination, (string) ($date ?? gmdate('Y-m-d')), $carry) ?>
-            <p class="football-help">This page contains <?= (int) ($pagination['returned'] ?? 0) ?> stored fixture<?= (int) ($pagination['returned'] ?? 0) === 1 ? '' : 's' ?>. Paging only reads saved rows; it never refreshes prices or regenerates a prediction.</p>
+            <?php
+              // What this read made of the page's own fixtures, in the same
+              // words the table below uses. Zero-valued clauses stay silent so
+              // the line reads as a sentence, not a spreadsheet.
+              $pageParts = [(int) ($pageBlock['predicted'] ?? 0) . ' with a stored prediction'];
+              if ($withheldOnPage > 0) $pageParts[] = $withheldOnPage . ' withheld (evidence below the floor)';
+              if ((int) ($pageBlock['frozen'] ?? 0) > 0) $pageParts[] = (int) $pageBlock['frozen'] . ' closed (kickoff already passed)';
+              if ((int) ($pageBlock['deferred'] ?? 0) > 0) $pageParts[] = (int) $pageBlock['deferred'] . ' deferred to the next cycle';
+              if ((int) ($pageBlock['failed'] ?? 0) > 0) $pageParts[] = (int) $pageBlock['failed'] . ' failed';
+            ?>
+            <p class="football-help">This page contains <?= $pageFixtures ?> stored fixture<?= $pageFixtures === 1 ? '' : 's' ?> — <?= implode(', ', $pageParts) ?>. <?= !empty($refresh)
+              ? 'Reading a page generates only its own missing predictions (at most the configured batch); paging never refreshes prices and never regenerates a stored prediction.'
+              : 'Paging only reads saved rows; it never refreshes prices and never generates a prediction.' ?></p>
           <?php endif; ?>
           <?php if (in_array((string) ($board['state'] ?? ''), ['NO_FIXTURES_STORED', 'NO_PREDICTIONS_STORED', 'PAGE_BEYOND_LAST'], true)): ?>
             <div class="empty-state"><p><?= e((string) ($board['message'] ?? 'No stored fixtures are available for this selection.')) ?></p></div>

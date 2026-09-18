@@ -163,6 +163,64 @@ test('football: the Premium League selector renders every premium league and the
         'the competition dropdown offers the same all-premium scope, selected');
 });
 
+test('football: the Day overview prints the full date, the selection, both scopes and the read stamp', function () {
+    // A populated day read the way the console reads it by default: with
+    // generation, so the page block is evaluated. The Day overview must show
+    // the friendly date label with the raw date, the active selection, the
+    // page-scoped withheld figure beside the selection-wide counts, the
+    // per-page prediction status, and a full Board read stamp.
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    $base = (int) strtotime($day . 'T00:30:00+00:00');
+    $rows = [];
+    for ($i = 0; $i < 3; $i++) {
+        $rows[] = fx_fb_row('fx-ovw-' . $i, gmdate('c', $base + $i * 60), 'Manchester City', 'Everton', '10', '20');
+    }
+    [, , $module] = fx_fb_harness($rows);
+    fx_fb_sync_today($module, $day);
+
+    $dashboard = $module->dashboard($day, true, 1, 50, []);
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard, 'refresh' => true]));
+    assert_true($render['notices'] === [], 'the generating read reaches for no key the payload does not publish'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    $html = $render['html'];
+    $overview = [];
+    assert_true(preg_match('/<section class="panel football-section" id="football-overview".*?<\\/section>/s', $html, $overview) === 1,
+        'the Day overview renders');
+
+    // The heading names the friendly label AND the raw date, and the read
+    // stamp carries the full day, not a bare clock time.
+    assert_true(str_contains($overview[0], 'What is stored for ' . gmdate('l, j F Y', (int) strtotime($day . 'T00:00:00+00:00'))),
+        'the heading carries the payload\'s date label');
+    assert_true(str_contains($overview[0], '(' . $day . ')'), 'and the raw date beside it');
+    assert_true(preg_match('/Board read \w{3} \d{1,2} \w{3} \d{4} · \d{2}:\d{2} UTC/', $overview[0]) === 1,
+        'the Board read stamp shows the full date and time');
+    // Six tiles: the five familiar counts plus Awaiting analysis, with the
+    // withheld figure labeled as the page-scoped number it is.
+    foreach (['Fixtures found', 'Analyzed', 'Qualified', 'Limited evidence', 'Withheld', 'Awaiting analysis'] as $tile) {
+        assert_true(str_contains($overview[0], $tile), 'the ' . $tile . ' tile renders');
+    }
+    assert_true(str_contains($overview[0], 'evidence below the floor · this page'), 'withheld is labeled with its page scope');
+    assert_true(str_contains($overview[0], 'no prediction row yet · whole selection'), 'awaiting analysis is labeled with its selection scope');
+    assert_true(str_contains($overview[0], '3 with a stored prediction'), 'the page line says how many fixtures on the page are predicted');
+    assert_true(str_contains($overview[0], 'Reading this board generates the missing predictions for the page in view'),
+        'and the intro states the generate-on-read behaviour');
+
+    // Narrowed to the premium scope, the heading names the selection and the
+    // intro counts describe it — a page figure never poses as a day figure.
+    $narrowed = $module->dashboard($day, true, 1, 50, ['competition' => \AIWorkforce\Football\MatchFeed::PREMIUM_LEAGUES]);
+    $render2 = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $narrowed, 'refresh' => true]));
+    assert_true($render2['notices'] === [], 'the narrowed board publishes every key the overview reads');
+    $overview2 = [];
+    assert_true(preg_match('/<section class="panel football-section" id="football-overview".*?<\\/section>/s', $render2['html'], $overview2) === 1);
+    assert_true(str_contains($overview2[0], '— All premium leagues</h3>'), 'the heading names the selection');
+    assert_true(str_contains($overview2[0], 'this selection — <b>All premium leagues</b>'), 'and the intro says which selection the counts describe');
+
+    // A read-only read (?refresh=0 / generate-on-read off) says so instead of
+    // implying the board generated itself.
+    $readonly = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $narrowed, 'refresh' => false]));
+    assert_true(str_contains($readonly['html'], 'This read generated nothing'), 'the read-only mode is stated');
+});
+
 test('football: the board renders an unanalyzed date without inventing a score', function () {
     [$repo, , $module] = fx_fb_harness([], ['skipHistory' => true]);
     $day = gmdate('Y-m-d', time() + 4 * 3600);

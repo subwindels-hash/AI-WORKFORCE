@@ -1726,7 +1726,7 @@ a.btn[aria-disabled="true"] {
   border-color: var(--line2);
   color: var(--text);
 }
-.football-stat-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.football-stat-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
 .football-stat-grid .stat { padding: 10px 11px; }
 .football-stat-grid .stat .v { font-size: 20px; }
 .football-stat-grid .trend { margin-top: 2px; font-size: 10px; color: var(--dim); line-height: 1.25; }
