@@ -373,6 +373,59 @@ class Football extends MY_Controller
         redirect('/football?' . http_build_query($query));
     }
 
+    /**
+     * Price the whole board for a date — the console form behind "Refresh odds
+     * for this date" (sports.manage).
+     *
+     * This is the day-scoped half of the per-match "Refresh odds" button. It
+     * spends provider quota, so it is an explicit operator action; the same
+     * sweep also runs unattended on the `odds` cron job, which is what keeps a
+     * board priced without anyone pressing anything. Prices already inside the
+     * freshness window are reused rather than re-bought unless the operator
+     * ticks "force".
+     */
+    public function refresh_board_odds()
+    {
+        if ($this->input->method(true) !== 'POST') { redirect('/football'); return; }
+        if (!$this->requireFootballPermission('sports.manage', 'odds refresh')) return;
+        @set_time_limit(180);
+        $date = $this->postedDate();
+        if ($date === null) return;
+        $force = in_array(strtolower(trim((string) $this->input->post('force'))), ['1', 'true', 'yes', 'on'], true);
+        try {
+            $result = $this->platform->football->syncOddsForDay($date, $force);
+        } catch (Throwable $e) {
+            $this->flash('error', 'Odds refresh refused: ' . $e->getMessage());
+            redirect('/football?date=' . $date);
+            return;
+        }
+        if ((string) ($result['status'] ?? '') === 'SKIPPED') {
+            $this->flash('error', 'No odds were requested — ' . rtrim((string) ($result['detail'] ?? 'the odds sweep could not run.'), '.') . '.');
+            redirect('/football?date=' . $date);
+            return;
+        }
+        $priced = (int) ($result['priced'] ?? 0);
+        $stored = (int) ($result['stored'] ?? 0);
+        $unpriced = (int) ($result['unpriced'] ?? 0);
+        $reused = (int) ($result['freshReused'] ?? 0);
+        $deferred = (int) ($result['deferred'] ?? 0);
+        $message = sprintf(
+            'Odds sweep for %s: %d fixture(s) priced (%d quote(s) stored), %d returned no price, %d already-fresh reused, %d provider request(s).',
+            $date, $priced, $stored, $unpriced, $reused, (int) ($result['requests'] ?? 0)
+        );
+        if ($deferred > 0) {
+            $message .= sprintf(' %d fixture(s) were left for the next run (request budget %d reached).',
+                $deferred, (int) ($result['budget'] ?? 0));
+        }
+        $errors = (array) ($result['errors'] ?? []);
+        if ($errors !== []) $message .= ' ' . count($errors) . ' provider warning(s).';
+        $this->flash($priced > 0 || $stored > 0 || $reused > 0 ? 'notice' : 'error',
+            $priced === 0 && $stored === 0 && $reused === 0
+                ? $message . ' No bookmaker has priced these fixtures yet — nothing was invented to fill the gap.'
+                : $message);
+        redirect('/football?date=' . $date . '#football-fixtures');
+    }
+
     /** Pull final results and settle the fixtures that reported them (sports.settle). */
     public function settle()
     {

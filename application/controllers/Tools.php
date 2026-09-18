@@ -27,7 +27,7 @@ class Tools extends MY_Controller
             : 'ops|sports|lottery';
         $footballJobs = class_exists(\AIWorkforce\Football\FootballCronService::class)
             ? implode('|', \AIWorkforce\Football\FootballCronService::JOBS)
-            : 'fixtures|upcoming|live|results|statistics|predict|settle|performance|cleanup';
+            : 'fixtures|upcoming|live|odds|results|statistics|predict|settle|performance|cleanup';
         echo "AI Workforce tools:\n  php index.php tools install           — (re)install schemas and seed RBAC defaults\n  php index.php tools bootstrap_admin   — create initial super-admin from environment variables\n  php index.php tools tests             — run the full test suite\n  php index.php tools marketdata        — market-data connectivity report (add --activate to go live, --probe to fetch real bars)\n  php index.php tools cron              — scheduled operations: portfolio risk scan, broker transitions, proposal expiry\n  php index.php tools scheduler [job]   — unified scheduler: runs every enabled + due job ({$groups})\n  php index.php tools sports-cron [job] [date] — sports scheduled jobs (fixtures|odds|results|quality|ticket|settlement|performance|monitoring|cleanup); optional YYYY-MM-DD re-runs a job for that day\n  php index.php tools sports-providers  — why the odds engine has no data feed and exactly how to connect one (no secrets printed)\n  php index.php tools sports-calibration-check [date] — calibration persistence check after a CALIBRATION_PERSIST_FAILED alert\n  php index.php tools football-cron [job] — football refresh jobs ({$footballJobs}); --force bypasses cadence\n  php index.php tools lottery-cron [job] — lottery scheduled jobs (sync|health|statistics|systems|tickets|backtests|intelligence|cleanup)\n  php index.php tools lottery-smoke     — live check of the configured lottery feed (LoteriasAPI / authorized feed); add --raw to print the vendor's own payload\n";
     }
 
@@ -156,6 +156,7 @@ class Tools extends MY_Controller
      *
      *   php index.php tools football-cron                 — every due job
      *   php index.php tools football-cron live           — one job
+     *   php index.php tools football-cron odds           — price today's board (then tomorrow, if budget remains)
      *   php index.php tools football-cron fixtures --force — run now, ignore cadence
      */
     public function football_cron()

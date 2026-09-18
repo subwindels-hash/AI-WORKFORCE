@@ -117,9 +117,8 @@ final class OddsSheetService
                 'reason' => 'This stored fixture carries no provider match id, so no feed can be asked for its odds.',
                 'refreshed' => ['fetched' => 0, 'stored' => 0, 'invalid' => 0], 'generatedAt' => gmdate('c')];
         }
-        $preferred = trim((string) ($fixture['provider_code'] ?? '')) ?: null;
         $this->gateway->beginSweep($this->config->requestBudget('upcoming'));
-        $outcome = $this->gateway->call('odds', fn($provider) => $provider->odds($external), $preferred);
+        $outcome = $this->fetchAndPersist($fixture);
         if (!$outcome['ok']) {
             return ['state' => DataState::UNAVAILABLE, 'fixtureId' => $fixtureId,
                 'fixture' => PredictionService::fixtureSummary($fixture),
@@ -130,15 +129,190 @@ final class OddsSheetService
                 'generatedAt' => gmdate('c')];
         }
         $providerCode = (string) $outcome['provider'];
-        $rows = is_array($outcome['result']) ? $outcome['result'] : [];
-        $persisted = $this->persistRows($fixture, $providerCode, $rows);
         $sheet = $this->sheet($fixtureId);
-        $sheet['refreshed'] = ['provider' => $providerCode, 'fetched' => count($rows)] + $persisted;
-        if ($rows === []) {
+        $sheet['refreshed'] = ['provider' => $providerCode, 'fetched' => (int) $outcome['fetched']]
+            + (array) $outcome['persisted'];
+        if ((int) $outcome['fetched'] === 0) {
             $sheet['reason'] = ($sheet['reason'] ?? '') !== '' ? $sheet['reason']
                 : $providerCode . ' returned no odds for this fixture (bookmakers may not have priced it yet).';
         }
         return $sheet;
+    }
+
+    /**
+     * Price a whole date's stored fixtures in ONE budgeted sweep.
+     *
+     * This is the job the board was missing. `refresh()` prices one fixture an
+     * operator opened; nothing priced the day, so every fixture the fixtures
+     * sweep stored arrived with zero quotes and the board's own odds panel
+     * ("Bookmaker odds — no quote", "Available odds 0 quotes across 0 markets")
+     * was reporting an absence the module had never actually gone and looked
+     * for.
+     *
+     * The same rules the rest of the module runs on apply here:
+     *
+     *  - **Budgeted.** One sweep, `requestBudget('odds')` requests. When the
+     *    budget runs out the remainder is reported as deferred, not dropped —
+     *    the next tick picks it up.
+     *  - **Freshness first.** A fixture whose newest stored quote is younger
+     *    than `maxDataAgeSeconds('odds')` is reused, not re-requested, so the
+     *    sweep spends quota only on prices that are actually missing or aged.
+     *  - **Nothing is invented.** A fixture the provider does not price keeps
+     *    zero quotes and the board keeps saying so.
+     *
+     * @return array<string,mixed>
+     */
+    public function refreshDay(string $date, ?int $limit = null, bool $force = false): array
+    {
+        $generatedAt = gmdate('c');
+        if ($this->store === null) {
+            return ['status' => 'SKIPPED', 'date' => $date, 'reason' => 'NO_ODDS_STORE',
+                'detail' => 'No odds store is bound in this runtime, so fetched prices could not be persisted. '
+                    . 'No provider request was made.',
+                'fixtures' => 0, 'priced' => 0, 'stored' => 0, 'invalid' => 0, 'freshReused' => 0,
+                'deferred' => 0, 'unpriced' => 0, 'requests' => 0, 'errors' => [], 'generatedAt' => $generatedAt];
+        }
+        if (!$this->gateway->configured()) {
+            return ['status' => 'SKIPPED', 'date' => $date, 'reason' => 'FOOTBALL_PROVIDER_NOT_CONFIGURED',
+                'detail' => 'No football data provider is registered, so no price could be requested. '
+                    . 'The board keeps reporting its quotes as unavailable rather than inventing one.',
+                'fixtures' => 0, 'priced' => 0, 'stored' => 0, 'invalid' => 0, 'freshReused' => 0,
+                'deferred' => 0, 'unpriced' => 0, 'requests' => 0, 'errors' => [], 'generatedAt' => $generatedAt];
+        }
+        if (!$this->gateway->supports('odds')) {
+            return ['status' => 'SKIPPED', 'date' => $date, 'reason' => 'UNSUPPORTED_CAPABILITY',
+                'detail' => 'No connected provider exposes an odds endpoint, so no bookmaker price can be stored '
+                    . 'for this date. This is a capability gap, not a missing market.',
+                'fixtures' => 0, 'priced' => 0, 'stored' => 0, 'invalid' => 0, 'freshReused' => 0,
+                'deferred' => 0, 'unpriced' => 0, 'requests' => 0, 'errors' => [], 'generatedAt' => $generatedAt];
+        }
+
+        $budget = $this->config->requestBudget('odds');
+        $this->gateway->beginSweep($budget);
+        $maxAge = $this->config->maxDataAgeSeconds('odds');
+        // Only fixtures that can still be bet on are worth a price: a finished
+        // or abandoned match is the settlement job's business, and paying for
+        // its odds would be quota spent on a market nobody can enter.
+        $fixtures = $this->repo->listFixtures(['date' => $date], max(1, min(500, $limit ?? 200)));
+        $priced = 0; $stored = 0; $invalid = 0; $freshReused = 0; $unpriced = 0; $deferred = 0;
+        $skippedClosed = 0; $errors = []; $providers = [];
+        foreach ($fixtures as $fixture) {
+            $status = strtoupper((string) ($fixture['status'] ?? ''));
+            if (in_array($status, ['FINISHED', 'CANCELLED', 'POSTPONED', FixtureSyncService::STALE_LIVE_STATUS], true)) {
+                $skippedClosed++;
+                continue;
+            }
+            if ((string) ($fixture['external_id'] ?? '') === '') {
+                $skippedClosed++;
+                continue;
+            }
+            // A price that is still inside its freshness window is reused. This
+            // is what keeps a 15-minute cadence affordable on a 200-fixture day.
+            if (!$force && $this->quotesAreFresh($fixture, $maxAge)) {
+                $freshReused++;
+                continue;
+            }
+            if ($this->gateway->requestsRemaining() <= 0) {
+                $deferred++;
+                continue;
+            }
+            $outcome = $this->fetchAndPersist($fixture);
+            if (!$outcome['ok']) {
+                // A provider that deferred (budget/backoff/quota) has not
+                // refused the fixture — it has not been asked yet.
+                if (!empty($outcome['deferred'])) { $deferred++; continue; }
+                $label = (string) ($fixture['home_team'] ?? '?') . ' vs ' . (string) ($fixture['away_team'] ?? '?');
+                if (count($errors) < 10) {
+                    $errors[] = $label . ': ' . implode('; ', array_map(
+                        static fn($k, $v): string => $k . '=' . $v,
+                        array_keys((array) $outcome['failures']),
+                        array_values((array) $outcome['failures'])
+                    ));
+                }
+                continue;
+            }
+            $persisted = (array) $outcome['persisted'];
+            $providers[(string) $outcome['provider']] = true;
+            $stored += (int) ($persisted['stored'] ?? 0);
+            $invalid += (int) ($persisted['invalid'] ?? 0);
+            foreach ((array) ($persisted['errors'] ?? []) as $error) {
+                if (count($errors) < 10) $errors[] = (string) $error;
+            }
+            // "Priced" counts fixtures a bookmaker actually quoted. A fixture
+            // the feed answered with an empty list is counted as unpriced, and
+            // the board keeps showing it as unpriced — which is the truth.
+            if ((int) ($persisted['stored'] ?? 0) > 0) $priced++;
+            else $unpriced++;
+        }
+        $requests = $this->gateway->requestsMade();
+        return [
+            'status' => $errors !== [] && $priced === 0 && $stored === 0 ? 'FAILED' : 'COMPLETED',
+            'date' => $date,
+            'fixtures' => count($fixtures),
+            'considered' => count($fixtures) - $skippedClosed,
+            'priced' => $priced,
+            'unpriced' => $unpriced,
+            'stored' => $stored,
+            'invalid' => $invalid,
+            'freshReused' => $freshReused,
+            'deferred' => $deferred,
+            'skippedClosed' => $skippedClosed,
+            'requests' => $requests,
+            'budget' => $budget,
+            'maxAgeSeconds' => $maxAge,
+            'providers' => array_keys($providers),
+            'errors' => $errors,
+            'note' => $deferred > 0
+                ? $deferred . ' fixture(s) were not requested in this sweep (request budget ' . $budget
+                    . ' reached); the next scheduled run continues from there.'
+                : 'every eligible fixture for ' . $date . ' was offered to the odds feed in this sweep.',
+            'generatedAt' => $generatedAt,
+        ];
+    }
+
+    /**
+     * One fixture's billed odds call + persistence, with NO budget reset — the
+     * caller owns the sweep. Shared by the single-fixture refresh and the
+     * day sweep so both bill, validate and store a price identically.
+     *
+     * @param array<string,mixed> $fixture
+     * @return array{ok:bool, provider:?string, fetched:int, persisted:array<string,mixed>, failures:array<string,string>, deferred:bool}
+     */
+    private function fetchAndPersist(array $fixture): array
+    {
+        $external = (string) ($fixture['external_id'] ?? '');
+        $preferred = trim((string) ($fixture['provider_code'] ?? '')) ?: null;
+        $outcome = $this->gateway->call('odds', fn($provider) => $provider->odds($external), $preferred);
+        if (!$outcome['ok']) {
+            return ['ok' => false, 'provider' => null, 'fetched' => 0,
+                'persisted' => ['stored' => 0, 'invalid' => 0, 'errors' => []],
+                'failures' => (array) $outcome['failures'], 'deferred' => (bool) ($outcome['deferred'] ?? false)];
+        }
+        $providerCode = (string) $outcome['provider'];
+        $rows = is_array($outcome['result']) ? $outcome['result'] : [];
+        return ['ok' => true, 'provider' => $providerCode, 'fetched' => count($rows),
+            'persisted' => $this->persistRows($fixture, $providerCode, $rows),
+            'failures' => [], 'deferred' => false];
+    }
+
+    /**
+     * True when this fixture already has a stored quote inside the odds
+     * freshness window, so re-requesting it would buy nothing.
+     *
+     * @param array<string,mixed> $fixture
+     */
+    private function quotesAreFresh(array $fixture, int $maxAgeSeconds): bool
+    {
+        $newest = null;
+        foreach ($this->storedRows($fixture) as $row) {
+            $observed = (string) ($row['observedAt'] ?? '');
+            if ($observed === '') continue;
+            $stamp = strtotime($observed);
+            if ($stamp === false) continue;
+            $newest = $newest === null ? $stamp : max($newest, $stamp);
+        }
+        if ($newest === null) return false;
+        return (time() - $newest) < $maxAgeSeconds;
     }
 
     // ── in-play odds ─────────────────────────────────────────────────────────

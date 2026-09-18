@@ -344,3 +344,149 @@ test('every odds payload survives strict JSON encoding', function () {
     }
     foreach (glob(sys_get_temp_dir() . '/football_odds_catalog_*.json') ?: [] as $file) @unlink($file);
 });
+
+// ─── 8. the day sweep: what actually prices the board ────────────────────────
+
+/**
+ * A harness holding SEVERAL fixtures on one date, so the day sweep can be
+ * judged the way it runs in production: one budgeted pass over a whole board.
+ *
+ * @return array{0:OddsSheetService,1:FootballRepositoryStub,2:object,3:list<array>,4:ProviderGateway}
+ */
+function fx_odds_day_harness(array $routes, string $date, int $count = 3, ?array &$log = null, array $config = []): array
+{
+    $repo = new FootballRepositoryStub();
+    $providerRow = $repo->ensureProvider('api-football', ['displayName' => 'API-Football']);
+    $fixtures = [];
+    for ($i = 0; $i < $count; $i++) {
+        $fixtures[] = $repo->saveFixture((int) $providerRow['id'], [
+            'externalId' => (string) (9001 + $i),
+            'homeTeam' => 'Home ' . $i, 'awayTeam' => 'Away ' . $i,
+            'competition' => 'Premier League',
+            'kickoff' => $date . 'T' . str_pad((string) (12 + $i), 2, '0', STR_PAD_LEFT) . ':00:00+00:00',
+            'status' => 'SCHEDULED', 'sourceTimestamp' => gmdate('c'),
+        ]);
+    }
+    $provider = fx_odds_provider($routes, $log);
+    $manager = new SportsProviderManager();
+    $manager->register($provider);
+    $configuration = new FootballConfiguration($config);
+    $gateway = new ProviderGateway($manager, $configuration);
+    $service = new OddsSheetService($repo, $gateway, $configuration, sys_get_temp_dir());
+    $service->bindSportsStore(new SportsRepositoryStub());
+    return [$service, $repo, $provider, $fixtures, $gateway];
+}
+
+test('refreshDay() prices every open fixture on the date — the sweep the board was missing', function () {
+    // The regression this guards: fixtures synced fine and predictions were
+    // generated fine, but NOTHING ever asked the odds endpoint for the board,
+    // so every fixture rendered "Bookmaker odds —", "Implied probability —"
+    // and "Available odds 0 quotes across 0 markets" forever.
+    $date = gmdate('Y-m-d', time() + 86400);
+    [$service, , , $fixtures] = fx_odds_day_harness(['/odds?' => fx_odds_wire()], $date, 3);
+    foreach ($fixtures as $fixture) {
+        assert_equals(DataState::UNAVAILABLE, $service->sheet((int) $fixture['id'])['state'],
+            'every fixture starts with no stored price at all');
+    }
+    $result = $service->refreshDay($date);
+    assert_equals('COMPLETED', $result['status']);
+    assert_equals(3, $result['fixtures'], 'the sweep saw the whole date, not one fixture');
+    assert_equals(3, $result['priced'], 'and priced every one of them in a single pass');
+    assert_equals(24, $result['stored'], '8 valid rows per fixture are persisted');
+    assert_equals(0, $result['unpriced']);
+    assert_equals(0, $result['deferred']);
+    assert_equals(['api-football'], $result['providers'], 'the feed behind the prices is named');
+    // The board reads these back for free, which is what makes the panel fill in.
+    foreach ($fixtures as $fixture) {
+        assert_equals(DataState::AVAILABLE, $service->sheet((int) $fixture['id'])['state'],
+            'each fixture now answers with a real stored sheet');
+    }
+});
+
+test('the day sweep reuses a still-fresh price instead of re-buying it', function () {
+    $date = gmdate('Y-m-d', time() + 86400);
+    [$service, , $provider, , ] = fx_odds_day_harness(['/odds?' => fx_odds_wire()], $date, 3, $log);
+    $first = $service->refreshDay($date);
+    assert_equals(3, $first['requests'], 'the first sweep pays for three fixtures');
+    $second = $service->refreshDay($date);
+    assert_equals(0, $second['requests'], 'the second spends nothing: every price is still inside its window');
+    assert_equals(3, $second['freshReused'], 'and says so rather than reporting phantom work');
+    assert_equals(0, $second['priced']);
+    // force=true is what an operator means by "refresh the prices now".
+    $forced = $service->refreshDay($date, null, true);
+    assert_equals(3, $forced['requests'], 'a forced sweep re-requests even fresh prices');
+    assert_equals(0, $forced['freshReused']);
+});
+
+test('the day sweep stops at its request budget and reports the remainder as deferred', function () {
+    $date = gmdate('Y-m-d', time() + 86400);
+    // Two requests of budget against five fixtures: three must be deferred, and
+    // never silently dropped — the next scheduled run continues from there.
+    [$service] = fx_odds_day_harness(['/odds?' => fx_odds_wire()], $date, 5, $log,
+        ['WINDELS_FOOTBALL_BUDGET_ODDS' => 2, 'WINDELS_FOOTBALL_MIN_REQUEST_SPACING_MS' => 0]);
+    $result = $service->refreshDay($date);
+    assert_equals(2, $result['priced'], 'only the budgeted number of fixtures was requested');
+    assert_equals(2, $result['requests']);
+    assert_equals(3, $result['deferred'], 'the rest is deferred, not lost');
+    assert_true(str_contains((string) $result['note'], 'next scheduled run'),
+        'and the note explains why the board is only partly priced');
+});
+
+test('a fixture the bookmakers have not priced stays honestly unpriced', function () {
+    $date = gmdate('Y-m-d', time() + 86400);
+    // The provider answers, but with an empty market list.
+    [$service, , , $fixtures] = fx_odds_day_harness(['/odds?' => ['response' => []]], $date, 2);
+    $result = $service->refreshDay($date);
+    assert_equals('COMPLETED', $result['status'], 'asking and getting nothing is a completed sweep');
+    assert_equals(0, $result['priced']);
+    assert_equals(2, $result['unpriced'], 'the fixtures are counted as unpriced, not as priced-with-zero');
+    assert_equals(0, $result['stored'], 'and no placeholder price is written');
+    assert_equals(DataState::UNAVAILABLE, $service->sheet((int) $fixtures[0]['id'])['state']);
+});
+
+test('the day sweep never spends quota on a match that can no longer be bet', function () {
+    $date = gmdate('Y-m-d', time() + 86400);
+    [$service, $repo, , $fixtures] = fx_odds_day_harness(['/odds?' => fx_odds_wire()], $date, 3);
+    // A finished match belongs to settlement; buying its odds is wasted quota.
+    $repo->fixtures[0]['status'] = 'FINISHED';
+    $repo->fixtures[1]['status'] = 'POSTPONED';
+    $result = $service->refreshDay($date);
+    assert_equals(2, $result['skippedClosed'], 'closed fixtures are skipped before any request');
+    assert_equals(1, $result['considered'], 'only the open fixture was eligible');
+    assert_equals(1, $result['requests'], 'and only it was paid for');
+});
+
+test('the day sweep refuses honestly when nothing could price the board', function () {
+    $date = gmdate('Y-m-d', time() + 86400);
+    // No provider registered at all: the sweep must name that, not report a
+    // completed pass over zero fixtures.
+    $repo = new FootballRepositoryStub();
+    $configuration = new FootballConfiguration();
+    $gateway = new ProviderGateway(new SportsProviderManager(), $configuration);
+    $service = new OddsSheetService($repo, $gateway, $configuration, sys_get_temp_dir());
+    $service->bindSportsStore(new SportsRepositoryStub());
+    $result = $service->refreshDay($date);
+    assert_equals('SKIPPED', $result['status']);
+    assert_equals('FOOTBALL_PROVIDER_NOT_CONFIGURED', $result['reason']);
+    assert_equals(0, $result['requests'], 'and no request was attempted');
+
+    // A store-less runtime cannot persist a price, so it must not buy one.
+    $manager = new SportsProviderManager();
+    $manager->register(fx_odds_provider(['/odds?' => fx_odds_wire()]));
+    $unbound = new OddsSheetService($repo, new ProviderGateway($manager, $configuration), $configuration, sys_get_temp_dir());
+    $result = $unbound->refreshDay($date);
+    assert_equals('SKIPPED', $result['status']);
+    assert_equals('NO_ODDS_STORE', $result['reason']);
+});
+
+test('the odds job is a real scheduled job, and it is provider-gated like the other sweeps', function () {
+    // The scheduler has to know about the job, or it never runs unattended —
+    // which is exactly how the board stayed unpriced.
+    assert_in_array('odds', \AIWorkforce\Football\FootballCronService::JOBS,
+        'the cron service exposes an odds job');
+    assert_in_array('football-odds', \AIWorkforce\Football\RefreshPolicy::jobIds(),
+        'and the refresh policy schedules it');
+    $config = new FootballConfiguration();
+    assert_true($config->refreshInterval('odds') > 0, 'the odds bucket has its own cadence');
+    assert_true($config->requestBudget('odds') > 0, 'and its own request budget, so it can actually call the feed');
+});

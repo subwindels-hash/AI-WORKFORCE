@@ -147,6 +147,15 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         <input type="hidden" name="provider" value="<?= e((string) ($carry['provider'] ?? '')) ?>">
         <button class="btn small" type="submit" <?= empty($caps['sync']) ? 'title="Requires the sports.manage permission — click to see the access message"' : '' ?>>Generate this page (max 50)</button>
       </form>
+      <?php /* The day-scoped odds sweep. Prices every open fixture stored for
+               this date in one budgeted pass; quotes still inside the freshness
+               window are reused rather than re-bought. The same sweep runs
+               unattended on the `odds` cron job. */ ?>
+      <form method="post" action="/football/refresh-odds" onsubmit="return confirm('Request bookmaker odds for every open fixture stored on this date? This spends provider quota; prices that are still fresh are reused, not re-bought.')">
+        <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+        <input type="hidden" name="date" value="<?= e((string) ($date ?? gmdate('Y-m-d'))) ?>">
+        <button class="btn small" type="submit" <?= empty($caps['sync']) ? 'title="Requires the sports.manage permission — click to see the access message"' : '' ?>>Refresh odds for this date</button>
+      </form>
     </div>
     <div class="football-actionbar__group">
       <a class="btn small" href="#football-live-panel">Live match</a>
@@ -535,7 +544,9 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
                     <div><span class="football-summary-label">Overview market</span><b><?= e((string) ($primary['label'] ?? $marketBlock['label'] ?? 'Match Winner')) ?></b><span><?= e((string) ($primary['selectionLabel'] ?? ($hasPrediction ? 'No selection' : 'No quoted selection in this market'))) ?></span></div>
                     <?php if ($hasPrediction): ?>
                       <div><span class="football-summary-label">WINDELS probability</span><b class="mono"><?= $pct($primary['probability'] ?? null) ?></b><span><?= e((string) ($primary['source'] ?? '')) ?></span></div>
-                      <div><span class="football-summary-label">Bookmaker odds</span><b class="mono"><?= $odds($primary['odds'] ?? null) ?></b><span><?= is_numeric($primary['odds'] ?? null) ? 'verified provider price' : 'UNPRICED' ?></span></div>
+                      <div><span class="football-summary-label">Bookmaker odds</span><b class="mono"><?= $odds($primary['odds'] ?? null) ?></b><span><?= is_numeric($primary['odds'] ?? null)
+                        ? 'verified provider price'
+                        : ($pricedSelections > 0 ? 'UNPRICED in this market' : 'UNPRICED — no quote stored for this fixture yet') ?></span></div>
                       <div><span class="football-summary-label">Potential edge</span><b class="mono <?= (float) ($primaryValue['expectedValue'] ?? -1) >= 0 ? 'up' : 'down' ?>"><?= $signedPct($primaryValue['expectedValue'] ?? null) ?></b><span><?= e((string) ($primaryValue['valueLabel'] ?? 'No value verdict')) ?></span></div>
                       <div><span class="football-summary-label">Most likely winner</span><b><?= e((string) ($row['resultLabel'] ?? '—')) ?></b><span>most likely 1X2 outcome</span></div>
                       <div><span class="football-summary-label">Home / draw / away</span><b class="mono"><?= $pct($oneXtwo['home'] ?? null) ?> / <?= $pct($oneXtwo['draw'] ?? null) ?> / <?= $pct($oneXtwo['away'] ?? null) ?></b><span>stored 1X2 probabilities</span></div>
@@ -544,10 +555,30 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
                       <div><span class="football-summary-label">Alternative scorelines</span><b class="mono"><?= e($alternativeLabels === [] ? '—' : implode(' · ', array_slice($alternativeLabels, 0, 3))) ?></b><span>next most likely scores</span></div>
                       <div><span class="football-summary-label">Confidence</span><b class="mono"><?= $dash($row['confidence'] ?? null) ?>%</b><span><?= e((string) ($row['band'] ?? '')) ?></span></div>
                     <?php else: ?>
-                      <div><span class="football-summary-label">Bookmaker odds</span><b class="mono"><?= $odds($primary['odds'] ?? null) ?></b><span><?= is_numeric($primary['odds'] ?? null) ? 'verified provider price' : 'No quote in the overview market' ?></span></div>
+                      <?php /* Why a cell is empty is itself information. "No quote"
+                               when the feed was never asked for this fixture is a
+                               different fact from "no quote" when it was asked and
+                               the bookmakers had not priced the market, so each
+                               cell names the state it is actually in. */ ?>
+                      <div><span class="football-summary-label">Bookmaker odds</span><b class="mono"><?= $odds($primary['odds'] ?? null) ?></b><span><?= is_numeric($primary['odds'] ?? null)
+                        ? 'verified provider price'
+                        : ($pricedSelections > 0
+                            ? 'This market is unpriced; ' . $pricedSelections . ' quote' . ($pricedSelections === 1 ? '' : 's') . ' exist in other markets'
+                            : 'No bookmaker quote is stored for this fixture yet') ?></span></div>
                       <div><span class="football-summary-label">Implied probability</span><b class="mono"><?= $pct($primary['impliedProbability'] ?? null) ?></b><span><?= is_numeric($primary['impliedProbability'] ?? null) ? 'from the quoted decimal odds' : 'Requires a bookmaker quote' ?></span></div>
-                      <div><span class="football-summary-label">Available odds</span><b class="mono"><?= $pricedSelections ?></b><span>quote<?= $pricedSelections === 1 ? '' : 's' ?> across <?= $pricedMarkets ?> market<?= $pricedMarkets === 1 ? '' : 's' ?></span></div>
-                      <div><span class="football-summary-label">Model comparison</span><b>Not scored</b><span>No WINDELS probability, category, edge or risk is invented.</span></div>
+                      <div><span class="football-summary-label">Available odds</span><b class="mono"><?= $pricedSelections ?></b><span><?= $pricedSelections > 0
+                        ? 'quote' . ($pricedSelections === 1 ? '' : 's') . ' across ' . $pricedMarkets . ' market' . ($pricedMarkets === 1 ? '' : 's')
+                        : 'No price has been stored for this fixture. Prices arrive with the scheduled odds sweep, or from Refresh odds for this date.' ?></span></div>
+                      <?php /* A quoted price is NOT a model pick. When prices exist but
+                               no prediction was published, the cell must say which of the
+                               two states it is in — assessed-and-withheld, or not yet
+                               analyzed — instead of letting the provider's price stand in
+                               for a WINDELS opinion. */ ?>
+                      <div><span class="football-summary-label">Model comparison</span><b>Not scored</b><span><?= $assessmentState === 'PREDICTION_WITHHELD'
+                        ? 'Assessed, but below the publishing floor. The prices above are the bookmakers\' — not a WINDELS pick.'
+                        : ($pricedSelections > 0
+                            ? 'Prices are stored, but the fixture is not analyzed, so no WINDELS probability, edge or risk is invented.'
+                            : 'No WINDELS probability, category, edge or risk is invented.') ?></span></div>
                     <?php endif; ?>
                   </div>
                   <details class="football-odds-disclosure">
@@ -557,7 +588,7 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
                     </summary>
                     <div class="football-odds-sheet">
                       <?php if ($marketSheet === []): ?>
-                        <p class="football-help">Analyze this fixture to build its market sheet. No probability or price is invented before a stored prediction exists.</p>
+                        <p class="football-help">No market sheet exists for this fixture yet: it has neither a stored prediction to model from nor a stored bookmaker quote to show. Analyze the fixture to build its modelled markets, and let the scheduled odds sweep (or <b>Refresh odds for this date</b>) fetch its prices. No probability or price is invented in the meantime.</p>
                       <?php elseif ($pricedSelections === 0): ?>
                         <div class="football-odds-status"><span class="badge b-amber">BOOKMAKER ODDS UNAVAILABLE</span><p>The model-derived probabilities and WINDELS fair odds remain available below. No provider price is substituted for the missing quotes.</p></div>
                       <?php endif; ?>

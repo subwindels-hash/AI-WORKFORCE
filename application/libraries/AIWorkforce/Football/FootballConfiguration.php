@@ -90,6 +90,11 @@ final class FootballConfiguration
             'live' => 90,               // live scores: bounded by provider limits, not by a fixed 5-minute loop
             'results' => 15 * 60,      // finished matches: check for a final score, settle once
             'statistics' => 12 * 3600,  // team/league statistics and head-to-head
+            // Bookmaker prices for the fixtures already on the board. Quoted
+            // prices move continuously, so this is the fastest of the
+            // non-live buckets — but it is still a bucket, not a per-page
+            // fetch: reading the console never spends a request.
+            'odds' => 900,
             'predict' => 1800,          // (re)build today's board for not-yet-kicked-off fixtures
             'settle' => 900,            // settlement sweep
             'performance' => 3600,      // performance snapshot
@@ -118,6 +123,9 @@ final class FootballConfiguration
     {
         $defaults = [
             'fixtures' => 4, 'upcoming' => 8, 'live' => 6, 'results' => 12, 'statistics' => 20,
+            // The odds sweep costs one request per fixture it prices, so its
+            // budget is what bounds a busy day rather than the fixture count.
+            'odds' => 25,
             'predict' => 0, 'settle' => 0, 'performance' => 0, 'cleanup' => 0,
         ];
         return max(-1, (int) $this->num('WINDELS_FOOTBALL_BUDGET_' . strtoupper($job), $defaults[$job] ?? 10));
@@ -630,6 +638,7 @@ final class FootballConfiguration
                 'live' => $this->refreshInterval('live'),
                 'results' => $this->refreshInterval('results'),
                 'statistics' => $this->refreshInterval('statistics'),
+                'odds' => $this->refreshInterval('odds'),
                 'predict' => $this->refreshInterval('predict'),
                 'settle' => $this->refreshInterval('settle'),
                 'performance' => $this->refreshInterval('performance'),
@@ -643,6 +652,7 @@ final class FootballConfiguration
                 'live' => $this->requestBudget('live'),
                 'results' => $this->requestBudget('results'),
                 'statistics' => $this->requestBudget('statistics'),
+                'odds' => $this->requestBudget('odds'),
                 'predict' => $this->requestBudget('predict'),
                 'settle' => $this->requestBudget('settle'),
                 'performance' => $this->requestBudget('performance'),

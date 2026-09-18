@@ -23,8 +23,8 @@ use AIWorkforce\Persistence\FootballRepository;
  */
 final class FootballCronService
 {
-    public const JOBS = ['fixtures', 'upcoming', 'live', 'results', 'statistics', 'predict', 'settle', 'performance', 'cleanup'];
-    private const PROVIDER_JOBS = ['fixtures', 'upcoming', 'live', 'results', 'statistics'];
+    public const JOBS = ['fixtures', 'upcoming', 'live', 'results', 'statistics', 'odds', 'predict', 'settle', 'performance', 'cleanup'];
+    private const PROVIDER_JOBS = ['fixtures', 'upcoming', 'live', 'results', 'statistics', 'odds'];
 
     public function __construct(
         private FootballIntelligence $football,
@@ -105,6 +105,12 @@ final class FootballCronService
             'statistics' => $this->track('STATISTICS', fn() => $this->football->collectStatisticsForDay(
                 $date, $this->football->config()->analysisBatchSize()
             ), $suffix),
+            // Bookmaker prices for the fixtures already stored for today and
+            // tomorrow. Without this job nothing ever priced the board: the
+            // fixtures sweep stores matches, the predict job models them, and
+            // every quote stayed missing because only an operator opening a
+            // single match page ever asked the odds endpoint for a price.
+            'odds' => $this->track('ODDS', fn() => $this->jobOdds($date), $suffix),
             'predict' => $this->track('PREDICT', fn() => $this->jobPredict($date), $suffix),
             'settle' => $this->track('SETTLE', fn() => $this->football->settlements()->settleDue(200, 0, 'settle' . $suffix), $suffix),
             'performance' => $this->track('PERFORMANCE', fn() => $this->jobPerformance(), $suffix),
@@ -176,6 +182,48 @@ final class FootballCronService
             'created' => 0, 'updated' => (int) ($sync['updated'] ?? $sync['processed'] ?? 0),
             'expiredLive' => (int) ($sync['expiredLive'] ?? 0), 'liveMatches' => count($board['matches']),
             'fixtureStatistics' => $statistics, 'requests' => (int) ($sync['requests'] ?? 0), 'errors' => $errors];
+    }
+
+    /**
+     * Price today's board, then spend whatever request budget is left on
+     * tomorrow's.
+     *
+     * Today comes first deliberately: a match kicking off in two hours is the
+     * one whose price a reader is about to act on, and on a quota-bound plan
+     * the day that runs out of budget must be the far one, not the near one.
+     */
+    private function jobOdds(string $date): array
+    {
+        $sheet = $this->football->oddsSheet();
+        $today = $sheet->refreshDay($date);
+        // A skipped sweep (no store, no provider, no odds capability) is a
+        // standing condition, not something tomorrow would answer differently.
+        if ((string) ($today['status'] ?? '') === 'SKIPPED') {
+            return $today + ['scope' => $date, 'tomorrow' => null];
+        }
+        $tomorrowDate = gmdate('Y-m-d', strtotime($date . ' +1 day'));
+        $tomorrow = $this->football->config()->requestBudget('odds') !== 0 && (int) ($today['deferred'] ?? 0) === 0
+            ? $sheet->refreshDay($tomorrowDate)
+            : null;
+        $sum = static fn(string $key): int => (int) ($today[$key] ?? 0) + (int) ($tomorrow[$key] ?? 0);
+        $errors = array_merge((array) ($today['errors'] ?? []), (array) ($tomorrow['errors'] ?? []));
+        return [
+            'status' => (string) ($today['status'] ?? 'COMPLETED'),
+            'scope' => $tomorrow === null ? $date : $date . ' + ' . $tomorrowDate,
+            'processed' => $sum('priced') + $sum('unpriced'),
+            'created' => $sum('stored'),
+            'updated' => 0,
+            'priced' => $sum('priced'),
+            'unpriced' => $sum('unpriced'),
+            'stored' => $sum('stored'),
+            'invalid' => $sum('invalid'),
+            'freshReused' => $sum('freshReused'),
+            'deferred' => $sum('deferred'),
+            'requests' => $sum('requests'),
+            'errors' => $errors,
+            'today' => $today,
+            'tomorrow' => $tomorrow,
+        ];
     }
 
     /**
