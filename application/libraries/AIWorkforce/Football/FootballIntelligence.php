@@ -331,6 +331,9 @@ final class FootballIntelligence
         $model = $usable['model'];
         $modelVersionId = (int) ($model['id'] ?? 0);
         $calibrations = $modelVersionId > 0 ? $this->calibration()->versions($modelVersionId) : [];
+        $calibrationAvailability = $modelVersionId > 0
+            ? $this->calibration()->availability($modelVersionId)
+            : ['settled' => 0, 'usable' => 0, 'missingProbabilities' => 0, 'minimum' => $this->config->minCalibrationSamples(), 'sources' => []];
         $active = null;
         foreach ($calibrations as $row) {
             if ((string) $row['status'] === CalibrationService::CALIBRATED) { $active = $row; break; }
@@ -365,7 +368,9 @@ final class FootballIntelligence
                 'calibrationVersion' => $active['calibrationVersion'] ?? null,
                 'calibrationStatus' => $active['status'] ?? CalibrationService::PENDING,
             ],
-            'calibration' => $active ?? ['status' => CalibrationService::PENDING, 'samples' => 0, 'calibrationVersion' => null],
+            'calibration' => $active ?? ['status' => CalibrationService::PENDING, 'samples' => $calibrationAvailability['usable'],
+                'settledSamples' => $calibrationAvailability['settled'], 'minimum' => $calibrationAvailability['minimum'], 'calibrationVersion' => null],
+            'calibrationAvailability' => $calibrationAvailability,
             'calibrationVersions' => $calibrations,
             'approvedCalibrationCount' => $this->calibration()->approvedCount(),
             'versions' => array_map(fn(array $row) => [

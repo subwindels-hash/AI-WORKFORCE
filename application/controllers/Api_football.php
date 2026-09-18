@@ -513,6 +513,11 @@ class Api_football extends Api_controller
         if (!$this->requirePermission('sports.view', false)) return;
         $refresh = !empty($this->input->get('refresh'));
         $board = $this->football()->live()->board($refresh, !$refresh);
+        // This endpoint is polled by an open browser panel. Do not let a reverse
+        // proxy, CDN or browser cache replay the previous score after the live
+        // provider sweep has written a newer stored row.
+        $this->output->set_header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        $this->output->set_header('Pragma: no-cache');
         $this->json($board);
     }
 
@@ -711,6 +716,9 @@ class Api_football extends Api_controller
             $modelVersionId = (int) ($this->football()->models()->usable()['model']['id'] ?? 0);
         }
         $versions = $modelVersionId > 0 ? $this->football()->calibration()->versions($modelVersionId) : [];
+        $availability = $modelVersionId > 0
+            ? $this->football()->calibration()->availability($modelVersionId)
+            : ['settled' => 0, 'usable' => 0, 'missingProbabilities' => 0, 'minimum' => $this->football()->config()->minCalibrationSamples(), 'sources' => []];
         $usable = null;
         foreach ($versions as $row) {
             if ((string) $row['status'] === \AIWorkforce\Football\CalibrationService::CALIBRATED) { $usable = $row; break; }
@@ -722,11 +730,14 @@ class Api_football extends Api_controller
                 : \AIWorkforce\Football\CalibrationService::CALIBRATED,
             'active' => $usable,
             'approvedCount' => $this->football()->calibration()->approvedCount(),
-            'minimumSamples' => $this->football()->config()->minCalibrationSamples(),
-            'samplesAvailable' => $versions[0]['samples'] ?? 0,
+            'minimumSamples' => $availability['minimum'],
+            'samplesAvailable' => $availability['usable'],
+            'settledSamples' => $availability['settled'],
+            'missingProbabilitySamples' => $availability['missingProbabilities'],
+            'sampleSources' => $availability['sources'],
             'versions' => $versions,
             'message' => $usable === null
-                ? 'Calibration is pending: it is fitted only once enough settled predictions with stored probabilities exist. Predictions made before that are labelled uncalibrated.'
+                ? 'Calibration is pending: ' . $availability['usable'] . ' of ' . $availability['minimum'] . ' required settled predictions have recoverable raw probabilities. Predictions made before that are labelled uncalibrated.'
                 : null,
             'request' => ['modelVersionId' => $modelVersionId, 'notes' => array_values($notes)],
             'generatedAt' => gmdate('c'),

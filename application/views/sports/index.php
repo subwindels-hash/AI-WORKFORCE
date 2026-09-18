@@ -1041,7 +1041,10 @@ $kickoffStamp = static function (mixed $iso): string {
 
   function poll(){
     if(paused || document.hidden){ schedule(); return; }
-    fetch('/api/sports/live?since=' + encodeURIComponent(since), {credentials: 'same-origin'})
+    // Cache-bust as a second defence for shared hosts that ignore Fetch's
+    // default cache policy and response headers. The API still self-throttles
+    // provider calls; this only ensures the browser reads the newest board.
+    fetch('/api/sports/live?since=' + encodeURIComponent(since) + '&poll=' + encodeURIComponent(Date.now()), {credentials: 'same-origin', cache: 'no-store', headers: {'Accept': 'application/json', 'Cache-Control': 'no-cache'}})
       .then(function(res){ if(!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
       .then(function(data){
         if(data.refreshIntervalSeconds) intervalSec = data.refreshIntervalSeconds;
