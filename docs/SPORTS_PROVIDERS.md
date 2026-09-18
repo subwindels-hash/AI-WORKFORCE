@@ -284,8 +284,13 @@ page reload, no manual "Sync now". The chain is:
    date and time in its own **Kickoff (UTC)** column (`YYYY-MM-DD HH:MM`,
    rendered from the stored kickoff on both the server side and by the poll
    handler); a match the provider gave no kickoff for shows `—`, never a
-   guessed time. The football console's live cards carry the same stamp
-   (`Sun 6 Sep 2026 · 14:00 UTC`, or `DATA_UNAVAILABLE`).
+   guessed time. The **Minute** column prints the provider's minute plus any
+   stated stoppage time (`90+4'`). The repaint is placement-safe: the poll
+   handler updates the server-rendered cells in place, one writer per column,
+   and refuses to paint at all if the served `<thead>` does not match its
+   column list — so an auto-refresh can change a cell's text but can never
+   move a value into a neighbouring column. The football console's live cards
+   carry the same stamp (`Sun 6 Sep 2026 · 14:00 UTC`, or `DATA_UNAVAILABLE`).
 
 ### Quota-safe by construction
 

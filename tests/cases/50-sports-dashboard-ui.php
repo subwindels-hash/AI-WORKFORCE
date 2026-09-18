@@ -383,13 +383,70 @@ test('sports UI: the live scores board shows the match date and time', function 
     assert_equals(2, count($dash['todayIntelligence']['live']), 'both live rows reach the board');
     $html = fx_render_sports('index', ['dashboard' => $dash]);
     assert_contains('Kickoff (UTC)</th>', $html, 'the live board has a match date and time column');
-    assert_contains('<td class="mono dim live-kickoff-cell">' . gmdate('Y-m-d H:i', (int) strtotime($kickoff)) . '</td>', $html,
+    assert_contains('<td class="mono dim live-kickoff-cell live-cell-kickoff">' . gmdate('Y-m-d H:i', (int) strtotime($kickoff)) . '</td>', $html,
         'the live row prints its stored kickoff as date and time');
-    assert_contains('<td class="mono dim live-kickoff-cell">—</td>', $html,
+    assert_contains('<td class="mono dim live-kickoff-cell live-cell-kickoff">—</td>', $html,
         'a match with no stored kickoff prints — instead of a time');
     assert_contains('NoKickoffHome vs NoKickoffAway', $html);
     assert_true(!str_contains($html, 'Undefined array key'), 'no PHP warnings');
     assert_true(!str_contains($html, '1970-01-01'), 'a missing kickoff is never rendered as the epoch');
+});
+
+test('sports UI: the live board repaint is placement-safe — a poll can never shift data sideways', function () {
+    $repo = new SportsRepositoryStub();
+    $repo->ensureProvider('ui-test', 'UI Test');
+    // One in-play match in stoppage time with a complete stored state: every
+    // column gets a known value, so the assertions below can demand each value
+    // inside its own labelled cell.
+    $kickoff = gmdate("Y-m-d\TH:i:00+00:00", strtotime('today 14:30:00'));
+    $repo->matches[] = ['id' => 9110, 'provider_id' => 1, 'external_id' => 'ui-live-3', 'sport' => 'football',
+        'competition' => 'UI League', 'home_team' => 'StoppageHome', 'away_team' => 'StoppageAway', 'kickoff_at' => $kickoff,
+        'status' => 'LIVE', 'source_timestamp' => gmdate('c'), 'updated_at' => gmdate('c'),
+        'payload' => ['live' => ['minute' => 90, 'extraMinute' => 4, 'homeScore' => 2, 'awayScore' => 1, 'statusShort' => '2H']]];
+    $dash = (new SportsIntelligence($repo, fx_ui_audit()))->dashboard();
+    $html = fx_render_sports('index', ['dashboard' => $dash]);
+
+    // The stoppage-time minute is real stored provider data — printed in full,
+    // never truncated to a bare 90'.
+    assert_contains('<td class="mono dim live-cell-minute">90+4\'</td>', $html,
+        'the Minute cell prints the provider minute plus stated stoppage');
+
+    // The server-rendered row must mirror the poll handler's column contract
+    // exactly: one live-cell-* class per <td>, in the same order the <thead>
+    // declares its columns, so the poll updates cells in place instead of
+    // rebuilding rows that could drift under a different column set.
+    $liveTable = substr($html, (int) strpos($html, 'id="live-scores-table"'));
+    $liveTable = substr($liveTable, 0, (int) strpos($liveTable, '</table>'));
+    $thead = substr($liveTable, (int) strpos($liveTable, '<thead>'), (int) strpos($liveTable, '</thead>') - (int) strpos($liveTable, '<thead>'));
+    assert_equals(6, substr_count($thead, '<th'), 'the live board header declares exactly six columns');
+    $row = substr($liveTable, (int) strpos($liveTable, '<tr data-match-id'));
+    $row = substr($row, 0, (int) strpos($row, '</tr>'));
+    assert_equals(6, substr_count($row, '<td'), 'each server-rendered live row has exactly one cell per header column');
+    $expectedCellClasses = [
+        'live-cell-minute', 'live-cell-kickoff', 'live-cell-match',
+        'live-cell-competition', 'live-cell-score', 'live-cell-updated',
+    ];
+    $cursor = 0;
+    foreach ($expectedCellClasses as $i => $cellClass) {
+        $pos = strpos($row, $cellClass, $cursor);
+        assert_true($pos !== false, "live row cell {$i} carries its {$cellClass} class");
+        $cursor = $pos + strlen($cellClass);
+    }
+
+    // The poll handler must define one writer per column and refuse to paint
+    // when the served header does not match that contract — a mismatched paint
+    // is exactly how values end up under the wrong headings.
+    $js = substr($html, (int) strpos($html, 'id="live-scores-js"'));
+    $js = substr($js, 0, (int) strpos($js, '</script>'));
+    assert_equals(6, substr_count($js, "cls: '"), 'the poll handler defines exactly one writer per column');
+    foreach ($expectedCellClasses as $cellClass) {
+        assert_true(strpos($js, $cellClass) !== false, "the poll handler knows the {$cellClass} column");
+    }
+    assert_true(strpos($js, 'LIVE_CELLS.length') !== false, 'the poll handler renders through the shared column list');
+    assert_true(strpos($js, "headers.length !== LIVE_CELLS.length") !== false,
+        'the poll handler guards against a header/column mismatch before painting');
+    assert_true(strpos($js, 'updateRow') !== false && strpos($js, 'tds[i].innerHTML') !== false,
+        'existing rows are updated in place, cell by cell, not rebuilt');
 });
 
 test('sports UI: NO QUALIFIED TICKET panel names every funnel stage, the blocking field and the provider', function () {
