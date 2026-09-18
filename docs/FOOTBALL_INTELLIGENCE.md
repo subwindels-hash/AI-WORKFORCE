@@ -807,7 +807,10 @@ GET /api/football/fixtures/live
 GET /api/football/matches                 ?date=&page=1&limit=50&competition=&market=&line=   the paginated feed (50 per page)
 GET /api/football/competitions          ?date=&providerId=   competitions stored for the date, premium marked
 GET /api/football/markets               ?date=   the odds-prediction markets and which can be answered
-GET /api/football/picks                 ?date=&page=1&limit=50&competition=&market=&line=   "Top WINDELS Picks": the page ranked by evidence, with every exclusion's reason
+GET /api/football/picks                 ?date=&page=1&limit=50&competition=&market=&line=&generate=   "Top WINDELS Picks": the page ranked by evidence, with every exclusion's reason
+                                        (read-only by default; generate=1 needs sports.manage and analyzes the page's missing
+                                         predictions first. `generated` and `pageOutcome` report which of the two you got, so
+                                         "eligible 0" on an unanalyzed page is distinguishable from "eligible 0" after refusal.)
 GET /api/football/intelligence/:id      ?market=&line=&generate=   one fixture's whole intelligence block — score, quality checklist, drivers, fair value, stability, three clocks
 GET /api/football/matches/:id            fixture + statistics + H2H as stored
 GET /api/football/matches/:id/analysis

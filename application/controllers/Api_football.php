@@ -291,8 +291,15 @@ class Api_football extends Api_controller
         $options = $this->feedOptions($g, $notes);
         $limit = \AIWorkforce\Football\RequestParams::int($g, 'limit', \AIWorkforce\Football\MatchFeed::DEFAULT_PAGE_SIZE,
             1, \AIWorkforce\Football\MatchFeed::MAX_PAGE_SIZE, $notes);
-        $payload = $this->football()->picks($date, $page, $limit, $options);
-        $payload['request'] = ['date' => $date, 'page' => $page, 'options' => $options, 'notes' => array_values($notes)];
+        // Read-only by default. `generate=1` is the documented exception and
+        // carries the same rule as `/intelligence`: writing prediction rows is
+        // a managed action even on a read endpoint. Without it this endpoint
+        // could only ever rank what something else had already generated.
+        $generate = in_array(strtolower((string) ($g['generate'] ?? '')), ['1', 'true', 'yes'], true);
+        if ($generate && !$this->requirePermission('sports.manage', false)) return;
+        $payload = $this->football()->picks($date, $page, $limit, $options, $generate);
+        $payload['request'] = ['date' => $date, 'page' => $page, 'options' => $options,
+            'generate' => $generate, 'notes' => array_values($notes)];
         $this->json($payload);
     }
 

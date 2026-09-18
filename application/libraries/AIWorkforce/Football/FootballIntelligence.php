@@ -486,10 +486,22 @@ final class FootballIntelligence
     /**
      * The ranked "Top WINDELS Picks" reading of one page of a date, built by the
      * same pass that fills the board.
+     *
+     * Read-only by default, like every other read path. `$generate` is the
+     * documented exception and follows the same rule as
+     * `intelligenceFor(..., $generate)`: writing prediction rows is a managed
+     * action even when it rides on a read endpoint, so the caller checks
+     * `sports.manage` before passing it. Without it this method used to count
+     * matches it had no way to analyze — reporting "considered 6 / eligible 0"
+     * while being structurally unable to generate the six readings it had just
+     * counted. The caller now chooses: report what is stored, or generate the
+     * page's missing predictions (bounded by the configured batch) and rank
+     * what that produced.
      */
-    public function picks(string $date, int $page = 1, int $limit = MatchFeed::MAX_PAGE_SIZE, array $options = []): array
+    public function picks(string $date, int $page = 1, int $limit = MatchFeed::MAX_PAGE_SIZE, array $options = [],
+        bool $generate = false): array
     {
-        $board = $this->board()->forDate($date, false, $page, $limit, $options);
+        $board = $this->board()->forDate($date, $generate, $page, $limit, $options);
         return [
             'date' => (string) ($board['date'] ?? $date),
             'page' => (int) ($board['pagination']['page'] ?? $page),
@@ -501,6 +513,13 @@ final class FootballIntelligence
             'beyondList' => (int) ($board['picks']['beyondList'] ?? 0),
             'excluded' => (array) ($board['picks']['excluded'] ?? []),
             'state' => (string) ($board['picks']['state'] ?? DataState::UNAVAILABLE),
+            // Whether this call generated anything, and what the page's
+            // fixtures actually resolved to. A consumer reading "eligible 0"
+            // can now tell a page nobody has analyzed (`generate=false`, every
+            // slot notAttempted) from one the engine analyzed and refused
+            // (withheld), instead of having to guess which of the two it got.
+            'generated' => $generate,
+            'pageOutcome' => (array) ($board['page'] ?? []),
             'disclaimer' => IntelligenceReport::PICKS_DISCLAIMER,
             'summary' => (array) ($board['intelligence'] ?? []),
             'generatedAt' => gmdate('c'),

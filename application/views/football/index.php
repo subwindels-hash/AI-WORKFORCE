@@ -338,7 +338,7 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
               <h3 id="top-picks-heading">Top WINDELS Picks</h3>
             </div>
           </div>
-          <span class="football-section__meta" title="<?= e((string) ($picksRule['eligibility'] ?? 'Eligible matches on this page: analyzed, QUALIFIED or LIMITED data quality, an actual selection in the selected market, not withheld, not unstable.')) ?>"><?= $picksEligible ?> eligible on this page<?= $picksEligible > 0 ? ' · all ' . count($picksAll) . ' listed' : '' ?><?= $picksBeyond > 0 ? ' · top ' . $picksLimit . ' marked' : '' ?></span>
+          <span class="football-section__meta" title="<?= e((string) ($picksRule['eligibility'] ?? 'Eligible matches on this page: still to be played, analyzed, QUALIFIED or LIMITED data quality, a selection in the selected market backed by a generated WINDELS probability, not withheld, not unstable.')) ?>"><?= $picksEligible ?> eligible on this page<?= $picksEligible > 0 ? ' · all ' . count($picksAll) . ' listed' : '' ?><?= $picksBeyond > 0 ? ' · top ' . $picksLimit . ' marked' : '' ?></span>
         </div>
         <div class="body">
           <p class="football-section-intro">The strongest comparisons drawn from the fixtures in section 3, ordered by intelligence score. Each row keeps the model probability and the bookmaker price in their own columns so the two readings are never confused. Every pick is the selected market's answer<?= $picksMarketLabel !== '' ? ' — <b>' . e($picksMarketLabel) . '</b>' : '' ?> — ranked evidence band first, then intelligence score, then the edge against the quoted price, then model confidence.</p>
@@ -395,7 +395,10 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
               </ul>
             </details>
           <?php endif; ?>
-          <p class="football-help"><?= $picksConsidered ?> match<?= $picksConsidered === 1 ? ' was' : 'es were' ?> considered on this page · <?= $picksEligible ?> eligible · all <?= count($picksAll) ?> listed<?= $picksLimit > 0 ? ' (top ' . $picksLimit . ' marked' . ($picksBeyond > 0 ? ', +' . $picksBeyond . ' ranked below it' : '') . ')' : '' ?>. <?= e((string) ($picksRule['ranking'] ?? 'Ranked by evidence band, then intelligence score, then edge against the quoted price, then model confidence.')) ?></p>
+          <?php /* With nothing eligible there is no list to describe, so the
+                   "all 0 listed (top 5 marked)" tail is dropped rather than
+                   printed as a marking of an empty table. */ ?>
+          <p class="football-help"><?= $picksConsidered ?> match<?= $picksConsidered === 1 ? ' was' : 'es were' ?> considered on this page · <?= $picksEligible ?> eligible<?= $picksAll === [] ? '' : ' · all ' . count($picksAll) . ' listed' . ($picksLimit > 0 ? ' (top ' . $picksLimit . ' marked' . ($picksBeyond > 0 ? ', +' . $picksBeyond . ' ranked below it' : '') . ')' : '') ?>. <?= e((string) ($picksRule['ranking'] ?? 'Ranked by evidence band, then intelligence score, then edge against the quoted price, then model confidence.')) ?></p>
           <p class="football-help"><?= e((string) ($picksBlock['disclaimer'] ?? 'Rankings are analytical comparisons, not a promise of a result.')) ?></p>
         </div>
       </section>
