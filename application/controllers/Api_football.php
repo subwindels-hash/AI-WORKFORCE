@@ -513,6 +513,11 @@ class Api_football extends Api_controller
         if (!$this->requirePermission('sports.view', false)) return;
         $refresh = !empty($this->input->get('refresh'));
         $board = $this->football()->live()->board($refresh, !$refresh);
+        // This endpoint is polled by an open browser panel. Do not let a reverse
+        // proxy, CDN or browser cache replay the previous score after the live
+        // provider sweep has written a newer stored row.
+        $this->output->set_header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        $this->output->set_header('Pragma: no-cache');
         $this->json($board);
     }
 

@@ -836,7 +836,11 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
     if(document.hidden){ schedule(pollEveryMs); return; }
     if(inFlight) return;
     inFlight = true;
-    fetch('/api/football/fixtures/live', {credentials: 'same-origin', cache: 'no-store', headers: {'Accept': 'application/json'}})
+    // Add a cache key as a second line of defence for shared hosts whose proxy
+    // ignores Fetch's cache mode or the response headers. The endpoint still
+    // performs the provider-aware cadence gate; this only guarantees that the
+    // browser asks for the current stored board.
+    fetch('/api/football/fixtures/live' + '?poll=' + encodeURIComponent(Date.now()), {credentials: 'same-origin', cache: 'no-store', headers: {'Accept': 'application/json', 'Cache-Control': 'no-cache'}})
       .then(function(response){
         if(!response.ok) throw new Error('HTTP ' + response.status);
         return response.json();
