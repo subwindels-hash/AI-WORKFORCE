@@ -90,6 +90,65 @@ test('football: the premium league is the configured featured competition', func
     assert_equals('MOST_MATCHES_ON_DATE', (string) $fallbackPremium['source'], 'an absent premium league falls back, and says so');
 });
 
+test('football: the default premium classification covers every premium league, and only them', function () {
+    // Unconfigured, "premium" is the whole group the module has always named —
+    // the Premier League, the Champions League, La Liga, Serie A, the
+    // Bundesliga and Ligue 1 — not only the featured flagship league. So all
+    // of them are offered in the Premium League selector by default.
+    $config = new FootballConfiguration([]);
+    foreach (['Premier League', 'English Premier League', 'UEFA Champions League', 'Champions League',
+        'La Liga', 'Spanish La Liga', 'Serie A', 'Italian Serie A', 'Bundesliga', 'German Bundesliga',
+        'Ligue 1', 'French Ligue 1'] as $league) {
+        assert_true($config->isPremiumCompetition($league), $league . ' is premium by default');
+    }
+    foreach (['Saudi Pro League', 'Eredivisie', 'Championship', 'Ligue 2'] as $league) {
+        assert_false($config->isPremiumCompetition($league), $league . ' is not premium unless the deployment classifies it');
+    }
+    // The featured league leads the default list, exactly once.
+    assert_equals('English Premier League', $config->defaultPremiumCompetitions()[0], 'the featured league leads the default group');
+    assert_equals(count($config->defaultPremiumCompetitions()), count(array_unique($config->defaultPremiumCompetitions())), 'no league is listed twice');
+    // A configured list still narrows the classification to exactly what was named.
+    $narrow = new FootballConfiguration(['WINDELS_FOOTBALL_PREMIUM_COMPETITIONS' => 'Premier League']);
+    assert_equals(['Premier League'], $narrow->premiumCompetitions(), 'a configured list is honoured verbatim');
+    assert_false($narrow->isPremiumCompetition('La Liga'), 'so La Liga is premium only when it was classified');
+});
+
+test('football: the Premium League selector offers every premium league stored on the date', function () {
+    // One match in each of the six default premium leagues, plus one in a
+    // league no deployment classified: the dropdown data must offer all six
+    // and never the seventh.
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    $base = (int) strtotime($day . 'T00:30:00+00:00');
+    $leagues = [
+        ['39', 'Premier League', 'England'], ['2', 'UEFA Champions League', 'Europe'], ['140', 'La Liga', 'Spain'],
+        ['135', 'Serie A', 'Italy'], ['78', 'Bundesliga', 'Germany'], ['61', 'Ligue 1', 'France'],
+    ];
+    $rows = [];
+    foreach ($leagues as $index => [$leagueId, $name, $country]) {
+        $rows[] = fx_fb_row('fx-prem-' . $index, gmdate('c', $base + $index * 60), 'Home ' . $index, 'Away ' . $index,
+            '10', '20', 'SCHEDULED', null, null, null, ['leagueId' => $leagueId, 'competition' => $name, 'country' => $country]);
+    }
+    $rows[] = fx_fb_row('fx-prem-unclassified', gmdate('c', $base + 400), 'Al Hilal', 'Al Nassr', '50', '60',
+        'SCHEDULED', null, null, null, ['leagueId' => '307', 'competition' => 'Saudi Pro League', 'country' => 'Saudi Arabia']);
+    [, , $module] = fx_fb_harness($rows);
+    fx_fb_sync_today($module, $day);
+
+    $listing = $module->feed()->competitions($day);
+    $premiumNames = array_column((array) $listing['premiumCompetitions'], 'name');
+    sort($premiumNames);
+    assert_equals(['Bundesliga', 'La Liga', 'Ligue 1', 'Premier League', 'Serie A', 'UEFA Champions League'],
+        $premiumNames, 'every premium league stored for the date is offered, not only the featured one');
+    assert_false(in_array('Saudi Pro League', $premiumNames, true), 'a league that was not classified premium is not offered as premium');
+
+    // The All premium leagues scope pages the group together and keeps the
+    // unclassified league outside it.
+    $page = $module->feed()->page($day, 1, 50, false, ['competition' => MatchFeed::PREMIUM_LEAGUES]);
+    assert_equals(6, (int) $page['pagination']['totalMatches'], 'the six premium-league matches, and not the seventh');
+    foreach ($page['matches'] as $match) {
+        assert_not_equals('Saudi Pro League', (string) $match['competition'], 'the unclassified league stays outside the premium scope');
+    }
+});
+
 test('football: selecting a competition narrows the page and the totals to that league', function () {
     [, $module, $day] = fx_fb_two_leagues(60, 30);
     $feed = $module->feed();
@@ -466,6 +525,7 @@ test('football: the competition and market endpoints are routed and permission-g
     $view = (string) file_get_contents(dirname(TESTSPATH) . '/application/views/football/index.php');
     assert_contains('name="competition"', $view, 'the competition dropdown');
     assert_contains('name="premium"', $view, 'the premium league dropdown');
+    assert_contains('>All premium leagues</option>', $view, 'the premium league dropdown also offers the all-premium scope');
     assert_contains('name="market"', $view, 'the odds prediction dropdown');
     assert_contains('Generate this page', $view, 'and one page-scoped generation action');
     assert_contains("name=\"competition\" value=", $view, 'generation carries the selection, so it stays in the chosen league');
@@ -490,22 +550,25 @@ test('football: the Premium League all-value narrows to every premium league on 
     [$repo, $module, $day] = fx_fb_two_leagues(60, 30);
     $feed = $module->feed();
 
+    // The default premium classification covers the whole premium group, so
+    // both stored leagues here — the Premier League and La Liga — are premium,
+    // and the all-value pages them together.
     $page = $feed->page($day, 1, 50, false, ['competition' => MatchFeed::PREMIUM_LEAGUES]);
-    assert_equals(60, (int) $page['pagination']['totalMatches'], 'premium-all pages the date\'s premium leagues together (Premier League, 60)');
+    assert_equals(90, (int) $page['pagination']['totalMatches'], 'premium-all pages the date\'s premium leagues together (Premier League 60 + La Liga 30)');
     assert_equals('PREMIUM_LEAGUES', (string) $page['filters']['competition']['state'], 'the scope states itself');
     assert_equals('All premium leagues', (string) $page['filters']['competition']['name'], 'and names the group');
-    assert_equals(60, (int) $page['filters']['competition']['matches'], 'with the combined match count');
+    assert_equals(90, (int) $page['filters']['competition']['matches'], 'with the combined match count');
     assert_true((bool) $page['filters']['competition']['premium'], 'marked as premium scope');
     assert_null($page['filters']['competition']['externalId'], 'no single league id');
-    assert_equals(['39'], (array) $page['filters']['competition']['externalIds'], 'resolved to the group of premium external ids');
+    assert_equals(['39', '140'], (array) $page['filters']['competition']['externalIds'], 'resolved to the group of premium external ids');
     foreach ($page['matches'] as $match) {
-        assert_equals('Premier League', (string) $match['competition'], 'only premium-league matches are on the page');
+        assert_true(in_array((string) $match['competition'], ['Premier League', 'La Liga'], true), 'only premium-league matches are on the page');
     }
     // The selectable spelling and the documented alias land on the same scope.
     $aliased = $feed->page($day, 1, 50, false, ['competition' => 'all_premium']);
-    assert_equals(60, (int) $aliased['pagination']['totalMatches'], 'all_premium is an alias for the same scope');
+    assert_equals(90, (int) $aliased['pagination']['totalMatches'], 'all_premium is an alias for the same scope');
     $spaced = $feed->page($day, 1, 50, false, ['competition' => 'premium leagues']);
-    assert_equals(60, (int) $spaced['pagination']['totalMatches'], 'spelling with spaces is accepted too');
+    assert_equals(90, (int) $spaced['pagination']['totalMatches'], 'spelling with spaces is accepted too');
 });
 
 test('football: premium-all combines every configured premium league on one page', function () {
@@ -532,12 +595,14 @@ test('football: generating under premium-all spends the budget inside the premiu
     [$repo, $module, $day] = fx_fb_two_leagues(60, 30);
     $feed = $module->feed();
 
+    // Default classification: both the Premier League and La Liga are premium,
+    // so the 50-match budget runs across the group and the rest waits on page 2.
     $page = $feed->generate($day, 1, 50, ['competition' => 'PREMIUM_LEAGUES']);
     assert_equals(50, (int) $page['generation']['generated'], 'the first premium-all page writes 50 new predictions');
-    assert_equals(10, (int) $page['generation']['remainingOnDate'], 'leaving 10 premium matches for page 2');
-    assert_equals(50, count($repo->predictions), 'and only those rows exist — La Liga was not processed');
+    assert_equals(40, (int) $page['generation']['remainingOnDate'], 'leaving 40 premium matches for page 2');
+    assert_equals(50, count($repo->predictions), 'and only those rows exist — nothing outside the page was processed');
     foreach ($page['matches'] as $match) {
-        assert_equals('Premier League', (string) $match['competition'], 'every generated match is from a premium league');
+        assert_true(in_array((string) $match['competition'], ['Premier League', 'La Liga'], true), 'every generated match is from a premium league');
     }
     assert_equals('PREMIUM_LEAGUES', (string) $page['request']['competition'], 'the request still names the premium scope, so paging stays in it');
 });

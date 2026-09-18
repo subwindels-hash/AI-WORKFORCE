@@ -623,13 +623,20 @@ this deployment classifies as premium — names or provider competition ids:
 WINDELS_FOOTBALL_PREMIUM_COMPETITIONS=Premier League, UEFA Champions League, La Liga, Serie A, Bundesliga, Ligue 1
 ```
 
+Unset, the list defaults to that whole premium group — the (English) Premier
+League, UEFA Champions League, La Liga, Serie A, the Bundesliga and Ligue 1 —
+so every premium league is offered without configuration; setting it narrows
+the classification to exactly the named leagues.
+
 A league is premium because it was classified, and names match loosely, so one
 feed's "English Premier League" and another's "Premier League" are the same
 premium competition — and the same internal competition id. The Premium League
 selector offers every premium league that has a match on the date, with the
-featured one marked; a league that was not classified is never offered as
-premium, and a configured premium league with no match on the date is
-substituted by the featured competition with that stated, never silently.
+featured one marked, plus an **All premium leagues** option that pages and
+generates across the whole group at once; a league that was not classified is
+never offered as premium, and a configured premium league with no match on the
+date is substituted by the featured competition with that stated, never
+silently.
 
 ### API calls: database first
 
@@ -1027,7 +1034,10 @@ WINDELS_FOOTBALL_PREMIUM_COMPETITION=English Premier League   the featured ("Pre
 WINDELS_FOOTBALL_PREMIUM_COMPETITION_ID=39   optional: pin it to a provider competition id instead of matching the name
 WINDELS_FOOTBALL_PREMIUM_COMPETITIONS=English Premier League  comma-separated list of leagues classified premium (names or
                                              provider competition ids); matches loosely, so "English Premier League"
-                                             and "Premier League" are one premium competition
+                                             and "Premier League" are one premium competition. Default when unset:
+                                             Premier League, UEFA Champions League, La Liga, Serie A, Bundesliga,
+                                             Ligue 1 — every premium league, offered in the Premium League selector
+                                             alongside its All premium leagues option
 WINDELS_FOOTBALL_DEFAULT_MARKET=MATCH_WINNER the market a request is answered in when it names none
 WINDELS_FOOTBALL_FIRST_HALF_SHARE=0.45       goal expectancy attributed to the first half (0.20..0.80); named in the market basis
 WINDELS_FOOTBALL_MAX_AGE_ODDS=1800         how old a quoted price may be before the board labels it aged; read by the

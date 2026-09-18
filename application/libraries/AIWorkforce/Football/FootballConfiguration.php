@@ -387,6 +387,29 @@ final class FootballConfiguration
     }
 
     /**
+     * The built-in premium classification: the leagues this deployment means
+     * by "all premium leagues" when the operator has not classified any
+     * itself. The featured league (premiumCompetition(), the English Premier
+     * League by default) leads the list; the rest are the group "premium" has
+     * always named in this module — the Champions League, La Liga, Serie A,
+     * the Bundesliga and Ligue 1 — so the Premium League selector offers every
+     * premium league by default, not only the flagship one.
+     *
+     * @return list<string>
+     */
+    public function defaultPremiumCompetitions(): array
+    {
+        return array_values(array_unique([
+            $this->premiumCompetition()['name'],
+            'UEFA Champions League',
+            'Spanish La Liga',
+            'Italian Serie A',
+            'German Bundesliga',
+            'French Ligue 1',
+        ]));
+    }
+
+    /**
      * The premium (featured) competitions — the leagues the Premium League
      * selector offers. Premium is an *application-level* classification: no
      * provider numbers competitions the same way, so a league is premium
@@ -395,7 +418,9 @@ final class FootballConfiguration
      * The list is configuration, and it is a list rather than a single value
      * because "premium" in football means a group of leagues — the Premier
      * League, the Champions League, La Liga, Serie A, the Bundesliga, Ligue 1
-     * — not one flagship. Matching is by name or by provider competition id.
+     * — not one flagship. Unset, it defaults to that whole group
+     * (defaultPremiumCompetitions()); set, exactly the named leagues are
+     * premium. Matching is by name or by provider competition id.
      *
      * @return list<string> names and/or provider competition ids, as configured
      */
@@ -407,7 +432,7 @@ final class FootballConfiguration
             $entry = trim($entry);
             if ($entry !== '') $out[] = $entry;
         }
-        return $out === [] ? [$this->premiumCompetition()['name']] : $out;
+        return $out === [] ? $this->defaultPremiumCompetitions() : $out;
     }
 
     /**

@@ -207,9 +207,10 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
               <label class="fld">Premium league
                 <select class="sel" name="premium" onchange="this.form.competition.value=this.value">
                   <option value="">No premium-only filter</option>
+                  <option value="<?= e($premiumAllKeyword) ?>" <?= $premiumAllScope ? 'selected' : '' ?>>All premium leagues</option>
                   <?php foreach ($premiumOptions as $entry): ?>
                     <?php $value = (string) ($entry['externalId'] ?? ''); ?>
-                    <option value="<?= e($value) ?>" <?= !$premiumAllScope && $selectedExternal === $value ? 'selected' : '' ?>><?= e((string) ($entry['name'] ?? 'Premium league')) ?><?= $value === (string) ($premium['externalId'] ?? '') ? ' · featured' : '' ?></option>
+                    <option value="<?= e($value) ?>" <?= !$premiumAllScope && $selectedExternal === $value ? 'selected' : '' ?>><?= e((string) ($entry['name'] ?? 'Premium league')) ?> · <?= (int) ($entry['matches'] ?? 0) ?> match<?= (int) ($entry['matches'] ?? 0) === 1 ? '' : 'es' ?><?= $value === (string) ($premium['externalId'] ?? '') ? ' · featured' : '' ?></option>
                   <?php endforeach; ?>
                 </select>
               </label>

@@ -116,6 +116,53 @@ test('football: the board renders the intelligence layer over a populated page',
         'the intelligence column renders for at least one row');
 });
 
+test('football: the Premium League selector renders every premium league and the All premium leagues option', function () {
+    // Default classification: both stored leagues are premium, so the Premium
+    // League dropdown lists each of them, an unclassified league is not
+    // offered as premium, and the All premium leagues option is there —
+    // selected while the board is read in that scope.
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    $base = (int) strtotime($day . 'T00:30:00+00:00');
+    $rows = [];
+    for ($i = 0; $i < 3; $i++) {
+        $rows[] = fx_fb_row('fx-pr' . $i, gmdate('c', $base + $i * 60), 'Manchester City', 'Everton', '10', '20');
+    }
+    for ($i = 0; $i < 2; $i++) {
+        $rows[] = fx_fb_row('fx-pl' . $i, gmdate('c', $base + 120 + $i * 60), 'Brighton', 'Burnley', '30', '40',
+            'SCHEDULED', null, null, null, ['leagueId' => '140', 'competition' => 'La Liga', 'country' => 'Spain']);
+    }
+    $rows[] = fx_fb_row('fx-pu', gmdate('c', $base + 300), 'Al Hilal', 'Al Nassr', '50', '60',
+        'SCHEDULED', null, null, null, ['leagueId' => '307', 'competition' => 'Saudi Pro League', 'country' => 'Saudi Arabia']);
+    [, , $module] = fx_fb_harness($rows);
+    fx_fb_sync_today($module, $day);
+
+    $dashboard = $module->dashboard($day, false, 1, 50, ['competition' => \AIWorkforce\Football\MatchFeed::PREMIUM_LEAGUES]);
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard]));
+    assert_true($render['notices'] === [], 'the premium-scoped board reaches for no key the payload does not publish'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    $html = $render['html'];
+
+    $premiumSelect = [];
+    assert_true(preg_match('/<select[^>]*name="premium".*?<\/select>/s', $html, $premiumSelect) === 1,
+        'the premium league dropdown renders');
+    $premiumHtml = $premiumSelect[0];
+    assert_true(str_contains($premiumHtml, '<option value="PREMIUM_LEAGUES" selected>All premium leagues</option>'),
+        'the All premium leagues option is offered, and selected while the board is in that scope');
+    foreach (['Premier League', 'La Liga'] as $league) {
+        assert_true(str_contains($premiumHtml, $league), $league . ' is offered in the premium league dropdown');
+    }
+    assert_true(str_contains($premiumHtml, 'Premier League · 3 matches'), 'each premium league is listed with its match count');
+    assert_false(str_contains($premiumHtml, 'Saudi Pro League'), 'a league that was not classified premium is not offered as premium');
+
+    // The competition dropdown keeps the same all-value, so the two selectors
+    // never disagree about what "all premium leagues" selects.
+    $competitionSelect = [];
+    assert_true(preg_match('/<select[^>]*name="competition".*?<\/select>/s', $html, $competitionSelect) === 1,
+        'the competition dropdown renders');
+    assert_true(str_contains($competitionSelect[0], '<option value="PREMIUM_LEAGUES" selected>All premium leagues</option>'),
+        'the competition dropdown offers the same all-premium scope, selected');
+});
+
 test('football: the board renders an unanalyzed date without inventing a score', function () {
     [$repo, , $module] = fx_fb_harness([], ['skipHistory' => true]);
     $day = gmdate('Y-m-d', time() + 4 * 3600);
