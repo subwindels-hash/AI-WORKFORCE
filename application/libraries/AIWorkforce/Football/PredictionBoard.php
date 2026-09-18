@@ -166,10 +166,29 @@ final class PredictionBoard
         // one way in the table and another way in the card under it.
         $intelligenceEntries = [];
         foreach ($fixtures as $index => $fixture) {
+            $prediction = $this->predictions->existing($fixture, $modelVersionId, PredictionService::KIND_PRE_MATCH);
+            // Why an empty slot is empty. The generation pass above already
+            // asked the engine and got an answer — "data quality 40/100, below
+            // the 50-point floor" is a finding, not an absence — so that answer
+            // travels into the intelligence block instead of being dropped and
+            // re-described as "nobody has looked at this yet". Without this the
+            // board reported every refusal as merely unanalyzed, which is how a
+            // page came to show six withheld matches and six awaiting analysis
+            // while holding only six fixtures.
+            $outcome = (array) ($generation['matches'][$index] ?? []);
+            // `NOT_GENERATED` is the read-only sentinel — it means nobody asked
+            // the engine, not that the engine answered — so it is deliberately
+            // not passed on as a refusal, exactly as the page counters above
+            // exclude it from `withheld`. Anything else is a real answer.
+            $outcomeCode = (string) ($outcome['code'] ?? '');
+            $engineAnswered = $outcomeCode !== '' && $outcomeCode !== 'NOT_GENERATED';
             $intelligenceEntries[] = [
                 'fixture' => (array) $fixture,
-                'prediction' => $this->predictions->existing($fixture, $modelVersionId, PredictionService::KIND_PRE_MATCH),
+                'prediction' => $prediction,
                 'market' => (array) ($markets[$index] ?? []),
+                'predictionRefusal' => $prediction === null && $engineAnswered
+                    ? ['code' => $outcomeCode, 'reason' => (string) ($outcome['reason'] ?? '')]
+                    : [],
             ];
         }
         $blocks = $this->report->forPage($intelligenceEntries);

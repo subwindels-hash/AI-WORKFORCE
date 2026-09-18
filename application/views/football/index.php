@@ -245,9 +245,18 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         $selectionState = (string) ($selectedCompetition['state'] ?? '');
         $selectionName = in_array($selectionState, ['NARROWED', 'PREMIUM_LEAGUES'], true)
             ? (string) ($selectedCompetition['name'] ?? '') : '';
-        $awaitingAnalysis = max(0, (int) ($summary['fixtures'] ?? 0) - (int) ($summary['analyzed'] ?? 0));
         $withheldOnPage = (int) ($pageBlock['withheld'] ?? 0);
         $pageFixtures = (int) ($pagination['returned'] ?? 0);
+        /* "Withheld" and "Awaiting analysis" must not describe the same match
+           twice. A withheld match HAS been analyzed — the engine ran, scored the
+           evidence below the floor and refused to store a row — so counting it
+           again as "no prediction row yet" reported six fixtures as twelve
+           states. Everything this read already answered for (withheld, closed,
+           failed) is therefore taken out of the waiting count, which is left
+           meaning exactly what it says: nobody has asked the engine yet. */
+        $unanalyzed = max(0, (int) ($summary['fixtures'] ?? 0) - (int) ($summary['analyzed'] ?? 0));
+        $answeredOnPage = min($unanalyzed, $withheldOnPage + (int) ($pageBlock['frozen'] ?? 0) + (int) ($pageBlock['failed'] ?? 0));
+        $awaitingAnalysis = max(0, $unanalyzed - $answeredOnPage);
       ?>
       <section class="panel football-section" id="football-overview" aria-labelledby="day-overview-heading">
         <div class="football-section__heading">
@@ -270,7 +279,9 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
             <div class="stat"><div class="k">Qualified</div><div class="v up"><?= (int) ($summary['qualified'] ?? 0) ?></div><div class="trend">verified data quality</div></div>
             <div class="stat"><div class="k">Limited evidence</div><div class="v warn"><?= (int) ($summary['limited'] ?? 0) ?></div><div class="trend">usable with caution</div></div>
             <div class="stat"><div class="k">Withheld</div><div class="v down"><?= $withheldOnPage ?></div><div class="trend">evidence below the floor · this page</div></div>
-            <div class="stat"><div class="k">Awaiting analysis</div><div class="v"><?= $awaitingAnalysis ?></div><div class="trend">no prediction row yet · whole selection</div></div>
+            <div class="stat"><div class="k">Awaiting analysis</div><div class="v"><?= $awaitingAnalysis ?></div><div class="trend"><?= $answeredOnPage > 0
+              ? 'no prediction row yet · excludes ' . $answeredOnPage . ' answered on this page'
+              : 'no prediction row yet · whole selection' ?></div></div>
           </div>
           <?php if ($pagination !== []): ?>
             <div class="football-section__divider"></div>
@@ -327,7 +338,7 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
               <h3 id="top-picks-heading">Top WINDELS Picks</h3>
             </div>
           </div>
-          <span class="football-section__meta" title="<?= e((string) ($picksRule['eligibility'] ?? 'Eligible matches on this page: analyzed, QUALIFIED or LIMITED data quality, an actual selection in the selected market, not withheld, not unstable.')) ?>"><?= $picksEligible ?> eligible on this page<?= $picksEligible > 0 ? ' · all ' . count($picksAll) . ' listed' : '' ?><?= $picksBeyond > 0 ? ' · top ' . $picksLimit . ' marked' : '' ?></span>
+          <span class="football-section__meta" title="<?= e((string) ($picksRule['eligibility'] ?? 'Eligible matches on this page: still to be played, analyzed, QUALIFIED or LIMITED data quality, a selection in the selected market backed by a generated WINDELS probability, not withheld, not unstable.')) ?>"><?= $picksEligible ?> eligible on this page<?= $picksEligible > 0 ? ' · all ' . count($picksAll) . ' listed' : '' ?><?= $picksBeyond > 0 ? ' · top ' . $picksLimit . ' marked' : '' ?></span>
         </div>
         <div class="body">
           <p class="football-section-intro">The strongest comparisons drawn from the fixtures in section 3, ordered by intelligence score. Each row keeps the model probability and the bookmaker price in their own columns so the two readings are never confused. Every pick is the selected market's answer<?= $picksMarketLabel !== '' ? ' — <b>' . e($picksMarketLabel) . '</b>' : '' ?> — ranked evidence band first, then intelligence score, then the edge against the quoted price, then model confidence.</p>
@@ -384,7 +395,10 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
               </ul>
             </details>
           <?php endif; ?>
-          <p class="football-help"><?= $picksConsidered ?> match<?= $picksConsidered === 1 ? ' was' : 'es were' ?> considered on this page · <?= $picksEligible ?> eligible · all <?= count($picksAll) ?> listed<?= $picksLimit > 0 ? ' (top ' . $picksLimit . ' marked' . ($picksBeyond > 0 ? ', +' . $picksBeyond . ' ranked below it' : '') . ')' : '' ?>. <?= e((string) ($picksRule['ranking'] ?? 'Ranked by evidence band, then intelligence score, then edge against the quoted price, then model confidence.')) ?></p>
+          <?php /* With nothing eligible there is no list to describe, so the
+                   "all 0 listed (top 5 marked)" tail is dropped rather than
+                   printed as a marking of an empty table. */ ?>
+          <p class="football-help"><?= $picksConsidered ?> match<?= $picksConsidered === 1 ? ' was' : 'es were' ?> considered on this page · <?= $picksEligible ?> eligible<?= $picksAll === [] ? '' : ' · all ' . count($picksAll) . ' listed' . ($picksLimit > 0 ? ' (top ' . $picksLimit . ' marked' . ($picksBeyond > 0 ? ', +' . $picksBeyond . ' ranked below it' : '') . ')' : '') ?>. <?= e((string) ($picksRule['ranking'] ?? 'Ranked by evidence band, then intelligence score, then edge against the quoted price, then model confidence.')) ?></p>
           <p class="football-help"><?= e((string) ($picksBlock['disclaimer'] ?? 'Rankings are analytical comparisons, not a promise of a result.')) ?></p>
         </div>
       </section>

@@ -483,6 +483,110 @@ test('football: picks rank evidence, exclude what is not fit, and never promise'
         'the eligibility rule is published, not left as a mood');
 });
 
+/**
+ * The integrity rule behind the pick list: nothing is counted as eligible on
+ * data the module did not generate, and a refusal is never reported as an
+ * absence.
+ *
+ * Both halves were real defects. A market carrying only provider quotes has a
+ * genuine price and a genuine selection but no model probability — the score
+ * grid never produced one — so its edge and expected value are null. Such a row
+ * passed the gate and was published as an eligible, ranked pick whose central
+ * number was the bookmaker's, not ours. Separately, a match the engine had
+ * analyzed and refused was excluded with "Not analyzed", which told a reader to
+ * generate the page when generating it could not possibly help.
+ */
+test('football: a pick is never ranked on a probability the module did not generate', function () {
+    $base = static fn(array $overrides): array => array_merge([
+        'analysisState' => 'ANALYZED', 'matchId' => 'm', 'fixtureId' => 1, 'homeTeam' => 'A', 'awayTeam' => 'B',
+        'kickoffLabel' => 'today', 'status' => 'SCHEDULED', 'confidence' => 80.0, 'dataQuality' => 91.0,
+        'risk' => ['level' => 'LOW'],
+        'market' => ['state' => PredictionMarkets::STATE_AVAILABLE, 'key' => 'MATCH_WINNER',
+            'label' => 'Match Winner — 1X2', 'selection' => 'HOME', 'selectionLabel' => 'Home win',
+            'probability' => 0.61, 'basis' => 'SCORE_GRID'],
+        'intelligence' => [
+            'state' => IntelligenceReport::STATE_SCORED,
+            'score' => ['score' => 80, 'band' => IntelligenceScore::BAND_STRONG, 'available' => true],
+            'quality' => ['score' => 91.0, 'band' => QualityBand::QUALIFIED, 'checklist' => [], 'missing' => []],
+            'fairValue' => ['state' => 'AVAILABLE', 'valueClass' => OddsIntelligence::CLASS_POSITIVE_VALUE,
+                'valueLabel' => 'Positive value', 'expectedValue' => 0.1, 'edgePoints' => 7.0, 'odds' => 1.85,
+                'windelsFairOdds' => 1.64],
+            'stability' => ['state' => StabilityMonitor::STABLE, 'reason' => ''],
+            'freshness' => ['state' => FreshnessTracker::CURRENT],
+            'withheld' => ['withheld' => false],
+        ],
+    ], $overrides);
+    $report = new IntelligenceReport(new FootballRepositoryStub(), new FootballConfiguration([]),
+        new StabilityMonitor(new FootballRepositoryStub(), new FootballConfiguration([])),
+        new IntelligenceScore(new FootballConfiguration([])), new PredictionDrivers(),
+        new FreshnessTracker(new FootballConfiguration([])));
+
+    $picks = $report->picks([
+        // A genuine model reading: eligible.
+        $base([]),
+        // Provider quotes only. A real price and a real selection, but the
+        // probability was never generated, so there is nothing of ours to rank.
+        $base(['fixtureId' => 2, 'homeTeam' => 'C', 'awayTeam' => 'D',
+            'market' => ['state' => PredictionMarkets::STATE_AVAILABLE, 'key' => 'CORNERS',
+                'label' => 'Corners', 'selection' => 'OVER', 'selectionLabel' => 'Over 9.5',
+                'probability' => null, 'basis' => 'PROVIDER_QUOTES_ONLY', 'odds' => 1.90]]),
+        // The same defect wearing a different hat: a basis that claims a model
+        // but carries no number. The absent probability alone must disqualify it.
+        $base(['fixtureId' => 3, 'homeTeam' => 'E', 'awayTeam' => 'F',
+            'market' => array_replace((array) $base([])['market'], ['probability' => null])]),
+    ], 'Match Winner — 1X2');
+
+    assert_equals(1, (int) $picks['eligible'], 'only the match with a generated probability is eligible');
+    assert_equals(1, (int) ($picks['picks'][0]['fixtureId'] ?? 0), 'and it is the one that was ranked');
+    foreach ((array) $picks['allPicks'] as $pick) {
+        assert_true(is_numeric($pick['probability'] ?? null),
+            'every published pick carries the model probability it was ranked on');
+    }
+    $reasons = implode(' | ', array_column((array) $picks['excluded'], 'reason'));
+    assert_equals(2, count((array) $picks['excluded']), 'both unbacked rows are named, not silently dropped');
+    assert_equals(2, substr_count($reasons, 'No WINDELS probability was generated'),
+        'each says the model reading is what was missing, not the price');
+    assert_true(str_contains((string) $picks['rule']['eligibility'], 'generated WINDELS probability'),
+        'and the published rule states the requirement');
+});
+
+test('football: a match the engine analyzed and refused is excluded as withheld, not as unanalyzed', function () {
+    $report = new IntelligenceReport(new FootballRepositoryStub(), new FootballConfiguration([]),
+        new StabilityMonitor(new FootballRepositoryStub(), new FootballConfiguration([])),
+        new IntelligenceScore(new FootballConfiguration([])), new PredictionDrivers(),
+        new FreshnessTracker(new FootballConfiguration([])));
+    $slot = static fn(int $id, array $intelligence): array => [
+        'analysisState' => 'NOT_ANALYZED', 'matchId' => 'm' . $id, 'fixtureId' => $id,
+        'homeTeam' => 'H' . $id, 'awayTeam' => 'A' . $id, 'kickoffLabel' => 'today', 'status' => 'SCHEDULED',
+        'market' => [], 'intelligence' => $intelligence,
+    ];
+    $picks = $report->picks([
+        // Analyzed and refused: the engine answered, and its sentence is the reason.
+        $slot(1, ['withheld' => ['withheld' => true, 'needsAnalysis' => false,
+            'code' => 'DATA_QUALITY_BELOW_THRESHOLD',
+            'reason' => 'Data quality 40/100 is below the 50-point minimum for a published prediction.']]),
+        // Never put to the engine: still the "not analyzed" sentence.
+        $slot(2, ['withheld' => ['withheld' => false, 'needsAnalysis' => true,
+            'headline' => 'Not analyzed yet — no prediction stored', 'reason' => '']]),
+        // No intelligence block at all — the oldest shape, still handled.
+        $slot(3, []),
+    ], 'Match Winner — 1X2');
+
+    $byFixture = [];
+    foreach ((array) $picks['excluded'] as $row) $byFixture[(int) $row['fixtureId']] = (string) $row['reason'];
+    assert_equals(0, (int) $picks['eligible'], 'none of the three is eligible');
+    assert_true(str_contains($byFixture[1] ?? '', 'Prediction withheld'),
+        'the refused match is named as withheld');
+    assert_true(str_contains($byFixture[1] ?? '', '40/100'),
+        'quoting the score the engine actually measured');
+    assert_true(!str_contains($byFixture[1] ?? '', 'Not analyzed'),
+        'and never as merely unanalyzed — generating the page cannot fix thin evidence');
+    foreach ([2, 3] as $id) {
+        assert_true(str_contains($byFixture[$id] ?? '', 'Not analyzed — no stored prediction to rank.'),
+            'a match nobody has analyzed keeps the sentence that tells a reader to generate it (' . $id . ')');
+    }
+});
+
 test('football: every eligible pick is ranked and published — the limit caps the top list, not the ranking', function () {
     // Seven eligible matches against the default top-list limit of five: the
     // ranking itself is never truncated. `picks` keeps the configured top
