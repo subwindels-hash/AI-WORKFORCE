@@ -26,6 +26,11 @@ final class ModelRegistry
 {
     public const MODEL_NAME = 'football-score-model';
 
+    /** Cached because usable(), diagnostics and the board can all ask for the
+     * deployed row during one request. Legacy compatibility may inspect several
+     * versions and their settlement counts, which must remain a one-time read. */
+    private ?array $registration = null;
+
     public const DRAFT = 'DRAFT';
     public const TRAINED = 'TRAINED';
     public const VALIDATED = 'VALIDATED';
@@ -56,7 +61,8 @@ final class ModelRegistry
      */
     public function deployedVersion(): array
     {
-        $fingerprint = $this->config->describe();
+        $configuration = $this->config->describe();
+        $fingerprint = self::predictionFingerprint($configuration);
         $hash = substr(hash('sha256', json_encode($fingerprint, JSON_THROW_ON_ERROR)), 0, 8);
         return [
             'model_name' => self::MODEL_NAME,
@@ -67,7 +73,12 @@ final class ModelRegistry
             // parameter, so a reader can match a stored prediction to the
             // feature set that produced it.
             'feature_version' => 'football-features-v1',
-            'parameters' => $fingerprint,
+            // Keep the complete, redacted configuration for auditability. Only
+            // probability-producing parameters are used for identity below.
+            // Cadence, provider budgets, board page size and (critically) the
+            // minimum calibration sample count do not change the score model.
+            'parameters' => $configuration,
+            'prediction_fingerprint' => $fingerprint,
         ];
     }
 
@@ -79,11 +90,31 @@ final class ModelRegistry
      */
     public function ensureRegistered(): array
     {
+        if ($this->registration !== null) {
+            $id = (int) ($this->registration['model']['id'] ?? 0);
+            $fresh = $id > 0 ? $this->repo->findModelVersion($id) : null;
+            return ['status' => 'ALREADY_REGISTERED', 'model' => $fresh ?? $this->registration['model'], 'created' => false]
+                + array_intersect_key($this->registration, ['compatibleLegacyVersion' => true]);
+        }
+
         $spec = $this->deployedVersion();
         $existing = $this->repo->findModelVersionByName($spec['model_name'], $spec['model_version']);
         if ($existing !== null) {
-            return ['status' => 'ALREADY_REGISTERED', 'model' => $existing, 'created' => false];
+            return $this->registration = ['status' => 'ALREADY_REGISTERED', 'model' => $existing, 'created' => false];
         }
+
+        // Releases before the prediction-fingerprint split hashed the complete
+        // operational configuration. Changing cron cadence, page size or the
+        // calibration minimum therefore registered a fresh model and made its
+        // valid settlement history appear as "0 available". Reuse a row whose
+        // actual scoring contract is identical. Prefer ACTIVE, otherwise the
+        // compatible row with the most settlements, so an empty settings-only
+        // duplicate cannot strand the evidence.
+        $compatible = $this->compatibleRegisteredVersion($spec);
+        if ($compatible !== null) {
+            return $this->registration = ['status' => 'ALREADY_REGISTERED', 'model' => $compatible, 'created' => false, 'compatibleLegacyVersion' => true];
+        }
+
         $row = $this->repo->saveModelVersion([
             'model_id' => 'football-model-' . substr(hash('sha256', $spec['model_name'] . '@' . $spec['model_version']), 0, 10),
             'model_name' => $spec['model_name'],
@@ -92,10 +123,14 @@ final class ModelRegistry
             'feature_version' => $spec['feature_version'],
             'status' => self::DRAFT,
             'parameters' => json_encode($spec['parameters']),
-            'lifecycle_history' => json_encode([['status' => self::DRAFT, 'at' => gmdate('c'), 'actor' => 'system', 'note' => 'registered from deployed configuration']]),
+            'lifecycle_history' => json_encode([['status' => self::DRAFT, 'at' => gmdate('c'), 'actor' => 'system', 'note' => 'registered from deployed scoring configuration']]),
         ]);
-        $this->audit?->emit('FOOTBALL_MODEL_REGISTERED', 'Football model ' . $spec['model_name'] . ' ' . $spec['model_version'] . ' registered as DRAFT', ['modelVersionId' => $row['id'] ?? null, 'parameters' => $spec['parameters']], 'system');
-        return ['status' => 'REGISTERED', 'model' => $row, 'created' => true];
+        $this->audit?->emit('FOOTBALL_MODEL_REGISTERED', 'Football model ' . $spec['model_name'] . ' ' . $spec['model_version'] . ' registered as DRAFT', [
+            'modelVersionId' => $row['id'] ?? null,
+            'parameters' => $spec['parameters'],
+            'predictionFingerprint' => $spec['prediction_fingerprint'],
+        ], 'system');
+        return $this->registration = ['status' => 'REGISTERED', 'model' => $row, 'created' => true];
     }
 
     public function active(): ?array
@@ -117,7 +152,10 @@ final class ModelRegistry
         $deployed = $registered['model'];
         $active = $this->active();
         if ($active !== null) {
-            $isDeployed = (string) ($active['model_version'] ?? '') === (string) ($deployed['model_version'] ?? '');
+            // A pre-fix row can carry a different version hash solely because
+            // operational settings used to be part of that hash. Compare the
+            // actual scoring contract before calling an ACTIVE row superseded.
+            $isDeployed = $this->isCompatibleWithSpec($active, $this->deployedVersion());
             return [
                 'state' => self::ACTIVE,
                 'model' => $active,
@@ -270,6 +308,64 @@ final class ModelRegistry
         }
         $this->repo->updateModelVersion($modelVersionId, $patch);
         return ['status' => 'OK', 'model' => $this->repo->findModelVersion($modelVersionId)];
+    }
+
+    /**
+     * Only values that can change the raw 1X2 probability distribution belong
+     * to model identity. Operational controls decide when/how many rows run; the
+     * calibration minimum decides when evidence is sufficient. Neither changes
+     * a prediction and neither may split that prediction's settlement history.
+     *
+     * @return array{maxGoals:int,dixonColesRho:float,marketBlendWeight:float}
+     */
+    private static function predictionFingerprint(array $configuration): array
+    {
+        $model = is_array($configuration['model'] ?? null) ? $configuration['model'] : [];
+        return [
+            'maxGoals' => (int) ($model['maxGoals'] ?? 8),
+            'dixonColesRho' => round((float) ($model['dixonColesRho'] ?? -0.06), 8),
+            'marketBlendWeight' => round((float) ($model['marketBlendWeight'] ?? 0.35), 8),
+        ];
+    }
+
+    /** @param array<string,mixed> $spec */
+    private function compatibleRegisteredVersion(array $spec): ?array
+    {
+        $candidates = [];
+        $ladder = array_flip(self::STATES);
+        foreach ($this->repo->listModelVersions(null, 200) as $row) {
+            if (!$this->isCompatibleWithSpec($row, $spec)) continue;
+            $id = (int) ($row['id'] ?? 0);
+            if ($id <= 0) continue;
+            $settlements = (int) ($this->repo->settlementAggregates(['modelVersionId' => $id])['evaluated'] ?? 0);
+            $candidates[] = [
+                'row' => $row,
+                'active' => (string) ($row['status'] ?? '') === self::ACTIVE ? 1 : 0,
+                'settlements' => $settlements,
+                'rank' => (int) ($ladder[(string) ($row['status'] ?? self::DRAFT)] ?? 0),
+                'id' => $id,
+            ];
+        }
+        usort($candidates, static function (array $a, array $b): int {
+            foreach (['active', 'settlements', 'rank', 'id'] as $key) {
+                $order = (int) $b[$key] <=> (int) $a[$key];
+                if ($order !== 0) return $order;
+            }
+            return 0;
+        });
+        return $candidates[0]['row'] ?? null;
+    }
+
+    /** @param array<string,mixed> $spec */
+    private function isCompatibleWithSpec(array $row, array $spec): bool
+    {
+        if ((string) ($row['model_name'] ?? '') !== (string) ($spec['model_name'] ?? '')) return false;
+        if ((string) ($row['algorithm'] ?? '') !== (string) ($spec['algorithm'] ?? '')) return false;
+        if ((string) ($row['feature_version'] ?? '') !== (string) ($spec['feature_version'] ?? '')) return false;
+        $parameters = $row['parameters'] ?? null;
+        if (is_string($parameters)) $parameters = json_decode($parameters, true);
+        if (!is_array($parameters) || !is_array($parameters['model'] ?? null)) return false;
+        return self::predictionFingerprint($parameters) === ($spec['prediction_fingerprint'] ?? null);
     }
 
     private function history(?array $model, array $entry): string

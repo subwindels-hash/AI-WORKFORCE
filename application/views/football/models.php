@@ -16,6 +16,7 @@ $active = $models['activeModel'] ?? null;
 $calibration = $models['calibration'] ?? [];
 $versions = $models['versions'] ?? [];
 $calibrationVersions = $models['calibrationVersions'] ?? [];
+$calibrationAvailability = $models['calibrationAvailability'] ?? ['settled' => 0, 'usable' => 0, 'missingProbabilities' => 0, 'minimum' => 50];
 $caps = $caps ?? ['sync' => false, 'calibrate' => false, 'approve' => false, 'settle' => false];
 $windelsModelId = '1520863';
 
@@ -119,7 +120,10 @@ $stateClass = static fn(string $state): string => match (strtoupper($state)) {
         <div class="body scroll">
         <p class="football-section-intro">Calibration adjusts displayed confidence to match observed outcomes. Until a fit exists, confidence is published raw and labelled CALIBRATION_PENDING — it is never quietly adjusted.</p>
         <?php if ($calibrationVersions === []): ?>
-          <p class="dim">No calibration has been fitted yet. A temperature is only estimated once at least the configured minimum of settled predictions with stored probabilities exist — until then displayed confidence is labelled <b>CALIBRATION_PENDING</b> (raw), never silently adjusted.</p>
+          <p class="dim">No calibration has been fitted yet. <b><?= (int) ($calibrationAvailability['usable'] ?? 0) ?> of <?= (int) ($calibrationAvailability['minimum'] ?? 50) ?></b> required settled predictions currently have recoverable raw probabilities (<?= (int) ($calibrationAvailability['settled'] ?? 0) ?> settled for this model in total). The results and settlement jobs add evidence automatically after stored pre-match predictions finish. Until the minimum is reached, displayed confidence is labelled <b>CALIBRATION_PENDING</b> (raw), never silently adjusted.</p>
+          <?php if ((int) ($calibrationAvailability['missingProbabilities'] ?? 0) > 0): ?>
+            <p class="football-help"><?= (int) $calibrationAvailability['missingProbabilities'] ?> legacy/calibrated settlement row(s) have no safe raw-probability vector and are excluded rather than guessed.</p>
+          <?php endif; ?>
         <?php else: ?>
           <table class="tbl">
             <thead><tr><th>Version</th><th>Method</th><th>Status</th><th class="num">Samples</th><th class="num">T</th><th class="num">ECE</th><th class="num">Brier</th><th>Window</th><th>Approved</th></tr></thead>

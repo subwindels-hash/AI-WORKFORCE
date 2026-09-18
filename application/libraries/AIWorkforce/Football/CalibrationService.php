@@ -44,17 +44,28 @@ final class CalibrationService
      */
     public function fit(int $modelVersionId, ?string $windowStart = null, string $actor = 'system'): array
     {
-        $minimum = $this->config->minCalibrationSamples();
-        $samples = $this->samples($modelVersionId, $windowStart);
-        $usable = array_values(array_filter($samples, static fn(array $row) => self::hasProbabilities($row) && in_array((string) ($row['actual_result'] ?? ''), ['HOME', 'DRAW', 'AWAY'], true)));
+        $availability = $this->sampleSet($modelVersionId, $windowStart);
+        $minimum = $availability['minimum'];
+        $usable = $availability['rows'];
         if (count($usable) < $minimum) {
+            $reason = 'Calibration needs ' . $minimum . ' settled predictions with stored probabilities; '
+                . count($usable) . ' available (' . $availability['settled'] . ' settled for this model, '
+                . $availability['missingProbabilities'] . ' without a safe raw vector)'
+                . ($windowStart !== null ? ' since ' . $windowStart : '') . '.';
+            if ($availability['settled'] === 0) {
+                $reason .= ' Predictions must be stored before kickoff, then the results and settlement jobs must complete them; calibration will retry automatically.';
+            } elseif ($availability['missingProbabilities'] > 0) {
+                $reason .= ' ' . $availability['missingProbabilities'] . ' legacy/calibrated row(s) have no safe raw-probability vector and were not guessed.';
+            }
             return [
                 'status' => self::PENDING,
                 'samples' => count($usable),
+                'settledSamples' => $availability['settled'],
+                'missingProbabilitySamples' => $availability['missingProbabilities'],
                 'minimum' => $minimum,
                 'calibration' => null,
                 'metrics' => [],
-                'reason' => 'Calibration needs ' . $minimum . ' settled predictions with stored probabilities; ' . count($usable) . ' available' . ($windowStart !== null ? ' since ' . $windowStart : '') . '.',
+                'reason' => $reason,
             ];
         }
         $metrics = $this->measure($usable, ['temperature' => 1.0]);
@@ -77,6 +88,7 @@ final class CalibrationService
                 'gridStep' => $fitted['gridStep'] ?? null,
                 'constraint' => 'temperature>=1 (softening only)',
                 'unconstrainedOptimum' => $fitted['unconstrained'] ?? null,
+                'sampleSources' => $availability['sources'],
             ]),
             'sample_size' => count($usable),
             'accuracy' => $final['accuracy'],
@@ -99,7 +111,8 @@ final class CalibrationService
             'logLossBefore' => $metrics['logLoss'], 'logLossAfter' => $final['logLoss'],
             'eceBefore' => $metrics['ece'], 'eceAfter' => $final['ece'], 'samples' => count($usable),
         ], $actor);
-        return ['status' => self::CALIBRATED, 'samples' => count($usable), 'minimum' => $minimum, 'calibration' => $row,
+        return ['status' => self::CALIBRATED, 'samples' => count($usable), 'settledSamples' => $availability['settled'],
+            'missingProbabilitySamples' => $availability['missingProbabilities'], 'minimum' => $minimum, 'calibration' => $row,
             'metrics' => $final + ['before' => $metrics], 'reason' => null];
     }
 
@@ -185,20 +198,108 @@ final class CalibrationService
         return $this->repo->countCalibrations(null, self::CALIBRATED);
     }
 
-    /** @return list<array<string,mixed>> */
-    private function samples(int $modelVersionId, ?string $windowStart): array
+    /**
+     * Current evidence count for API/UI diagnostics. Unlike the old
+     * `samplesAvailable = latest calibration version's sample_size` shortcut,
+     * this reads the actual settled rows even before the first fit exists.
+     *
+     * @return array{settled:int,usable:int,missingProbabilities:int,minimum:int,sources:array<string,int>}
+     */
+    public function availability(int $modelVersionId, ?string $windowStart = null): array
     {
-        $filter = ['modelVersionId' => $modelVersionId, 'limit' => max(1000, $this->config->minCalibrationSamples() * 20)];
+        $set = $this->sampleSet($modelVersionId, $windowStart);
+        return [
+            'settled' => $set['settled'],
+            'usable' => count($set['rows']),
+            'missingProbabilities' => $set['missingProbabilities'],
+            'minimum' => $set['minimum'],
+            'sources' => $set['sources'],
+        ];
+    }
+
+    /**
+     * Produce canonical raw_* rows for the fitter. Modern predictions carry the
+     * raw vector directly. Older installations often have only the immutable
+     * probability vector copied into the settlement; when that prediction was
+     * explicitly uncalibrated, that frozen vector *is* the raw vector and is safe
+     * to recover. A calibrated legacy vector is never reused, because doing so
+     * would compound one calibration into another.
+     *
+     * @return array{settled:int,missingProbabilities:int,minimum:int,sources:array<string,int>,rows:list<array<string,mixed>>}
+     */
+    private function sampleSet(int $modelVersionId, ?string $windowStart): array
+    {
+        $minimum = $this->config->minCalibrationSamples();
+        $filter = ['modelVersionId' => $modelVersionId, 'limit' => max(1000, $minimum * 20)];
         if ($windowStart !== null) $filter['from'] = $windowStart;
-        return $this->repo->listCalibrationSamples($filter);
+        $samples = $this->repo->listCalibrationSamples($filter);
+        $rows = []; $sources = [];
+        foreach ($samples as $sample) {
+            if (!in_array(strtoupper((string) ($sample['actual_result'] ?? '')), ['HOME', 'DRAW', 'AWAY'], true)) continue;
+            $prepared = self::prepareSample($sample);
+            if ($prepared === null) continue;
+            $source = (string) ($prepared['_calibration_probability_source'] ?? 'raw_prediction');
+            $sources[$source] = ($sources[$source] ?? 0) + 1;
+            $rows[] = $prepared;
+        }
+        ksort($sources);
+        return [
+            'settled' => count($samples),
+            'missingProbabilities' => max(0, count($samples) - count($rows)),
+            'minimum' => $minimum,
+            'sources' => $sources,
+            'rows' => $rows,
+        ];
+    }
+
+    /** @return array<string,mixed>|null */
+    private static function prepareSample(array $row): ?array
+    {
+        $raw = self::probabilityVector($row, ['raw_home', 'raw_draw', 'raw_away']);
+        $source = 'raw_prediction';
+        if ($raw === null) {
+            $calibrationId = is_numeric($row['calibration_version_id'] ?? null) ? (int) $row['calibration_version_id'] : 0;
+            $state = strtoupper(trim((string) ($row['calibration_state'] ?? '')));
+            $basis = strtoupper(trim((string) ($row['confidence_basis'] ?? '')));
+            $alreadyCalibrated = $calibrationId > 0 || $state === self::CALIBRATED || $basis === 'CALIBRATED';
+            if ($alreadyCalibrated) return null;
+
+            // Settlement columns win over the joined prediction columns: they
+            // are insert-once and therefore cannot have changed after grading.
+            $raw = self::probabilityVector($row, ['settled_probability_home', 'settled_probability_draw', 'settled_probability_away']);
+            $source = 'legacy_uncalibrated_settlement';
+            if ($raw === null) {
+                $raw = self::probabilityVector($row, ['probability_home', 'probability_draw', 'probability_away']);
+                $source = 'legacy_uncalibrated_prediction';
+            }
+        }
+        if ($raw === null) return null;
+        return array_merge($row, [
+            'raw_home' => $raw['home'],
+            'raw_draw' => $raw['draw'],
+            'raw_away' => $raw['away'],
+            '_calibration_probability_source' => $source,
+        ]);
+    }
+
+    /** @param array{0:string,1:string,2:string} $keys
+     *  @return array{home:float,draw:float,away:float}|null */
+    private static function probabilityVector(array $row, array $keys): ?array
+    {
+        $values = [];
+        foreach (['home', 'draw', 'away'] as $index => $outcome) {
+            $value = $row[$keys[$index]] ?? null;
+            if (!is_numeric($value)) return null;
+            $value = (float) $value;
+            if (!is_finite($value) || $value < 0.0) return null;
+            $values[$outcome] = $value;
+        }
+        return array_sum($values) > 0.0 ? $values : null;
     }
 
     private static function hasProbabilities(array $row): bool
     {
-        foreach (['raw_home', 'raw_draw', 'raw_away'] as $key) {
-            if (!isset($row[$key]) || !is_numeric($row[$key])) return false;
-        }
-        return (float) $row['raw_home'] + (float) $row['raw_draw'] + (float) $row['raw_away'] > 0;
+        return self::probabilityVector($row, ['raw_home', 'raw_draw', 'raw_away']) !== null;
     }
 
     private const EPSILON_IMPROVEMENT = 1e-4;
