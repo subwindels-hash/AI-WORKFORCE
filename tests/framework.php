@@ -1303,6 +1303,21 @@ class FootballRepositoryStub implements \AIWorkforce\Persistence\FootballReposit
         return $this->find($this->fixtureStatistics, fn(array $r) => (int) $r['fixture_id'] === $fixtureId && ($kind === null || $r['kind'] === $kind));
     }
 
+    public function listFixtureStatisticsFor(array $fixtureIds, ?string $kind = null): array
+    {
+        $wanted = array_fill_keys(array_values(array_unique(array_filter(array_map('intval', $fixtureIds), fn(int $id): bool => $id > 0))), true);
+        $rows = array_values(array_filter($this->fixtureStatistics, fn(array $r): bool => isset($wanted[(int) ($r['fixture_id'] ?? 0)])
+            && ($kind === null || (string) ($r['kind'] ?? '') === $kind)));
+        usort($rows, fn(array $a, array $b): int => strcmp((string) ($b['fetched_at'] ?? ''), (string) ($a['fetched_at'] ?? ''))
+            ?: ((int) ($b['id'] ?? 0) <=> (int) ($a['id'] ?? 0)));
+        $out = [];
+        foreach ($rows as $row) {
+            $fixtureId = (int) ($row['fixture_id'] ?? 0);
+            if ($fixtureId > 0 && !isset($out[$fixtureId])) $out[$fixtureId] = $row;
+        }
+        return $out;
+    }
+
     public function saveHeadToHead(int $providerId, array $row): array
     {
         $home = (string) ($row['homeTeamExternalId'] ?? '');

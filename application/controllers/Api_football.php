@@ -541,7 +541,7 @@ class Api_football extends Api_controller
         $this->json([
             'status' => 'OK',
             'fixture' => $this->fixtureSummary($fixture),
-            'statistics' => $this->AIWorkforce_model->football->findFixtureStatistics((int) $id),
+            'statistics' => $this->AIWorkforce_model->football->findFixtureStatistics((int) $id, 'MATCH'),
             'prediction' => $this->football()->predictionFor((int) $id)['prediction'] ?? null,
             'generatedAt' => gmdate('c'),
         ]);

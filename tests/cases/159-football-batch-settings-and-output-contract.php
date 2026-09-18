@@ -72,6 +72,37 @@ test('football generate-on-read: the board page block reports what the read eval
     assert_equals(4, (int) ($board['summary']['fixtures'] ?? -1), 'the summary counts stay date-wide');
     assert_equals(2, (int) ($board['summary']['analyzed'] ?? -1), 'and count the two stored prediction rows');
 
+    // The engine did assess the thin fixture even though it correctly refused
+    // to publish a prediction. Its measured result must replace the old display
+    // defaults (DQ 0/100, DATA_UNAVAILABLE, Unrated, UNKNOWN risk, NOT_ANALYZED).
+    $thinRow = null;
+    foreach ((array) $board['rows'] as $row) {
+        if ((string) ($row['externalId'] ?? '') === 'fx-gr-thin') $thinRow = $row;
+    }
+    assert_not_null($thinRow, 'the thin fixture remains on the every-match board');
+    assert_true(is_numeric($thinRow['dataQualityScore'] ?? null), 'its measured DQ score is carried to the board');
+    assert_true((int) $thinRow['dataQualityScore'] > 0, 'a missing default is never rendered as the fabricated score zero');
+    assert_equals('REJECTED', (string) ($thinRow['band'] ?? ''), 'the score carries its measured band');
+    assert_equals('PREDICTION_WITHHELD', (string) ($thinRow['assessmentState'] ?? ''), 'an engine refusal is not called unanalysed');
+    assert_contains('Data quality ', (string) ($thinRow['assessmentReason'] ?? ''), 'the exact refusal explains what needs more data');
+    assert_null($thinRow['riskStatus'] ?? null, 'no model risk is invented without a published prediction');
+    assert_equals((string) ($repo->findFixtureById((int) $thinRow['fixtureId'])['data_state'] ?? 'DATA_UNAVAILABLE'),
+        (string) ($thinRow['fixtureDataState'] ?? ''), 'the fixture data badge reads the stored state instead of a missing row-contract fallback');
+
+    // The assessment is durable: the POST action redirects before the next
+    // board read, and a read-only revisit must still show the measured answer.
+    $assessmentRows = $repo->listFixtureStatisticsFor([(int) $thinRow['fixtureId']], PredictionService::ASSESSMENT_KIND);
+    assert_true(isset($assessmentRows[(int) $thinRow['fixtureId']]), 'the refusal is stored separately from predictions');
+    $revisit = $module->board()->forDate($day, false, 1, MatchFeed::MAX_PAGE_SIZE);
+    $revisitedThin = null;
+    foreach ((array) $revisit['rows'] as $row) if ((string) ($row['externalId'] ?? '') === 'fx-gr-thin') $revisitedThin = $row;
+    assert_not_null($revisitedThin);
+    assert_equals((int) $thinRow['dataQualityScore'], (int) ($revisitedThin['dataQualityScore'] ?? -1),
+        'the redirect/revisit retains the measured score');
+    assert_equals('PREDICTION_WITHHELD', (string) ($revisitedThin['assessmentState'] ?? ''));
+    assert_equals(1, (int) ($revisit['page']['withheld'] ?? -1), 'the page overview retains the durable withheld classification too');
+    assert_equals(0, (int) ($revisit['page']['notAttempted'] ?? -1), 'the persisted assessment is not counted a second time as awaiting');
+
     // A read-only read (refresh=0 / generate-on-read off) writes nothing and
     // still classifies what it can without the engine.
     [$repo2, , $module2] = fx_fb_harness($rows);
@@ -88,6 +119,11 @@ test('football generate-on-read: the board page block reports what the read eval
     assert_equals(3, (int) ($read['page']['notAttempted'] ?? -1), 'the rest are named not-attempted, not silently blank');
     assert_equals(0, (int) ($read['page']['withheld'] ?? -1), 'nothing was evaluated, so nothing was refused yet');
     assert_equals(0, (int) ($read['page']['predicted'] ?? -1), 'and nothing is dressed up as predicted');
+    $freshThin = null;
+    foreach ((array) $read['rows'] as $row) if ((string) ($row['externalId'] ?? '') === 'fx-gr-thin') $freshThin = $row;
+    assert_not_null($freshThin);
+    assert_null($freshThin['dataQualityScore'] ?? null, 'an assessment that never ran stays null, not zero');
+    assert_equals('AWAITING_ANALYSIS', (string) ($freshThin['assessmentState'] ?? ''), 'the UI can name the next action without claiming an analysis occurred');
 });
 
 test('football generate-on-read: a page larger than the cycle reports its deferred remainder', function () {

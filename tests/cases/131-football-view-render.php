@@ -31,6 +31,10 @@ function fx_fb_render_view(string $view, array $data): array
             return htmlspecialchars((string) $value, ENT_QUOTES | ENT_HTML401, 'UTF-8');
         }
     }
+    if (!function_exists('crest')) {
+        /** The layout helper normally loaded before a view; no image is needed in this render harness. */
+        function crest(mixed $url, int $size = 18): string { return ''; }
+    }
     $notices = [];
     $previous = set_error_handler(static function (int $severity, string $message) use (&$notices): bool {
         if (preg_match('/Undefined (variable|array key|index)/', $message) === 1) {
@@ -114,6 +118,69 @@ test('football: the board renders the intelligence layer over a populated page',
     // A number is either present or a dash — never an empty cell that reads as zero.
     assert_true(preg_match('/Intelligence<\/th>.*?<\/tr>/s', $html) === 1 || str_contains($html, 'no score'),
         'the intelligence column renders for at least one row');
+});
+
+test('football: an awaiting fixture shows real fixture and odds information instead of five placeholder badges', function () {
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    $kickoff = $day . 'T12:00:00+00:00';
+    [$repo, , $module] = fx_fb_harness([
+        fx_fb_row('fx-awaiting-display', $kickoff, 'Manchester City', 'Everton', '10', '20'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $first = $module->board()->forDate($day, false, 1, 50);
+    $matchId = (string) ($first['rows'][0]['matchId'] ?? '');
+    $repo->marketOdds = [
+        ['matchId' => $matchId, 'market' => 'Match Winner', 'selection' => 'Home', 'decimalOdds' => 2.10,
+            'observedAt' => gmdate('c'), 'provider' => 'fixture-feed'],
+    ];
+
+    $dashboard = $module->dashboard($day, false, 1, 50, []);
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard]));
+    assert_true($render['notices'] === [], 'the awaiting-state presentation reaches for no missing key');
+    $article = [];
+    assert_true(preg_match('/<article class="football-fixture".*?<\/article>/s', $render['html'], $article) === 1,
+        'the fixture card renders');
+    $html = $article[0];
+    assert_contains('DQ pending', $html, 'an unrun assessment is pending, never the fabricated score 0/100');
+    assert_contains('Fixture data available', $html, 'the fixture badge uses the stored data_state');
+    assert_contains('Awaiting analysis', $html, 'the next action is plain language rather than an internal enum');
+    assert_true(!str_contains($html, 'DQ 0/100'), 'zero is not used as a missing DQ score');
+    assert_true(!str_contains($html, 'Data DATA_UNAVAILABLE'), 'the missing row key no longer overrides real fixture coverage');
+    assert_true(!str_contains($html, 'Unrated — insufficient data'), 'an unrun fixture is not falsely described as rejected');
+    assert_true(!str_contains($html, 'UNKNOWN risk'), 'risk is omitted until a prediction exists');
+    assert_true(!str_contains($html, '>NOT_ANALYZED<'), 'internal state names are not presented to the reader');
+    assert_contains('2.10', $html, 'the selected real bookmaker quote remains visible before model analysis');
+    assert_contains('47.6%', $html, 'its implied probability is calculated from that real quote');
+    assert_contains('No WINDELS probability, category, edge or risk is invented.', $html,
+        'the boundary between provider information and missing model analysis is explicit');
+});
+
+test('football: a quality-gated fixture shows its measured score and refusal instead of looking unanalysed', function () {
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    [$repo, , $module] = fx_fb_harness();
+    $providerId = (int) ($repo->listProviders()[0]['id'] ?? 1);
+    $repo->saveFixture($providerId, [
+        'externalId' => 'fx-withheld-display', 'competition' => 'Unknown Cup', 'leagueId' => '99', 'season' => '2026',
+        'kickoff' => $day . 'T14:00:00+00:00', 'status' => 'SCHEDULED', 'dataState' => 'AVAILABLE',
+        'homeTeam' => 'Home United', 'awayTeam' => 'Away Rovers', 'homeTeamId' => '900', 'awayTeamId' => '901',
+    ]);
+
+    $dashboard = $module->dashboard($day, true, 1, 50, []);
+    $row = (array) ($dashboard['board']['rows'][0] ?? []);
+    assert_true(is_numeric($row['dataQualityScore'] ?? null), 'the engine measured this refusal');
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard]));
+    assert_true($render['notices'] === [], 'the refusal presentation reaches for no missing key');
+    $article = [];
+    assert_true(preg_match('/<article class="football-fixture".*?<\/article>/s', $render['html'], $article) === 1);
+    $html = $article[0];
+    assert_contains('DQ ' . (int) $row['dataQualityScore'] . '/100 · REJECTED', $html, 'the actual measured score and band are shown');
+    assert_contains('Fixture data available', $html, 'fixture coverage is not conflated with model-input quality');
+    assert_contains('Prediction withheld', $html, 'the card says that an assessment happened');
+    assert_contains('The fixture was assessed, but no prediction was published.', $html);
+    assert_contains((string) $row['assessmentReason'], $html, 'the engine refusal reason reaches the reader');
+    assert_true(!str_contains($html, 'Unrated — insufficient data'));
+    assert_true(!str_contains($html, 'UNKNOWN risk'));
+    assert_true(!str_contains($html, '>NOT_ANALYZED<'));
 });
 
 test('football: the Premium League selector renders every premium league and the All premium leagues option', function () {

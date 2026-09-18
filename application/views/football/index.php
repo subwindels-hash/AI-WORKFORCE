@@ -248,12 +248,11 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         $withheldOnPage = (int) ($pageBlock['withheld'] ?? 0);
         $pageFixtures = (int) ($pagination['returned'] ?? 0);
         /* "Withheld" and "Awaiting analysis" must not describe the same match
-           twice. A withheld match HAS been analyzed — the engine ran, scored the
-           evidence below the floor and refused to store a row — so counting it
-           again as "no prediction row yet" reported six fixtures as twelve
-           states. Everything this read already answered for (withheld, closed,
-           failed) is therefore taken out of the waiting count, which is left
-           meaning exactly what it says: nobody has asked the engine yet. */
+           twice. A withheld match HAS been assessed — either during this request
+           or in a durable earlier assessment — and the engine published no
+           prediction. Counting it again as "no prediction row yet" reported six
+           fixtures as twelve states. Withheld, closed and failed states are
+           therefore taken out of waiting, which means no current assessment. */
         $unanalyzed = max(0, (int) ($summary['fixtures'] ?? 0) - (int) ($summary['analyzed'] ?? 0));
         $answeredOnPage = min($unanalyzed, $withheldOnPage + (int) ($pageBlock['frozen'] ?? 0) + (int) ($pageBlock['failed'] ?? 0));
         $awaitingAnalysis = max(0, $unanalyzed - $answeredOnPage);
@@ -270,7 +269,7 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
           <span class="football-section__meta" title="When this page read its stored board payload (UTC). Reload re-reads storage; no provider request is spent.">Board read <?= e($kickoff($d['generatedAt'] ?? null, 'D j M Y · H:i')) ?></span>
         </div>
         <div class="body">
-          <p class="football-section-intro">The counts below describe saved rows for <?= $selectionName !== '' ? 'this selection — <b>' . e($selectionName) . '</b> on ' : '' ?>this date. A fixture is <b>qualified</b> when its stored evidence clears the data-quality floor, <b>limited</b> when it is usable with caution, and <b>withheld</b> when the engine refused to write a prediction because the evidence was too thin. <?= !empty($refresh)
+          <p class="football-section-intro">The counts below describe saved rows for <?= $selectionName !== '' ? 'this selection — <b>' . e($selectionName) . '</b> on ' : '' ?>this date. A fixture is <b>qualified</b> when its stored evidence clears the data-quality floor, <b>limited</b> when it is usable with caution, and <b>withheld</b> when the engine completed an assessment but its evidence or model preconditions did not support publishing a prediction. <?= !empty($refresh)
             ? 'Reading this board generates the missing predictions for the page in view — at most the configured batch, stored ones are reused, never regenerated, and no provider request is spent.'
             : 'This read generated nothing: generation on read is off (?refresh=0 or WINDELS_FOOTBALL_GENERATE_ON_READ=false), so the Generate this page action stays the way predictions are created.' ?></p>
           <div class="stat-grid football-stat-grid">
@@ -291,7 +290,7 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
               // words the table below uses. Zero-valued clauses stay silent so
               // the line reads as a sentence, not a spreadsheet.
               $pageParts = [(int) ($pageBlock['predicted'] ?? 0) . ' with a stored prediction'];
-              if ($withheldOnPage > 0) $pageParts[] = $withheldOnPage . ' withheld (evidence below the floor)';
+              if ($withheldOnPage > 0) $pageParts[] = $withheldOnPage . ' assessed but not published';
               if ((int) ($pageBlock['frozen'] ?? 0) > 0) $pageParts[] = (int) $pageBlock['frozen'] . ' closed (kickoff already passed)';
               if ((int) ($pageBlock['deferred'] ?? 0) > 0) $pageParts[] = (int) $pageBlock['deferred'] . ' deferred to the next cycle';
               if ((int) ($pageBlock['failed'] ?? 0) > 0) $pageParts[] = (int) $pageBlock['failed'] . ' failed';
@@ -475,9 +474,25 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
                 // prediction remains visibly unavailable instead of receiving
                 // an estimated display value.
                 $rowPrediction = is_array($row['prediction'] ?? null) ? $row['prediction'] : [];
+                $hasPrediction = $rowPrediction !== [];
                 $oneXtwo = is_array($rowPrediction['probabilities'] ?? null) ? $rowPrediction['probabilities'] : [];
                 $expectedGoals = is_array($row['expectedGoals'] ?? null) ? $row['expectedGoals'] : [];
                 $category = is_array($row['category'] ?? null) ? $row['category'] : [];
+                $assessmentState = (string) ($row['assessmentState'] ?? ($hasPrediction ? 'ANALYZED' : 'AWAITING_ANALYSIS'));
+                $assessmentLabel = (string) ($row['assessmentLabel'] ?? ($hasPrediction ? 'Analysis complete' : 'Awaiting analysis'));
+                $assessmentReason = trim((string) ($row['assessmentReason'] ?? ''));
+                $assessmentTone = match ($assessmentState) {
+                    'ANALYZED' => 'b-green',
+                    'PREDICTION_WITHHELD', 'PRE_MATCH_CLOSED' => 'b-amber',
+                    'ANALYSIS_FAILED' => 'b-red',
+                    default => 'b-gray',
+                };
+                $fixtureDataState = (string) ($row['fixtureDataState'] ?? $row['dataState'] ?? \AIWorkforce\Football\DataState::UNAVAILABLE);
+                $fixtureDataLabel = match ($fixtureDataState) {
+                    \AIWorkforce\Football\DataState::AVAILABLE => 'Fixture data available',
+                    \AIWorkforce\Football\DataState::LIMITED => 'Fixture data limited',
+                    default => 'Fixture data unavailable',
+                };
                 $alternativeLabels = [];
                 foreach ((array) ($rowPrediction['alternativeScores'] ?? []) as $alternative) {
                   if (!is_array($alternative)) continue;
@@ -493,24 +508,47 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
                       <h4><a href="/football/match/<?= $rowPageId ?>"><?= crest($row['homeTeamLogo'] ?? null, 22) ?><?= e((string) ($row['homeTeam'] ?? '—')) ?> <span>vs</span> <?= crest($row['awayTeamLogo'] ?? null, 22) ?><?= e((string) ($row['awayTeam'] ?? '—')) ?></a></h4>
                     </div>
                     <div class="football-fixture__badges">
-                      <span class="badge <?= $bandClass((string) ($row['band'] ?? '')) ?>">DQ <?= (int) ($row['dataQualityScore'] ?? $row['dataQuality'] ?? 0) ?>/100</span>
-                      <span class="badge <?= $bandClass((string) ($row['fixtureDataState'] ?? 'DATA_UNAVAILABLE')) ?>">Data <?= e((string) ($row['fixtureDataState'] ?? 'DATA_UNAVAILABLE')) ?></span>
-                      <span class="badge <?= $bandClass((string) ($row['band'] ?? '')) ?>" title="<?= e((string) ($category['reason'] ?? 'A/B/C requires qualified data and the stored confidence band.')) ?>"><?= e((string) ($category['label'] ?? 'Unrated')) ?></span>
-                      <span class="badge <?= $bandClass((string) ($row['riskStatus'] ?? $row['risk']['level'] ?? '')) ?>"><?= e((string) ($row['riskStatus'] ?? $row['risk']['level'] ?? 'UNKNOWN')) ?> risk</span>
-                      <span class="badge <?= ($row['predictionStatus'] ?? '') === 'ANALYZED' ? 'b-green' : 'b-gray' ?>"><?= e((string) ($row['predictionStatus'] ?? 'NOT_ANALYZED')) ?></span>
+                      <?php if (is_numeric($row['dataQualityScore'] ?? null)): ?>
+                        <span class="badge <?= $bandClass((string) ($row['band'] ?? '')) ?>">DQ <?= (int) $row['dataQualityScore'] ?>/100 · <?= e((string) ($row['band'] ?? 'ASSESSED')) ?></span>
+                      <?php else: ?>
+                        <span class="badge b-gray">DQ pending</span>
+                      <?php endif; ?>
+                      <span class="badge <?= $bandClass($fixtureDataState) ?>" title="Stored fixture coverage state: <?= e($fixtureDataState) ?>"><?= e($fixtureDataLabel) ?></span>
+                      <?php if ($hasPrediction): ?>
+                        <span class="badge <?= $bandClass((string) ($row['band'] ?? '')) ?>" title="<?= e((string) ($category['reason'] ?? 'A/B/C requires qualified data and the stored confidence band.')) ?>"><?= e((string) ($category['label'] ?? 'Category unavailable')) ?></span>
+                        <?php $fixtureRisk = (string) ($row['riskStatus'] ?? $row['risk']['level'] ?? ''); ?>
+                        <?php if ($fixtureRisk !== ''): ?><span class="badge <?= $bandClass($fixtureRisk) ?>"><?= e($fixtureRisk) ?> risk</span><?php endif; ?>
+                      <?php endif; ?>
+                      <span class="badge <?= $assessmentTone ?>"><?= e($assessmentLabel) ?></span>
                     </div>
                   </header>
-                  <div class="football-fixture__summary">
-                    <div><span class="football-summary-label">Overview market</span><b><?= e((string) ($primary['label'] ?? $marketBlock['label'] ?? 'Match Winner')) ?></b><span><?= e((string) ($primary['selectionLabel'] ?? 'No selection')) ?></span></div>
-                    <div><span class="football-summary-label">WINDELS probability</span><b class="mono"><?= $pct($primary['probability'] ?? null) ?></b><span><?= e((string) ($primary['source'] ?? '')) ?></span></div>
-                    <div><span class="football-summary-label">Bookmaker odds</span><b class="mono"><?= $odds($primary['odds'] ?? null) ?></b><span><?= is_numeric($primary['odds'] ?? null) ? 'verified provider price' : 'UNPRICED' ?></span></div>
-                    <div><span class="football-summary-label">Potential edge</span><b class="mono <?= (float) ($primaryValue['expectedValue'] ?? -1) >= 0 ? 'up' : 'down' ?>"><?= $signedPct($primaryValue['expectedValue'] ?? null) ?></b><span><?= e((string) ($primaryValue['valueLabel'] ?? 'No value verdict')) ?></span></div>
-                    <div><span class="football-summary-label">Most likely winner</span><b><?= e((string) ($row['resultLabel'] ?? '—')) ?></b><span>most likely 1X2 outcome</span></div>
-                    <div><span class="football-summary-label">Home / draw / away</span><b class="mono"><?= $pct($oneXtwo['home'] ?? null) ?> / <?= $pct($oneXtwo['draw'] ?? null) ?> / <?= $pct($oneXtwo['away'] ?? null) ?></b><span>stored 1X2 probabilities</span></div>
-                    <div><span class="football-summary-label">Most likely score</span><b class="mono"><?= e((string) ($rowPrediction['predictedScore']['label'] ?? '—')) ?></b><span>modal scoreline</span></div>
-                    <div><span class="football-summary-label">Expected goals</span><b class="mono"><?= $dash($expectedGoals['home'] ?? null, 2) ?> – <?= $dash($expectedGoals['away'] ?? null, 2) ?></b><span><?= e((string) ($expectedGoals['method'] ?? 'DATA_UNAVAILABLE')) ?></span></div>
-                    <div><span class="football-summary-label">Alternative scorelines</span><b class="mono"><?= e($alternativeLabels === [] ? '—' : implode(' · ', array_slice($alternativeLabels, 0, 3))) ?></b><span>next most likely scores</span></div>
-                    <div><span class="football-summary-label">Confidence</span><b class="mono"><?= $dash($row['confidence'] ?? null) ?>%</b><span><?= e((string) ($row['band'] ?? '')) ?></span></div>
+                  <?php if (!$hasPrediction): ?>
+                    <div class="football-assessment-state" role="status">
+                      <span class="badge <?= $assessmentTone ?>"><?= e($assessmentLabel) ?></span>
+                      <div>
+                        <b><?= $assessmentState === 'PREDICTION_WITHHELD' ? 'The fixture was assessed, but no prediction was published.' : e($assessmentLabel . '.') ?></b>
+                        <p><?= e($assessmentReason !== '' ? $assessmentReason : 'Generate this page to calculate a data-quality assessment and, when the evidence clears the publishing floor, a prediction.') ?></p>
+                      </div>
+                    </div>
+                  <?php endif; ?>
+                  <div class="football-fixture__summary<?= $hasPrediction ? '' : ' football-fixture__summary--prices' ?>">
+                    <div><span class="football-summary-label">Overview market</span><b><?= e((string) ($primary['label'] ?? $marketBlock['label'] ?? 'Match Winner')) ?></b><span><?= e((string) ($primary['selectionLabel'] ?? ($hasPrediction ? 'No selection' : 'No quoted selection in this market'))) ?></span></div>
+                    <?php if ($hasPrediction): ?>
+                      <div><span class="football-summary-label">WINDELS probability</span><b class="mono"><?= $pct($primary['probability'] ?? null) ?></b><span><?= e((string) ($primary['source'] ?? '')) ?></span></div>
+                      <div><span class="football-summary-label">Bookmaker odds</span><b class="mono"><?= $odds($primary['odds'] ?? null) ?></b><span><?= is_numeric($primary['odds'] ?? null) ? 'verified provider price' : 'UNPRICED' ?></span></div>
+                      <div><span class="football-summary-label">Potential edge</span><b class="mono <?= (float) ($primaryValue['expectedValue'] ?? -1) >= 0 ? 'up' : 'down' ?>"><?= $signedPct($primaryValue['expectedValue'] ?? null) ?></b><span><?= e((string) ($primaryValue['valueLabel'] ?? 'No value verdict')) ?></span></div>
+                      <div><span class="football-summary-label">Most likely winner</span><b><?= e((string) ($row['resultLabel'] ?? '—')) ?></b><span>most likely 1X2 outcome</span></div>
+                      <div><span class="football-summary-label">Home / draw / away</span><b class="mono"><?= $pct($oneXtwo['home'] ?? null) ?> / <?= $pct($oneXtwo['draw'] ?? null) ?> / <?= $pct($oneXtwo['away'] ?? null) ?></b><span>stored 1X2 probabilities</span></div>
+                      <div><span class="football-summary-label">Most likely score</span><b class="mono"><?= e((string) ($rowPrediction['predictedScore']['label'] ?? '—')) ?></b><span>modal scoreline</span></div>
+                      <div><span class="football-summary-label">Expected goals</span><b class="mono"><?= $dash($expectedGoals['home'] ?? null, 2) ?> – <?= $dash($expectedGoals['away'] ?? null, 2) ?></b><span><?= e((string) ($expectedGoals['method'] ?? 'Method unavailable')) ?></span></div>
+                      <div><span class="football-summary-label">Alternative scorelines</span><b class="mono"><?= e($alternativeLabels === [] ? '—' : implode(' · ', array_slice($alternativeLabels, 0, 3))) ?></b><span>next most likely scores</span></div>
+                      <div><span class="football-summary-label">Confidence</span><b class="mono"><?= $dash($row['confidence'] ?? null) ?>%</b><span><?= e((string) ($row['band'] ?? '')) ?></span></div>
+                    <?php else: ?>
+                      <div><span class="football-summary-label">Bookmaker odds</span><b class="mono"><?= $odds($primary['odds'] ?? null) ?></b><span><?= is_numeric($primary['odds'] ?? null) ? 'verified provider price' : 'No quote in the overview market' ?></span></div>
+                      <div><span class="football-summary-label">Implied probability</span><b class="mono"><?= $pct($primary['impliedProbability'] ?? null) ?></b><span><?= is_numeric($primary['impliedProbability'] ?? null) ? 'from the quoted decimal odds' : 'Requires a bookmaker quote' ?></span></div>
+                      <div><span class="football-summary-label">Available odds</span><b class="mono"><?= $pricedSelections ?></b><span>quote<?= $pricedSelections === 1 ? '' : 's' ?> across <?= $pricedMarkets ?> market<?= $pricedMarkets === 1 ? '' : 's' ?></span></div>
+                      <div><span class="football-summary-label">Model comparison</span><b>Not scored</b><span>No WINDELS probability, category, edge or risk is invented.</span></div>
+                    <?php endif; ?>
                   </div>
                   <details class="football-odds-disclosure">
                     <summary>
@@ -540,7 +578,11 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
                               <span class="badge <?= $providerOnly ? 'b-amber' : 'b-blue' ?>"><?= $providerOnly ? 'Provider price only' : 'WINDELS modelled' ?></span>
                               <span class="badge <?= $bandClass((string) ($pricing['state'] ?? 'DATA_UNAVAILABLE')) ?>"><?= e((string) ($pricing['state'] ?? 'UNPRICED')) ?></span>
                               <?php if (!empty($pricing['priceStale'])): ?><span class="badge b-red">STALE PRICE</span><?php endif; ?>
-                              <span class="badge <?= $bandClass((string) ($candidate['riskLevel'] ?? '')) ?>"><?= e((string) ($candidate['riskLevel'] ?? 'UNKNOWN')) ?> risk</span>
+                              <?php if ($providerOnly): ?>
+                                <span class="badge b-gray">Model risk not scored</span>
+                              <?php else: ?>
+                                <span class="badge <?= $bandClass((string) ($candidate['riskLevel'] ?? '')) ?>"><?= e((string) ($candidate['riskLevel'] ?? 'Risk unavailable')) ?> risk</span>
+                              <?php endif; ?>
                             </div>
                           </header>
                           <div class="table-scroll">
@@ -596,7 +638,7 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
                       <p class="football-odds-sheet__note">Bookmaker odds are provider quotes. WINDELS fair odds are 1 ÷ model probability; expected return is shown only where a model probability and a valid price can be compared. Market margin is calculated only for a complete mutually exclusive price sheet.</p>
                     </div>
                   </details>
-                  <footer class="football-fixture__footer"><span>Match ID: <?= $rowPageId > 0 ? $rowPageId : '—' ?></span><span>Provider <b class="mono"><?= e((string) ($row['providerCode'] ?? '—')) ?></b></span><span>Latest odds <b class="mono"><?= e($kickoff($latestOddsAt, 'Y-m-d H:i')) ?></b></span><a href="/football/match/<?= $fixtureId ?>">Open full match analysis →</a></footer>
+                  <footer class="football-fixture__footer"><span>Match ID: <?= $rowPageId > 0 ? $rowPageId : '—' ?></span><span>Provider <b class="mono"><?= e((string) ($row['providerCode'] ?? '—')) ?></b></span><span>Latest odds <b class="mono"><?= $latestOddsAt !== null ? e($kickoff($latestOddsAt, 'Y-m-d H:i')) : 'No stored quote' ?></b></span><a href="/football/match/<?= $fixtureId ?>">Open full match analysis →</a></footer>
                 </article>
               <?php endforeach; ?>
             </div>

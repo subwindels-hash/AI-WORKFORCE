@@ -179,6 +179,14 @@ interface FootballRepository
     public function saveFixtureStatistics(int $fixtureId, int $providerId, string $kind, array $payload, array $coverage = []): array;
     /** @return array<string,mixed>|null */
     public function findFixtureStatistics(int $fixtureId, ?string $kind = null): ?array;
+    /**
+     * Batched fixture-statistics read, keyed by fixture id. When several
+     * providers have a row for the same fixture, the newest stored reading wins.
+     *
+     * @param list<int> $fixtureIds
+     * @return array<int,array<string,mixed>>
+     */
+    public function listFixtureStatisticsFor(array $fixtureIds, ?string $kind = null): array;
     /** @return array<string,mixed> */
     public function saveHeadToHead(int $providerId, array $row): array;
     /** @return array<string,mixed>|null */
