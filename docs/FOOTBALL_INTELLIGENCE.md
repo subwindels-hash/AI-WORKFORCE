@@ -1106,3 +1106,15 @@ cannot read must be dropped with a note rather than returned as an empty feed, a
 sync or board rebuild given an unreadable date refuses instead of quietly doing
 something to a different day — which, for a refresh, means billing quota for a day
 nobody asked for.
+
+## Outcome categories
+
+Published predictions use outcome-based categories: **A — Home Advantage** when
+home win is the clear strongest outcome, **B — Balanced / Competitive Match**
+when the home/away probabilities are close or draw probability is significant,
+and **C — Away Advantage** when away win is the clear strongest outcome. Admins
+configure the competitive margin and significant-draw threshold under **Admin →
+System Settings → Football**. The defaults are 8 and 30 percentage points,
+respectively. Predictions withheld by the data-quality gate remain Unrated.
+The category is stored in each prediction's immutable feature snapshot so later
+threshold changes do not rewrite historical forecasts.

@@ -9,6 +9,8 @@ $footballManual = (string) ($football['football_manual_provider'] ?? '');
 // prediction services; normalizing here only keeps a malformed stored value
 // from being presented as a valid setting.
 $footballBatchSize = max(1, min(50, (int) ($football['football_analysis_batch_size'] ?? 50)));
+$footballBalancedGap = max(0, min(100, (float) ($football['football_category_balanced_gap_pp'] ?? 8)));
+$footballDrawSignificant = max(0, min(100, (float) ($football['football_category_draw_significant_pp'] ?? 30)));
 $security = $set['security'] ?? [];
 $accounts = $set['accounts'] ?? [];
 $seo = $set['seo'] ?? [];
@@ -92,6 +94,14 @@ $signupWarnings = is_array($signupWarnings ?? null) ? $signupWarnings : [];
         <small class="dim">Maximum stored fixtures evaluated in one cycle. Use 10, 20, 50, or another whole number from 1–50. Fewer fixtures with sufficient provider data produce fewer predictions; the system never fills a batch with synthetic matches.</small>
       </label>
       <datalist id="football-batch-sizes"><option value="10"><option value="20"><option value="50"></datalist>
+      <label>Category B competitive margin (percentage points)
+        <input type="number" name="football_category_balanced_gap_pp" min="0" max="100" step="0.5" value="<?= e((string) $footballBalancedGap) ?>" required>
+        <small class="dim">Classify as B when home and away win probabilities differ by no more than this margin.</small>
+      </label>
+      <label>Category B significant draw probability (%)
+        <input type="number" name="football_category_draw_significant_pp" min="0" max="100" step="0.5" value="<?= e((string) $footballDrawSignificant) ?>" required>
+        <small class="dim">Classify as B when draw probability reaches this threshold. Otherwise the strongest home/away outcome becomes A/C.</small>
+      </label>
       <button class="btn primary" type="submit">Save football settings</button>
     </form>
   </div>

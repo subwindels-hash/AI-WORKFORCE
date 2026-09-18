@@ -371,6 +371,7 @@ class Platform
             if (!$model->db->table_exists('platform_settings')) return [];
             $query = $model->db->where_in('k', [
                 'football_provider_mode', 'football_manual_provider', 'football_analysis_batch_size',
+                'football_category_balanced_gap_pp', 'football_category_draw_significant_pp',
             ])->get('platform_settings');
             $rows = $query === false ? [] : $query->result_array();
         } catch (\Throwable $_) {
@@ -387,6 +388,12 @@ class Platform
         }
         if (array_key_exists('football_analysis_batch_size', $byKey)) {
             $out['WINDELS_FOOTBALL_ANALYSIS_BATCH_SIZE'] = $byKey['football_analysis_batch_size'];
+        }
+        if (array_key_exists('football_category_balanced_gap_pp', $byKey)) {
+            $out['WINDELS_FOOTBALL_CATEGORY_BALANCED_GAP_PP'] = $byKey['football_category_balanced_gap_pp'];
+        }
+        if (array_key_exists('football_category_draw_significant_pp', $byKey)) {
+            $out['WINDELS_FOOTBALL_CATEGORY_DRAW_SIGNIFICANT_PP'] = $byKey['football_category_draw_significant_pp'];
         }
         return $out;
     }

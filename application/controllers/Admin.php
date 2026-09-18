@@ -1107,6 +1107,10 @@ class Admin extends App_Controller
             // make a scheduled cycle exceed fifty stored fixtures.
             $batch = (int) ($values['football_analysis_batch_size'] ?? 50);
             $values['football_analysis_batch_size'] = (string) max(1, min(\AIWorkforce\Football\MatchFeed::MAX_PAGE_SIZE, $batch));
+            $gap = (float) ($values['football_category_balanced_gap_pp'] ?? 8);
+            $draw = (float) ($values['football_category_draw_significant_pp'] ?? 30);
+            $values['football_category_balanced_gap_pp'] = (string) max(0, min(100, $gap));
+            $values['football_category_draw_significant_pp'] = (string) max(0, min(100, $draw));
         }
         $logged = array_keys($values);
         if ($category === 'signup') {

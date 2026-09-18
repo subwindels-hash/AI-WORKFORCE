@@ -149,7 +149,7 @@ final class OutcomePredictor
             // The configured A/B/C mapping is emitted with the freshly
             // calculated result as well as being reconstructed from the stored
             // immutable snapshot on later reads.
-            'category' => $this->config->predictionCategory($confidence, $band),
+            'category' => $this->config->predictionCategory($calibrated['probabilities'], $band),
             'tierThresholds' => $tiers,
             'highConfidenceLabel' => $highConfidenceAllowed ? 'HIGH_CONFIDENCE' : null,
             'dataQuality' => ['score' => $score, 'status' => $band, 'band' => $band, 'components' => $quality['components'] ?? []],
