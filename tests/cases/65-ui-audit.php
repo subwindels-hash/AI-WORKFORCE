@@ -125,10 +125,12 @@ test('homepage CTAs and site footer links all point at routed destinations', fun
     }
     $footer = file_get_contents(FCPATH . 'application/views/site/layout/footer.php');
     assert_false(str_contains($footer, 'href="#"'), 'footer must not contain dead href="#" links');
+    assert_contains('href="/reviews"', $footer, 'footer exposes the public reviews page');
     preg_match_all('#href="([^"]+)"#', $footer, $fm);
     $fm[1] = array_values(array_filter($fm[1], fn ($h) => $h !== '#'));
     assert_true(count($fm[1]) > 4, 'footer must expose its links');
     foreach (array_unique($fm[1]) as $href) {
+        if (str_contains($href, '<?')) continue; // deployment-configured links are validated by the view before rendering
         if (preg_match('#^(https?://|mailto:|tel:)#', $href)) continue; // real external destinations (web, email, phone dialer) are fine
         $segments = trim($href, '/');
         assert_true(
@@ -136,6 +138,30 @@ test('homepage CTAs and site footer links all point at routed destinations', fun
             "footer link '$href' must have a route"
         );
     }
+});
+
+test('public footer social buttons use configured official HTTPS channels', function () {
+    $footer = file_get_contents(FCPATH . 'application/views/site/layout/footer.php');
+    $env = file_get_contents(FCPATH . '.env.example');
+    $channels = [
+        'FACEBOOK' => 'Facebook',
+        'INSTAGRAM' => 'Instagram',
+        'X' => 'X',
+        'LINKEDIN' => 'LinkedIn',
+        'TELEGRAM' => 'Telegram',
+        'WHATSAPP' => 'WhatsApp',
+        'YOUTUBE' => 'YouTube',
+    ];
+    foreach ($channels as $key => $label) {
+        assert_contains("VP_SOCIAL_{$key}", $footer, "footer reads the {$label} channel setting");
+        assert_contains("VP_SOCIAL_{$key}=", $env, ".env.example documents the {$label} channel setting");
+        assert_contains("'label' => '{$label}'", $footer, "footer includes the {$label} button");
+    }
+    assert_contains("\$scheme !== 'https'", $footer, 'non-HTTPS social destinations stay hidden');
+    assert_contains('FILTER_VALIDATE_URL', $footer, 'malformed social destinations stay hidden');
+    assert_contains('target="_blank"', $footer, 'social destinations open separately');
+    assert_contains('rel="noopener noreferrer"', $footer, 'new-tab social links cannot control the opener');
+    assert_contains('aria-label="Follow WINDELS on', $footer, 'social buttons carry accessible names');
 });
 
 test('auth pages are routed and protected-dashboard routes redirect to login', function () {
