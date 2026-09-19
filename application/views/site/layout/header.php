@@ -50,7 +50,7 @@ $nav = [
 <meta name="twitter:card" content="summary">
 <link rel="icon" type="image/png" href="/assets/images/windels-mark.png">
 <link rel="apple-touch-icon" href="/assets/images/windels-mark.png">
-<link rel="stylesheet" href="/assets/css/public.css">
+<link rel="stylesheet" href="<?= e(asset_url('assets/css/public.css')) ?>">
 </head>
 <body class="public">
 <?php $this->load->view('partials/announcement_bar'); ?>
