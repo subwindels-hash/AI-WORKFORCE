@@ -238,6 +238,48 @@ test('footer social icons are official brand marks at one small size', function 
     assert_false(str_contains($css, 'stroke-width: 1.8'), 'social marks no longer rely on stroke drawing');
 });
 
+test('footer social row is icon-only and laid out landscape', function () {
+    $footer = file_get_contents(FCPATH . 'application/views/site/layout/footer.php');
+    $css = file_get_contents(FCPATH . 'assets/css/public.css');
+
+    // 1. No visible channel name. The button markup must be the glyph alone —
+    //    the label used to print next to every mark, which made seven wide
+    //    name pills that wrapped into a tall portrait block.
+    assert_false(
+        (bool) preg_match('#<a class="pub-social-button.*?</a>#s', $footer, $m) && str_contains($m[0], '<span>'),
+        'the social button renders the mark only, with no channel name text'
+    );
+    assert_false(
+        str_contains($footer, "<span><?= e(\$channel['label']) ?></span>"),
+        'the printed channel name must not come back'
+    );
+    // The name is still exposed to assistive tech and on hover.
+    assert_contains('aria-label="Follow WINDELS on <?= e($channel[\'label\']) ?>"', $footer, 'the accessible name survives the text removal');
+    assert_contains('title="<?= e($channel[\'label\']) ?>"', $footer, 'hovering a mark still names the channel');
+
+    // 2. Landscape: the marks run in a horizontal row, not a stacked column.
+    //    `.pub-foot a { display: block }` would otherwise stack them.
+    assert_true(
+        (bool) preg_match('/^\.pub-social-links \{[^}]*flex-direction: row;[^}]*\}/m', $css),
+        'the social row is an explicit horizontal (landscape) flex row'
+    );
+    assert_true(
+        (bool) preg_match('/^\.pub-foot \.pub-social-button \{[^}]*display: inline-flex;[^}]*\}/m', $css),
+        'the button beats the footer block-link rule that would stack the marks'
+    );
+    // 3. Equal square-ish tap targets, so an icon-only button stays a circle
+    //    instead of collapsing to the width of its 16px glyph.
+    assert_true(
+        (bool) preg_match('/^\.pub-foot \.pub-social-button \{[^}]*width: 40px; height: 40px;[^}]*\}/m', $css),
+        'every mark sits in the same 40x40 button box'
+    );
+    // 4. Any stray label markup is visually hidden rather than painted.
+    assert_true(
+        (bool) preg_match('/^\.pub-foot \.pub-social-button span \{[^}]*clip-path: inset\(50%\);[^}]*\}/m', $css),
+        'label text inside a social button is visually hidden, not displayed'
+    );
+});
+
 test('the public stylesheet is cache-busted so a corrected icon size reaches users', function () {
     // .htaccess serves css with `max-age=604800`. Without a changing URL a
     // returning visitor keeps the old public.css for up to a week and still
