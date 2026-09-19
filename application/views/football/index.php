@@ -268,6 +268,20 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         $unanalyzed = max(0, (int) ($summary['fixtures'] ?? 0) - (int) ($summary['analyzed'] ?? 0));
         $answeredOnPage = min($unanalyzed, $withheldOnPage + (int) ($pageBlock['frozen'] ?? 0) + (int) ($pageBlock['failed'] ?? 0));
         $awaitingAnalysis = max(0, $unanalyzed - $answeredOnPage);
+        /* The date-wide durable split of the unanalyzed fixtures, from
+           dayStatus: past kickoff or void, withheld by the quality gate, and
+           genuinely awaiting an assessment. Preferred over the page-only
+           approximation above — the tiles describe the whole selection, so
+           their exclusions are named for the whole selection too ("4 past
+           kickoff"), not inferred from the page in view. Each unanalyzed
+           fixture is exactly one of the three, so the numbers always add up:
+           analyzed + withheld + closed + awaiting = fixtures found. */
+        $dayClosed = (int) (($dayStatus ?? [])['closed'] ?? 0);
+        $dayWithheld = (int) (($dayStatus ?? [])['withheld'] ?? 0);
+        $dayAwaiting = $dayStatus !== null ? (int) ($dayStatus['awaiting'] ?? 0) : $awaitingAnalysis;
+        $awaitExclusions = [];
+        if ($dayClosed > 0) $awaitExclusions[] = $dayClosed . ' past kickoff or void';
+        if ($dayWithheld > 0) $awaitExclusions[] = $dayWithheld . ' withheld by the quality gate';
       ?>
       <section class="panel football-section" id="football-overview" aria-labelledby="day-overview-heading">
         <div class="football-section__heading">
@@ -290,11 +304,12 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
                  speak for themselves: a populated overview IS the information.
                  Each state names which absence the tiles are in and the action
                  that fills them — no count is invented to look busy. */ ?>
-          <?php if ($dayStatus !== null && in_array((string) ($dayStatus['state'] ?? ''), ['NO_PROVIDER', 'NEVER_SYNCED', 'SYNCED_NO_FIXTURES', 'GENERATION_OFF', 'ANALYZED_NONE'], true)): ?>
+          <?php if ($dayStatus !== null && in_array((string) ($dayStatus['state'] ?? ''), ['NO_PROVIDER', 'NEVER_SYNCED', 'SYNCED_NO_FIXTURES', 'GENERATION_OFF', 'ANALYZED_NONE', 'ALL_CLOSED'], true)): ?>
             <?php
               [$dayBadgeClass, $dayBadgeLabel] = match ((string) $dayStatus['state']) {
                   'NO_PROVIDER' => ['b-amber', 'FIXTURES UNAVAILABLE'],
                   'ANALYZED_NONE' => ['b-amber', 'NO PREDICTION PUBLISHED'],
+                  'ALL_CLOSED' => ['b-gray', 'ALL FIXTURES PAST KICKOFF'],
                   'SYNCED_NO_FIXTURES' => ['b-gray', 'NO FIXTURES FOR THIS DATE'],
                   'GENERATION_OFF' => ['b-gray', 'AWAITING GENERATION'],
                   default => ['b-gray', 'FIXTURES SWEEP PENDING'],
@@ -307,13 +322,22 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
           <?php endif; ?>
           <div class="stat-grid football-stat-grid">
             <div class="stat"><div class="k">Fixtures found</div><div class="v"><?= (int) ($summary['fixtures'] ?? 0) ?></div><div class="trend">stored for this date<?= $selectionName !== '' ? ' · ' . e($selectionName) : '' ?></div></div>
-            <div class="stat"><div class="k">Analyzed</div><div class="v"><?= (int) ($summary['analyzed'] ?? 0) ?></div><div class="trend">prediction rows saved</div></div>
+            <div class="stat"><div class="k">Analyzed</div><div class="v"><?= (int) ($summary['analyzed'] ?? 0) ?></div><div class="trend"><?php
+              // When no row exists, the trend says WHY: the durable split of
+              // the unanalyzed fixtures, in the same words the strip uses.
+              if ((int) ($summary['analyzed'] ?? 0) === 0 && ($dayClosed > 0 || $dayWithheld > 0)) {
+                  $analyzedWhy = [];
+                  if ($dayClosed > 0) $analyzedWhy[] = $dayClosed . ' past kickoff or void';
+                  if ($dayWithheld > 0) $analyzedWhy[] = $dayWithheld . ' withheld by the quality gate';
+                  echo 'no prediction rows · ' . implode(' · ', $analyzedWhy);
+              } else {
+                  echo 'prediction rows saved';
+              }
+            ?></div></div>
             <div class="stat"><div class="k">Qualified</div><div class="v up"><?= (int) ($summary['qualified'] ?? 0) ?></div><div class="trend">verified data quality</div></div>
             <div class="stat"><div class="k">Limited evidence</div><div class="v warn"><?= (int) ($summary['limited'] ?? 0) ?></div><div class="trend">usable with caution</div></div>
-            <div class="stat"><div class="k">Withheld</div><div class="v down"><?= $withheldOnPage ?></div><div class="trend">evidence below the floor · this page</div></div>
-            <div class="stat"><div class="k">Awaiting analysis</div><div class="v"><?= $awaitingAnalysis ?></div><div class="trend"><?= $answeredOnPage > 0
-              ? 'no prediction row yet · excludes ' . $answeredOnPage . ' answered on this page'
-              : 'no prediction row yet · whole selection' ?></div></div>
+            <div class="stat"><div class="k">Withheld</div><div class="v down"><?= $dayStatus !== null ? $dayWithheld : $withheldOnPage ?></div><div class="trend">evidence below the floor<?= $dayStatus === null ? ' · this page' : '' ?></div></div>
+            <div class="stat"><div class="k">Awaiting analysis</div><div class="v"><?= $dayAwaiting ?></div><div class="trend">no prediction row yet · <?= $awaitExclusions === [] ? 'whole selection' : implode(' · ', $awaitExclusions) ?></div></div>
           </div>
           <?php if ($pagination !== []): ?>
             <div class="football-section__divider"></div>

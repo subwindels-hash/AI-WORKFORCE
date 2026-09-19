@@ -349,8 +349,18 @@ final class FootballIntelligence
      *                           (?refresh=0 / WINDELS_FOOTBALL_GENERATE_ON_READ=false)
      *  - ANALYZED_NONE        — this read ran the engine and nothing was
      *                           published: withheld / closed / failed — the
-     *                           page block and the rows carry the reasons
+     *                           split and the rows carry the reasons
+     *  - ALL_CLOSED           — every stored fixture for the date is past
+     *                           kickoff / postponed / cancelled: no pre-match
+     *                           prediction can ever be created; nothing is
+     *                           back-filled (a historical board)
      *  - POPULATED            — the counts speak for themselves
+     *
+     * It also publishes the date-wide durable split of the unanalyzed
+     * fixtures — `closed` (past kickoff or void, by the engine's own rule),
+     * `withheld` (a stored assessment for the current model) and `awaiting`
+     * (open, no assessment) — so the Day overview tiles can name their
+     * exclusions instead of approximating them from one page.
      *
      * Purely read-only: the board payload it describes plus the last recorded
      * FIXTURES sync run. No provider request is ever made.
@@ -372,10 +382,62 @@ final class FootballIntelligence
         $sweepStamp = substr($sweepAt, 11, 5);
         $sweepRequests = (int) ($lastRun['requests_made'] ?? 0);
 
+        // The date-wide durable split of the unanalyzed fixtures — the same
+        // question the board's `page` block answers for the page in view,
+        // answered for the WHOLE selection so the Day overview tiles can name
+        // their exclusions ("4 past kickoff") instead of approximating them
+        // from one page ("excludes 4 answered on this page"). Each unanalyzed
+        // fixture is exactly one of: withheld (a stored assessment for the
+        // current model), closed (the engine's own rule: kickoff passed or the
+        // fixture is postponed/cancelled), or awaiting (open, no assessment).
+        $closed = 0; $withheld = 0; $awaiting = 0;
+        $filter = ['date' => $date];
+        $selection = is_array(($board['filters'] ?? [])['competition'] ?? null) ? $board['filters']['competition'] : [];
+        if (is_array($selection['externalIds'] ?? null)) $filter['competitionExternalIds'] = $selection['externalIds'];
+        elseif (isset($selection['externalId'])) $filter['competitionExternalId'] = $selection['externalId'];
+        if ($fixtures > 0) {
+            $rows = $this->repo->listFixtures($filter, 500);
+            $modelVersionId = (int) ($this->models()->usable()['model']['id'] ?? 0);
+            $predicted = [];
+            try {
+                foreach ($this->repo->listPredictions($filter + ['kind' => PredictionService::KIND_PRE_MATCH], 500) as $row) {
+                    $predicted[(int) ($row['fixture_id'] ?? 0)] = true;
+                }
+            } catch (\Throwable $e) { $predicted = []; }
+            $assessed = [];
+            try {
+                foreach ($this->repo->listFixtureStatisticsFor(
+                    array_map(static fn(array $row): int => (int) ($row['id'] ?? 0), $rows),
+                    PredictionService::ASSESSMENT_KIND
+                ) as $fixtureId => $row) {
+                    $payload = is_array($row['payload'] ?? null) ? $row['payload'] : [];
+                    if ($payload !== [] && (string) ($payload['status'] ?? '') === 'ASSESSED_NO_PREDICTION'
+                        && (int) ($payload['modelVersionId'] ?? 0) === $modelVersionId) $assessed[(int) $fixtureId] = true;
+                }
+            } catch (\Throwable $e) { $assessed = []; }
+            foreach ($rows as $row) {
+                $fixtureId = (int) ($row['id'] ?? 0);
+                if (isset($predicted[$fixtureId])) continue;
+                if (isset($assessed[$fixtureId])) { $withheld++; continue; }
+                if ($this->predictions()->refusal($row) !== null) { $closed++; continue; }
+                $awaiting++;
+            }
+        }
+        $pageFailed = (int) ((is_array($board['page'] ?? null) ? $board['page'] : [])['failed'] ?? 0);
+        // The split sentence every empty-tile state shares: what the unanalyzed
+        // fixtures actually are, in the words the tiles use.
+        $split = [];
+        if ($closed > 0) $split[] = $closed . ' past kickoff or void';
+        if ($withheld > 0) $split[] = $withheld . ' withheld by the data-quality gate';
+        if ($awaiting > 0) $split[] = $awaiting . ' still without an assessment';
+        if ($pageFailed > 0) $split[] = $pageFailed . ' generation attempt(s) failed on this page';
+        $splitSentence = $split === [] ? 'none are awaiting anything' : implode(', ', $split);
+
         $state = match (true) {
             !$configured => 'NO_PROVIDER',
             $fixtures === 0 && $lastRun === null => 'NEVER_SYNCED',
             $fixtures === 0 => 'SYNCED_NO_FIXTURES',
+            $analyzed === 0 && $closed === $fixtures && $fixtures > 0 => 'ALL_CLOSED',
             $analyzed === 0 && !$refresh => 'GENERATION_OFF',
             $analyzed === 0 => 'ANALYZED_NONE',
             default => 'POPULATED',
@@ -385,10 +447,15 @@ final class FootballIntelligence
             'NEVER_SYNCED' => 'The connected feed\'s fixtures sweep has not stored anything yet. It runs automatically on the football fixtures job (every 6 hours while a provider is connected), or on demand via Sync this date — that sweep is what fills "Fixtures found".',
             'SYNCED_NO_FIXTURES' => 'The fixtures sweep last ran at ' . ($sweepStamp !== '' ? $sweepStamp . ' UTC' : 'an unknown time')
                 . ' (' . $sweepRequests . ' provider request(s)) and no fixture is stored for this date: either the feed returned none for it — an empty match day, or a league package that does not cover these competitions — or this date was outside that sweep\'s window. Sync this date asks the feed for exactly this day. No fixture is invented to fill the board.',
-            'GENERATION_OFF' => $fixtures . ' fixture(s) are stored for this date but no prediction row exists yet. Generation on read is off (?refresh=0 or WINDELS_FOOTBALL_GENERATE_ON_READ=false), so the Generate this page action is how "Analyzed" fills — at most 50 new predictions per request, stored ones reused.',
-            'ANALYZED_NONE' => $fixtures . ' fixture(s) are stored and this read ran the engine for the page in view, but no prediction was published: every fixture was withheld by the data-quality gate, closed (kickoff already passed) or failed. The Withheld tile and each fixture row below carry the specific reason.',
+            'ALL_CLOSED' => 'All ' . $fixtures . ' fixture(s) stored for this date are past kickoff, postponed or cancelled, so no pre-match prediction can be created for any of them — Analyzed stays 0 and nothing is back-filled. Matches still in play carry live estimates on the Live match panel; finished ones are graded by the settlement pipeline once their results are stored. Sync this date re-reads the feed\'s current statuses, and the day navigation moves to upcoming dates.',
+            'GENERATION_OFF' => $fixtures . ' fixture(s) are stored for this date but no prediction row exists yet (' . $splitSentence
+                . '). Generation on read is off (?refresh=0 or WINDELS_FOOTBALL_GENERATE_ON_READ=false), so the Generate this page action is how "Analyzed" fills — at most 50 new predictions per request, stored ones reused.'
+                . ($closed > 0 ? ' The past-kickoff ones can never receive one.' : ''),
+            'ANALYZED_NONE' => $fixtures . ' fixture(s) are stored and this read ran the engine for the page in view, but no prediction was published: ' . $splitSentence
+                . '. The Withheld tile and each fixture row below carry the specific reason.',
             default => $fixtures . ' fixture(s) stored · ' . $analyzed . ' analyzed — ' . $qualified . ' qualified, '
-                . $limited . ' on limited evidence — for this selection. The counts below describe exactly those rows.',
+                . $limited . ' on limited evidence' . ($awaiting > 0 ? ' · ' . $awaiting . ' awaiting analysis' : '')
+                . ' — for this selection. The counts below describe exactly those rows.',
         };
 
         return [
@@ -400,6 +467,11 @@ final class FootballIntelligence
             'analyzed' => $analyzed,
             'qualified' => $qualified,
             'limited' => $limited,
+            // The date-wide durable split of the unanalyzed fixtures.
+            'closed' => $closed,
+            'withheld' => $withheld,
+            'awaiting' => $awaiting,
+            'pageFailed' => $pageFailed,
             'lastFixturesSync' => $lastRun === null ? null : [
                 'status' => (string) ($lastRun['status'] ?? ''),
                 'startedAt' => $sweepAt,

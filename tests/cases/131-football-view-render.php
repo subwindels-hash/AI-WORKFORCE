@@ -270,7 +270,7 @@ test('football: the Day overview prints the full date, the selection, both scope
     foreach (['Fixtures found', 'Analyzed', 'Qualified', 'Limited evidence', 'Withheld', 'Awaiting analysis'] as $tile) {
         assert_true(str_contains($overview[0], $tile), 'the ' . $tile . ' tile renders');
     }
-    assert_true(str_contains($overview[0], 'evidence below the floor · this page'), 'withheld is labeled with its page scope');
+    assert_true(str_contains($overview[0], 'evidence below the floor'), 'withheld is labeled with the gate that withheld it');
     assert_true(str_contains($overview[0], 'no prediction row yet · whole selection'), 'awaiting analysis is labeled with its selection scope');
     assert_true(str_contains($overview[0], '3 with a stored prediction'), 'the page line says how many fixtures on the page are predicted');
     assert_true(str_contains($overview[0], 'Reading this board generates the missing predictions for the page in view'),
@@ -546,22 +546,100 @@ test('football: with no feed connected the overview names the connection, not th
 });
 
 test('football: a day the engine ran on but published nothing says that, not "awaiting"', function () {
-    // Kickoff long past, match still SCHEDULED: the engine classifies the slot
-    // closed and publishes nothing — the overview must own that this read ran
-    // and nothing was published, instead of promising a sweep that happened.
-    $day = gmdate('Y-m-d', time() - 7200);
+    // A mixed empty day: one fixture the quality gate refused (thin Unknown
+    // Cup evidence) and one whose kickoff has passed. The overview must own
+    // that this read ran and nothing was published — naming the split, not
+    // promising a sweep that happened.
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    [$repo, , $module] = fx_fb_harness();
+    $providerId = (int) ($repo->listProviders()[0]['id'] ?? 1);
+    $repo->saveFixture($providerId, [
+        'externalId' => 'fx-day-thin', 'competition' => 'Unknown Cup', 'leagueId' => '99', 'season' => '2026',
+        'kickoff' => $day . 'T12:00:00+00:00', 'status' => 'SCHEDULED', 'dataState' => 'AVAILABLE',
+        'homeTeam' => 'Home United', 'awayTeam' => 'Away Rovers', 'homeTeamId' => '900', 'awayTeamId' => '901',
+    ]);
+    // POSTPONED is closed by the engine's rule, independent of the clock —
+    // the test stays deterministic at any hour it runs.
+    $repo->saveFixture($providerId, [
+        'externalId' => 'fx-day-closed', 'competition' => 'Premier League', 'leagueId' => '39', 'season' => '2026',
+        'kickoff' => $day . 'T15:00:00+00:00', 'status' => 'POSTPONED',
+        'homeTeam' => 'Leeds', 'awayTeam' => 'Leicester', 'homeTeamId' => '10', 'awayTeamId' => '20',
+    ]);
+    $dashboard = $module->dashboard($day, true, 1, 50, []);
+    $status = $dashboard['dayStatus'];
+    assert_equals('ANALYZED_NONE', $status['state']);
+    assert_equals(2, $status['fixtures'], 'the fixtures are stored — it is the predictions that are absent');
+    assert_equals(1, $status['withheld'], 'one was assessed and refused');
+    assert_equals(1, $status['closed'], 'one is past kickoff');
+    assert_equals(0, $status['awaiting'], 'none is merely waiting: each has a durable answer');
+    assert_true(str_contains($status['detail'], 'no prediction was published'), 'the state says what actually happened');
+    assert_true(str_contains($status['detail'], '1 past kickoff or void, 1 withheld by the data-quality gate'),
+        'and names the split in the tiles\' own words');
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard, 'refresh' => true]));
+    assert_true(str_contains($render['html'], 'NO PREDICTION PUBLISHED'), 'the badge renders');
+    assert_true(str_contains($render['html'], 'Withheld'), 'and the Withheld tile it references still renders');
+    assert_true(str_contains($render['html'], 'no prediction rows · 1 past kickoff or void · 1 withheld by the quality gate'),
+        'the Analyzed tile names why it is zero');
+    assert_true(str_contains($render['html'], 'no prediction row yet · 1 past kickoff or void · 1 withheld by the quality gate'),
+        'and the Awaiting tile names its exclusions instead of "answered on this page"');
+});
+
+test('football: a day where every stored fixture is past kickoff says so on the tiles themselves', function () {
+    // The state the live board shows as "4 found / 0 / 0 / 0 / 0 / excludes 4
+    // answered on this page": every stored fixture has kicked off, so no
+    // pre-match prediction can ever be created. The overview must say THAT,
+    // not five zeros with a cryptic exclusion.
+    // POSTPONED statuses keep the scenario deterministic at any hour: closed
+    // by the engine's rule, not by where the clock happens to be.
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
     [, , $module] = fx_fb_harness([
-        fx_fb_row('fx-day-closed', $day . 'T00:15:00+00:00', 'Leeds', 'Leicester', '10', '20'),
+        fx_fb_row('fx-allclosed-1', $day . 'T15:00:00+00:00', 'Leeds', 'Leicester', '10', '20', 'POSTPONED'),
+        fx_fb_row('fx-allclosed-2', $day . 'T17:00:00+00:00', 'Wolves', 'Watford', '11', '21', 'POSTPONED'),
     ]);
     fx_fb_sync_today($module, $day);
     $dashboard = $module->dashboard($day, true, 1, 50, []);
     $status = $dashboard['dayStatus'];
-    assert_equals('ANALYZED_NONE', $status['state']);
-    assert_equals(1, $status['fixtures'], 'the fixture is stored — it is the prediction that is absent');
-    assert_true(str_contains($status['detail'], 'no prediction was published'), 'the state says what actually happened');
+    assert_equals('ALL_CLOSED', $status['state']);
+    assert_equals(2, $status['fixtures']);
+    assert_equals(2, $status['closed'], 'both fixtures are past kickoff');
+    assert_equals(0, $status['awaiting'], 'nothing awaits: the window is closed for all of them');
+    assert_true(str_contains($status['detail'], 'no pre-match prediction can be created for any of them'),
+        'the state says the board is historical');
+    assert_true(str_contains($status['detail'], 'nothing is back-filled'), 'and that nothing is invented after the fact');
     $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard, 'refresh' => true]));
-    assert_true(str_contains($render['html'], 'NO PREDICTION PUBLISHED'), 'the badge renders');
-    assert_true(str_contains($render['html'], 'Withheld'), 'and the Withheld tile it references still renders');
+    assert_true(str_contains($render['html'], 'ALL FIXTURES PAST KICKOFF'), 'the badge renders');
+    assert_true(str_contains($render['html'], 'no prediction rows · 2 past kickoff or void'),
+        'the Analyzed tile explains its own zero');
+    assert_true(str_contains($render['html'], 'no prediction row yet · 2 past kickoff or void'),
+        'and the Awaiting tile explains its zero with the same words');
+    assert_true(!str_contains($render['html'], 'answered on this page'), 'the cryptic page-scoped exclusion is gone');
+    assert_true(str_contains($render['html'], '2 closed (kickoff already passed)'), 'the page line keeps its own count');
+});
+
+test('football: a partly analyzed day reports the remainder as awaiting analysis', function () {
+    // One predicted, one still open without an assessment: POPULATED, with
+    // the remainder named on the tile and in the detail — the Awaiting count
+    // is the true date-wide figure, not a page approximation.
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    [$repo, , $module] = fx_fb_harness([
+        fx_fb_row('fx-part-predicted', $day . 'T15:00:00+00:00', 'Manchester City', 'Everton', '10', '20'),
+        fx_fb_row('fx-part-awaiting', $day . 'T17:30:00+00:00', 'Brighton', 'Burnley', '30', '40'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $fixtureId = fx_131_fixture_id($repo, 'fx-part-predicted');
+    $module->predictions()->predictFixture($fixtureId);
+    $dashboard = $module->dashboard($day, false, 1, 50, []);
+    $status = $dashboard['dayStatus'];
+    assert_equals('POPULATED', $status['state']);
+    assert_equals(1, $status['analyzed']);
+    assert_equals(1, $status['awaiting'], 'the open unanalyzed fixture is the remainder');
+    assert_true(str_contains($status['detail'], '1 awaiting analysis'), 'the detail carries the remainder');
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard]));
+    assert_true(preg_match('/Awaiting analysis<\/div><div class="v">1<\/div>/', $render['html']) === 1,
+        'the Awaiting tile shows the true date-wide count');
+    assert_true(str_contains($render['html'], 'no prediction row yet · whole selection'),
+        'with no durable exclusions the label stays whole-selection');
+    assert_true(!str_contains($render['html'], 'football-day-status'), 'a populated day carries no strip');
 });
 
 test('football: a swept day the feed had nothing for says that, and offers the day-scoped sync', function () {

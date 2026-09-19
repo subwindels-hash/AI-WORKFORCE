@@ -291,11 +291,26 @@ rows are absent the board states *which* absence it is in
 the last recorded `FIXTURES` sync run): no feed connected (`NO_PROVIDER`), the
 fixtures sweep has not run yet (`NEVER_SYNCED` — it runs on the `fixtures` job
 every 6 hours or via **Sync this date**), the sweep ran and the feed returned
-no fixture for the date (`SYNCED_NO_FIXTURES`), fixtures are stored but
-generation did not run on this read (`GENERATION_OFF` — **Generate this
-page** is the action), or this read ran the engine and nothing was published
+no fixture for the date (`SYNCED_NO_FIXTURES`), every stored fixture is past
+kickoff / postponed / cancelled (`ALL_CLOSED` — no pre-match prediction can
+ever be created; nothing is back-filled, in-play matches belong to the live
+panel and finished ones to settlement), fixtures are stored but generation
+did not run on this read (`GENERATION_OFF` — **Generate this page** is the
+action), or this read ran the engine and nothing was published
 (`ANALYZED_NONE` — withheld/closed/failed, with the reasons on the rows).
 A populated overview renders no strip: six real counts are the information.
+
+`dayStatus()` also publishes the **date-wide durable split** of the
+unanalyzed fixtures — `closed` (past kickoff or void, by the engine's own
+`refusal()` rule), `withheld` (a stored assessment for the current model) and
+`awaiting` (open, no assessment) — and the tiles use it so their exclusions
+are named for the whole selection: the *Analyzed* trend reads
+"no prediction rows · 4 past kickoff or void", the *Awaiting analysis* trend
+reads "no prediction row yet · 4 past kickoff or void" instead of the old
+page-scoped "excludes 4 answered on this page", and the *Withheld* tile
+carries the selection-wide count. Each unanalyzed fixture is exactly one of
+the three, so `analyzed + withheld + closed + awaiting` always equals
+`Fixtures found`.
 
 ## Selecting a competition, a premium league and a market
 
