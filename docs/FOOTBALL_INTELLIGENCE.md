@@ -221,7 +221,13 @@ Stored per version: `model_id`, `model_name`, `model_version`, `algorithm`,
   (`PRE_MATCH_CLOSED` — kickoff passed or the fixture is postponed/cancelled;
   nothing is back-filled, and the Analyze action is not offered because it
   cannot succeed), or **no analysis has run yet** (`AWAITING_ANALYSIS` — the
-  Analyze action runs the model on stored evidence, no provider request). With
+  Analyze action runs the model on stored evidence, no provider request). The
+  closed and awaiting states also carry the fixture's own facts, not a generic
+  sentence: a finished match names its stored final score and where that result
+  goes instead (settlement grades stored predictions; the result still feeds
+  future form/head-to-head evidence), an in-play match names its live minute
+  and points at the Live match panel, and an awaiting match names its kickoff
+  and that the pre-match window closes there. With
   a stored row the section renders the prediction itself and no status strip.
 * Live football is stored as separate `prediction_kind = 'LIVE'` rows
   (`supersedes_prediction_id` points at the pre-match row for display only). The

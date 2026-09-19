@@ -1102,3 +1102,82 @@ test('football: a measured models 30-day window renders its by-version table, no
     assert_contains('the board\'s own 30-day panel shows the same stored aggregates', $render['html'],
         'and the same-aggregates note stays');
 });
+
+test('football: a finished match\'s closed state carries its actual final score', function () {
+    // The match finished and the result is stored: the Prediction overview
+    // must say THAT — with the score — instead of a generic window-closed
+    // sentence. The prediction itself can never exist, and the strip says
+    // what the stored result is used for instead.
+    $day = gmdate('Y-m-d', time() - 7200);
+    [$repo, , $module] = fx_fb_harness([
+        fx_fb_row('fx-match-finished', $day . 'T00:15:00+00:00', 'Leeds', 'Leicester', '10', '20', 'FINISHED', 2, 1),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $fixtureId = fx_131_fixture_id($repo, 'fx-match-finished');
+    $prediction = $module->predictionFor($fixtureId);
+    $status = $prediction['statusDetail'];
+    assert_equals('PRE_MATCH_CLOSED', $status['state']);
+    assert_equals('FINISHED', $status['fixtureStatus'], 'the state names the fixture\'s own status');
+    assert_equals(['home' => 2, 'away' => 1], $status['finalScore'], 'and carries the stored final score');
+    assert_true(str_contains($status['detail'], 'This match finished Leeds 2–1 Leicester'), 'the detail names the match and its score');
+    assert_true(str_contains($status['detail'], 'result stored'), 'and that the result is in storage');
+    assert_true(str_contains($status['detail'], 'nothing is back-filled afterwards'), 'the no-back-fill rule stays');
+    assert_true(str_contains($status['detail'], 'only grades predictions that exist'), 'and what settlement does with it');
+    assert_true(str_contains($status['detail'], 'feeds the form and head-to-head evidence'), 'and what the result is used for instead');
+    $render = fx_fb_render_view('match', fx_fb_view_data([
+        'fixtureId' => $fixtureId, 'analysis' => $module->analysis($fixtureId),
+        'prediction' => $prediction, 'live' => null, 'settlement' => null,
+    ]));
+    assert_true($render['notices'] === [], 'renders with no missing key'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    assert_contains('PRE-MATCH WINDOW CLOSED', $render['html'], 'the badge renders');
+    assert_contains('This match finished Leeds 2–1 Leicester', $render['html'], 'the strip shows the score in the section');
+    assert_true(!str_contains($render['html'], '/analyze'), 'no analyze form is offered on a finished match');
+});
+
+test('football: an awaiting match names its kickoff and the window that closes', function () {
+    // The open state carries the fixture's own clock: when kickoff is and
+    // that the analysis window closes there — not just a generic action hint.
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    [$repo, , $module] = fx_fb_harness([
+        fx_fb_row('fx-match-clock', $day . 'T18:45:00+00:00', 'Arsenal', 'Aston Villa', '10', '20'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $fixtureId = fx_131_fixture_id($repo, 'fx-match-clock');
+    $status = $module->predictionFor($fixtureId)['statusDetail'];
+    assert_equals('AWAITING_ANALYSIS', $status['state']);
+    assert_true(str_contains($status['detail'], 'kickoff ' . substr($day . 'T18:45:00+00:00', 0, 16) . ' UTC'),
+        'the detail names the fixture\'s own kickoff');
+    assert_true(str_contains($status['detail'], 'window closes at kickoff'), 'and that the window is bounded');
+    $render = fx_fb_render_view('match', fx_fb_view_data([
+        'fixtureId' => $fixtureId, 'analysis' => $module->analysis($fixtureId),
+        'prediction' => $module->predictionFor($fixtureId), 'live' => null, 'settlement' => null,
+    ]));
+    assert_contains('kickoff ' . substr($day . 'T18:45:00+00:00', 0, 16) . ' UTC', $render['html'],
+        'the strip carries the kickoff in the section');
+    assert_contains('Analyze this match — generate odds prediction', $render['html'], 'and the action stays available while the window is open');
+});
+
+test('football: an in-play match\'s closed state points at the live product', function () {
+    // Kickoff passed and the match is LIVE: the strip names the in-play
+    // state with its minute and where live estimates live.
+    $day = gmdate('Y-m-d', time() - 1800);
+    [$repo, , $module] = fx_fb_harness([
+        fx_fb_row('fx-match-live', $day . 'T00:15:00+00:00', 'Leeds', 'Leicester', '10', '20', 'LIVE', null, null, 67),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $fixtureId = fx_131_fixture_id($repo, 'fx-match-live');
+    $status = $module->predictionFor($fixtureId)['statusDetail'];
+    assert_equals('PRE_MATCH_CLOSED', $status['state']);
+    assert_true($status['inPlay'], 'the state knows the match is in play');
+    assert_true(str_contains($status['detail'], "match is in play (67')"), 'the detail carries the live minute');
+    assert_true(str_contains($status['detail'], 'Live match panel'), 'and where the live product lives');
+    assert_true(str_contains($status['detail'], 'results sweep'), 'and what happens when it finishes');
+    $render = fx_fb_render_view('match', fx_fb_view_data([
+        'fixtureId' => $fixtureId, 'analysis' => $module->analysis($fixtureId),
+        'prediction' => $module->predictionFor($fixtureId), 'live' => null, 'settlement' => null,
+    ]));
+    assert_contains('match is in play (67', $render['html'], 'the strip renders the minute in the section');
+    assert_true(!str_contains($render['html'], '/analyze'), 'no analyze form is offered on an in-play match');
+}
+);

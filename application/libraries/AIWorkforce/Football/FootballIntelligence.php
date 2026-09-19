@@ -942,26 +942,52 @@ final class FootballIntelligence
         }
 
         $kickoff = (string) ($fixture['kickoff_at'] ?? '');
+        $fixtureStatus = strtoupper((string) ($fixture['status'] ?? ''));
+        $finalHome = $fixture['home_score'] ?? null;
+        $finalAway = $fixture['away_score'] ?? null;
+        $hasFinalScore = $fixtureStatus === 'FINISHED' && is_numeric($finalHome) && is_numeric($finalAway);
+        $inPlay = in_array($fixtureStatus, FixtureSyncService::LIVE_STATUSES, true)
+            || (is_numeric($fixture['minute'] ?? null) && $fixtureStatus !== 'FINISHED');
         $state = match (true) {
             $assessment !== null => 'WITHHELD_BY_QUALITY_GATE',
             $refusal !== null => 'PRE_MATCH_CLOSED',
             default => 'AWAITING_ANALYSIS',
         };
-        $detail = match ($state) {
-            'WITHHELD_BY_QUALITY_GATE' => 'This match WAS analyzed — the engine completed an assessment and published no prediction: '
-                . (string) ($assessment['reason'] ?? 'its evidence or model preconditions did not support one.')
-                . (is_numeric($assessment['dataQuality']['score'] ?? null)
-                    ? ' Measured data quality: ' . (int) $assessment['dataQuality']['score'] . '/100'
-                        . (($assessment['dataQuality']['band'] ?? '') !== '' ? ' (' . (string) $assessment['dataQuality']['band'] . ')' : '') . '.'
-                    : '')
-                . ($refusal !== null
-                    ? ' The pre-match window has since closed, so this assessment stands as the record — nothing is back-filled.'
-                    : ' Re-running the analysis after newer evidence is stored can publish a prediction; the button below re-asks the engine.'),
-            'PRE_MATCH_CLOSED' => (string) ($refusal['reason'] ?? 'The pre-match window is closed for this fixture.')
-                . ($kickoff !== '' ? ' Kickoff was ' . substr($kickoff, 0, 16) . ' UTC.' : '')
-                . ' While the match is in play, live estimates are the in-play model\'s product (the Live match panel); once it finishes, the stored result is settlement\'s business.',
-            default => 'This fixture is stored and still open, but no analysis has run for it yet. Analyze this match — generate odds prediction runs the model on the stored evidence (no provider request) and either publishes a prediction — qualified or on limited evidence — or withholds it with the measured reason. The scheduled predict job also picks up pending fixtures automatically.',
-        };
+        // The closed state says what THIS match actually is now: finished
+        // (with its stored final score), in play (with the minute), or merely
+        // past its kickoff — the same facts, named differently, because a
+        // finished match and an unplayed one are different situations even
+        // though neither can receive a pre-match prediction.
+        if ($state === 'PRE_MATCH_CLOSED') {
+            $closedLead = $hasFinalScore
+                ? 'This match finished ' . (string) ($fixture['home_team'] ?? '') . ' '
+                    . (int) $finalHome . '–' . (int) $finalAway . ' ' . (string) ($fixture['away_team'] ?? '')
+                    . ' (result stored' . ($kickoff !== '' ? '; kickoff was ' . substr($kickoff, 0, 16) . ' UTC' : '') . ').'
+                : (string) ($refusal['reason'] ?? 'The pre-match window is closed for this fixture.')
+                    . ($kickoff !== '' ? ' Kickoff was ' . substr($kickoff, 0, 16) . ' UTC.' : '');
+            $closedTail = $hasFinalScore
+                ? ' A pre-match prediction is created before kickoff and frozen — this fixture had none stored, and nothing is back-filled afterwards: the settlement pipeline only grades predictions that exist. The stored result still works for the model — it feeds the form and head-to-head evidence behind future predictions.'
+                : ($inPlay
+                    ? ' The match is in play' . (is_numeric($fixture['minute'] ?? null) ? ' (' . (int) $fixture['minute'] . '\')' : '')
+                        . ' — live estimates are the in-play model\'s product (the Live match panel). Once it finishes, its result is stored by the results sweep and becomes part of the evidence behind future predictions.'
+                    : ' While the match is in play, live estimates are the in-play model\'s product (the Live match panel); once it finishes, the stored result is settlement\'s business.');
+            $detail = $closedLead . ' ' . $closedTail;
+        } else {
+            $detail = match ($state) {
+                'WITHHELD_BY_QUALITY_GATE' => 'This match WAS analyzed — the engine completed an assessment and published no prediction: '
+                    . (string) ($assessment['reason'] ?? 'its evidence or model preconditions did not support one.')
+                    . (is_numeric($assessment['dataQuality']['score'] ?? null)
+                        ? ' Measured data quality: ' . (int) $assessment['dataQuality']['score'] . '/100'
+                            . (($assessment['dataQuality']['band'] ?? '') !== '' ? ' (' . (string) $assessment['dataQuality']['band'] . ')' : '') . '.'
+                        : '')
+                    . ($refusal !== null
+                        ? ' The pre-match window has since closed, so this assessment stands as the record — nothing is back-filled.'
+                        : ' Re-running the analysis after newer evidence is stored can publish a prediction; the button below re-asks the engine.'),
+                default => 'This fixture is stored and still open' . ($kickoff !== '' ? ' — kickoff ' . substr($kickoff, 0, 16) . ' UTC' : '')
+                    . ', but no analysis has run for it yet. Analyze this match — generate odds prediction runs the model on the stored evidence (no provider request) and either publishes a prediction — qualified or on limited evidence — or withholds it with the measured reason. The scheduled predict job also picks up pending fixtures automatically'
+                    . ($kickoff !== '' ? '. The pre-match window closes at kickoff, so the analysis is available until then' : '') . '.',
+            };
+        }
 
         return [
             'state' => $state,
@@ -970,6 +996,9 @@ final class FootballIntelligence
             'code' => $state === 'WITHHELD_BY_QUALITY_GATE' ? (string) ($assessment['code'] ?? 'NO_PREDICTION')
                 : ($refusal['code'] ?? null),
             'dataQualityScore' => is_numeric($assessment['dataQuality']['score'] ?? null) ? (int) $assessment['dataQuality']['score'] : null,
+            'fixtureStatus' => $fixtureStatus,
+            'finalScore' => $hasFinalScore ? ['home' => (int) $finalHome, 'away' => (int) $finalAway] : null,
+            'inPlay' => $inPlay,
             'kickoff' => $kickoff !== '' ? $kickoff : null,
             'assessmentAt' => $assessment !== null ? ($assessment['generatedAt'] ?? null) : null,
             'generatedAt' => gmdate('c'),
