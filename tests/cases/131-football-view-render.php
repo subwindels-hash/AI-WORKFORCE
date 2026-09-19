@@ -467,3 +467,117 @@ test('football: the match page renders a fixture with no prediction at all', fun
     assert_true(preg_match('/WINDELS Intelligence Score<\/div>\s*<div[^>]*>\s*<span[^>]*>no score/s', $render['html']) === 1,
         'and it is the intelligence figure that is absent, not a zero wearing a label');
 });
+
+// ─── the Day overview explains its own six counters ──────────────────────────
+
+test('football: a populated Day overview carries no status strip — the counts are the information', function () {
+    $day = gmdate('Y-m-d', time() + 3 * 3600);
+    [, , $module] = fx_fb_harness([
+        fx_fb_row('fx-day-ok1', gmdate('c', time() + 3 * 3600), 'Manchester City', 'Everton', '10', '20'),
+        fx_fb_row('fx-day-ok2', gmdate('c', time() + 3 * 3600 + 900), 'Brighton', 'Burnley', '30', '40'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $dashboard = $module->dashboard($day, false, 1, 50, []);
+    $status = $dashboard['dayStatus'];
+    assert_equals('POPULATED', $status['state']);
+    assert_true($status['fixtures'] >= 2, 'the status carries the same count the Fixtures found tile prints');
+    assert_true($status['analyzed'] >= 1, 'and the analyzed count the board published');
+    assert_true(str_contains($status['detail'], (string) $status['qualified'] . ' qualified'),
+        'the populated detail summarizes the tiles it sits above');
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard]));
+    assert_true($render['notices'] === [], 'the strip adds no key the payload does not publish'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    assert_true(!str_contains($render['html'], 'football-day-status'),
+        'a populated overview renders no strip: six real counts need no apology');
+    assert_true(str_contains($render['html'], 'Fixtures found'), 'the tiles render');
+});
+
+test('football: a stored-but-unanalyzed day says generation is the missing step', function () {
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    [, , $module] = fx_fb_harness([
+        fx_fb_row('fx-day-gen', $day . 'T12:00:00+00:00', 'Arsenal', 'Aston Villa', '10', '20'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $dashboard = $module->dashboard($day, false, 1, 50, []);
+    $status = $dashboard['dayStatus'];
+    assert_equals('GENERATION_OFF', $status['state'], 'fixtures stored, nothing analyzed, this read did not generate');
+    assert_equals(1, $status['fixtures']);
+    assert_true(str_contains($status['detail'], 'Generate this page'), 'the state names the action that fills Analyzed');
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard]));
+    assert_equals(1, substr_count($render['html'], 'id="football-day-status"'), 'exactly one strip renders');
+    assert_true(str_contains($render['html'], 'AWAITING GENERATION'), 'with its badge');
+    assert_true(str_contains($render['html'], 'Generate this page'), 'and the remedy in the strip sentence');
+    assert_true(str_contains($render['html'], '1</div>'), 'the Fixtures found tile still shows its real count');
+});
+
+test('football: a day nothing has swept yet names the missing sweep', function () {
+    $day = gmdate('Y-m-d', time() + 86400);
+    $repo = new FootballRepositoryStub();
+    $manager = new \AIWorkforce\Sports\Providers\SportsProviderManager();
+    $manager->register(new FxFootballProvider(fx_fb_provider_data([
+        fx_fb_row('fx-day-never', $day . 'T15:00:00+00:00', 'Chelsea', 'Fulham', '10', '20'),
+    ])));
+    $module = new \AIWorkforce\Football\FootballIntelligence($repo, $manager, null, new \AIWorkforce\Football\FootballConfiguration());
+    assert_equals(null, $repo->lastSyncRun('FIXTURES'), 'no fixtures sweep has run in this scenario');
+    $dashboard = $module->dashboard($day, false, 1, 50, []);
+    $status = $dashboard['dayStatus'];
+    assert_equals('NEVER_SYNCED', $status['state']);
+    assert_true(str_contains($status['detail'], 'Sync this date'), 'the state names the operator action');
+    assert_true(str_contains($status['detail'], 'fixtures job'), 'and the automatic one');
+    assert_true(str_contains($status['detail'], 'Fixtures found'), 'and ties the remedy to the tile it fills');
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard]));
+    assert_true(str_contains($render['html'], 'FIXTURES SWEEP PENDING'), 'the badge renders');
+    assert_true(str_contains($render['html'], 'No fixture has been stored'), 'the empty state still states its own fact');
+});
+
+test('football: with no feed connected the overview names the connection, not the sweep', function () {
+    $day = gmdate('Y-m-d');
+    $module = new \AIWorkforce\Football\FootballIntelligence(
+        new FootballRepositoryStub(), new \AIWorkforce\Sports\Providers\SportsProviderManager());
+    $dashboard = $module->dashboard($day, false, 1, 50, []);
+    $status = $dashboard['dayStatus'];
+    assert_equals('NO_PROVIDER', $status['state']);
+    assert_false($status['providerConfigured']);
+    assert_true(str_contains($status['detail'], 'No football data provider is connected'));
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard]));
+    assert_true(str_contains($render['html'], 'FIXTURES UNAVAILABLE'), 'the badge renders');
+    assert_true(str_contains($render['html'], 'Data feed panel'), 'and the strip points at where a feed is connected');
+});
+
+test('football: a day the engine ran on but published nothing says that, not "awaiting"', function () {
+    // Kickoff long past, match still SCHEDULED: the engine classifies the slot
+    // closed and publishes nothing — the overview must own that this read ran
+    // and nothing was published, instead of promising a sweep that happened.
+    $day = gmdate('Y-m-d', time() - 7200);
+    [, , $module] = fx_fb_harness([
+        fx_fb_row('fx-day-closed', $day . 'T00:15:00+00:00', 'Leeds', 'Leicester', '10', '20'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $dashboard = $module->dashboard($day, true, 1, 50, []);
+    $status = $dashboard['dayStatus'];
+    assert_equals('ANALYZED_NONE', $status['state']);
+    assert_equals(1, $status['fixtures'], 'the fixture is stored — it is the prediction that is absent');
+    assert_true(str_contains($status['detail'], 'no prediction was published'), 'the state says what actually happened');
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard, 'refresh' => true]));
+    assert_true(str_contains($render['html'], 'NO PREDICTION PUBLISHED'), 'the badge renders');
+    assert_true(str_contains($render['html'], 'Withheld'), 'and the Withheld tile it references still renders');
+});
+
+test('football: a swept day the feed had nothing for says that, and offers the day-scoped sync', function () {
+    // The sweep ran (a FIXTURES run is recorded) but the feed returned no
+    // fixture for this date: an empty match day or an uncovered league
+    // package — a different fact from "the sweep never ran".
+    $day = gmdate('Y-m-d', time() + 86400);
+    [, , $module] = fx_fb_harness([], ['skipHistory' => true]);
+    fx_fb_sync_today($module, $day);
+    $dashboard = $module->dashboard($day, false, 1, 50, []);
+    $status = $dashboard['dayStatus'];
+    assert_equals('SYNCED_NO_FIXTURES', $status['state']);
+    assert_true(is_array($status['lastFixturesSync']), 'the state can cite the sweep it is describing');
+    assert_true(str_contains($status['detail'], 'no fixture is stored for this date'), 'it states the actual fact');
+    assert_true(str_contains($status['detail'], 'Sync this date'), 'and the day-scoped remedy');
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard]));
+    assert_true(str_contains($render['html'], 'NO FIXTURES FOR THIS DATE'), 'the badge renders');
+    assert_true(str_contains($render['html'], 'No fixture has been stored'), 'and the empty state keeps its own sentence');
+});

@@ -272,6 +272,20 @@ that configured 1–50 ceiling. Today and tomorrow share the same ceiling in one
 scheduled cycle, and existing stored rows are skipped unless the stated
 regeneration policy permits a replacement.
 
+**The Day overview explains its own counters.** The console's "What is stored
+for `<date>`" tiles (`Fixtures found`, `Analyzed`, `Qualified`, `Limited
+evidence`, `Withheld`, `Awaiting analysis`) describe stored rows, so when the
+rows are absent the board states *which* absence it is in
+(`FootballIntelligence::dayStatus()`, a pure read over the board payload plus
+the last recorded `FIXTURES` sync run): no feed connected (`NO_PROVIDER`), the
+fixtures sweep has not run yet (`NEVER_SYNCED` — it runs on the `fixtures` job
+every 6 hours or via **Sync this date**), the sweep ran and the feed returned
+no fixture for the date (`SYNCED_NO_FIXTURES`), fixtures are stored but
+generation did not run on this read (`GENERATION_OFF` — **Generate this
+page** is the action), or this read ran the engine and nothing was published
+(`ANALYZED_NONE` — withheld/closed/failed, with the reasons on the rows).
+A populated overview renders no strip: six real counts are the information.
+
 ## Selecting a competition, a premium league and a market
 
 The console and the API are driven by one flow:

@@ -309,17 +309,103 @@ final class FootballIntelligence
     {
         $date = $date ?? gmdate('Y-m-d');
         $diagnostics = $this->diagnostics()->snapshot();
+        $board = $this->board()->forDate($date, $refresh, $page, $limit, $options);
         return [
             'date' => $date,
             // One page of the board. The pager moves through stored matches; the
             // summary counts above the cards still describe the whole date.
             // `options` narrow it (`competition`, `market`) without generating
             // anything — both are selections over rows that are already stored.
-            'board' => $this->board()->forDate($date, $refresh, $page, $limit, $options),
+            'board' => $board,
+            // The pipeline state behind the Day overview's counters: which
+            // absence the six tiles are in (no feed / sweep never ran / feed
+            // returned nothing / generation off / nothing published), computed
+            // from the board payload it describes plus the last recorded
+            // FIXTURES sweep. A pure read — no provider request.
+            'dayStatus' => $this->dayStatus($date, $board, $refresh),
             'diagnostics' => $diagnostics,
             'performance' => $this->performance()->report(30),
             'live' => $this->live()->board(false),
             'models' => $this->modelSummary(),
+            'generatedAt' => gmdate('c'),
+        ];
+    }
+
+    /**
+     * The day-overview pipeline state — what the console's "What is stored
+     * for <date>" section explains its six counters with instead of six bare
+     * zeros. The counters describe stored rows, and when the rows are absent
+     * the state names WHICH absence the tiles are in, because they are
+     * different facts with different remedies:
+     *
+     *  - NO_PROVIDER          — no feed connected; no fixture can ever be stored
+     *  - NEVER_SYNCED         — feed connected, but no fixtures sweep recorded
+     *                           (the cron has not run / nobody clicked Sync)
+     *  - SYNCED_NO_FIXTURES   — the sweep ran and the feed returned no fixture
+     *                           for this date (empty match day, or a league
+     *                           package that does not cover these competitions)
+     *  - GENERATION_OFF       — fixtures are stored but no prediction row
+     *                           exists and this read did not generate
+     *                           (?refresh=0 / WINDELS_FOOTBALL_GENERATE_ON_READ=false)
+     *  - ANALYZED_NONE        — this read ran the engine and nothing was
+     *                           published: withheld / closed / failed — the
+     *                           page block and the rows carry the reasons
+     *  - POPULATED            — the counts speak for themselves
+     *
+     * Purely read-only: the board payload it describes plus the last recorded
+     * FIXTURES sync run. No provider request is ever made.
+     *
+     * @param array<string,mixed> $board a board payload from PredictionBoard::forDate()
+     * @return array<string,mixed>
+     */
+    public function dayStatus(string $date, array $board, bool $refresh = false): array
+    {
+        $summary = is_array($board['summary'] ?? null) ? $board['summary'] : [];
+        $fixtures = (int) ($summary['fixtures'] ?? 0);
+        $analyzed = (int) ($summary['analyzed'] ?? 0);
+        $qualified = (int) ($summary['qualified'] ?? 0);
+        $limited = (int) ($summary['limited'] ?? 0);
+        $configured = $this->gateway()->configured();
+        $lastRun = null;
+        try { $lastRun = $this->repo->lastSyncRun('FIXTURES'); } catch (\Throwable $e) { $lastRun = null; }
+        $sweepAt = (string) ($lastRun['started_at'] ?? '');
+        $sweepStamp = substr($sweepAt, 11, 5);
+        $sweepRequests = (int) ($lastRun['requests_made'] ?? 0);
+
+        $state = match (true) {
+            !$configured => 'NO_PROVIDER',
+            $fixtures === 0 && $lastRun === null => 'NEVER_SYNCED',
+            $fixtures === 0 => 'SYNCED_NO_FIXTURES',
+            $analyzed === 0 && !$refresh => 'GENERATION_OFF',
+            $analyzed === 0 => 'ANALYZED_NONE',
+            default => 'POPULATED',
+        };
+        $detail = match ($state) {
+            'NO_PROVIDER' => 'No football data provider is connected, so no fixture can be stored for this board and every count in this overview is zero. Connect a feed on the Data feed panel; nothing is invented to fill the gap.',
+            'NEVER_SYNCED' => 'The connected feed\'s fixtures sweep has not stored anything yet. It runs automatically on the football fixtures job (every 6 hours while a provider is connected), or on demand via Sync this date — that sweep is what fills "Fixtures found".',
+            'SYNCED_NO_FIXTURES' => 'The fixtures sweep last ran at ' . ($sweepStamp !== '' ? $sweepStamp . ' UTC' : 'an unknown time')
+                . ' (' . $sweepRequests . ' provider request(s)) and no fixture is stored for this date: either the feed returned none for it — an empty match day, or a league package that does not cover these competitions — or this date was outside that sweep\'s window. Sync this date asks the feed for exactly this day. No fixture is invented to fill the board.',
+            'GENERATION_OFF' => $fixtures . ' fixture(s) are stored for this date but no prediction row exists yet. Generation on read is off (?refresh=0 or WINDELS_FOOTBALL_GENERATE_ON_READ=false), so the Generate this page action is how "Analyzed" fills — at most 50 new predictions per request, stored ones reused.',
+            'ANALYZED_NONE' => $fixtures . ' fixture(s) are stored and this read ran the engine for the page in view, but no prediction was published: every fixture was withheld by the data-quality gate, closed (kickoff already passed) or failed. The Withheld tile and each fixture row below carry the specific reason.',
+            default => $fixtures . ' fixture(s) stored · ' . $analyzed . ' analyzed — ' . $qualified . ' qualified, '
+                . $limited . ' on limited evidence — for this selection. The counts below describe exactly those rows.',
+        };
+
+        return [
+            'state' => $state,
+            'detail' => $detail,
+            'date' => $date,
+            'providerConfigured' => $configured,
+            'fixtures' => $fixtures,
+            'analyzed' => $analyzed,
+            'qualified' => $qualified,
+            'limited' => $limited,
+            'lastFixturesSync' => $lastRun === null ? null : [
+                'status' => (string) ($lastRun['status'] ?? ''),
+                'startedAt' => $sweepAt,
+                'requests' => $sweepRequests,
+            ],
+            'generatedOnRead' => $refresh,
             'generatedAt' => gmdate('c'),
         ];
     }

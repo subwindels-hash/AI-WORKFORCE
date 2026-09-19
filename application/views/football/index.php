@@ -13,6 +13,9 @@ $board = $d['board'] ?? [];
 $diagnostics = $d['diagnostics'] ?? [];
 $diag = $diagnostics;
 $perf = $d['performance'] ?? [];
+// The Day overview's pipeline state (see FootballIntelligence::dayStatus):
+// which absence the six counters are in when they cannot speak for themselves.
+$dayStatus = is_array($d['dayStatus'] ?? null) ? $d['dayStatus'] : null;
 // Categories remain part of the stored board contract. The unified odds board
 // presents every fixture once rather than duplicating it into several sections.
 $categories = $board['categories'] ?? [];
@@ -281,6 +284,27 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
           <p class="football-section-intro">The counts below describe saved rows for <?= $selectionName !== '' ? 'this selection — <b>' . e($selectionName) . '</b> on ' : '' ?>this date. A fixture is <b>qualified</b> when its stored evidence clears the data-quality floor, <b>limited</b> when it is usable with caution, and <b>withheld</b> when the engine completed an assessment but its evidence or model preconditions did not support publishing a prediction. <?= !empty($refresh)
             ? 'Reading this board generates the missing predictions for the page in view — at most the configured batch, stored ones are reused, never regenerated, and no provider request is spent.'
             : 'This read generated nothing: generation on read is off (?refresh=0 or WINDELS_FOOTBALL_GENERATE_ON_READ=false), so the Generate this page action stays the way predictions are created.' ?></p>
+          <?php /* The pipeline state behind the six counters, computed from the
+                 stored board payload and the last recorded FIXTURES sweep
+                 (zero provider requests). Rendered only when the counts cannot
+                 speak for themselves: a populated overview IS the information.
+                 Each state names which absence the tiles are in and the action
+                 that fills them — no count is invented to look busy. */ ?>
+          <?php if ($dayStatus !== null && in_array((string) ($dayStatus['state'] ?? ''), ['NO_PROVIDER', 'NEVER_SYNCED', 'SYNCED_NO_FIXTURES', 'GENERATION_OFF', 'ANALYZED_NONE'], true)): ?>
+            <?php
+              [$dayBadgeClass, $dayBadgeLabel] = match ((string) $dayStatus['state']) {
+                  'NO_PROVIDER' => ['b-amber', 'FIXTURES UNAVAILABLE'],
+                  'ANALYZED_NONE' => ['b-amber', 'NO PREDICTION PUBLISHED'],
+                  'SYNCED_NO_FIXTURES' => ['b-gray', 'NO FIXTURES FOR THIS DATE'],
+                  'GENERATION_OFF' => ['b-gray', 'AWAITING GENERATION'],
+                  default => ['b-gray', 'FIXTURES SWEEP PENDING'],
+              };
+            ?>
+            <div class="football-day-status" id="football-day-status">
+              <span class="badge <?= $dayBadgeClass ?>"><?= e($dayBadgeLabel) ?></span>
+              <p><?= e((string) ($dayStatus['detail'] ?? '')) ?></p>
+            </div>
+          <?php endif; ?>
           <div class="stat-grid football-stat-grid">
             <div class="stat"><div class="k">Fixtures found</div><div class="v"><?= (int) ($summary['fixtures'] ?? 0) ?></div><div class="trend">stored for this date<?= $selectionName !== '' ? ' · ' . e($selectionName) : '' ?></div></div>
             <div class="stat"><div class="k">Analyzed</div><div class="v"><?= (int) ($summary['analyzed'] ?? 0) ?></div><div class="trend">prediction rows saved</div></div>
