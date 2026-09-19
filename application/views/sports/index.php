@@ -644,20 +644,69 @@ $kickoffStamp = static function (mixed $iso): string {
         <span class="sports-section__meta">settled tickets only</span>
       </div>
       <div class="body">
-        <p class="sports-section-intro">Outcomes of tickets that have actually been settled from verified results over the 30 days ending on the viewed date. Nothing here is projected: an unsettled ticket contributes no win, no ROI and no profit figure.</p>
+        <p class="sports-section-intro">Outcomes of tickets that have actually been settled from verified results over the 30 days ending on the viewed date. Nothing here is projected: an unsettled ticket contributes no win, no ROI and no profit figure. Each card explains exactly what is still required when a number is not available.</p>
         <?php if (!empty($perf['demoBanner'])): ?><div class="notice warnbox"><?= e((string) $perf['demoBanner']) ?></div><?php endif; ?>
-        <div class="stat-grid">
-          <div class="stat"><div class="k">Settled tickets</div><div class="v"><?= (int) ($perf['settledTickets'] ?? 0) ?></div></div>
-          <div class="stat"><div class="k">Win rate</div><div class="v"><?= ($perf['winRate'] ?? null) !== null ? e(number_format((float) $perf['winRate'] * 100, 1)) . '%' : '—' ?></div></div>
-          <div class="stat"><div class="k">ROI</div><div class="v <?= ($perf['roi'] ?? null) !== null && (float) $perf['roi'] >= 0 ? 'up' : 'down' ?>"><?= ($perf['roi'] ?? null) !== null ? e(number_format((float) $perf['roi'] * 100, 1)) . '%' : '—' ?></div></div>
-          <div class="stat"><div class="k">Profit / loss</div><div class="v <?= ($perf['profitLoss'] ?? null) !== null && (float) $perf['profitLoss'] >= 0 ? 'up' : 'down' ?>"><?= ($perf['profitLoss'] ?? null) !== null ? e(number_format((float) $perf['profitLoss'], 2)) : '—' ?></div></div>
-          <div class="stat"><div class="k">Max drawdown</div><div class="v"><?= ($perf['maxDrawdown'] ?? null) !== null ? e(number_format((float) $perf['maxDrawdown'], 2)) : '—' ?></div></div>
-          <div class="stat"><div class="k">Avg odds</div><div class="v"><?= ($perf['averageOdds'] ?? null) !== null ? e(number_format((float) $perf['averageOdds'], 2)) : '—' ?></div></div>
+        <?php
+          $settledTickets = (int) ($perf['settledTickets'] ?? 0);
+          $pendingTickets = (int) ($perf['pendingTickets'] ?? 0);
+          $wonTickets = (int) ($perf['won'] ?? 0);
+          $lostTickets = (int) ($perf['lost'] ?? 0);
+          $voidTickets = (int) ($perf['void'] ?? 0) + (int) ($perf['cancelled'] ?? 0);
+          $decisiveTickets = $wonTickets + $lostTickets;
+          $winRate = is_numeric($perf['winRate'] ?? null) ? (float) $perf['winRate'] : null;
+          $roi = is_numeric($perf['roi'] ?? null) ? (float) $perf['roi'] : null;
+          $profitLoss = is_numeric($perf['profitLoss'] ?? null) ? (float) $perf['profitLoss'] : null;
+          $maxDrawdown = is_numeric($perf['maxDrawdown'] ?? null) ? (float) $perf['maxDrawdown'] : null;
+          $averageOdds = is_numeric($perf['averageOdds'] ?? null) ? (float) $perf['averageOdds'] : null;
+          $settledNote = $settledTickets > 0
+              ? number_format($wonTickets) . ' won · ' . number_format($lostTickets) . ' lost · ' . number_format($voidTickets) . ' void/cancelled.'
+              : ($pendingTickets > 0
+                  ? number_format($pendingTickets) . ' pending ticket' . ($pendingTickets === 1 ? ' is' : 's are') . ' awaiting a verified final result.'
+                  : 'No ticket has settled in this 30-day window.');
+          $winRateNote = $winRate !== null
+              ? 'Won ÷ decisive tickets; void/cancelled tickets are excluded.'
+              : ($settledTickets > 0 && $decisiveTickets === 0
+                  ? 'Only void/cancelled tickets are settled; there is no decisive result yet.'
+                  : 'Needs at least one WON or LOST settled ticket.');
+          $accountingNote = $settledTickets > 0
+              ? 'Needs a positive stored stake and recorded P/L on a settled ticket.'
+              : 'Available after a ticket settles with stored stake and P/L.';
+        ?>
+        <div class="stat-grid sports-performance-grid" aria-label="Stored settlement performance">
+          <div class="stat" data-performance-metric="settled-tickets">
+            <div class="k">Settled tickets</div>
+            <div class="v"><?= number_format($settledTickets) ?></div>
+            <small class="sports-stat-note"><?= e($settledNote) ?></small>
+          </div>
+          <div class="stat" data-performance-metric="win-rate">
+            <div class="k">Win rate</div>
+            <div class="v<?= $winRate === null ? ' is-unavailable' : '' ?>"><?= $winRate !== null ? e(number_format($winRate * 100, 1)) . '%' : 'Not available yet' ?></div>
+            <small class="sports-stat-note"><?= e($winRateNote) ?></small>
+          </div>
+          <div class="stat" data-performance-metric="roi">
+            <div class="k">ROI</div>
+            <div class="v<?= $roi === null ? ' is-unavailable' : ($roi >= 0 ? ' up' : ' down') ?>"><?= $roi !== null ? e(number_format($roi * 100, 1)) . '%' : 'Not available yet' ?></div>
+            <small class="sports-stat-note"><?= e($roi !== null ? 'Recorded profit/loss ÷ total stored stake.' : $accountingNote) ?></small>
+          </div>
+          <div class="stat" data-performance-metric="profit-loss">
+            <div class="k">Profit / loss</div>
+            <div class="v<?= $profitLoss === null ? ' is-unavailable' : ($profitLoss >= 0 ? ' up' : ' down') ?>"><?= $profitLoss !== null ? e(number_format($profitLoss, 2)) : 'Not available yet' ?></div>
+            <small class="sports-stat-note"><?= e($profitLoss !== null ? 'Net recorded return in the ticket stake unit.' : $accountingNote) ?></small>
+          </div>
+          <div class="stat" data-performance-metric="max-drawdown">
+            <div class="k">Max drawdown</div>
+            <div class="v<?= $maxDrawdown === null ? ' is-unavailable' : '' ?>"><?= $maxDrawdown !== null ? e(number_format($maxDrawdown, 2)) : 'Not available yet' ?></div>
+            <small class="sports-stat-note"><?= e($maxDrawdown !== null ? 'Largest peak-to-trough fall in cumulative recorded P/L.' : $accountingNote) ?></small>
+          </div>
+          <div class="stat" data-performance-metric="average-odds">
+            <div class="k">Avg odds</div>
+            <div class="v<?= $averageOdds === null ? ' is-unavailable' : '' ?>"><?= $averageOdds !== null ? e(number_format($averageOdds, 2)) : 'Not available yet' ?></div>
+            <small class="sports-stat-note"><?= e($averageOdds !== null ? 'Mean final decimal odds across settled tickets.' : 'Needs at least one settled ticket with valid stored odds.') ?></small>
+          </div>
         </div>
-        <?php $pendingTickets = (int) ($perf['pendingTickets'] ?? 0); ?>
         <?php if (empty($perf['dataAvailable'])): ?>
           <?php if ($pendingTickets > 0): ?>
-            <p class="sports-empty"><?= e(number_format($pendingTickets)) ?> ticket<?= $pendingTickets === 1 ? '' : 's' ?> from this window <?= $pendingTickets === 1 ? 'is' : 'are' ?> still awaiting settlement. <?= $pendingTickets === 1 ? 'It settles' : 'They settle' ?> automatically (hourly sports cron) once each match's final result is stored and corroborated — the metrics below appear the moment the first ticket settles. Nothing is projected in the meantime.</p>
+            <p class="sports-empty"><?= e(number_format($pendingTickets)) ?> ticket<?= $pendingTickets === 1 ? '' : 's' ?> from this window <?= $pendingTickets === 1 ? 'is' : 'are' ?> still awaiting settlement. <?= $pendingTickets === 1 ? 'It settles' : 'They settle' ?> automatically (hourly sports cron) once each match's final result is stored and corroborated. The cards above update as soon as the first ticket settles; until then they name the evidence each unavailable number still needs. Nothing is projected in the meantime.</p>
           <?php else: ?>
             <p class="sports-empty">No settled records or selections yet — metrics are intentionally unavailable rather than invented.</p>
           <?php endif; ?>

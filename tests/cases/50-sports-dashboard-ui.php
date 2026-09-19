@@ -471,12 +471,45 @@ test('sports UI: the measured-results panel explains pending settlement and offe
     assert_contains('<a class="btn small" href="/sports/settle-all">', $html, 'the dashboard opens the routed settlement review page');
     assert_contains('Settle all pending tickets from verified results (sports.settle)', $html);
     assert_contains('which stored results are ready', $html, 'the link explains that the page previews readiness before mutating');
+    // Empty metrics explain themselves inside their own cards instead of
+    // showing five ambiguous em dashes (or colouring unavailable ROI red).
+    assert_contains('data-performance-metric="settled-tickets"', $html);
+    assert_contains('1 pending ticket is awaiting a verified final result.', $html);
+    assert_equals(5, substr_count($html, '>Not available yet</div>'), 'each unavailable derived metric names its state');
+    assert_contains('Needs at least one WON or LOST settled ticket.', $html, 'win rate names its minimum evidence');
+    assert_contains('Available after a ticket settles with stored stake and P/L.', $html, 'accounting metrics name their required inputs');
+    assert_contains('Needs at least one settled ticket with valid stored odds.', $html, 'average odds names its required input');
+    assert_true(!str_contains($html, 'class="v down">Not available yet'), 'an unavailable number is neutral, never red/negative');
 
     // Read-only identity: same explanation, no link — the permission note.
     $htmlReadOnly = fx_render_sports('index', ['dashboard' => $dash, 'csrfToken' => 'ui-csrf-token', 'caps' => fx_sports_caps_none()]);
     assert_contains('still awaiting settlement', $htmlReadOnly);
     assert_true(!str_contains($htmlReadOnly, 'href="/sports/settle-all"'), 'a read-only identity gets no settle-all control');
     assert_contains('Settlement stays with identities holding <b>sports.settle</b>.', $htmlReadOnly);
+
+    // Once settlements exist, the exact stored calculations replace the
+    // explanatory unavailable state; positive/negative tones only apply to
+    // real numbers.
+    $settledDash = $dash;
+    $settledDash['performance'] = [
+        'dataAvailable' => true, 'settledTickets' => 4, 'pendingTickets' => 0,
+        'won' => 3, 'lost' => 1, 'void' => 0, 'cancelled' => 0,
+        'winRate' => 0.75, 'roi' => 0.125, 'profitLoss' => 5.0,
+        'maxDrawdown' => 2.5, 'averageOdds' => 1.92,
+    ];
+    $settledHtml = fx_render_sports('index', ['dashboard' => $settledDash]);
+    assert_true((bool) preg_match('/data-performance-metric="settled-tickets".*?<div class="v">4<\/div>/s', $settledHtml));
+    assert_true((bool) preg_match('/data-performance-metric="win-rate".*?<div class="v">75\.0%<\/div>/s', $settledHtml));
+    assert_true((bool) preg_match('/data-performance-metric="roi".*?<div class="v up">12\.5%<\/div>/s', $settledHtml));
+    assert_true((bool) preg_match('/data-performance-metric="profit-loss".*?<div class="v up">5\.00<\/div>/s', $settledHtml));
+    assert_true((bool) preg_match('/data-performance-metric="max-drawdown".*?<div class="v">2\.50<\/div>/s', $settledHtml));
+    assert_true((bool) preg_match('/data-performance-metric="average-odds".*?<div class="v">1\.92<\/div>/s', $settledHtml));
+    assert_contains('3 won · 1 lost · 0 void/cancelled.', $settledHtml);
+    assert_not_contains('>Not available yet</div>', $settledHtml, 'complete stored inputs produce every number');
+
+    $css = (string) file_get_contents(FCPATH . 'assets/css/ai_workforce.css');
+    assert_contains('.sports-performance-grid .stat .v.is-unavailable', $css, 'unavailable values have a neutral readable treatment');
+    assert_contains('.sports-stat-note', $css, 'each metric can carry its evidence note');
 
     // Nothing pending at all: the honest bare empty state, and no sweep form
     // for anyone (nothing to settle).
