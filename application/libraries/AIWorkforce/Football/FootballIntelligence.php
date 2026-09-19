@@ -655,7 +655,27 @@ final class FootballIntelligence
      */
     public function syncOddsForDay(string $date, bool $force = false, ?int $limit = null): array
     {
-        return $this->oddsSheet()->refreshDay($date, $limit, $force);
+        // The operator-driven sweep is recorded exactly like the scheduled
+        // one (jobType ODDS in the sync log), so the board's odds status can
+        // say when a sweep last ran without caring which path triggered it.
+        // A second click inside the same second still runs — it just shares
+        // the run record, exactly like two concurrent cron ticks dedupe.
+        $key = 'manual:ODDS:' . $date . ':' . gmdate('Ymd\This');
+        $run = $this->repo->startSyncRun(['executionKey' => $key, 'jobType' => 'ODDS', 'windowStart' => $date, 'startedAt' => gmdate('c')]);
+        $result = $this->oddsSheet()->refreshDay($date, $limit, $force);
+        if ($run !== null) {
+            $interval = $this->config()->refreshInterval('odds');
+            $status = (string) ($result['status'] ?? 'COMPLETED');
+            if ($status === 'FAILED') $interval = min($interval, RefreshPolicy::FAILED_RETRY_SECONDS);
+            $this->repo->finishSyncRun($key, [
+                'status' => $status,
+                'processed' => (int) ($result['considered'] ?? $result['fixtures'] ?? 0),
+                'requests' => (int) ($result['requests'] ?? 0),
+                'errors' => (array) ($result['errors'] ?? []),
+                'nextRunAt' => gmdate('c', time() + $interval),
+            ]);
+        }
+        return $result;
     }
 
     /**

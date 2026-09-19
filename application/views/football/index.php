@@ -425,6 +425,28 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         </div>
         <div class="body">
           <p class="football-section-intro">Open any fixture for its complete market sheet. Every modelled selection includes the WINDELS probability and fair odds; every real bookmaker quote adds decimal odds, implied and margin-free probability, market fair odds, break-even point, model edge, expected return, quote range, source and timestamp. Missing prices stay clearly marked <b>UNPRICED</b>.</p>
+          <?php /* The board's odds pipeline state, computed from stored quotes
+                 and the last recorded ODDS sweep (zero provider requests).
+                 Every unpriced cell below stays honest because the section
+                 itself names WHICH absence it is in: the feed cannot quote at
+                 all, the sweep has not run yet, it ran and the bookmakers had
+                 not priced these fixtures, or quotes exist and are counted. */ ?>
+          <?php if (is_array($oddsStatus ?? null) && ($oddsStatus['state'] ?? '') !== ''): ?>
+            <?php
+              $oddsState = (string) $oddsStatus['state'];
+              [$oddsBadgeClass, $oddsBadgeLabel] = match ($oddsState) {
+                  'PRICED' => ['b-green', 'ODDS STORED'],
+                  'NO_ODDS_CAPABILITY', 'NO_PROVIDER' => ['b-amber', 'BOOKMAKER ODDS UNAVAILABLE'],
+                  'SWEPT_NO_QUOTES' => ['b-amber', 'SWEEP STORED NO QUOTES'],
+                  'NO_OPEN_FIXTURES' => ['b-gray', 'NO OPEN FIXTURES'],
+                  default => ['b-gray', 'ODDS SWEEP PENDING'],
+              };
+            ?>
+            <div class="football-odds-status" id="football-odds-status">
+              <span class="badge <?= $oddsBadgeClass ?>"><?= e($oddsBadgeLabel) ?></span>
+              <p><?= e((string) ($oddsStatus['detail'] ?? '')) ?></p>
+            </div>
+          <?php endif; ?>
           <?php if ($rows === []): ?>
             <div class="empty-state"><p>No fixtures match this page and filter selection.</p></div>
           <?php else: ?>

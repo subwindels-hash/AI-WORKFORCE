@@ -271,6 +271,100 @@ final class OddsSheetService
     }
 
     /**
+     * The board-level odds status for a date — what the console's "Fixture
+     * odds board" section explains itself with instead of leaving every cell
+     * to promise "prices arrive with the scheduled odds sweep".
+     *
+     * Purely read-only: stored quotes, the last recorded ODDS sweep and the
+     * gateway's capability table. No provider request is ever made. The state
+     * names WHICH absence the board is in, because they are different facts:
+     *
+     *  - NO_PROVIDER          — no feed connected; nothing can be requested
+     *  - NO_ODDS_CAPABILITY   — a feed is connected but exposes no odds
+     *                           endpoint, so no price can EVER be stored
+     *                           (a capability gap, not a missing market)
+     *  - NO_OPEN_FIXTURES     — the date holds no still-priceable fixture
+     *  - NEVER_SWEPT          — no odds sweep recorded yet (cron not due /
+     *                           never run, operator never clicked)
+     *  - SWEPT_NO_QUOTES      — a sweep ran and the feed stored no quote:
+     *                           the bookmakers had not priced these fixtures
+     *                           (or the feed's plan does not include odds)
+     *  - PRICED               — quotes exist; report how many and how fresh
+     *
+     * @return array<string,mixed>
+     */
+    public function boardStatus(string $date): array
+    {
+        $generatedAt = gmdate('c');
+        $configured = $this->gateway->configured();
+        $supports = $configured && $this->gateway->supports('odds');
+        $lastRun = null;
+        try { $lastRun = $this->repo->lastSyncRun('ODDS'); } catch (\Throwable $e) { $lastRun = null; }
+
+        $fixtures = $this->repo->listFixtures(['date' => $date], 500);
+        $openFixtures = 0; $quotedFixtures = 0; $quotes = 0; $newestQuoteAt = null;
+        foreach ($fixtures as $fixture) {
+            $status = strtoupper((string) ($fixture['status'] ?? ''));
+            if (in_array($status, ['FINISHED', 'CANCELLED', 'POSTPONED', FixtureSyncService::STALE_LIVE_STATUS], true)) continue;
+            $openFixtures++;
+            $rows = $this->storedRows($fixture);
+            if ($rows === []) continue;
+            $quotedFixtures++;
+            $quotes += count($rows);
+            foreach ($rows as $row) {
+                $observed = (string) ($row['observedAt'] ?? '');
+                if ($observed !== '' && ($newestQuoteAt === null || $observed > $newestQuoteAt)) $newestQuoteAt = $observed;
+            }
+        }
+
+        $sweepAt = (string) ($lastRun['started_at'] ?? '');
+        $sweepStamp = substr($sweepAt, 11, 5);
+        $sweepRequests = (int) ($lastRun['requests_made'] ?? 0);
+        $sweepErrors = (array) ($lastRun['errors'] ?? []);
+
+        $state = match (true) {
+            !$configured => 'NO_PROVIDER',
+            !$supports => 'NO_ODDS_CAPABILITY',
+            $openFixtures === 0 => 'NO_OPEN_FIXTURES',
+            $lastRun === null => 'NEVER_SWEPT',
+            $quotes === 0 => 'SWEPT_NO_QUOTES',
+            default => 'PRICED',
+        };
+        $detail = match ($state) {
+            'NO_PROVIDER' => 'No football data provider is connected, so no bookmaker price can be requested or stored for this board.',
+            'NO_ODDS_CAPABILITY' => 'The connected provider exposes no odds endpoint, so no bookmaker price can be stored for this board. That is a capability gap of the feed, not a missing market — connect a provider with an odds capability to price it. No price is invented in the meantime.',
+            'NO_OPEN_FIXTURES' => 'No open (still priceable) fixtures are stored for this date — finished, postponed and abandoned matches are the settlement job\'s business, and their odds are never re-bought.',
+            'NEVER_SWEPT' => 'No odds sweep has been recorded yet. The sweep prices every open fixture on this board and runs automatically on the football odds job (every 15 minutes while a provider is connected), or on demand via Refresh odds for this date.',
+            'SWEPT_NO_QUOTES' => 'The last odds sweep ran at ' . ($sweepStamp !== '' ? $sweepStamp . ' UTC' : 'an unknown time')
+                . ' and spent ' . $sweepRequests . ' provider request(s), but no bookmaker quote is stored for this date: the bookmakers had not priced these fixtures, or the feed\'s plan does not include odds.'
+                . ($sweepErrors !== [] ? ' ' . count($sweepErrors) . ' provider warning(s) from that sweep are in the sync log.' : '')
+                . ' No price is invented to fill the gap.',
+            default => $quotes . ' bookmaker quote(s) stored across ' . $quotedFixtures . ' of ' . $openFixtures . ' open fixture(s)'
+                . ($newestQuoteAt !== null ? ' · newest quote ' . substr((string) $newestQuoteAt, 11, 5) . ' UTC' : '')
+                . ($sweepAt !== '' ? ' · last sweep ' . $sweepStamp . ' UTC (' . $sweepRequests . ' request(s))' : '') . '.',
+        };
+
+        return [
+            'state' => $state,
+            'detail' => $detail,
+            'date' => $date,
+            'providerConfigured' => $configured,
+            'supportsOdds' => $supports,
+            'openFixtures' => $openFixtures,
+            'quotedFixtures' => $quotedFixtures,
+            'quotes' => $quotes,
+            'newestQuoteAt' => $newestQuoteAt,
+            'lastSweep' => $lastRun === null ? null : [
+                'status' => (string) ($lastRun['status'] ?? ''),
+                'startedAt' => $sweepAt,
+                'requests' => $sweepRequests,
+                'errors' => count($sweepErrors),
+            ],
+            'generatedAt' => $generatedAt,
+        ];
+    }
+
+    /**
      * One fixture's billed odds call + persistence, with NO budget reset — the
      * caller owns the sweep. Shared by the single-fixture refresh and the
      * day sweep so both bill, validate and store a price identically.

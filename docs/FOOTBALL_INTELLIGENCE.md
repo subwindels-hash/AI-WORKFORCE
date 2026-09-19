@@ -1012,6 +1012,7 @@ job on all of:
 | `football-live` | live | 90 s | 6 |
 | `football-results` | results | 15 m | 12 |
 | `football-statistics` | statistics | 12 h | 20 |
+| `football-odds` | odds | 15 m | 25 |
 | `football-predict` | predict | 30 m | 0 (database only) |
 | `football-settle` | settle | 15 m | 0 |
 | `football-performance` | performance | 1 h | 0 |
@@ -1054,6 +1055,22 @@ gated by the seven checks above before it touches the feed. A sweep in which eve
 job reported "nothing due" emits no audit event at all (`FOOTBALL_CRON_RUN` is
 written only when a job actually ran); a job that ran records its own row in
 `football_provider_sync_logs`, and a failure emits `FOOTBALL_JOB_FAILED`.
+
+The odds sweep (`football-odds`) is what prices the console's fixture board:
+`OddsSheetService::refreshDay()` walks every open fixture on a date —
+finished, postponed and abandoned matches are skipped before any request —
+reuses quotes still inside their freshness window unless forced, and defers
+what the budget could not cover instead of dropping it. The operator's
+**Refresh odds** button runs the same sweep and records the same `ODDS`
+sync-log row, so the board's status strip (`OddsSheetService::boardStatus()`,
+a pure read that never calls the feed) can say which absence the page is in:
+the feed cannot quote at all (`NO_PROVIDER` / `NO_ODDS_CAPABILITY`), no
+priceable fixture is stored for the date (`NO_OPEN_FIXTURES`), the sweep has
+not run yet (`NEVER_SWEPT`), it ran and the bookmakers had not priced these
+fixtures (`SWEPT_NO_QUOTES`), or quotes exist and are counted (`PRICED`),
+with the newest quote and the last sweep's stamp. An unpriced cell on the
+board is therefore always explained by the section it sits in, never left
+as a bare placeholder.
 
 A failure's text is displayed — in the sync log's error list, in the operator's
 flash message and in `football_providers.last_error` — and an HTTP client typically
