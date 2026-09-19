@@ -354,8 +354,10 @@ Settlement runs from:
 
 - the **hourly settlement cron** (`tools sports-cron settlement` / the
   Sports cron job),
-- `POST /sports/settle-all` — the console's *Settle all pending tickets from
-  verified results* button (sports.settle, CSRF, PRG),
+- `GET /sports/settle-all` — the console's read-only settlement review page;
+  it lists each pending pick's stored-result readiness and never mutates data,
+- `POST /sports/settle-all` — the review page's *Settle all pending tickets
+  from verified results* action (`sports.settle`, CSRF, PRG back to the review),
 - `POST /api/sports/settle` and `/api/sports/tickets/{id}/settle`,
 - `POST /sports/{id}/settle` — the per-ticket console button.
 

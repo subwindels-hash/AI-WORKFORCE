@@ -665,11 +665,8 @@ $kickoffStamp = static function (mixed $iso): string {
         <?php if ($pendingTickets > 0): ?>
           <?php if (!empty($caps['settle'])): ?>
             <div class="sports-actions">
-              <form method="post" action="/sports/settle-all">
-                <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
-                <button class="btn small" type="submit">Settle all pending tickets from verified results (sports.settle)</button>
-              </form>
-              <p class="sports-note">Runs the same sweep as the hourly settlement cron: final, corroborated results are verified first (audited as <span class="mono">SPORTS_RESULT_VERIFIED</span>), then every pending ticket is settled from them. Tickets whose results are not yet final or corroborated stay pending.</p>
+              <a class="btn small" href="/sports/settle-all">Settle all pending tickets from verified results (sports.settle)</a>
+              <p class="sports-note">Opens the settlement review page first. It shows which stored results are ready, still corroborating or missing before you run the same audited sweep as the hourly settlement cron.</p>
             </div>
           <?php else: ?>
             <p class="sports-note">Settlement stays with identities holding <b>sports.settle</b>.</p>

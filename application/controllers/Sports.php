@@ -28,11 +28,11 @@ class Sports extends MY_Controller
     }
 
     /** Renders the sign-in gate inside the page shell when nobody is signed in. */
-    private function gateGuest(string $title): bool
+    private function gateGuest(string $title, string $returnTo = '/sports'): bool
     {
         if ($this->identity !== null) return false;
         $data = $this->base($title, 'sports');
-        $data['signInUrl'] = $this->signInUrl('/sports');
+        $data['signInUrl'] = $this->signInUrl($returnTo);
         $data['gateTitle'] = 'Sign in to view Sports Intelligence';
         $this->load->view('layout/header', $data);
         $this->load->view('partials/signin_gate', $data);
@@ -188,18 +188,29 @@ class Sports extends MY_Controller
     }
 
     /**
-     * Settle every pending odds prediction ticket from stored verified
-     * results (sports.settle) — the browser-facing equivalent of
-     * POST /api/sports/settle and the hourly settlement cron. Results earn
-     * verification first (terminal status + corroborated source stamp), so
-     * this is the one-click way to make the measured-results panel show real
-     * numbers once matches have finished, instead of hand-crafting per-match
-     * verify API calls.
+     * GET shows the settlement review page; POST runs the permissioned sweep.
+     *
+     * Keeping both verbs on the canonical /sports/settle-all URL makes the
+     * dashboard control a real, bookmarkable page instead of sending a user
+     * straight into a long-running mutation with no explanation. The POST is
+     * still the browser-facing equivalent of POST /api/sports/settle and the
+     * hourly settlement cron: only stored results can be used, and a terminal
+     * result must already be verified or old enough to earn corroborated
+     * verification before any selection is finalized.
      */
     public function settle_all()
     {
-        if ($this->input->method(true) !== 'POST') { redirect('/sports'); return; }
-        if (!$this->requireSportsPermission('sports.settle', 'settle all pending tickets')) return;
+        $method = $this->input->method(true);
+        if (in_array($method, ['GET', 'HEAD'], true)) {
+            if ($this->gateGuest('Settle pending sports tickets', '/sports/settle-all')) return;
+            $this->render('sports/settle_all', $this->settlementPageData());
+            return;
+        }
+        if ($method !== 'POST') {
+            $this->output->set_status_header(405)->set_header('Allow: GET, HEAD, POST');
+            return;
+        }
+        if (!$this->requireSportsPermission('sports.settle', 'settle all pending tickets', '/sports/settle-all')) return;
         @set_time_limit(120);
         try {
             $out = $this->platform->sports->settlement->settleAllPending(200, $this->actor());
@@ -207,9 +218,139 @@ class Sports extends MY_Controller
                 (int) ($out['settled'] ?? 0), (int) ($out['pending'] ?? 0),
                 !empty($out['errors']) ? ' (' . count($out['errors']) . ' error(s), see audit log)' : ''));
         } catch (Throwable $e) {
-            $this->flash('error', $e->getMessage());
+            $this->flash('error', 'Settlement sweep failed: ' . mb_substr($e->getMessage(), 0, 300));
         }
-        redirect('/sports');
+        // PRG back to the dedicated status page: a refresh can never submit
+        // the sweep twice, and the operator immediately sees the remaining
+        // queue rather than having to find the panel on the overview again.
+        redirect('/sports/settle-all');
+    }
+
+    /**
+     * Build a read-only preview of exactly what the next settlement sweep can
+     * process. GET never verifies a result or changes a ticket.
+     *
+     * @return array<string,mixed>
+     */
+    private function settlementPageData(): array
+    {
+        $data = $this->base('Settle pending sports tickets', 'sports');
+        $tickets = $this->platform->model->sports->listTickets(['status' => 'PENDING'], 200);
+        $corroborationSeconds = \AIWorkforce\Sports\PersistedResultVerifier::corroborationSeconds();
+        $verificationEngine = new \AIWorkforce\Sports\ResultVerificationEngine();
+        $now = time();
+        $matches = [];
+        $results = [];
+        $rows = [];
+        $ticketRows = [];
+        $summary = [
+            'tickets' => count($tickets), 'pendingSelections' => 0,
+            'readySelections' => 0, 'verifiedSelections' => 0,
+            'waitingResults' => 0, 'waitingFinal' => 0,
+            'corroborating' => 0,
+        ];
+
+        foreach ($tickets as $ticket) {
+            $ticketId = (string) ($ticket['id'] ?? '');
+            $selections = $ticketId !== '' ? $this->platform->model->sports->ticketSelections($ticketId) : [];
+            $pendingForTicket = 0;
+            $readyForTicket = 0;
+
+            foreach ($selections as $selection) {
+                $matchId = (int) ($selection['match_id'] ?? 0);
+                if (!array_key_exists($matchId, $matches)) {
+                    $matches[$matchId] = $matchId > 0 ? $this->platform->model->sports->findMatchById($matchId) : null;
+                }
+                if (!array_key_exists($matchId, $results)) {
+                    $results[$matchId] = $matchId > 0 ? $this->platform->model->sports->findResultByMatch($matchId) : null;
+                }
+                $match = is_array($matches[$matchId]) ? $matches[$matchId] : null;
+                $result = is_array($results[$matchId]) ? $results[$matchId] : null;
+                $selectionStatus = strtoupper((string) ($selection['status'] ?? 'PENDING'));
+                $state = 'RESOLVED';
+                $reason = 'This selection is already ' . ($selectionStatus !== '' ? $selectionStatus : 'resolved') . '.';
+                $retryAt = null;
+
+                if ($selectionStatus === 'PENDING') {
+                    $pendingForTicket++;
+                    $summary['pendingSelections']++;
+                    if ($result === null) {
+                        $state = 'WAITING_FOR_RESULT';
+                        $reason = 'No provider result is stored for this match yet.';
+                        $summary['waitingResults']++;
+                    } else {
+                        // Ask the same verification engine used by settlement
+                        // whether the stored score/status is terminal and valid.
+                        // `verified=true` here only validates the candidate in
+                        // memory; GET never writes that flag to storage.
+                        $candidate = $verificationEngine->verify([
+                            'verified' => true,
+                            'status' => (string) ($result['status'] ?? ''),
+                            'homeScore' => ($result['home_score'] ?? null) === null ? null : (int) $result['home_score'],
+                            'awayScore' => ($result['away_score'] ?? null) === null ? null : (int) $result['away_score'],
+                        ]);
+                        if (empty($candidate['verified'])) {
+                            $state = ($candidate['reason'] ?? '') === 'RESULT_INVALID' ? 'INVALID_RESULT' : 'WAITING_FOR_FINAL';
+                            $reason = $state === 'INVALID_RESULT'
+                                ? 'The stored terminal result has an invalid or incomplete score.'
+                                : 'The provider has not marked this match final yet.';
+                            $summary['waitingFinal']++;
+                        } elseif (!empty($result['verified'])) {
+                            $state = 'VERIFIED';
+                            $reason = 'A verified terminal result is stored and ready to settle.';
+                            $readyForTicket++;
+                            $summary['readySelections']++;
+                            $summary['verifiedSelections']++;
+                        } else {
+                            $sourceTimestamp = strtotime((string) ($result['source_timestamp'] ?? ''));
+                            if ($sourceTimestamp === false) {
+                                $state = 'INVALID_TIMESTAMP';
+                                $reason = 'The result has no valid provider source timestamp, so it cannot be auto-verified.';
+                                $summary['waitingFinal']++;
+                            } else {
+                                $age = $now - $sourceTimestamp;
+                                if ($age >= $corroborationSeconds) {
+                                    $state = 'READY_TO_VERIFY';
+                                    $reason = 'The terminal result has passed the corroboration window and will be verified during the sweep.';
+                                    $readyForTicket++;
+                                    $summary['readySelections']++;
+                                } else {
+                                    $remaining = max(1, $corroborationSeconds - $age);
+                                    $retryAt = gmdate('c', $now + $remaining);
+                                    $state = 'CORROBORATING';
+                                    $reason = 'The final result is stored but is still inside the corroboration window.';
+                                    $summary['corroborating']++;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                $rows[] = [
+                    'ticketId' => $ticketId,
+                    'matchId' => $matchId,
+                    'match' => $match,
+                    'selection' => $selection,
+                    'result' => $result,
+                    'state' => $state,
+                    'reason' => $reason,
+                    'retryAt' => $retryAt,
+                ];
+            }
+
+            $ticketRows[] = [
+                'ticket' => $ticket,
+                'selectionCount' => count($selections),
+                'pendingSelections' => $pendingForTicket,
+                'readySelections' => $readyForTicket,
+            ];
+        }
+
+        $data['settlementTickets'] = $ticketRows;
+        $data['settlementRows'] = $rows;
+        $data['settlementSummary'] = $summary;
+        $data['corroborationSeconds'] = $corroborationSeconds;
+        return $data;
     }
 
     /**
@@ -536,13 +677,16 @@ class Sports extends MY_Controller
      * platform-wide csrf_protection is off and privileged endpoints guard
      * themselves.
      */
-    private function requireSportsPermission(string $permission, string $action): bool
+    private function requireSportsPermission(string $permission, string $action, string $returnTo = '/sports'): bool
     {
         // A logged-out visitor cannot perform a mutation: send them to sign in
-        // and return to the sports console afterwards, rather than showing a
-        // permission-refusal that implies they merely lack a role.
+        // and return to the page that owns the action afterwards, rather than
+        // showing a permission-refusal that implies they merely lack a role.
+        if (!str_starts_with($returnTo, '/') || str_starts_with($returnTo, '//') || str_contains($returnTo, '://')) {
+            $returnTo = '/sports';
+        }
         if ($this->identity === null && $this->currentUser() === null) {
-            $this->session->set_userdata('return_to', '/sports');
+            $this->session->set_userdata('return_to', $returnTo);
             redirect('/login');
             return false;
         }
@@ -552,14 +696,14 @@ class Sports extends MY_Controller
         if (!is_array($user) || !$this->platform->identity->can($user, $permission)) {
             $this->flash('error', "Refused: signed-in identity lacks '{$permission}' — the {$action} action was not performed."
                 . " Ask an administrator to assign a role that carries '{$permission}' (Sports administrator for the sports console), then retry — permissions are re-read from the database on every action, so no sign-out is needed.");
-            redirect('/sports');
+            redirect($returnTo);
             return false;
         }
         $sent = (string) $this->input->post('csrf_token');
         $known = $this->session->userdata('csrf_token');
         if ($sent === '' || !is_string($known) || $known === '' || !hash_equals($known, $sent)) {
             $this->flash('error', "Refused: missing or invalid CSRF token — the {$action} action was not performed.");
-            redirect('/sports');
+            redirect($returnTo);
             return false;
         }
         return true;

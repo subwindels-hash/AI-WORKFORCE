@@ -418,7 +418,7 @@ test('sports UI: the live board repaint is placement-safe — a poll can never s
     $liveTable = substr($html, (int) strpos($html, 'id="live-scores-table"'));
     $liveTable = substr($liveTable, 0, (int) strpos($liveTable, '</table>'));
     $thead = substr($liveTable, (int) strpos($liveTable, '<thead>'), (int) strpos($liveTable, '</thead>') - (int) strpos($liveTable, '<thead>'));
-    assert_equals(6, substr_count($thead, '<th'), 'the live board header declares exactly six columns');
+    assert_equals(6, preg_match_all('/<th(?:\\s|>)/', $thead), 'the live board header declares exactly six columns');
     $row = substr($liveTable, (int) strpos($liveTable, '<tr data-match-id'));
     $row = substr($row, 0, (int) strpos($row, '</tr>'));
     assert_equals(6, substr_count($row, '<td'), 'each server-rendered live row has exactly one cell per header column');
@@ -462,19 +462,20 @@ test('sports UI: the measured-results panel explains pending settlement and offe
     assert_equals(1, (int) ($dash['performance']['pendingTickets'] ?? 0), 'pendingTickets counts the window\'s unsettled tickets');
     assert_equals(0, (int) ($dash['performance']['settledTickets'] ?? -1), 'nothing is settled yet');
 
-    // Privileged identity: the explanation plus the settle-all sweep form.
+    // Privileged identity: the explanation plus a link to the real settlement
+    // review page. Opening the page is read-only; the mutation lives behind a
+    // separate CSRF-protected confirmation form there.
     $html = fx_render_sports('index', ['dashboard' => $dash, 'csrfToken' => 'ui-csrf-token']);
     assert_contains('still awaiting settlement', $html, 'the empty state names the pending tickets');
     assert_contains('settles automatically (hourly sports cron)', $html, 'and says how they settle');
-    assert_contains('<form method="post" action="/sports/settle-all">', $html, 'the settle-all form posts to the routed console action');
-    assert_contains('name="csrf_token" value="ui-csrf-token"', $html, 'the sweep form carries the CSRF token');
+    assert_contains('<a class="btn small" href="/sports/settle-all">', $html, 'the dashboard opens the routed settlement review page');
     assert_contains('Settle all pending tickets from verified results (sports.settle)', $html);
-    assert_contains('SPORTS_RESULT_VERIFIED', $html, 'the note says promotions are audited');
+    assert_contains('which stored results are ready', $html, 'the link explains that the page previews readiness before mutating');
 
-    // Read-only identity: same explanation, no form — the permission note.
+    // Read-only identity: same explanation, no link — the permission note.
     $htmlReadOnly = fx_render_sports('index', ['dashboard' => $dash, 'csrfToken' => 'ui-csrf-token', 'caps' => fx_sports_caps_none()]);
     assert_contains('still awaiting settlement', $htmlReadOnly);
-    assert_true(!str_contains($htmlReadOnly, 'action="/sports/settle-all"'), 'a read-only identity gets no settle-all form');
+    assert_true(!str_contains($htmlReadOnly, 'href="/sports/settle-all"'), 'a read-only identity gets no settle-all control');
     assert_contains('Settlement stays with identities holding <b>sports.settle</b>.', $htmlReadOnly);
 
     // Nothing pending at all: the honest bare empty state, and no sweep form
@@ -485,14 +486,76 @@ test('sports UI: the measured-results panel explains pending settlement and offe
     assert_equals(0, (int) ($emptyDash['performance']['pendingTickets'] ?? -1));
     $htmlEmpty = fx_render_sports('index', ['dashboard' => $emptyDash, 'csrfToken' => 'ui-csrf-token']);
     assert_contains('No settled records or selections yet — metrics are intentionally unavailable rather than invented.', $htmlEmpty);
-    assert_true(!str_contains($htmlEmpty, 'action="/sports/settle-all"'), 'no pending tickets means no sweep form');
+    assert_true(!str_contains($htmlEmpty, 'href="/sports/settle-all"'), 'no pending tickets means no settlement-page control');
 
-    // The console action is routed and guarded like every other mutation.
+    // The console page/action is routed: GET renders a real page, while POST
+    // is guarded like every other mutation and redirects back with a result.
     $routes = file_get_contents(FCPATH . 'application/config/routes.php');
-    assert_contains("\$route['sports/settle-all'] = 'sports/settle_all';", $routes, 'the settle-all action is routed');
+    assert_contains("\$route['sports/settle-all'] = 'sports/settle_all';", $routes, 'the settle-all page/action is routed');
     $controller = file_get_contents(FCPATH . 'application/controllers/Sports.php');
-    assert_contains("public function settle_all()", $controller, 'the console controller has the action');
-    assert_contains("requireSportsPermission('sports.settle', 'settle all pending tickets')", $controller, 'it enforces sports.settle + CSRF like the other mutations');
+    assert_contains("public function settle_all()", $controller, 'the console controller has the page/action');
+    assert_contains("\$this->render('sports/settle_all', \$this->settlementPageData())", $controller, 'GET renders the dedicated settlement page');
+    assert_contains("requireSportsPermission('sports.settle', 'settle all pending tickets', '/sports/settle-all')", $controller, 'POST enforces sports.settle + CSRF and returns errors to the review page');
+    assert_contains("redirect('/sports/settle-all')", $controller, 'POST uses PRG back to the settlement page');
+});
+
+test('sports UI: settle-all URL renders a review page with a working guarded action', function () {
+    $ticket = [
+        'id' => 'tkt_settlement_page', 'created_at' => '2026-09-19T10:00:00+00:00',
+        'approval_status' => 'APPROVED_NOT_EXECUTED', 'settlement_status' => 'PENDING',
+    ];
+    $selection = [
+        'market' => 'MATCH_RESULT', 'selection' => 'HOME', 'status' => 'PENDING',
+    ];
+    $match = [
+        'home_team' => 'Home FC', 'away_team' => 'Away FC', 'competition' => 'Test League',
+        'kickoff_at' => '2026-09-19T08:00:00+00:00',
+    ];
+    $result = [
+        'status' => 'FINISHED', 'home_score' => 2, 'away_score' => 0,
+        'source_timestamp' => '2026-09-19T09:00:00+00:00', 'verified' => 1,
+    ];
+    $page = fx_render_sports('settle_all', [
+        'csrfToken' => 'settlement-csrf',
+        'settlementSummary' => [
+            'tickets' => 1, 'pendingSelections' => 1, 'readySelections' => 1,
+            'verifiedSelections' => 1, 'waitingResults' => 0,
+            'waitingFinal' => 0, 'corroborating' => 0,
+        ],
+        'corroborationSeconds' => 600,
+        'settlementTickets' => [[
+            'ticket' => $ticket, 'selectionCount' => 1,
+            'pendingSelections' => 1, 'readySelections' => 1,
+        ]],
+        'settlementRows' => [[
+            'ticketId' => $ticket['id'], 'matchId' => 9001,
+            'match' => $match, 'selection' => $selection, 'result' => $result,
+            'state' => 'VERIFIED',
+            'reason' => 'A verified terminal result is stored and ready to settle.',
+            'retryAt' => null,
+        ]],
+    ]);
+
+    assert_contains('<h2 id="settlement-heading">Settle all pending tickets</h2>', $page);
+    assert_contains('What the next sweep can process', $page);
+    assert_contains('tkt_settlement_page', $page);
+    assert_contains('Home FC vs Away FC', $page);
+    assert_contains('FINISHED · 2–0', $page);
+    assert_contains('Verified · ready', $page);
+    assert_contains('<form method="post" action="/sports/settle-all"', $page, 'the review page owns the POST action');
+    assert_contains('name="csrf_token" value="settlement-csrf"', $page, 'every settlement form carries CSRF');
+    assert_contains('Settle all pending tickets from verified results (sports.settle)', $page);
+    assert_contains('Refreshing this page does not run the action again.', $page, 'the page explains the PRG safety');
+    assert_true(!str_contains($page, 'Fatal error'), 'the settlement page renders without a fatal error');
+
+    $readOnly = fx_render_sports('settle_all', [
+        'caps' => fx_sports_caps_none(),
+        'settlementSummary' => ['tickets' => 1, 'pendingSelections' => 1],
+        'settlementTickets' => [], 'settlementRows' => [],
+    ]);
+    assert_true(!str_contains($readOnly, '<form method="post" action="/sports/settle-all"'), 'read-only identity gets no mutation form');
+    assert_contains('Review only.', $readOnly);
+    assert_contains('sports.settle', $readOnly);
 });
 
 test('sports UI: NO QUALIFIED TICKET panel names every funnel stage, the blocking field and the provider', function () {
