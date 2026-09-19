@@ -51,6 +51,11 @@ final class PerformanceService
                 // The flag the console reads to confirm an empty history is not a gate:
                 // settlement never disables forecasting.
                 'gatesPredictions' => false,
+                // WHY the window is empty and HOW a measurement appears — the
+                // state the sidebar's Measured results panel explains itself
+                // with instead of ten zeros and a generic promise. Pure reads:
+                // stored prediction and settlement counts.
+                'status' => $this->emptyWindowStatus($days),
                 'message' => self::EMPTY_MESSAGE,
                 'note' => 'Live predictions are unaffected by this: forecasting depends on provider data, statistics and the loaded model — not on how much history has been settled.',
                 'modelVersionId' => $modelVersionId,
@@ -126,6 +131,9 @@ final class PerformanceService
 
         return [
             'state' => 'MEASURED',
+            // A measured window carries no status strip: the figures are the
+            // information.
+            'status' => null,
             'windowDays' => $days, 'windowStart' => $from, 'windowEnd' => $to,
             'evaluatedPredictions' => $evaluated,
             'correctResults' => $correctResults === null ? null : (int) $correctResults,
@@ -355,5 +363,43 @@ final class PerformanceService
             if ((float) ($values[$key] ?? 0) > $bestValue) { $bestValue = (float) $values[$key]; $best = $key; }
         }
         return $best;
+    }
+
+    /**
+     * The empty-window status: which absence the Measured results panel is in.
+     *
+     *   NO_PREDICTIONS          — no pre-match prediction row exists at all;
+     *                              there is nothing to measure until one is
+     *                              generated (Generate this page / generate-on-
+     *                              read / the scheduled predict job)
+     *   PREDICTIONS_UNSETTLED   — predictions exist but none is settled: a
+     *                              prediction is measured only after its match
+     *                              finishes, the results sweep stores the final
+     *                              score and the settle job grades it
+     *   SETTLED_OUTSIDE_WINDOW  — settlements exist, none inside the window
+     *                              the panel describes
+     *
+     * Purely read-only counts; no settlement or provider action is taken.
+     *
+     * @return array<string,mixed>
+     */
+    private function emptyWindowStatus(int $days): array
+    {
+        $predictionsStored = 0;
+        try { $predictionsStored = $this->repo->countPredictions(['kind' => PredictionService::KIND_PRE_MATCH]); } catch (\Throwable $e) { $predictionsStored = 0; }
+        $settledAllTime = 0;
+        try { $settledAllTime = (int) ($this->repo->settlementAggregates([])['evaluated'] ?? 0); } catch (\Throwable $e) { $settledAllTime = 0; }
+
+        $state = match (true) {
+            $predictionsStored === 0 => 'NO_PREDICTIONS',
+            $settledAllTime === 0 => 'PREDICTIONS_UNSETTLED',
+            default => 'SETTLED_OUTSIDE_WINDOW',
+        };
+        $detail = match ($state) {
+            'NO_PREDICTIONS' => 'No prediction row exists yet, so there is nothing to measure. Predictions are created by the Generate this page action (or automatically on read and by the scheduled predict job); a measurement appears only after a predicted match finishes and its final result is stored.',
+            'PREDICTIONS_UNSETTLED' => $predictionsStored . ' prediction(s) are stored; none is settled yet. A prediction is measured only after its match finishes: the results sweep stores the final score (football-results job, every 15 minutes) and the settle job grades the prediction against it (football-settle job, every 15 minutes) — the figures in this panel come from that settlement record. Upcoming and in-play matches have nothing to measure yet.',
+            default => $settledAllTime . ' settlement(s) exist, none inside the last ' . $days . ' days this panel describes. The figures below always describe this window only.',
+        };
+        return ['state' => $state, 'detail' => $detail, 'predictionsStored' => $predictionsStored, 'settledAllTime' => $settledAllTime];
     }
 }

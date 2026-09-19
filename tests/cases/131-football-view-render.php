@@ -270,7 +270,7 @@ test('football: the Day overview prints the full date, the selection, both scope
     foreach (['Fixtures found', 'Analyzed', 'Qualified', 'Limited evidence', 'Withheld', 'Awaiting analysis'] as $tile) {
         assert_true(str_contains($overview[0], $tile), 'the ' . $tile . ' tile renders');
     }
-    assert_true(str_contains($overview[0], 'evidence below the floor · this page'), 'withheld is labeled with its page scope');
+    assert_true(str_contains($overview[0], 'evidence below the floor'), 'withheld is labeled with the gate that withheld it');
     assert_true(str_contains($overview[0], 'no prediction row yet · whole selection'), 'awaiting analysis is labeled with its selection scope');
     assert_true(str_contains($overview[0], '3 with a stored prediction'), 'the page line says how many fixtures on the page are predicted');
     assert_true(str_contains($overview[0], 'Reading this board generates the missing predictions for the page in view'),
@@ -467,3 +467,717 @@ test('football: the match page renders a fixture with no prediction at all', fun
     assert_true(preg_match('/WINDELS Intelligence Score<\/div>\s*<div[^>]*>\s*<span[^>]*>no score/s', $render['html']) === 1,
         'and it is the intelligence figure that is absent, not a zero wearing a label');
 });
+
+// ─── the Day overview explains its own six counters ──────────────────────────
+
+test('football: a populated Day overview carries no status strip — the counts are the information', function () {
+    $day = gmdate('Y-m-d', time() + 3 * 3600);
+    [, , $module] = fx_fb_harness([
+        fx_fb_row('fx-day-ok1', gmdate('c', time() + 3 * 3600), 'Manchester City', 'Everton', '10', '20'),
+        fx_fb_row('fx-day-ok2', gmdate('c', time() + 3 * 3600 + 900), 'Brighton', 'Burnley', '30', '40'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $dashboard = $module->dashboard($day, false, 1, 50, []);
+    $status = $dashboard['dayStatus'];
+    assert_equals('POPULATED', $status['state']);
+    assert_true($status['fixtures'] >= 2, 'the status carries the same count the Fixtures found tile prints');
+    assert_true($status['analyzed'] >= 1, 'and the analyzed count the board published');
+    assert_true(str_contains($status['detail'], (string) $status['qualified'] . ' qualified'),
+        'the populated detail summarizes the tiles it sits above');
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard]));
+    assert_true($render['notices'] === [], 'the strip adds no key the payload does not publish'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    assert_true(!str_contains($render['html'], 'football-day-status'),
+        'a populated overview renders no strip: six real counts need no apology');
+    assert_true(str_contains($render['html'], 'Fixtures found'), 'the tiles render');
+});
+
+test('football: a stored-but-unanalyzed day says generation is the missing step', function () {
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    [, , $module] = fx_fb_harness([
+        fx_fb_row('fx-day-gen', $day . 'T12:00:00+00:00', 'Arsenal', 'Aston Villa', '10', '20'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $dashboard = $module->dashboard($day, false, 1, 50, []);
+    $status = $dashboard['dayStatus'];
+    assert_equals('GENERATION_OFF', $status['state'], 'fixtures stored, nothing analyzed, this read did not generate');
+    assert_equals(1, $status['fixtures']);
+    assert_true(str_contains($status['detail'], 'Generate this page'), 'the state names the action that fills Analyzed');
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard]));
+    assert_equals(1, substr_count($render['html'], 'id="football-day-status"'), 'exactly one strip renders');
+    assert_true(str_contains($render['html'], 'AWAITING GENERATION'), 'with its badge');
+    assert_true(str_contains($render['html'], 'Generate this page'), 'and the remedy in the strip sentence');
+    assert_true(str_contains($render['html'], '1</div>'), 'the Fixtures found tile still shows its real count');
+});
+
+test('football: a day nothing has swept yet names the missing sweep', function () {
+    $day = gmdate('Y-m-d', time() + 86400);
+    $repo = new FootballRepositoryStub();
+    $manager = new \AIWorkforce\Sports\Providers\SportsProviderManager();
+    $manager->register(new FxFootballProvider(fx_fb_provider_data([
+        fx_fb_row('fx-day-never', $day . 'T15:00:00+00:00', 'Chelsea', 'Fulham', '10', '20'),
+    ])));
+    $module = new \AIWorkforce\Football\FootballIntelligence($repo, $manager, null, new \AIWorkforce\Football\FootballConfiguration());
+    assert_equals(null, $repo->lastSyncRun('FIXTURES'), 'no fixtures sweep has run in this scenario');
+    $dashboard = $module->dashboard($day, false, 1, 50, []);
+    $status = $dashboard['dayStatus'];
+    assert_equals('NEVER_SYNCED', $status['state']);
+    assert_true(str_contains($status['detail'], 'Sync this date'), 'the state names the operator action');
+    assert_true(str_contains($status['detail'], 'fixtures job'), 'and the automatic one');
+    assert_true(str_contains($status['detail'], 'Fixtures found'), 'and ties the remedy to the tile it fills');
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard]));
+    assert_true(str_contains($render['html'], 'FIXTURES SWEEP PENDING'), 'the badge renders');
+    assert_true(str_contains($render['html'], 'No fixture has been stored'), 'the empty state still states its own fact');
+});
+
+test('football: with no feed connected the overview names the connection, not the sweep', function () {
+    $day = gmdate('Y-m-d');
+    $module = new \AIWorkforce\Football\FootballIntelligence(
+        new FootballRepositoryStub(), new \AIWorkforce\Sports\Providers\SportsProviderManager());
+    $dashboard = $module->dashboard($day, false, 1, 50, []);
+    $status = $dashboard['dayStatus'];
+    assert_equals('NO_PROVIDER', $status['state']);
+    assert_false($status['providerConfigured']);
+    assert_true(str_contains($status['detail'], 'No football data provider is connected'));
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard]));
+    assert_true(str_contains($render['html'], 'FIXTURES UNAVAILABLE'), 'the badge renders');
+    assert_true(str_contains($render['html'], 'Data feed panel'), 'and the strip points at where a feed is connected');
+});
+
+test('football: a day the engine ran on but published nothing says that, not "awaiting"', function () {
+    // A mixed empty day: one fixture the quality gate refused (thin Unknown
+    // Cup evidence) and one whose kickoff has passed. The overview must own
+    // that this read ran and nothing was published — naming the split, not
+    // promising a sweep that happened.
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    [$repo, , $module] = fx_fb_harness();
+    $providerId = (int) ($repo->listProviders()[0]['id'] ?? 1);
+    $repo->saveFixture($providerId, [
+        'externalId' => 'fx-day-thin', 'competition' => 'Unknown Cup', 'leagueId' => '99', 'season' => '2026',
+        'kickoff' => $day . 'T12:00:00+00:00', 'status' => 'SCHEDULED', 'dataState' => 'AVAILABLE',
+        'homeTeam' => 'Home United', 'awayTeam' => 'Away Rovers', 'homeTeamId' => '900', 'awayTeamId' => '901',
+    ]);
+    // POSTPONED is closed by the engine's rule, independent of the clock —
+    // the test stays deterministic at any hour it runs.
+    $repo->saveFixture($providerId, [
+        'externalId' => 'fx-day-closed', 'competition' => 'Premier League', 'leagueId' => '39', 'season' => '2026',
+        'kickoff' => $day . 'T15:00:00+00:00', 'status' => 'POSTPONED',
+        'homeTeam' => 'Leeds', 'awayTeam' => 'Leicester', 'homeTeamId' => '10', 'awayTeamId' => '20',
+    ]);
+    $dashboard = $module->dashboard($day, true, 1, 50, []);
+    $status = $dashboard['dayStatus'];
+    assert_equals('ANALYZED_NONE', $status['state']);
+    assert_equals(2, $status['fixtures'], 'the fixtures are stored — it is the predictions that are absent');
+    assert_equals(1, $status['withheld'], 'one was assessed and refused');
+    assert_equals(1, $status['closed'], 'one is past kickoff');
+    assert_equals(0, $status['awaiting'], 'none is merely waiting: each has a durable answer');
+    assert_true(str_contains($status['detail'], 'no prediction was published'), 'the state says what actually happened');
+    assert_true(str_contains($status['detail'], '1 past kickoff or void, 1 withheld by the data-quality gate'),
+        'and names the split in the tiles\' own words');
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard, 'refresh' => true]));
+    assert_true(str_contains($render['html'], 'NO PREDICTION PUBLISHED'), 'the badge renders');
+    assert_true(str_contains($render['html'], 'Withheld'), 'and the Withheld tile it references still renders');
+    assert_true(str_contains($render['html'], 'no prediction rows · 1 past kickoff or void · 1 withheld by the quality gate'),
+        'the Analyzed tile names why it is zero');
+    assert_true(str_contains($render['html'], 'no prediction row yet · 1 past kickoff or void · 1 withheld by the quality gate'),
+        'and the Awaiting tile names its exclusions instead of "answered on this page"');
+});
+
+test('football: a day where every stored fixture is past kickoff says so on the tiles themselves', function () {
+    // The state the live board shows as "4 found / 0 / 0 / 0 / 0 / excludes 4
+    // answered on this page": every stored fixture has kicked off, so no
+    // pre-match prediction can ever be created. The overview must say THAT,
+    // not five zeros with a cryptic exclusion.
+    // POSTPONED statuses keep the scenario deterministic at any hour: closed
+    // by the engine's rule, not by where the clock happens to be.
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    [, , $module] = fx_fb_harness([
+        fx_fb_row('fx-allclosed-1', $day . 'T15:00:00+00:00', 'Leeds', 'Leicester', '10', '20', 'POSTPONED'),
+        fx_fb_row('fx-allclosed-2', $day . 'T17:00:00+00:00', 'Wolves', 'Watford', '11', '21', 'POSTPONED'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $dashboard = $module->dashboard($day, true, 1, 50, []);
+    $status = $dashboard['dayStatus'];
+    assert_equals('ALL_CLOSED', $status['state']);
+    assert_equals(2, $status['fixtures']);
+    assert_equals(2, $status['closed'], 'both fixtures are past kickoff');
+    assert_equals(0, $status['awaiting'], 'nothing awaits: the window is closed for all of them');
+    assert_true(str_contains($status['detail'], 'no pre-match prediction can be created for any of them'),
+        'the state says the board is historical');
+    assert_true(str_contains($status['detail'], 'nothing is back-filled'), 'and that nothing is invented after the fact');
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard, 'refresh' => true]));
+    assert_true(str_contains($render['html'], 'ALL FIXTURES PAST KICKOFF'), 'the badge renders');
+    assert_true(str_contains($render['html'], 'no prediction rows · 2 past kickoff or void'),
+        'the Analyzed tile explains its own zero');
+    assert_true(str_contains($render['html'], 'no prediction row yet · 2 past kickoff or void'),
+        'and the Awaiting tile explains its zero with the same words');
+    assert_true(!str_contains($render['html'], 'answered on this page'), 'the cryptic page-scoped exclusion is gone');
+    assert_true(str_contains($render['html'], '2 closed (kickoff already passed)'), 'the page line keeps its own count');
+});
+
+test('football: a partly analyzed day reports the remainder as awaiting analysis', function () {
+    // One predicted, one still open without an assessment: POPULATED, with
+    // the remainder named on the tile and in the detail — the Awaiting count
+    // is the true date-wide figure, not a page approximation.
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    [$repo, , $module] = fx_fb_harness([
+        fx_fb_row('fx-part-predicted', $day . 'T15:00:00+00:00', 'Manchester City', 'Everton', '10', '20'),
+        fx_fb_row('fx-part-awaiting', $day . 'T17:30:00+00:00', 'Brighton', 'Burnley', '30', '40'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $fixtureId = fx_131_fixture_id($repo, 'fx-part-predicted');
+    $module->predictions()->predictFixture($fixtureId);
+    $dashboard = $module->dashboard($day, false, 1, 50, []);
+    $status = $dashboard['dayStatus'];
+    assert_equals('POPULATED', $status['state']);
+    assert_equals(1, $status['analyzed']);
+    assert_equals(1, $status['awaiting'], 'the open unanalyzed fixture is the remainder');
+    assert_true(str_contains($status['detail'], '1 awaiting analysis'), 'the detail carries the remainder');
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard]));
+    assert_true(preg_match('/Awaiting analysis<\/div><div class="v">1<\/div>/', $render['html']) === 1,
+        'the Awaiting tile shows the true date-wide count');
+    assert_true(str_contains($render['html'], 'no prediction row yet · whole selection'),
+        'with no durable exclusions the label stays whole-selection');
+    assert_true(!str_contains($render['html'], 'football-day-status'), 'a populated day carries no strip');
+});
+
+test('football: a swept day the feed had nothing for says that, and offers the day-scoped sync', function () {
+    // The sweep ran (a FIXTURES run is recorded) but the feed returned no
+    // fixture for this date: an empty match day or an uncovered league
+    // package — a different fact from "the sweep never ran".
+    $day = gmdate('Y-m-d', time() + 86400);
+    [, , $module] = fx_fb_harness([], ['skipHistory' => true]);
+    fx_fb_sync_today($module, $day);
+    $dashboard = $module->dashboard($day, false, 1, 50, []);
+    $status = $dashboard['dayStatus'];
+    assert_equals('SYNCED_NO_FIXTURES', $status['state']);
+    assert_true(is_array($status['lastFixturesSync']), 'the state can cite the sweep it is describing');
+    assert_true(str_contains($status['detail'], 'no fixture is stored for this date'), 'it states the actual fact');
+    assert_true(str_contains($status['detail'], 'Sync this date'), 'and the day-scoped remedy');
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard]));
+    assert_true(str_contains($render['html'], 'NO FIXTURES FOR THIS DATE'), 'the badge renders');
+    assert_true(str_contains($render['html'], 'No fixture has been stored'), 'and the empty state keeps its own sentence');
+});
+
+/** The stored fixture id for one external id (the harness seeds history days too). */
+function fx_131_fixture_id(FootballRepositoryStub $repo, string $external): int
+{
+    foreach ($repo->fixtures as $row) {
+        if ((string) ($row['external_id'] ?? '') === $external) return (int) ($row['id'] ?? 0);
+    }
+    return 0;
+}
+
+// ─── the match page's Prediction overview explains its own empty state ────────
+
+test('football: a stored open match with no analysis says what creates its prediction', function () {
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    [$repo, , $module] = fx_fb_harness([
+        fx_fb_row('fx-match-awaiting', $day . 'T15:00:00+00:00', 'Arsenal', 'Aston Villa', '10', '20'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $fixtureId = fx_131_fixture_id($repo, 'fx-match-awaiting');
+    assert_true($fixtureId > 0, 'the fixture is stored');
+    $prediction = $module->predictionFor($fixtureId);
+    assert_equals('NO_PREDICTION', $prediction['status']);
+    $status = $prediction['statusDetail'];
+    assert_equals('AWAITING_ANALYSIS', $status['state'], 'stored and open, but no engine assessment has run');
+    assert_true(str_contains($status['detail'], 'no analysis has run'), 'the state states the actual fact');
+    assert_true(str_contains($status['detail'], 'Analyze this match'), 'and names the action that fills the section');
+    $render = fx_fb_render_view('match', fx_fb_view_data([
+        'fixtureId' => $fixtureId, 'analysis' => $module->analysis($fixtureId),
+        'prediction' => $prediction, 'live' => null, 'settlement' => null,
+    ]));
+    assert_true($render['notices'] === [], 'the strip reaches for no key the payload does not publish'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    assert_contains('id="football-prediction-status"', $render['html'], 'the strip renders');
+    assert_contains('AWAITING ANALYSIS', $render['html'], 'with its badge');
+    assert_contains('No prediction row is stored for this fixture', $render['html'], 'the fact stays stated');
+    assert_contains('Analyze this match — generate odds prediction', $render['html'], 'and the action is offered');
+});
+
+test('football: an assessed-and-refused match presents its refusal as the prediction state', function () {
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    [$repo, , $module] = fx_fb_harness();
+    $providerId = (int) ($repo->listProviders()[0]['id'] ?? 1);
+    $repo->saveFixture($providerId, [
+        'externalId' => 'fx-match-withheld', 'competition' => 'Unknown Cup', 'leagueId' => '99', 'season' => '2026',
+        'kickoff' => $day . 'T14:00:00+00:00', 'status' => 'SCHEDULED', 'dataState' => 'AVAILABLE',
+        'homeTeam' => 'Home United', 'awayTeam' => 'Away Rovers', 'homeTeamId' => '900', 'awayTeamId' => '901',
+    ]);
+    $fixtureId = fx_131_fixture_id($repo, 'fx-match-withheld');
+    // One generating pass: the engine answers and refuses, storing the assessment.
+    $module->predictions()->predictFixture($fixtureId);
+    $prediction = $module->predictionFor($fixtureId);
+    $status = $prediction['statusDetail'];
+    assert_equals('WITHHELD_BY_QUALITY_GATE', $status['state'], 'an assessment exists — a finding, not an absence');
+    assert_true(is_numeric($status['dataQualityScore']), 'the refusal carries its measured score');
+    assert_true(str_contains($status['detail'], 'no prediction:'), 'and the engine reason reaches the reader');
+    $render = fx_fb_render_view('match', fx_fb_view_data([
+        'fixtureId' => $fixtureId, 'analysis' => $module->analysis($fixtureId),
+        'prediction' => $prediction, 'live' => null, 'settlement' => null,
+    ]));
+    assert_true($render['notices'] === [], 'renders with no missing key'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    assert_contains('ANALYZED — NOT PUBLISHED', $render['html'], 'the badge names the finding');
+    assert_contains('WAS analyzed', $render['html'], 'the strip says the match WAS analyzed');
+    assert_contains('Analyze this match — generate odds prediction', $render['html'],
+        're-analysis stays available while the window is open');
+});
+
+test('football: a match whose kickoff passed explains why no prediction can exist', function () {
+    $day = gmdate('Y-m-d', time() - 7200);
+    [$repo, , $module] = fx_fb_harness([
+        fx_fb_row('fx-match-closed', $day . 'T00:15:00+00:00', 'Leeds', 'Leicester', '10', '20'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $fixtureId = fx_131_fixture_id($repo, 'fx-match-closed');
+    $prediction = $module->predictionFor($fixtureId);
+    $status = $prediction['statusDetail'];
+    assert_equals('PRE_MATCH_CLOSED', $status['state']);
+    assert_equals('KICKOFF_PASSED', $status['code'], 'the engine\'s own closed-slot rule supplies the code');
+    assert_true(str_contains($status['detail'], 'Nothing is back-filled'), 'the state says nothing can be back-filled');
+    $render = fx_fb_render_view('match', fx_fb_view_data([
+        'fixtureId' => $fixtureId, 'analysis' => $module->analysis($fixtureId),
+        'prediction' => $prediction, 'live' => null, 'settlement' => null,
+    ]));
+    assert_true($render['notices'] === [], 'renders with no missing key'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    assert_contains('PRE-MATCH WINDOW CLOSED', $render['html'], 'the badge renders');
+    assert_true(!str_contains($render['html'], '/analyze'), 'no analyze form is offered on a slot that can never be written');
+    assert_contains('settlement', $render['html'], 'the strip points at where a finished match\'s record lives');
+});
+
+test('football: predictionStatus reports PREDICTED once a row is stored, and the view needs no strip', function () {
+    $day = gmdate('Y-m-d', time() + 3 * 3600);
+    [, , $module] = fx_fb_harness([
+        fx_fb_row('fx-match-predicted', gmdate('c', time() + 3 * 3600), 'Manchester City', 'Everton', '10', '20'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    // Locate the stored fixture id through the board rows (the harness repo is not in scope here).
+    $board = $module->board()->forDate($day, false, 1, 50);
+    $fixtureId = (int) ($board['rows'][0]['fixtureId'] ?? 0);
+    assert_true($fixtureId > 0, 'the fixture is on the board');
+    $status = $module->predictionStatus($fixtureId);
+    assert_equals('PREDICTED', $status['state']);
+    $prediction = $module->predictionFor($fixtureId);
+    assert_equals('OK', $prediction['status']);
+    assert_true($prediction['statusDetail'] === null, 'a populated overview carries no status block');
+    $render = fx_fb_render_view('match', fx_fb_view_data([
+        'fixtureId' => $fixtureId, 'analysis' => $module->analysis($fixtureId),
+        'prediction' => $prediction, 'live' => null, 'settlement' => null,
+    ]));
+    assert_true($render['notices'] === [], 'renders with no missing key');
+    assert_true(!str_contains($render['html'], 'football-prediction-status'), 'no strip: the prediction IS the information');
+    assert_contains('Model outcome', $render['html'], 'the prediction grid renders');
+});
+
+// ─── the Measured results panel explains its own empty window ────────────────
+
+test('football: the Measured results panel names why its window is empty', function () {
+    // Predictions stored, none settled — the state a freshly deployed board
+    // shows: the panel must say the matches have not completed yet, not ten
+    // zeros and a generic promise.
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    [, , $module] = fx_fb_harness([
+        fx_fb_row('fx-perf-panel', $day . 'T15:00:00+00:00', 'Manchester City', 'Everton', '10', '20'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $dashboard = $module->dashboard($day, false, 1, 50, []);
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard]));
+    assert_true($render['notices'] === [], 'the strip reaches for no key the payload does not publish'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    assert_contains('id="football-perf-status"', $render['html'], 'the strip renders');
+    assert_contains('AWAITING COMPLETED MATCHES', $render['html'], 'with its badge');
+    assert_contains('none is settled yet', $render['html'], 'the strip states the actual fact');
+    assert_contains('No settled predictions yet', $render['html'], 'the honest empty-state sentence stays');
+    assert_contains('Approved calibrations 0', $render['html'], 'the calibration zero explains itself');
+    assert_contains('built from settled history', $render['html'], 'and names what a calibration is built from');
+    assert_contains('Models &amp; calibration', $render['html'], 'and where it is approved');
+});
+
+test('football: a measured performance window renders its figures and no strip', function () {
+    // Predict, finish the match, settle — then the panel shows numbers and
+    // carries no apology strip.
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    [$repo, , $module] = fx_fb_harness([
+        fx_fb_row('fx-perf-measured', gmdate('c', $kickoff), 'Manchester City', 'Everton', '10', '20'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $fixtureId = fx_131_fixture_id($repo, 'fx-perf-measured');
+    $fixture = $repo->findFixtureById($fixtureId);
+    $repo->saveFixture((int) $fixture['provider_id'], [
+        'externalId' => (string) $fixture['external_id'], 'status' => 'FINISHED', 'homeScore' => 2, 'awayScore' => 0,
+    ]);
+    $settlement = $module->settlements()->settleFixture($fixtureId, 'test:render');
+    assert_equals('SETTLED', $settlement['status'], 'the scenario holds a settlement');
+    $dashboard = $module->dashboard($day, false, 1, 50, []);
+    assert_equals('MEASURED', $dashboard['performance']['state']);
+    $render = fx_fb_render_view('index', fx_fb_view_data(['date' => $day, 'dashboard' => $dashboard]));
+    assert_true($render['notices'] === [], 'renders with no missing key');
+    assert_true(!str_contains($render['html'], 'football-perf-status'), 'no strip: measured figures are the information');
+    assert_contains('Predictions evaluated', $render['html'], 'the panel renders');
+    // The calibration note is governed by approved calibrations, not by the
+    // performance window: with none approved it honestly stays (settling one
+    // match does not approve a calibration).
+    assert_contains('Approved calibrations 0', $render['html'], 'the calibration zero still explains itself');
+});
+
+// ─── the models screen renders the lifecycle state behind its dashes ─────────
+
+test('football: the models screen renders the strip for a fresh DRAFT version', function () {
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    [, , $module] = fx_fb_harness([fx_fb_row('fx-models-view', gmdate('c', $kickoff), 'Manchester City', 'Everton', '10', '20')]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $render = fx_fb_render_view('models', fx_fb_view_data([
+        'models' => $module->modelSummary(),
+        'performance' => $module->performance()->report(30),
+    ]));
+    assert_true($render['notices'] === [], 'the strip reaches for no key the payload does not publish'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    assert_contains('id="football-model-status"', $render['html'], 'the strip renders in the Live version section');
+    assert_contains('DRAFT — AWAITING SETTLED EVIDENCE', $render['html'], 'with its badge');
+    assert_contains('never as an approved model', $render['html'], 'the strip says how the row came to exist');
+    assert_contains('hourly performance job', $render['html'], 'and how the measured figures fill');
+    // The dashes stay honest — the strip explains them, it does not replace them.
+    assert_contains('football-cell-label">Trained</td><td class="mono">—</td>', $render['html'], 'the Trained dash still renders');
+    assert_contains('football-cell-label">Activated</td><td class="mono">—</td>', $render['html'], 'the Activated dash still renders');
+    assert_contains('CALIBRATION_PENDING', $render['html'], 'the calibration badge the predictions carry is visible');
+    assert_contains('Allowed transitions: DRAFT → TRAINED → VALIDATED → CALIBRATED → APPROVED → ACTIVE', $render['html'],
+        'the register keeps its own guard sentence');
+});
+
+test('football: the models screen renders the ACTIVE — CALIBRATION PENDING strip', function () {
+    // One settled prediction, then the operator chain to activation: the model
+    // is live but uncalibrated, and the strip says exactly that.
+    [$repo, , $module] = fx_fb_harness([fx_fb_row('fx-models-active', gmdate('c', time() + 7200), 'Manchester City', 'Everton', '10', '20')]);
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $registry = $module->models();
+    $id = (int) $registry->ensureRegistered()['model']['id'];
+    $fixtureId = fx_131_fixture_id($repo, 'fx-models-active');
+    $fixture = $repo->findFixtureById($fixtureId);
+    $repo->saveFixture((int) $fixture['provider_id'], [
+        'externalId' => (string) $fixture['external_id'], 'status' => 'FINISHED', 'homeScore' => 2, 'awayScore' => 0,
+    ]);
+    $settlement = $module->settlements()->settleFixture($fixtureId, 'test:models');
+    assert_equals('SETTLED', $settlement['status'], 'the scenario holds a settlement');
+    $module->performance()->snapshot(30, $id);
+    foreach ([\AIWorkforce\Football\ModelRegistry::TRAINED, \AIWorkforce\Football\ModelRegistry::VALIDATED] as $state) {
+        assert_equals('OK', $registry->transition($id, $state, 'tester')['status'], 'earned ' . $state);
+    }
+    assert_equals('OK', $registry->approve($id, 'admin@windels')['status']);
+    assert_equals('OK', $registry->activate($id, 'admin@windels')['status']);
+
+    $render = fx_fb_render_view('models', fx_fb_view_data([
+        'models' => $module->modelSummary(),
+        'performance' => $module->performance()->report(30),
+    ]));
+    assert_true($render['notices'] === [], 'renders with no missing key'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    assert_contains('ACTIVE — CALIBRATION PENDING', $render['html'], 'the badge names the remaining gap');
+    assert_contains('This is the version answering predictions', $render['html'], 'the strip names what ACTIVE means');
+    assert_contains('Fit calibration', $render['html'], 'and the action that fills the calibration pair');
+    // The earned stamps are no longer dashed.
+    assert_contains('football-cell-label">Trained</td><td class="mono">20', $render['html'], 'the Trained stamp filled');
+    assert_contains('football-cell-label">Approved by</td><td class="mono">admin@windels', $render['html'], 'and the approver');
+});
+
+// ─── the register explains its dashed measured columns ───────────────────────
+
+test('football: the register explains its dashed Samples, Acc. and ECE columns', function () {
+    // The live board's register state: one auto-registered DRAFT version with
+    // — for Samples, Acc. and ECE and an empty actions cell. The section must
+    // explain those dashes, not just print them.
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    [, , $module] = fx_fb_harness([fx_fb_row('fx-register-draft', gmdate('c', $kickoff), 'Manchester City', 'Everton', '10', '20')]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $summary = $module->modelSummary();
+    assert_equals(1, count($summary['versions']), 'one auto-registered version');
+    assert_null($summary['versions'][0]['validationSampleSize'] ?? null, 'it carries no evaluation yet');
+    $render = fx_fb_render_view('models', fx_fb_view_data([
+        'models' => $summary, 'performance' => $module->performance()->report(30),
+    ]));
+    assert_true($render['notices'] === [], 'the register reaches for no key the payload does not publish'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    assert_contains('Samples, Acc. and ECE', $render['html'], 'the column-explanation line renders');
+    assert_contains('none recorded yet: with no settled prediction there is nothing to measure', $render['html'],
+        'the none-evaluated clause states the actual fact');
+    assert_contains('None recorded yet for this version', $render['html'], 'the dashes carry their own tooltips');
+    assert_contains('— no action yet', $render['html'], 'a row with no available action says so instead of a silent blank');
+    assert_contains('hourly performance job', $render['html'], 'and names what records the evaluations');
+    assert_contains('Allowed transitions:', $render['html'], 'the register keeps its guard sentence');
+});
+
+test('football: an evaluated register states its coverage instead of the none-yet clause', function () {
+    // Once the hourly performance job records an evaluation, the measured
+    // columns hold numbers, the dash tooltips leave, and the help line states
+    // how many versions are evaluated.
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    [$repo, , $module] = fx_fb_harness([fx_fb_row('fx-register-eval', gmdate('c', $kickoff), 'Manchester City', 'Everton', '10', '20')]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $registry = $module->models();
+    $id = (int) $registry->ensureRegistered()['model']['id'];
+    $fixtureId = fx_131_fixture_id($repo, 'fx-register-eval');
+    $fixture = $repo->findFixtureById($fixtureId);
+    $repo->saveFixture((int) $fixture['provider_id'], [
+        'externalId' => (string) $fixture['external_id'], 'status' => 'FINISHED', 'homeScore' => 2, 'awayScore' => 0,
+    ]);
+    assert_equals('SETTLED', $module->settlements()->settleFixture($fixtureId, 'test:register')['status'],
+        'the scenario holds a settlement');
+    $module->performance()->snapshot(30, $id);
+    $summary = $module->modelSummary();
+    $samples = $summary['versions'][0]['validationSampleSize'] ?? null;
+    assert_true(is_int($samples) && $samples > 0, 'the hourly job recorded the evaluation');
+    $render = fx_fb_render_view('models', fx_fb_view_data([
+        'models' => $summary, 'performance' => $module->performance()->report(30),
+    ]));
+    assert_true($render['notices'] === [], 'renders with no missing key');
+    assert_contains('(1 of 1 version(s) evaluated)', $render['html'], 'the help line states its coverage');
+    assert_true(!str_contains($render['html'], 'None recorded yet for this version'), 'no dash tooltips remain');
+    assert_contains('<td class="num">' . $samples . '</td>', $render['html'], 'the Samples cell holds the measured number');
+});
+
+// ─── the Calibration versions section explains its missing evidence ──────────
+
+test('football: the calibration section names the evidence pipeline when nothing has settled', function () {
+    // The live models screen's state: no calibration, 0 of 50 usable, 0
+    // settled for the model. The section must say where samples come from
+    // and what refuses below the minimum — not just "0 of 50".
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    [, , $module] = fx_fb_harness([fx_fb_row('fx-cal-none', gmdate('c', $kickoff), 'Manchester City', 'Everton', '10', '20')]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $summary = $module->modelSummary();
+    assert_equals('NO_SAMPLES', $summary['calibrationStatus']['state'], 'nothing this version predicted has settled');
+    $render = fx_fb_render_view('models', fx_fb_view_data([
+        'models' => $summary, 'performance' => $module->performance()->report(30),
+    ]));
+    assert_true($render['notices'] === [], 'the strip reaches for no key the payload does not publish'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    assert_contains('id="football-calibration-status"', $render['html'], 'the strip renders in the calibration section');
+    assert_contains('AWAITING SETTLED EVIDENCE', $render['html'], 'with its badge');
+    assert_contains('football-results job stores the final score', $render['html'], 'the strip names the evidence pipeline');
+    assert_contains('every 15 minutes', $render['html'], 'with its cadence');
+    assert_contains('WINDELS_FOOTBALL_MIN_CALIBRATION_SAMPLES', $render['html'], 'and the setting behind the minimum');
+    assert_contains('hourly performance job retries the fit', $render['html'], 'and that the retry is automatic');
+    assert_contains('No calibration has been fitted yet', $render['html'], 'the honest empty-state paragraph stays');
+    assert_contains('0 versions for this model · 0 CALIBRATED', $render['html'], 'the section meta labels its counts as what they are');
+});
+
+test('football: partial calibration evidence is reported as insufficient, with the shortfall', function () {
+    // One settled prediction: 1 of 50 — evidence exists, the fit is refused.
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    [$repo, , $module] = fx_fb_harness([fx_fb_row('fx-cal-partial', gmdate('c', $kickoff), 'Manchester City', 'Everton', '10', '20')]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $fixtureId = fx_131_fixture_id($repo, 'fx-cal-partial');
+    $fixture = $repo->findFixtureById($fixtureId);
+    $repo->saveFixture((int) $fixture['provider_id'], [
+        'externalId' => (string) $fixture['external_id'], 'status' => 'FINISHED', 'homeScore' => 2, 'awayScore' => 0,
+    ]);
+    assert_equals('SETTLED', $module->settlements()->settleFixture($fixtureId, 'test:cal')['status'], 'the scenario holds a settlement');
+    $summary = $module->modelSummary();
+    $status = $summary['calibrationStatus'];
+    assert_equals('INSUFFICIENT_SAMPLES', $status['state']);
+    assert_equals(1, $status['usable']);
+    assert_true(str_contains($status['detail'], '1 of 50'), 'the shortfall is stated in samples');
+    assert_true(str_contains($status['detail'], 'fit stays refused below the minimum'), 'and the refusal is honest');
+    $render = fx_fb_render_view('models', fx_fb_view_data([
+        'models' => $summary, 'performance' => $module->performance()->report(30),
+    ]));
+    assert_contains('INSUFFICIENT SAMPLES', $render['html'], 'the badge names the state');
+    assert_contains('1 of 50 required settled predictions', $render['html'], 'and the render carries the shortfall');
+});
+
+test('football: a met minimum says READY TO FIT, and a fitted calibration drops the strip', function () {
+    // 12 settled predictions with the minimum at 10: the fit is possible —
+    // the state says so. After fitting, the table is the information and no
+    // strip may render.
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    $rows = [];
+    for ($i = 0; $i < 12; $i++) {
+        $rows[] = fx_fb_row('fx-cal-many-' . $i, gmdate('c', $kickoff), 'Manchester City', 'Everton', '10', '20');
+    }
+    [$repo, , $module] = fx_fb_harness($rows);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $providerId = (int) ($repo->listProviders()[0]['id'] ?? 1);
+    foreach ($repo->listFixtures(['date' => $day], 200) as $fixture) {
+        $repo->saveFixture($providerId, ['externalId' => (string) $fixture['external_id'],
+            'status' => 'FINISHED', 'homeScore' => 2, 'awayScore' => 0]);
+    }
+    $module->settlements()->settleDue(200, 0, 'test:calmany');
+    assert_equals(12, count($repo->listSettlements([], 50)), 'the scenario settled a real sample');
+    $id = (int) $module->models()->ensureRegistered()['model']['id'];
+    $lenient = new \AIWorkforce\Football\FootballIntelligence($repo, $module->providerManager(), null,
+        new \AIWorkforce\Football\FootballConfiguration(['WINDELS_FOOTBALL_MIN_CALIBRATION_SAMPLES' => '10']));
+    $summary = $lenient->modelSummary();
+    $status = $summary['calibrationStatus'];
+    assert_equals('FITTABLE_NOT_FITTED', $status['state'], '12 usable of a 10 minimum');
+    assert_true(str_contains($status['detail'], 'minimum is met'), 'the state says the threshold is crossed');
+    assert_true(str_contains($status['detail'], 'only softens confidence'), 'and states the softening constraint');
+    $render = fx_fb_render_view('models', fx_fb_view_data([
+        'models' => $summary, 'performance' => $lenient->performance()->report(30),
+    ]));
+    assert_contains('READY TO FIT', $render['html'], 'the badge names the available action');
+
+    assert_equals(\AIWorkforce\Football\CalibrationService::CALIBRATED, $lenient->calibration()->fit($id, null, 'tester')['status'],
+        'the scenario fits a calibration');
+    $summary = $lenient->modelSummary();
+    assert_null($summary['calibrationStatus'], 'a stored calibration is the information — no strip');
+    $render = fx_fb_render_view('models', fx_fb_view_data([
+        'models' => $summary, 'performance' => $lenient->performance()->report(30),
+    ]));
+    assert_true(!str_contains($render['html'], 'football-calibration-status'), 'no strip once fitted');
+    assert_contains('1 version for this model · 1 CALIBRATED', $render['html'], 'the meta counts the stored calibration');
+    assert_contains('<td class="mono">T', $render['html'], 'the calibration table lists the fitted version');
+});
+
+// ─── the models screen's Measured results explains its empty window too ──────
+
+test('football: the models screen 30-day section names why its window is empty', function () {
+    // Predictions stored, none settled: the by-version table has nothing to
+    // show, and the section must say which absence it is in — the same status
+    // contract the board's Measured results panel renders, from the same
+    // report payload, so the two screens cannot disagree.
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    [, , $module] = fx_fb_harness([fx_fb_row('fx-mperf-unsettled', gmdate('c', $kickoff), 'Manchester City', 'Everton', '10', '20')]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $report = $module->performance()->report(30);
+    assert_equals('PREDICTIONS_UNSETTLED', $report['status']['state'], 'the scenario holds stored-but-unsettled predictions');
+    $render = fx_fb_render_view('models', fx_fb_view_data([
+        'models' => $module->modelSummary(), 'performance' => $report,
+    ]));
+    assert_true($render['notices'] === [], 'the strip reaches for no key the payload does not publish'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    assert_contains('id="football-models-performance-status"', $render['html'], 'the strip renders in the models 30-day section');
+    assert_contains('AWAITING COMPLETED MATCHES', $render['html'], 'with its badge');
+    assert_contains('none is settled yet', $render['html'], 'the strip states the actual fact');
+    assert_contains('results sweep stores the final score', $render['html'], 'and names the pipeline that produces a measurement');
+    assert_contains('No settled predictions yet', $render['html'], 'the honest empty-state sentence stays');
+    assert_contains('These are the stored aggregates the board reports', $render['html'], 'and the intro keeps its no-recompute promise');
+});
+
+test('football: a measured models 30-day window renders its by-version table, no strip', function () {
+    // Predict, finish, settle: the table is the information.
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    [$repo, , $module] = fx_fb_harness([fx_fb_row('fx-mperf-measured', gmdate('c', $kickoff), 'Manchester City', 'Everton', '10', '20')]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $fixtureId = fx_131_fixture_id($repo, 'fx-mperf-measured');
+    $fixture = $repo->findFixtureById($fixtureId);
+    $repo->saveFixture((int) $fixture['provider_id'], [
+        'externalId' => (string) $fixture['external_id'], 'status' => 'FINISHED', 'homeScore' => 2, 'awayScore' => 0,
+    ]);
+    assert_equals('SETTLED', $module->settlements()->settleFixture($fixtureId, 'test:mperf')['status'], 'the scenario holds a settlement');
+    $report = $module->performance()->report(30);
+    assert_equals('MEASURED', $report['state']);
+    $render = fx_fb_render_view('models', fx_fb_view_data([
+        'models' => $module->modelSummary(), 'performance' => $report,
+    ]));
+    assert_true($render['notices'] === [], 'renders with no missing key');
+    assert_true(!str_contains($render['html'], 'football-models-performance-status'), 'no strip: the by-version table is the information');
+    assert_contains('30-day performance by model version', $render['html'], 'the section renders');
+    assert_contains('<th class="num">Evaluated</th>', $render['html'], 'with its table');
+    assert_contains('the board\'s own 30-day panel shows the same stored aggregates', $render['html'],
+        'and the same-aggregates note stays');
+});
+
+test('football: a finished match\'s closed state carries its actual final score', function () {
+    // The match finished and the result is stored: the Prediction overview
+    // must say THAT — with the score — instead of a generic window-closed
+    // sentence. The prediction itself can never exist, and the strip says
+    // what the stored result is used for instead.
+    $day = gmdate('Y-m-d', time() - 7200);
+    [$repo, , $module] = fx_fb_harness([
+        fx_fb_row('fx-match-finished', $day . 'T00:15:00+00:00', 'Leeds', 'Leicester', '10', '20', 'FINISHED', 2, 1),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $fixtureId = fx_131_fixture_id($repo, 'fx-match-finished');
+    $prediction = $module->predictionFor($fixtureId);
+    $status = $prediction['statusDetail'];
+    assert_equals('PRE_MATCH_CLOSED', $status['state']);
+    assert_equals('FINISHED', $status['fixtureStatus'], 'the state names the fixture\'s own status');
+    assert_equals(['home' => 2, 'away' => 1], $status['finalScore'], 'and carries the stored final score');
+    assert_true(str_contains($status['detail'], 'This match finished Leeds 2–1 Leicester'), 'the detail names the match and its score');
+    assert_true(str_contains($status['detail'], 'result stored'), 'and that the result is in storage');
+    assert_true(str_contains($status['detail'], 'nothing is back-filled afterwards'), 'the no-back-fill rule stays');
+    assert_true(str_contains($status['detail'], 'only grades predictions that exist'), 'and what settlement does with it');
+    assert_true(str_contains($status['detail'], 'feeds the form and head-to-head evidence'), 'and what the result is used for instead');
+    $render = fx_fb_render_view('match', fx_fb_view_data([
+        'fixtureId' => $fixtureId, 'analysis' => $module->analysis($fixtureId),
+        'prediction' => $prediction, 'live' => null, 'settlement' => null,
+    ]));
+    assert_true($render['notices'] === [], 'renders with no missing key'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    assert_contains('PRE-MATCH WINDOW CLOSED', $render['html'], 'the badge renders');
+    assert_contains('This match finished Leeds 2–1 Leicester', $render['html'], 'the strip shows the score in the section');
+    assert_true(!str_contains($render['html'], '/analyze'), 'no analyze form is offered on a finished match');
+});
+
+test('football: an awaiting match names its kickoff and the window that closes', function () {
+    // The open state carries the fixture's own clock: when kickoff is and
+    // that the analysis window closes there — not just a generic action hint.
+    $day = gmdate('Y-m-d', time() + 2 * 86400);
+    [$repo, , $module] = fx_fb_harness([
+        fx_fb_row('fx-match-clock', $day . 'T18:45:00+00:00', 'Arsenal', 'Aston Villa', '10', '20'),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $fixtureId = fx_131_fixture_id($repo, 'fx-match-clock');
+    $status = $module->predictionFor($fixtureId)['statusDetail'];
+    assert_equals('AWAITING_ANALYSIS', $status['state']);
+    assert_true(str_contains($status['detail'], 'kickoff ' . substr($day . 'T18:45:00+00:00', 0, 16) . ' UTC'),
+        'the detail names the fixture\'s own kickoff');
+    assert_true(str_contains($status['detail'], 'window closes at kickoff'), 'and that the window is bounded');
+    $render = fx_fb_render_view('match', fx_fb_view_data([
+        'fixtureId' => $fixtureId, 'analysis' => $module->analysis($fixtureId),
+        'prediction' => $module->predictionFor($fixtureId), 'live' => null, 'settlement' => null,
+    ]));
+    assert_contains('kickoff ' . substr($day . 'T18:45:00+00:00', 0, 16) . ' UTC', $render['html'],
+        'the strip carries the kickoff in the section');
+    assert_contains('Analyze this match — generate odds prediction', $render['html'], 'and the action stays available while the window is open');
+});
+
+test('football: an in-play match\'s closed state points at the live product', function () {
+    // Kickoff passed and the match is LIVE: the strip names the in-play
+    // state with its minute and where live estimates live.
+    $day = gmdate('Y-m-d', time() - 1800);
+    [$repo, , $module] = fx_fb_harness([
+        fx_fb_row('fx-match-live', $day . 'T00:15:00+00:00', 'Leeds', 'Leicester', '10', '20', 'LIVE', null, null, 67),
+    ]);
+    fx_fb_sync_today($module, $day);
+    $fixtureId = fx_131_fixture_id($repo, 'fx-match-live');
+    $status = $module->predictionFor($fixtureId)['statusDetail'];
+    assert_equals('PRE_MATCH_CLOSED', $status['state']);
+    assert_true($status['inPlay'], 'the state knows the match is in play');
+    assert_true(str_contains($status['detail'], "match is in play (67')"), 'the detail carries the live minute');
+    assert_true(str_contains($status['detail'], 'Live match panel'), 'and where the live product lives');
+    assert_true(str_contains($status['detail'], 'results sweep'), 'and what happens when it finishes');
+    $render = fx_fb_render_view('match', fx_fb_view_data([
+        'fixtureId' => $fixtureId, 'analysis' => $module->analysis($fixtureId),
+        'prediction' => $module->predictionFor($fixtureId), 'live' => null, 'settlement' => null,
+    ]));
+    assert_contains('match is in play (67', $render['html'], 'the strip renders the minute in the section');
+    assert_true(!str_contains($render['html'], '/analyze'), 'no analyze form is offered on an in-play match');
+}
+);

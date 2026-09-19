@@ -596,18 +596,31 @@ $kickoffStamp = static function (mixed $iso): string {
         </div>
         <div id="live-goal-flash" class="sports-goal-flash" hidden></div>
         <div class="table-scroll">
-          <table class="tbl">
+          <table class="tbl" id="live-scores-table">
             <thead><tr><th class="sports-col-minute">Minute</th><th class="sports-col-kickoff">Kickoff (UTC)</th><th>Match</th><th>Competition</th><th class="num">Score</th><th class="sports-col-updated">Updated (UTC)</th></tr></thead>
             <tbody id="live-scores-body">
               <?php $liveRows = $today['live'] ?? []; ?>
-              <?php if ($liveRows): foreach ($liveRows as $m): $ls = is_array($m['liveState'] ?? null) ? $m['liveState'] : []; $known = isset($ls['homeScore'], $ls['awayScore']); ?>
+              <?php if ($liveRows): foreach ($liveRows as $m): $ls = is_array($m['liveState'] ?? null) ? $m['liveState'] : []; $known = isset($ls['homeScore'], $ls['awayScore']);
+                // Each cell carries one live-cell-* class naming the column it
+                // belongs to. The poll handler targets those cells and updates
+                // them IN PLACE, so an auto-refresh can change a cell's text
+                // but can never move a value into a neighbouring column.
+                // Minute prints the provider's own number plus any stated
+                // stoppage time (90+4'); no stored minute prints —, never 0'.
+                // A blank stored update stamp prints — as well, not an empty cell.
+                $minuteStamp = isset($ls['minute'])
+                  ? (int) $ls['minute'] . ((isset($ls['extraMinute']) && (int) $ls['extraMinute'] > 0) ? '+' . (int) $ls['extraMinute'] : '')
+                  : null;
+                $updatedCell = substr((string) ($m['updated_at'] ?? ''), 11, 5);
+                if ($updatedCell === '') $updatedCell = '—';
+              ?>
                 <tr data-match-id="<?= (int) ($m['id'] ?? 0) ?>">
-                  <td class="mono dim"><?= isset($ls['minute']) ? e((string) (int) $ls['minute']) . "'" : '—' ?></td>
-                  <td class="mono dim live-kickoff-cell"><?= e($kickoffStamp($m['kickoff_at'] ?? null)) ?></td>
-                  <td class="sports-cell-strong"><?= e(($m['home_team'] ?? '?') . ' vs ' . ($m['away_team'] ?? '?')) ?><?php if (!empty($m['simulated'])): ?> <span class="badge b-gray">sim</span><?php endif; ?></td>
-                  <td class="dim"><?= e((string) ($m['competition'] ?? '')) ?></td>
-                  <td class="num mono live-score-cell"><?= $known ? e((int) $ls['homeScore'] . ' – ' . (int) $ls['awayScore']) : '—' ?></td>
-                  <td class="mono dim sports-cell-detail"><?= e(substr((string) ($m['updated_at'] ?? ''), 11, 5)) ?></td>
+                  <td class="mono dim live-cell-minute"><?= $minuteStamp !== null ? e((string) $minuteStamp) . "'" : '—' ?></td>
+                  <td class="mono dim live-kickoff-cell live-cell-kickoff"><?= e($kickoffStamp($m['kickoff_at'] ?? null)) ?></td>
+                  <td class="sports-cell-strong live-cell-match"><?= e(($m['home_team'] ?? '?') . ' vs ' . ($m['away_team'] ?? '?')) ?><?php if (!empty($m['simulated'])): ?> <span class="badge b-gray">sim</span><?php endif; ?></td>
+                  <td class="dim live-cell-competition"><?= e((string) ($m['competition'] ?? '')) ?></td>
+                  <td class="num mono live-score-cell live-cell-score"><?= $known ? e((int) $ls['homeScore'] . ' – ' . (int) $ls['awayScore']) : '—' ?></td>
+                  <td class="mono dim sports-cell-detail live-cell-updated"><?= e($updatedCell) ?></td>
                 </tr>
               <?php endforeach; else: ?>
                 <tr><td colspan="6" class="dim" id="live-scores-empty">No matches currently live</td></tr>
@@ -615,7 +628,7 @@ $kickoffStamp = static function (mixed $iso): string {
             </tbody>
           </table>
         </div>
-        <p class="sports-note">Scores come from the provider's live endpoint (one shared, self-gated request — <span class="mono">WINDELS_SPORTS_LIVE_REFRESH_SECONDS</span>, default 60, skipped entirely while nothing is in play). <b>Kickoff (UTC)</b> is the stored match date and time; a match with no stored kickoff shows <b>—</b>, never a guessed one. A match the provider gives no score for shows <b>—</b>, never 0-0. Goal events are audited as <span class="mono">SPORTS_GOAL_SCORED</span>.</p>
+        <p class="sports-note">Scores come from the provider's live endpoint (one shared, self-gated request — <span class="mono">WINDELS_SPORTS_LIVE_REFRESH_SECONDS</span>, default 60, skipped entirely while nothing is in play). <b>Kickoff (UTC)</b> is the stored match date and time; a match with no stored kickoff shows <b>—</b>, never a guessed one. <b>Minute</b> prints the provider's minute plus any stated stoppage time (e.g. <b>90+4'</b>). A match the provider gives no score for shows <b>—</b>, never 0-0. Auto-refresh updates each cell in place — a column's meaning can never change under a value. Goal events are audited as <span class="mono">SPORTS_GOAL_SCORED</span>.</p>
       </div>
     </section>
 
@@ -641,8 +654,26 @@ $kickoffStamp = static function (mixed $iso): string {
           <div class="stat"><div class="k">Max drawdown</div><div class="v"><?= ($perf['maxDrawdown'] ?? null) !== null ? e(number_format((float) $perf['maxDrawdown'], 2)) : '—' ?></div></div>
           <div class="stat"><div class="k">Avg odds</div><div class="v"><?= ($perf['averageOdds'] ?? null) !== null ? e(number_format((float) $perf['averageOdds'], 2)) : '—' ?></div></div>
         </div>
+        <?php $pendingTickets = (int) ($perf['pendingTickets'] ?? 0); ?>
         <?php if (empty($perf['dataAvailable'])): ?>
-          <p class="sports-empty">No settled records or selections yet — metrics are intentionally unavailable rather than invented.</p>
+          <?php if ($pendingTickets > 0): ?>
+            <p class="sports-empty"><?= e(number_format($pendingTickets)) ?> ticket<?= $pendingTickets === 1 ? '' : 's' ?> from this window <?= $pendingTickets === 1 ? 'is' : 'are' ?> still awaiting settlement. <?= $pendingTickets === 1 ? 'It settles' : 'They settle' ?> automatically (hourly sports cron) once each match's final result is stored and corroborated — the metrics below appear the moment the first ticket settles. Nothing is projected in the meantime.</p>
+          <?php else: ?>
+            <p class="sports-empty">No settled records or selections yet — metrics are intentionally unavailable rather than invented.</p>
+          <?php endif; ?>
+        <?php endif; ?>
+        <?php if ($pendingTickets > 0): ?>
+          <?php if (!empty($caps['settle'])): ?>
+            <div class="sports-actions">
+              <form method="post" action="/sports/settle-all">
+                <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
+                <button class="btn small" type="submit">Settle all pending tickets from verified results (sports.settle)</button>
+              </form>
+              <p class="sports-note">Runs the same sweep as the hourly settlement cron: final, corroborated results are verified first (audited as <span class="mono">SPORTS_RESULT_VERIFIED</span>), then every pending ticket is settled from them. Tickets whose results are not yet final or corroborated stay pending.</p>
+            </div>
+          <?php else: ?>
+            <p class="sports-note">Settlement stays with identities holding <b>sports.settle</b>.</p>
+          <?php endif; ?>
         <?php endif; ?>
         <p class="sports-note">Prediction accuracy, Brier, ECE and model/calibration state are reported once, on <a href="/football">Football Intelligence</a> and <a href="/football/models">Models &amp; calibration</a>.</p>
       </div>
@@ -941,8 +972,20 @@ $kickoffStamp = static function (mixed $iso): string {
   // The server shares ONE provider request per refresh interval across all
   // viewers, so polling here is cheap between sweeps. New SPORTS_GOAL_SCORED
   // events flash a GOAL banner and highlight the row.
+  //
+  // PLACEMENT-SAFE REPAINT: the <thead> of #live-scores-table is the single
+  // definition of this board's columns. Each entry in LIVE_CELLS renders
+  // exactly one of those columns, in the same order, and render() updates the
+  // server-rendered cells IN PLACE — a refresh may change a cell's text, never
+  // move a value into a neighbouring column. Rows are only built from scratch
+  // for matches the server render did not know about, and if the header and
+  // this script ever disagree on the column count (a stale or partially
+  // deployed page), render() refuses to paint anything and says so instead of
+  // shifting every value one column sideways — corruption this board must
+  // never show its readers.
   var body = document.getElementById('live-scores-body');
   if(!body) return;
+  var table = document.getElementById('live-scores-table');
   var dot = document.getElementById('live-poll-dot');
   var note = document.getElementById('live-poll-note');
   var toggleBtn = document.getElementById('live-refresh-toggle');
@@ -967,31 +1010,101 @@ $kickoffStamp = static function (mixed $iso): string {
     return isNaN(t) ? '—' : new Date(t).toISOString().substring(0, 16).replace('T', ' ');
   }
 
+  // One renderer per column, in the header's order. Each `cls` matches the
+  // class list the server prints on that column's <td>, so a row built here is
+  // indistinguishable from a server-rendered one and both can be updated in
+  // place by the same code. The Minute cell prints the provider's minute plus
+  // stated stoppage (90+4') — matching the server cell exactly.
+  var LIVE_CELLS = [
+    { cls: 'mono dim live-cell-minute', html: function(m){
+        if (m.minute === null || m.minute === undefined) return '—';
+        var base = parseInt(m.minute, 10);
+        if (isNaN(base)) return '—';
+        var extra = m.extraMinute === null || m.extraMinute === undefined ? 0 : parseInt(m.extraMinute, 10);
+        return base + (!isNaN(extra) && extra > 0 ? '+' + extra : '') + "'";
+      } },
+    { cls: 'mono dim live-kickoff-cell live-cell-kickoff', html: function(m){ return esc(kickoffStamp(m.kickoff)); } },
+    { cls: 'sports-cell-strong live-cell-match', html: function(m){
+        return esc(m.homeTeam) + ' vs ' + esc(m.awayTeam) + (m.simulated ? ' <span class="badge b-gray">sim</span>' : '');
+      } },
+    { cls: 'dim live-cell-competition', html: function(m){ return esc(m.competition); } },
+    { cls: 'num mono live-score-cell live-cell-score', html: function(m){
+        return m.scoreKnown ? esc(m.homeScore) + ' – ' + esc(m.awayScore) : '—';
+      } },
+    { cls: 'mono dim sports-cell-detail live-cell-updated', html: function(m){
+        var stamp = (m.updatedAt || '').substring(11, 16);
+        return stamp === '' ? '—' : esc(stamp);
+      } }
+  ];
+
   function rowHtml(m){
-    var score = m.scoreKnown ? esc(m.homeScore) + ' – ' + esc(m.awayScore) : '—';
-    var minute = (m.minute !== null && m.minute !== undefined) ? esc(m.minute) + "'" : '—';
-    var sim = m.simulated ? ' <span class="badge b-gray">sim</span>' : '';
-    var updated = (m.updatedAt || '').substring(11, 16);
-    return '<tr data-match-id="' + esc(m.id) + '">'
-      + '<td class="mono dim">' + minute + '</td>'
-      + '<td class="mono dim live-kickoff-cell">' + esc(kickoffStamp(m.kickoff)) + '</td>'
-      + '<td class="sports-cell-strong">' + esc(m.homeTeam) + ' vs ' + esc(m.awayTeam) + sim + '</td>'
-      + '<td class="dim">' + esc(m.competition) + '</td>'
-      + '<td class="num mono live-score-cell">' + score + '</td>'
-      + '<td class="mono dim sports-cell-detail">' + esc(updated) + '</td>'
-      + '</tr>';
+    // Only for matches the server render did not know about. Everything else
+    // is updated in place by updateRow().
+    var out = '<tr data-match-id="' + esc(m.id) + '">';
+    for (var i = 0; i < LIVE_CELLS.length; i++) out += '<td class="' + LIVE_CELLS[i].cls + '">' + LIVE_CELLS[i].html(m) + '</td>';
+    return out + '</tr>';
+  }
+
+  function updateRow(tr, m){
+    // Overwrite each existing cell's content, one writer per column. The row's
+    // structure stays exactly as the server wrote it, which is what makes the
+    // refresh placement-safe. A row that does not honour this script's column
+    // contract is refused (the caller replaces it whole) — writing into it by
+    // index would be how data ends up in the wrong column.
+    var tds = tr.children;
+    if (tds.length !== LIVE_CELLS.length) return false;
+    for (var i = 0; i < LIVE_CELLS.length; i++) tds[i].innerHTML = LIVE_CELLS[i].html(m);
+    return true;
   }
 
   function render(matches){
-    if(!matches.length){
-      // Same empty state the server renders, without repeating its id: the
-      // SSR row already owns the live-scores-empty id, and a repaint must not
-      // introduce a duplicate DOM id (nothing queries that id after load).
-      body.innerHTML = '<tr><td colspan="6" class="dim">No matches currently live</td></tr>';
-    } else {
-      body.innerHTML = matches.map(rowHtml).join('');
+    // The header is the board's contract. If this script and the served markup
+    // disagree on the number of columns, painting anything would place values
+    // under the wrong headings — refuse, keep the server-rendered rows, and
+    // tell the reader to reload. Returns false so the poll handler keeps this
+    // note instead of overwriting it with the routine "board updated" one.
+    var headers = table ? table.querySelectorAll('thead th') : [];
+    if (headers.length !== LIVE_CELLS.length) {
+      setNote('Live board columns changed — reload the page to update it safely.', 'down');
+      return false;
     }
-    if(countStat) countStat.textContent = String(matches.length);
+    if (!matches.length) {
+      // Same empty state the server renders, without repeating its id: the
+      // SSR row already owns live-scores-empty, and a repaint must not
+      // introduce a duplicate DOM id (nothing queries that id after load).
+      body.innerHTML = '<tr><td colspan="' + LIVE_CELLS.length + '" class="dim">No matches currently live</td></tr>';
+      if (countStat) countStat.textContent = String(matches.length);
+      return true;
+    }
+    var keep = {};
+    matches.forEach(function(m){ keep['' + m.id] = true; });
+    // Rows that left the board (full time, gone stale) are removed.
+    Array.prototype.forEach.call(body.querySelectorAll('tr[data-match-id]'), function(tr){
+      if (!keep[tr.getAttribute('data-match-id')]) tr.parentNode.removeChild(tr);
+    });
+    // The empty-state row (server-rendered or from an earlier paint) leaves
+    // the moment matches exist. querySelectorAll is static, so removing while
+    // iterating is safe.
+    Array.prototype.forEach.call(body.querySelectorAll('tr:not([data-match-id])'), function(tr){
+      tr.parentNode.removeChild(tr);
+    });
+    var byId = {};
+    Array.prototype.forEach.call(body.querySelectorAll('tr[data-match-id]'), function(tr){
+      byId[tr.getAttribute('data-match-id')] = tr;
+    });
+    // Update or append in board order. appendChild MOVES an existing row to
+    // the end, so walking the board's order re-sorts the rows without ever
+    // rebuilding one the server already rendered.
+    matches.forEach(function(m){
+      var tr = byId['' + m.id];
+      if (tr) {
+        if (updateRow(tr, m)) { body.appendChild(tr); return; }
+        tr.parentNode.removeChild(tr);   // wrong cell count — replace the row whole
+      }
+      body.insertAdjacentHTML('beforeend', rowHtml(m));
+    });
+    if (countStat) countStat.textContent = String(matches.length);
+    return true;
   }
 
   function goalKey(ev){
@@ -1049,10 +1162,12 @@ $kickoffStamp = static function (mixed $iso): string {
       .then(function(data){
         if(data.refreshIntervalSeconds) intervalSec = data.refreshIntervalSeconds;
         if(data.serverTime) since = data.serverTime;
-        render(data.matches || []);
+        var painted = render(data.matches || []);
         flashGoals(data.goalEvents || []);
         var waited = data.refreshed && data.refreshed.retryInSeconds ? data.refreshed.retryInSeconds : intervalSec;
-        setNote('Auto-refresh on — live board updated' + (data.refreshed && data.refreshed.status === 'THROTTLED' ? ' (next provider sweep in ~' + waited + 's)' : '') + '.', 'up');
+        // Only the routine note when the board actually repainted — a refused
+        // paint (column mismatch) keeps its reload instruction.
+        if (painted) setNote('Auto-refresh on — live board updated' + (data.refreshed && data.refreshed.status === 'THROTTLED' ? ' (next provider sweep in ~' + waited + 's)' : '') + '.', 'up');
       })
       .catch(function(err){
         var forbidden = String(err && err.message || '').indexOf('403') >= 0;

@@ -730,22 +730,26 @@ class Api_sports extends Api_controller
     /** Settles all open odds prediction tickets from verified persisted results. */
     public function settle()
     {
-        if (!$this->requirePermission('sports.settle')) return;
+        $user = $this->requirePermission('sports.settle');
+        if (!$user) return;
         try {
-            $this->json(['settlement' => $this->platform->sports->settlement->settleAllPending(200)]);
+            // Corroborated final results earn verification on the way, audited
+            // under the acting identity.
+            $this->json(['settlement' => $this->platform->sports->settlement->settleAllPending(200, (string) $user['id'])]);
         } catch (\Throwable $e) { $this->jsonError($e->getMessage(), 409); }
     }
 
     /** Settles only from an already verified persisted provider result. */
     public function settle_ticket(string $id)
     {
-        if (!$this->requirePermission('sports.settle')) return;
+        $user = $this->requirePermission('sports.settle');
+        if (!$user) return;
         $body = $this->jsonBody();
         try {
             if (isset($body['matchId'], $body['providerId']) && is_numeric($body['matchId']) && is_numeric($body['providerId'])) {
                 $this->json(['settlement' => $this->platform->sports->settlement->applyStoredResult($id, (int) $body['matchId'], (int) $body['providerId'])]);
             } else {
-                $this->json(['settlement' => $this->platform->sports->settlement->settlePending($id)]);
+                $this->json(['settlement' => $this->platform->sports->settlement->settlePending($id, (string) $user['id'])]);
             }
         } catch (\InvalidArgumentException $e) { $this->jsonError($e->getMessage(), 404); }
         catch (\Throwable $e) { $this->jsonError($e->getMessage(), 409); }

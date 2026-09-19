@@ -171,6 +171,7 @@ $route['sports/generate'] = 'sports/generate_ticket';
 $route['sports/reset-candidates'] = 'sports/reset_candidates';
 $route['sports/(:any)/decide'] = 'sports/decide/$1';
 $route['sports/(:any)/settle'] = 'sports/settle/$1';
+$route['sports/settle-all'] = 'sports/settle_all';
 $route['lottery'] = 'lottery';
 $route['lottery/draw/(:num)'] = 'lottery/index';
 $route['lottery/tickets'] = 'lottery/index';

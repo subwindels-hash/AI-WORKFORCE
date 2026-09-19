@@ -490,3 +490,118 @@ test('the odds job is a real scheduled job, and it is provider-gated like the ot
     assert_true($config->refreshInterval('odds') > 0, 'the odds bucket has its own cadence');
     assert_true($config->requestBudget('odds') > 0, 'and its own request budget, so it can actually call the feed');
 });
+
+// ─── 9. boardStatus: the board-level odds state behind every unpriced cell ───
+
+/**
+ * FootballIntelligence wired the way Platform wires it (repo + provider
+ * manager + sports store), so the operator-driven sweep path can be judged
+ * against the same run records the cron path writes.
+ *
+ * @return array{0:\AIWorkforce\Football\FootballIntelligence,1:FootballRepositoryStub}
+ */
+function fx_odds_board_intel(array $routes, string $date, int $count = 3, ?array &$log = null): array
+{
+    $repo = new FootballRepositoryStub();
+    $providerRow = $repo->ensureProvider('api-football', ['displayName' => 'API-Football']);
+    for ($i = 0; $i < $count; $i++) {
+        $repo->saveFixture((int) $providerRow['id'], [
+            'externalId' => (string) (9001 + $i),
+            'homeTeam' => 'Home ' . $i, 'awayTeam' => 'Away ' . $i,
+            'competition' => 'Premier League',
+            'kickoff' => $date . 'T' . str_pad((string) (12 + $i), 2, '0', STR_PAD_LEFT) . ':00:00+00:00',
+            'status' => 'SCHEDULED', 'sourceTimestamp' => gmdate('c'),
+        ]);
+    }
+    $manager = new SportsProviderManager();
+    $manager->register(fx_odds_provider($routes, $log));
+    $config = new FootballConfiguration(['WINDELS_FOOTBALL_MIN_REQUEST_SPACING_MS' => 0]);
+    $intel = new \AIWorkforce\Football\FootballIntelligence($repo, $manager, null, $config);
+    $intel->bindSportsStore(new SportsRepositoryStub());
+    return [$intel, $repo];
+}
+
+test('boardStatus() is a pure read that names the sweep the board is waiting for', function () {
+    $date = gmdate('Y-m-d', time() + 86400);
+    $log = [];
+    [$intel] = fx_odds_board_intel(['/odds?' => fx_odds_wire()], $date, 3, $log);
+    $status = $intel->oddsSheet()->boardStatus($date);
+    assert_equals([], $log, 'building the status spends zero provider requests');
+    assert_equals('NEVER_SWEPT', $status['state']);
+    assert_equals(3, $status['openFixtures'], 'the fixtures are stored and priceable');
+    assert_equals(0, $status['quotes']);
+    assert_true(str_contains($status['detail'], 'No odds sweep has been recorded'),
+        'the board says the sweep has not run, not that the markets are empty');
+    assert_true(str_contains($status['detail'], 'Refresh odds'),
+        'and names the operator action that prices it');
+});
+
+test('the console sweep is recorded like the scheduled one — the status cannot lie about it', function () {
+    // The regression this guards: the operator's "Refresh odds" button ran
+    // the exact same sweep as the cron job but left no run record, so any
+    // status built on lastSyncRun("ODDS") would keep claiming the sweep never
+    // ran — right after it had priced the whole board.
+    $date = gmdate('Y-m-d', time() + 86400);
+    [$intel, $repo] = fx_odds_board_intel(['/odds?' => fx_odds_wire()], $date, 2);
+    assert_equals(null, $repo->lastSyncRun('ODDS'), 'before the sweep there is no recorded ODDS run');
+    $result = $intel->syncOddsForDay($date);
+    assert_equals('COMPLETED', $result['status']);
+    $run = $repo->lastSyncRun('ODDS');
+    assert_true(is_array($run), 'an operator-driven sweep leaves the same trace the cron job does');
+    assert_equals('COMPLETED', $run['status']);
+    assert_equals(2, (int) $run['requests_made'], 'the stored run bills the requests the sweep spent');
+    $status = $intel->oddsSheet()->boardStatus($date);
+    assert_equals('PRICED', $status['state']);
+    assert_equals(2, $status['quotedFixtures']);
+    assert_equals(16, $status['quotes'], '8 valid rows per fixture are counted');
+    assert_true(str_contains($status['detail'], 'last sweep'), 'the detail names when the prices were bought');
+});
+
+test('a sweep the bookmakers could not price is reported as exactly that', function () {
+    $date = gmdate('Y-m-d', time() + 86400);
+    // The feed answers, but with no markets: the sweep runs, spends its
+    // requests, stores nothing — and the board must own that fact instead of
+    // promising a sweep that already happened.
+    [$intel] = fx_odds_board_intel(['/odds?' => ['response' => []]], $date, 2);
+    $result = $intel->syncOddsForDay($date);
+    assert_equals('COMPLETED', $result['status']);
+    assert_equals(0, $result['stored']);
+    $status = $intel->oddsSheet()->boardStatus($date);
+    assert_equals('SWEPT_NO_QUOTES', $status['state']);
+    assert_equals(0, $status['quotes']);
+    assert_equals(2, $status['openFixtures'], 'the fixtures are there — it is the prices that are not');
+    assert_true(str_contains($status['detail'], 'no bookmaker quote is stored'),
+        'the board names the actual fact: the sweep ran and nothing priced');
+    assert_true(str_contains($status['detail'], '2 provider request(s)'),
+        'and shows the sweep spent its requests, so it cannot be mistaken for a skipped one');
+});
+
+test('boardStatus() names the missing connection before anything else', function () {
+    $date = gmdate('Y-m-d', time() + 86400);
+    $repo = new FootballRepositoryStub();
+    $providerRow = $repo->ensureProvider('api-football', ['displayName' => 'API-Football']);
+    $repo->saveFixture((int) $providerRow['id'], [
+        'externalId' => '9001', 'homeTeam' => 'Home', 'awayTeam' => 'Away', 'competition' => 'Premier League',
+        'kickoff' => $date . 'T15:00:00+00:00', 'status' => 'SCHEDULED', 'sourceTimestamp' => gmdate('c'),
+    ]);
+    $configuration = new FootballConfiguration();
+    $gateway = new ProviderGateway(new SportsProviderManager(), $configuration);
+    $service = new OddsSheetService($repo, $gateway, $configuration, sys_get_temp_dir());
+    $status = $service->boardStatus($date);
+    assert_equals('NO_PROVIDER', $status['state'],
+        'with no feed connected the state is the connection, not the sweep');
+    assert_equals(1, $status['openFixtures']);
+    assert_true(str_contains($status['detail'], 'No football data provider is connected'));
+    assert_false($status['providerConfigured']);
+});
+
+test('the football board view and controller wire the odds pipeline status in', function () {
+    $view = fx_fb_read('application/views/football/index.php');
+    assert_true(str_contains($view, 'id="football-odds-status"'), 'the board section has the status strip');
+    foreach (['ODDS STORED', 'ODDS SWEEP PENDING', 'SWEEP STORED NO QUOTES', 'BOOKMAKER ODDS UNAVAILABLE'] as $badge) {
+        assert_true(str_contains($view, $badge), 'the strip renders the "' . $badge . '" state badge');
+    }
+    $controller = fx_fb_read('application/controllers/Football.php');
+    assert_true(str_contains($controller, 'boardStatus('), 'the controller computes the board status');
+    assert_true(str_contains($controller, "'oddsStatus'"), 'and hands it to the view as oddsStatus');
+});

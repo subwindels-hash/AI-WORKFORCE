@@ -64,6 +64,31 @@ $stateClass = static fn(string $state): string => match (strtoupper($state)) {
           <?php endif; ?>
         </p>
         <?php if (!empty($models['reason'])): ?><p class="football-help"><?= e((string) $models['reason']) ?></p><?php endif; ?>
+        <?php /* The lifecycle state behind the table's dashes (see
+               FootballIntelligence::lifecycleStatus — pure read over the same
+               rows the table prints). Rendered only while fields remain
+               empty: an ACTIVE, calibrated model needs no apology. Names
+               which dashes are measured figures (auto-recorded from settled
+               predictions by the hourly performance job) and which are
+               operator-earned lifecycle stamps, and the guards that order
+               them. */ ?>
+        <?php $lifecycle = is_array($models['lifecycleStatus'] ?? null) ? $models['lifecycleStatus'] : null; ?>
+        <?php if ($lifecycle !== null && ($lifecycle['state'] ?? '') !== ''): ?>
+          <?php
+            [$lifecycleBadgeClass, $lifecycleBadgeLabel] = match ((string) $lifecycle['state']) {
+                'DRAFT_NO_EVIDENCE' => ['b-amber', 'DRAFT — AWAITING SETTLED EVIDENCE'],
+                'DRAFT_EVIDENCE_RECORDED' => ['b-violet', 'DRAFT — MEASURED FIGURES RECORDED'],
+                'LIFECYCLE_IN_PROGRESS' => ['b-violet', 'LIFECYCLE IN PROGRESS'],
+                'APPROVED_NOT_ACTIVE' => ['b-green', 'APPROVED — ACTIVATION REMAINS'],
+                'ACTIVE_UNCALIBRATED' => ['b-amber', 'ACTIVE — CALIBRATION PENDING'],
+                default => ['b-gray', 'LIFECYCLE'],
+            };
+          ?>
+          <div class="football-model-status" id="football-model-status">
+            <span class="badge <?= $lifecycleBadgeClass ?>"><?= e($lifecycleBadgeLabel) ?></span>
+            <p><?= e((string) ($lifecycle['detail'] ?? '')) ?></p>
+          </div>
+        <?php endif; ?>
         <?php if ($active === null): ?>
           <p class="dim">No model version is registered yet. The engine registers the deployed scoring configuration as <b>DRAFT</b> the first time it analyzes a fixture — never as an approved model.</p>
         <?php else: ?>
@@ -115,10 +140,31 @@ $stateClass = static fn(string $state): string => match (strtoupper($state)) {
               <h3 id="calibration-heading">Calibration versions</h3>
             </div>
           </div>
-          <span class="football-section__meta"><?= count($calibrationVersions) ?> for this model · <?= (int) ($models['approvedCalibrationCount'] ?? 0) ?> usable</span>
+          <span class="football-section__meta" title="Calibration versions stored for this model version, and how many of them are fitted (CALIBRATED)."><?= count($calibrationVersions) ?> version<?= count($calibrationVersions) === 1 ? '' : 's' ?> for this model · <?= (int) ($models['approvedCalibrationCount'] ?? 0) ?> CALIBRATED</span>
         </div>
         <div class="body scroll">
         <p class="football-section-intro">Calibration adjusts displayed confidence to match observed outcomes. Until a fit exists, confidence is published raw and labelled CALIBRATION_PENDING — it is never quietly adjusted.</p>
+        <?php /* The calibration-evidence state (see
+               FootballIntelligence::calibrationStatus — pure read over the
+               same availability block the section prints). Rendered only
+               while no calibration exists: once one is stored, the table
+               below is the information. Names where samples come from, the
+               jobs that produce them and their cadence, the configured
+               minimum and the fit action. */ ?>
+        <?php $calStatus = is_array($models['calibrationStatus'] ?? null) ? $models['calibrationStatus'] : null; ?>
+        <?php if ($calStatus !== null && ($calStatus['state'] ?? '') !== ''): ?>
+          <?php
+            [$calBadgeClass, $calBadgeLabel] = match ((string) $calStatus['state']) {
+                'INSUFFICIENT_SAMPLES' => ['b-amber', 'INSUFFICIENT SAMPLES'],
+                'FITTABLE_NOT_FITTED' => ['b-green', 'READY TO FIT'],
+                default => ['b-gray', 'AWAITING SETTLED EVIDENCE'],
+            };
+          ?>
+          <div class="football-calibration-status" id="football-calibration-status">
+            <span class="badge <?= $calBadgeClass ?>"><?= e($calBadgeLabel) ?></span>
+            <p><?= e((string) ($calStatus['detail'] ?? '')) ?></p>
+          </div>
+        <?php endif; ?>
         <?php if ($calibrationVersions === []): ?>
           <p class="dim">No calibration has been fitted yet. <b><?= (int) ($calibrationAvailability['usable'] ?? 0) ?> of <?= (int) ($calibrationAvailability['minimum'] ?? 50) ?></b> required settled predictions currently have recoverable raw probabilities (<?= (int) ($calibrationAvailability['settled'] ?? 0) ?> settled for this model in total). The results and settlement jobs add evidence automatically after stored pre-match predictions finish. Until the minimum is reached, displayed confidence is labelled <b>CALIBRATION_PENDING</b> (raw), never silently adjusted.</p>
           <?php if ((int) ($calibrationAvailability['missingProbabilities'] ?? 0) > 0): ?>
@@ -162,6 +208,26 @@ $stateClass = static fn(string $state): string => match (strtoupper($state)) {
         </div>
         <div class="body">
         <p class="football-section-intro">What each version actually scored over the last 30 days of settled predictions. These are the stored aggregates the board reports; no figure is recomputed here.</p>
+        <?php /* The same empty-window status the board's Measured results
+               panel renders (PerformanceService's status block — a pure read
+               over stored counts). This page receives the identical report
+               payload, so the board and the models screen cannot disagree
+               about why the window is empty. Rendered only while the window
+               holds no settlement; a measured window renders its table. */ ?>
+        <?php $perfStatus = is_array($perf['status'] ?? null) ? $perf['status'] : null; ?>
+        <?php if ($perfStatus !== null && ($perfStatus['state'] ?? '') !== ''): ?>
+          <?php
+            [$perfBadgeClass, $perfBadgeLabel] = match ((string) $perfStatus['state']) {
+                'PREDICTIONS_UNSETTLED' => ['b-amber', 'AWAITING COMPLETED MATCHES'],
+                'SETTLED_OUTSIDE_WINDOW' => ['b-gray', 'NOTHING SETTLED IN THIS WINDOW'],
+                default => ['b-gray', 'NOTHING TO MEASURE YET'],
+            };
+          ?>
+          <div class="football-perf-status" id="football-models-performance-status">
+            <span class="badge <?= $perfBadgeClass ?>"><?= e($perfBadgeLabel) ?></span>
+            <p><?= e((string) ($perfStatus['detail'] ?? '')) ?></p>
+          </div>
+        <?php endif; ?>
         <?php if (($perf['state'] ?? '') !== 'MEASURED'): ?>
           <p class="dim">No settled predictions yet. Historical performance metrics will appear after predicted matches have completed.</p>
         <?php else: ?>
@@ -203,41 +269,65 @@ $stateClass = static fn(string $state): string => match (strtoupper($state)) {
         <div class="body scroll">
         <p class="football-section-intro">Every registered version and its lifecycle state.</p>
         <?php if ($versions === []): ?>
-          <p class="dim">No model versions recorded.</p>
+          <p class="dim">No model versions recorded. A version is registered automatically from the deployed scoring configuration the first time the engine analyzes a fixture — the Generate this page action (or a scheduled predict run) is how the first one appears, always as DRAFT and never as an approved model.</p>
         <?php else: ?>
           <table class="tbl">
             <thead><tr><th>Model</th><th>Version</th><th>Status</th><th class="num">Samples</th><th class="num">Acc.</th><th class="num">ECE</th><th></th></tr></thead>
             <tbody>
               <?php foreach ($versions as $row): ?>
+                <?php
+                  /* The measured columns (Samples, Acc., ECE) are each
+                     version's stored evaluation, recorded automatically from
+                     settled predictions by the hourly performance job. A dash
+                     therefore carries its own tooltip naming that, so the
+                     register never shows an unexplained blank. */
+                  $unevaluated = ($row['validationSampleSize'] ?? null) === null;
+                  $samplesTitle = $unevaluated ? 'Samples are the version\'s stored evaluation — recorded automatically from settled predictions by the hourly performance job. None recorded yet for this version.' : null;
+                  $accuracyTitle = $unevaluated ? 'Accuracy is measured over the version\'s settled predictions by the hourly performance job. None recorded yet for this version.' : null;
+                  $eceTitle = $unevaluated ? 'Expected calibration error is measured over the version\'s settled predictions by the hourly performance job. None recorded yet for this version.' : null;
+                ?>
                 <tr>
-                  <td class="dim football-cell-small"><?= e((string) ($row['name'] ?? '')) ?></td>
-                  <td class="mono"><?= e((string) ($row['version'] ?? '')) ?></td>
+                  <td class="dim football-cell-small" title="Registered from the deployed scoring configuration the first time the engine analyzed a fixture."><?= e((string) ($row['name'] ?? '')) ?></td>
+                  <td class="mono" title="The deployed scoring fingerprint: algorithm, grid width, feature set and blend weight."><?= e((string) ($row['version'] ?? '')) ?></td>
                   <td><span class="badge <?= $stateClass((string) ($row['status'] ?? '')) ?>"><?= e((string) ($row['status'] ?? '')) ?></span></td>
-                  <td class="num"><?= $row['validationSampleSize'] === null ? '—' : (int) $row['validationSampleSize'] ?></td>
-                  <td class="num"><?= $pct($row['accuracy'] ?? null) ?></td>
-                  <td class="num mono"><?= $dash($row['ece'] ?? null, 3) ?></td>
+                  <td class="num"<?= $samplesTitle !== null ? ' title="' . e($samplesTitle) . '"' : '' ?>><?= $row['validationSampleSize'] === null ? '—' : (int) $row['validationSampleSize'] ?></td>
+                  <td class="num"<?= $accuracyTitle !== null ? ' title="' . e($accuracyTitle) . '"' : '' ?>><?= $pct($row['accuracy'] ?? null) ?></td>
+                  <td class="num mono"<?= $eceTitle !== null ? ' title="' . e($eceTitle) . '"' : '' ?>><?= $dash($row['ece'] ?? null, 3) ?></td>
                   <td class="num football-cell-actions">
+                    <?php $rowAction = false; ?>
                     <?php if (!empty($caps['approve'])): ?>
                       <?php if (in_array((string) ($row['status'] ?? ''), ['VALIDATED', 'CALIBRATED'], true)): ?>
+                        <?php $rowAction = true; ?>
                         <form method="post" action="/football/models/<?= (int) $row['id'] ?>/decide" class="football-inline-form">
                           <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><input type="hidden" name="activate" value="0">
                           <button class="btn small primary">approve</button>
                         </form>
                       <?php endif; ?>
                       <?php if (in_array((string) ($row['status'] ?? ''), ['APPROVED'], true)): ?>
+                        <?php $rowAction = true; ?>
                         <form method="post" action="/football/models/<?= (int) $row['id'] ?>/decide" class="football-inline-form" onsubmit="return confirm('Make this the ACTIVE model version? The previous ACTIVE version is retired by the same action.')">
                           <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>"><input type="hidden" name="activate" value="1">
                           <button class="btn small primary">activate</button>
                         </form>
                       <?php endif; ?>
                     <?php else: ?>
+                      <?php $rowAction = true; ?>
                       <span class="football-inline-note dim">needs sports.approve</span>
+                    <?php endif; ?>
+                    <?php /* A row with no available action says so instead of
+                           rendering a silent blank cell. */ ?>
+                    <?php if (!$rowAction): ?>
+                      <span class="dim" title="No action is available in this state yet: the registry refuses Train/Validate until the hourly performance job records an evaluation from settled predictions.">— no action yet</span>
                     <?php endif; ?>
                   </td>
                 </tr>
               <?php endforeach; ?>
             </tbody>
           </table>
+          <?php $evaluatedVersions = 0; foreach ($versions as $row) { if (($row['validationSampleSize'] ?? null) !== null) $evaluatedVersions++; } ?>
+          <p class="football-help"><b>Samples, Acc. and ECE</b> are each version's stored evaluation — recorded automatically from settled predictions by the hourly performance job<?= $evaluatedVersions === 0
+            ? ' (none recorded yet: with no settled prediction there is nothing to measure, so every row reads — and the dashes carry their own tooltip)'
+            : ' (' . $evaluatedVersions . ' of ' . count($versions) . ' version(s) evaluated)' ?>. Hover a dash for its specific reason. Status advances only through the operator transitions in the actions column.</p>
         <?php endif; ?>
         <p class="football-help">Allowed transitions: DRAFT → TRAINED → VALIDATED → CALIBRATED → APPROVED → ACTIVE (RETIRE from any state). Approving a model that has not been validated against stored settlements, or activating one that no operator approved, is refused by the registry.</p>
         </div>

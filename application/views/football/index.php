@@ -13,6 +13,9 @@ $board = $d['board'] ?? [];
 $diagnostics = $d['diagnostics'] ?? [];
 $diag = $diagnostics;
 $perf = $d['performance'] ?? [];
+// The Day overview's pipeline state (see FootballIntelligence::dayStatus):
+// which absence the six counters are in when they cannot speak for themselves.
+$dayStatus = is_array($d['dayStatus'] ?? null) ? $d['dayStatus'] : null;
 // Categories remain part of the stored board contract. The unified odds board
 // presents every fixture once rather than duplicating it into several sections.
 $categories = $board['categories'] ?? [];
@@ -265,6 +268,20 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         $unanalyzed = max(0, (int) ($summary['fixtures'] ?? 0) - (int) ($summary['analyzed'] ?? 0));
         $answeredOnPage = min($unanalyzed, $withheldOnPage + (int) ($pageBlock['frozen'] ?? 0) + (int) ($pageBlock['failed'] ?? 0));
         $awaitingAnalysis = max(0, $unanalyzed - $answeredOnPage);
+        /* The date-wide durable split of the unanalyzed fixtures, from
+           dayStatus: past kickoff or void, withheld by the quality gate, and
+           genuinely awaiting an assessment. Preferred over the page-only
+           approximation above — the tiles describe the whole selection, so
+           their exclusions are named for the whole selection too ("4 past
+           kickoff"), not inferred from the page in view. Each unanalyzed
+           fixture is exactly one of the three, so the numbers always add up:
+           analyzed + withheld + closed + awaiting = fixtures found. */
+        $dayClosed = (int) (($dayStatus ?? [])['closed'] ?? 0);
+        $dayWithheld = (int) (($dayStatus ?? [])['withheld'] ?? 0);
+        $dayAwaiting = $dayStatus !== null ? (int) ($dayStatus['awaiting'] ?? 0) : $awaitingAnalysis;
+        $awaitExclusions = [];
+        if ($dayClosed > 0) $awaitExclusions[] = $dayClosed . ' past kickoff or void';
+        if ($dayWithheld > 0) $awaitExclusions[] = $dayWithheld . ' withheld by the quality gate';
       ?>
       <section class="panel football-section" id="football-overview" aria-labelledby="day-overview-heading">
         <div class="football-section__heading">
@@ -281,15 +298,46 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
           <p class="football-section-intro">The counts below describe saved rows for <?= $selectionName !== '' ? 'this selection — <b>' . e($selectionName) . '</b> on ' : '' ?>this date. A fixture is <b>qualified</b> when its stored evidence clears the data-quality floor, <b>limited</b> when it is usable with caution, and <b>withheld</b> when the engine completed an assessment but its evidence or model preconditions did not support publishing a prediction. <?= !empty($refresh)
             ? 'Reading this board generates the missing predictions for the page in view — at most the configured batch, stored ones are reused, never regenerated, and no provider request is spent.'
             : 'This read generated nothing: generation on read is off (?refresh=0 or WINDELS_FOOTBALL_GENERATE_ON_READ=false), so the Generate this page action stays the way predictions are created.' ?></p>
+          <?php /* The pipeline state behind the six counters, computed from the
+                 stored board payload and the last recorded FIXTURES sweep
+                 (zero provider requests). Rendered only when the counts cannot
+                 speak for themselves: a populated overview IS the information.
+                 Each state names which absence the tiles are in and the action
+                 that fills them — no count is invented to look busy. */ ?>
+          <?php if ($dayStatus !== null && in_array((string) ($dayStatus['state'] ?? ''), ['NO_PROVIDER', 'NEVER_SYNCED', 'SYNCED_NO_FIXTURES', 'GENERATION_OFF', 'ANALYZED_NONE', 'ALL_CLOSED'], true)): ?>
+            <?php
+              [$dayBadgeClass, $dayBadgeLabel] = match ((string) $dayStatus['state']) {
+                  'NO_PROVIDER' => ['b-amber', 'FIXTURES UNAVAILABLE'],
+                  'ANALYZED_NONE' => ['b-amber', 'NO PREDICTION PUBLISHED'],
+                  'ALL_CLOSED' => ['b-gray', 'ALL FIXTURES PAST KICKOFF'],
+                  'SYNCED_NO_FIXTURES' => ['b-gray', 'NO FIXTURES FOR THIS DATE'],
+                  'GENERATION_OFF' => ['b-gray', 'AWAITING GENERATION'],
+                  default => ['b-gray', 'FIXTURES SWEEP PENDING'],
+              };
+            ?>
+            <div class="football-day-status" id="football-day-status">
+              <span class="badge <?= $dayBadgeClass ?>"><?= e($dayBadgeLabel) ?></span>
+              <p><?= e((string) ($dayStatus['detail'] ?? '')) ?></p>
+            </div>
+          <?php endif; ?>
           <div class="stat-grid football-stat-grid">
             <div class="stat"><div class="k">Fixtures found</div><div class="v"><?= (int) ($summary['fixtures'] ?? 0) ?></div><div class="trend">stored for this date<?= $selectionName !== '' ? ' · ' . e($selectionName) : '' ?></div></div>
-            <div class="stat"><div class="k">Analyzed</div><div class="v"><?= (int) ($summary['analyzed'] ?? 0) ?></div><div class="trend">prediction rows saved</div></div>
+            <div class="stat"><div class="k">Analyzed</div><div class="v"><?= (int) ($summary['analyzed'] ?? 0) ?></div><div class="trend"><?php
+              // When no row exists, the trend says WHY: the durable split of
+              // the unanalyzed fixtures, in the same words the strip uses.
+              if ((int) ($summary['analyzed'] ?? 0) === 0 && ($dayClosed > 0 || $dayWithheld > 0)) {
+                  $analyzedWhy = [];
+                  if ($dayClosed > 0) $analyzedWhy[] = $dayClosed . ' past kickoff or void';
+                  if ($dayWithheld > 0) $analyzedWhy[] = $dayWithheld . ' withheld by the quality gate';
+                  echo 'no prediction rows · ' . implode(' · ', $analyzedWhy);
+              } else {
+                  echo 'prediction rows saved';
+              }
+            ?></div></div>
             <div class="stat"><div class="k">Qualified</div><div class="v up"><?= (int) ($summary['qualified'] ?? 0) ?></div><div class="trend">verified data quality</div></div>
             <div class="stat"><div class="k">Limited evidence</div><div class="v warn"><?= (int) ($summary['limited'] ?? 0) ?></div><div class="trend">usable with caution</div></div>
-            <div class="stat"><div class="k">Withheld</div><div class="v down"><?= $withheldOnPage ?></div><div class="trend">evidence below the floor · this page</div></div>
-            <div class="stat"><div class="k">Awaiting analysis</div><div class="v"><?= $awaitingAnalysis ?></div><div class="trend"><?= $answeredOnPage > 0
-              ? 'no prediction row yet · excludes ' . $answeredOnPage . ' answered on this page'
-              : 'no prediction row yet · whole selection' ?></div></div>
+            <div class="stat"><div class="k">Withheld</div><div class="v down"><?= $dayStatus !== null ? $dayWithheld : $withheldOnPage ?></div><div class="trend">evidence below the floor<?= $dayStatus === null ? ' · this page' : '' ?></div></div>
+            <div class="stat"><div class="k">Awaiting analysis</div><div class="v"><?= $dayAwaiting ?></div><div class="trend">no prediction row yet · <?= $awaitExclusions === [] ? 'whole selection' : implode(' · ', $awaitExclusions) ?></div></div>
           </div>
           <?php if ($pagination !== []): ?>
             <div class="football-section__divider"></div>
@@ -425,6 +473,28 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         </div>
         <div class="body">
           <p class="football-section-intro">Open any fixture for its complete market sheet. Every modelled selection includes the WINDELS probability and fair odds; every real bookmaker quote adds decimal odds, implied and margin-free probability, market fair odds, break-even point, model edge, expected return, quote range, source and timestamp. Missing prices stay clearly marked <b>UNPRICED</b>.</p>
+          <?php /* The board's odds pipeline state, computed from stored quotes
+                 and the last recorded ODDS sweep (zero provider requests).
+                 Every unpriced cell below stays honest because the section
+                 itself names WHICH absence it is in: the feed cannot quote at
+                 all, the sweep has not run yet, it ran and the bookmakers had
+                 not priced these fixtures, or quotes exist and are counted. */ ?>
+          <?php if (is_array($oddsStatus ?? null) && ($oddsStatus['state'] ?? '') !== ''): ?>
+            <?php
+              $oddsState = (string) $oddsStatus['state'];
+              [$oddsBadgeClass, $oddsBadgeLabel] = match ($oddsState) {
+                  'PRICED' => ['b-green', 'ODDS STORED'],
+                  'NO_ODDS_CAPABILITY', 'NO_PROVIDER' => ['b-amber', 'BOOKMAKER ODDS UNAVAILABLE'],
+                  'SWEPT_NO_QUOTES' => ['b-amber', 'SWEEP STORED NO QUOTES'],
+                  'NO_OPEN_FIXTURES' => ['b-gray', 'NO OPEN FIXTURES'],
+                  default => ['b-gray', 'ODDS SWEEP PENDING'],
+              };
+            ?>
+            <div class="football-odds-status" id="football-odds-status">
+              <span class="badge <?= $oddsBadgeClass ?>"><?= e($oddsBadgeLabel) ?></span>
+              <p><?= e((string) ($oddsStatus['detail'] ?? '')) ?></p>
+            </div>
+          <?php endif; ?>
           <?php if ($rows === []): ?>
             <div class="empty-state"><p>No fixtures match this page and filter selection.</p></div>
           <?php else: ?>
@@ -693,6 +763,25 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         </div>
         <div class="body">
           <p class="football-section-intro">Measured from stored settlements only. Unsettled predictions are excluded, and unavailable measurements remain blank rather than being estimated.</p>
+          <?php /* The empty-window pipeline state (see PerformanceService's
+                 status block — pure stored counts). Rendered only when the
+                 window holds no settlement: a measured window needs no
+                 apology. Names which absence the panel is in and how a
+                 measurement appears; no figure is estimated to look busy. */ ?>
+          <?php $perfStatus = is_array($perf['status'] ?? null) ? $perf['status'] : null; ?>
+          <?php if ($perfStatus !== null && ($perfStatus['state'] ?? '') !== ''): ?>
+            <?php
+              [$perfBadgeClass, $perfBadgeLabel] = match ((string) $perfStatus['state']) {
+                  'PREDICTIONS_UNSETTLED' => ['b-amber', 'AWAITING COMPLETED MATCHES'],
+                  'SETTLED_OUTSIDE_WINDOW' => ['b-gray', 'NOTHING SETTLED IN THIS WINDOW'],
+                  default => ['b-gray', 'NOTHING TO MEASURE YET'],
+              };
+            ?>
+            <div class="football-perf-status" id="football-perf-status">
+              <span class="badge <?= $perfBadgeClass ?>"><?= e($perfBadgeLabel) ?></span>
+              <p><?= e((string) ($perfStatus['detail'] ?? '')) ?></p>
+            </div>
+          <?php endif; ?>
           <dl class="football-performance-list">
             <div><dt>Predictions evaluated</dt><dd class="mono"><?= $count($perf['evaluatedPredictions'] ?? null) ?></dd></div>
             <div><dt>Correct results</dt><dd class="mono"><?= $count($perf['correctResults'] ?? null) ?></dd></div>
@@ -709,6 +798,14 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
           </dl>
           <?php if (($perf['state'] ?? '') !== 'MEASURED'): ?><p class="football-help"><?= e((string) ($perf['message'] ?? 'No settled predictions yet. Historical performance metrics will appear after predicted matches have completed.')) ?></p><?php endif; ?>
           <?php if (!empty($perf['note'])): ?><p class="football-help"><?= e((string) $perf['note']) ?></p><?php endif; ?>
+          <?php /* The Approved calibrations zero explains itself: a calibration
+                 is built from settled history and approved by an operator.
+                 Until then probabilities are published uncalibrated and say
+                 so (CALIBRATION_PENDING on every prediction). */ ?>
+          <?php $calAvailability = is_array($models['calibrationAvailability'] ?? null) ? $models['calibrationAvailability'] : []; ?>
+          <?php if ((int) ($models['approvedCalibrationCount'] ?? 0) === 0 && $calAvailability !== []): ?>
+            <p class="football-help">Approved calibrations 0 — a calibration is built from settled history (<?= (int) ($calAvailability['usable'] ?? 0) ?> usable settled sample<?= (int) ($calAvailability['usable'] ?? 0) === 1 ? '' : 's' ?> of the <?= (int) ($calAvailability['minimum'] ?? 0) ?> minimum) and approved on the Models &amp; calibration screen. Predictions are published uncalibrated meanwhile and say so.</p>
+          <?php endif; ?>
         </div>
       </section>
 

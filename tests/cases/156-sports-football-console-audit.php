@@ -35,7 +35,14 @@ test('sports console: the live-scores empty row is not a duplicated DOM id', fun
     // The empty state itself is still full-width and still announced.
     assert_true(substr_count($view, 'No matches currently live') >= 2,
         'both render paths keep the honest empty message');
-    assert_true(substr_count($view, 'colspan="6"') >= 2, 'the empty row still spans every column in both paths');
+    // The empty row spans every column in both paths. The server row keeps the
+    // literal colspan="6"; the poll handler derives its colspan from the same
+    // LIVE_CELLS list that mirrors the <thead>, so the two can never disagree
+    // after a column change (a hardcoded JS colspan was the drift risk).
+    assert_true(substr_count($view, 'colspan="6"') >= 1, 'the server-rendered empty row spans every column');
+    $js = (string) substr($view, (int) strpos($view, 'live-scores-js'));
+    assert_contains("colspan=\"' + LIVE_CELLS.length + '\"", $js,
+        'the repainted empty row spans exactly as many columns as the board defines');
 });
 
 test('app shell: football and messages are SPA destinations and the active state is single + aria-current', function () {

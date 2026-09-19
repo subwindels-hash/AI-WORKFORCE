@@ -163,6 +163,15 @@ class Football extends MY_Controller
         $data['competition'] = $competition;
         $data['market'] = $market;
         $data['line'] = $line;
+        // The board-level odds pipeline state (stored quotes + last recorded
+        // ODDS sweep + provider capability — a pure read, no provider request).
+        // It is what lets the fixture board say WHICH absence it is in instead
+        // of every cell promising "prices arrive with the scheduled sweep".
+        try {
+            $data['oddsStatus'] = $this->platform->football->oddsSheet()->boardStatus($date);
+        } catch (Throwable $e) {
+            $data['oddsStatus'] = null;
+        }
         $data['dashboard'] = $this->platform->football->dashboard($date, $data['refresh'], $page, (int) $data['pageSize'],
             ['competition' => $competition, 'market' => $market, 'line' => $line]);
         $this->render('football/index', $data);

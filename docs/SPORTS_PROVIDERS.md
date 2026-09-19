@@ -284,8 +284,13 @@ page reload, no manual "Sync now". The chain is:
    date and time in its own **Kickoff (UTC)** column (`YYYY-MM-DD HH:MM`,
    rendered from the stored kickoff on both the server side and by the poll
    handler); a match the provider gave no kickoff for shows `—`, never a
-   guessed time. The football console's live cards carry the same stamp
-   (`Sun 6 Sep 2026 · 14:00 UTC`, or `DATA_UNAVAILABLE`).
+   guessed time. The **Minute** column prints the provider's minute plus any
+   stated stoppage time (`90+4'`). The repaint is placement-safe: the poll
+   handler updates the server-rendered cells in place, one writer per column,
+   and refuses to paint at all if the served `<thead>` does not match its
+   column list — so an auto-refresh can change a cell's text but can never
+   move a value into a neighbouring column. The football console's live cards
+   carry the same stamp (`Sun 6 Sep 2026 · 14:00 UTC`, or `DATA_UNAVAILABLE`).
 
 ### Quota-safe by construction
 
@@ -316,6 +321,46 @@ The circuit breaker applies as everywhere else: a quota-dead feed is skipped
 without a request. The refresh interval is the worst-case delay between the
 provider reporting a score and the board showing it — lower it on a paid feed
 for faster updates.
+
+## Ticket settlement and verified results
+
+The console's **Measured results** panel (30-day odds prediction ticket
+performance) counts only tickets that have actually been **settled** — and a
+ticket can only settle from a **verified** stored provider result. Verification
+is the `ResultVerificationEngine`'s evidence bar, satisfied by either path:
+
+1. **Explicit (human)** — `POST /api/sports/results/verify` with
+   `sports.settle`, per (match, provider).
+2. **Corroborated (automatic)** — before settling, the settlement sweep
+   (`TicketSettlementService::settlePending()`) gives each pending selection's
+   stored result the chance to **earn** verification: terminal status
+   (`FINISHED`, or `VOID`/`CANCELLED`/`POSTPONED`), a valid non-negative
+   integer score for `FINISHED`, and a provider source stamp older than
+   `WINDELS_SPORTS_RESULT_CORROBORATION_SECONDS` (default 600 = 10 minutes).
+   Every promotion is audited as `SPORTS_RESULT_VERIFIED` with
+   `automation: true` and the acting identity (`system:settlement` for the
+   cron, the operator's id for console/API actions).
+
+Without the corroborated path a deployment where nobody calls the verify API
+by hand can never settle anything: results sync always stores `verified=0`,
+every sweep honestly refuses with `RESULT_UNVERIFIED`, and the measured-results
+panel stays at `0 / —` forever even though real final results are stored.
+
+A **re-synced result that states exactly what is already stored keeps its
+earned verification** (it is the same observation); a **changed** result (a
+score correction) resets to unverified and must earn verification again.
+
+Settlement runs from:
+
+- the **hourly settlement cron** (`tools sports-cron settlement` / the
+  Sports cron job),
+- `POST /sports/settle-all` — the console's *Settle all pending tickets from
+  verified results* button (sports.settle, CSRF, PRG),
+- `POST /api/sports/settle` and `/api/sports/tickets/{id}/settle`,
+- `POST /sports/{id}/settle` — the per-ticket console button.
+
+Tickets whose results are missing, not final, or not yet corroborated stay
+`PENDING` and contribute nothing to the panel — no number is ever projected.
 
 ## Provider health, circuit breaker and DATA_UNAVAILABLE
 

@@ -163,6 +163,36 @@ settled rows and says so, and `PerformanceService::report()` returns
   ACTIVE version in the same action, with the reason stored.
 * Nothing is ever hard-coded as approved: `ModelRegistry` refuses transitions whose
   evidence is missing, and the console shows the refusal reason.
+* **The models screen explains its dashes.** The "Live version" table's empty
+  fields are two different kinds, and `FootballIntelligence::lifecycleStatus()`
+  (a pure read, published in `modelSummary()`) says which is which: the
+  **measured figures** (Training dataset version, Validation sample size,
+  Accuracy, Log loss, Brier, ECE, Last evaluated) are recorded automatically
+  from settled predictions by the hourly performance job — with none settled
+  there is nothing to measure — while the **lifecycle stamps** (Trained,
+  Validated, Calibrated, Approved, Approved by, Activated) are earned by
+  operator transitions in the version register, which refuse Train/Validate
+  until an evaluation exists. The strip renders per state
+  (`DRAFT_NO_EVIDENCE` / `DRAFT_EVIDENCE_RECORDED` / `LIFECYCLE_IN_PROGRESS` /
+  `APPROVED_NOT_ACTIVE` / `ACTIVE_UNCALIBRATED`); an ACTIVE, calibrated model
+  renders none — a full table is the information. The version **register**
+  explains its own measured columns the same way: a help line under the table
+  states that *Samples, Acc. and ECE* are each version's stored evaluation
+  (recorded automatically from settled predictions by the hourly performance
+  job, with the none-evaluated clause or the evaluated-versions count as
+  applicable), every dashed cell carries a tooltip with its specific reason,
+  and a row with no available operator action says "no action yet" instead of
+  a silent blank. The **Calibration versions** section explains a missing
+  calibration the same way (`FootballIntelligence::calibrationStatus()`):
+  `NO_SAMPLES` (nothing this version predicted has settled — the strip names
+  the evidence pipeline: predict before kickoff, the `results` sweep stores
+  the final score, the `settle` job grades it, both every 15 minutes; the
+  hourly performance job retries the fit; the minimum is the
+  `WINDELS_FOOTBALL_MIN_CALIBRATION_SAMPLES` setting, floor 10),
+  `INSUFFICIENT_SAMPLES` (N of M with the shortfall and the honest refusal),
+  or `FITTABLE_NOT_FITTED` (the minimum is met — the fit action and the
+  hourly job both produce one; the temperature only ever softens). Once a
+  calibration is stored the table is the information and no strip renders.
 
 Stored per version: `model_id`, `model_name`, `model_version`, `algorithm`,
 `feature_version`, `training_dataset_version`, `created_at`, `trained_at`,
@@ -182,6 +212,23 @@ Stored per version: `model_id`, `model_name`, `model_version`, `algorithm`,
 * Predictions are frozen at kickoff: `PredictionService::frozenReason()` refuses a
   pre-match write once the match has started, and `savePrediction` refuses to
   overwrite a settled row. Postponed or cancelled fixtures are voided, not graded.
+* **A missing prediction is a named state, not a blank.** The match page's
+  Prediction overview carries `FootballIntelligence::predictionStatus()` — a
+  pure read over the stored rows plus the engine's closed-slot rule — so an
+  absent prediction says which fact it is: the engine **assessed the match and
+  refused** (`WITHHELD_BY_QUALITY_GATE`, with the measured score and reason; a
+  finding, not an absence), the **pre-match window is closed**
+  (`PRE_MATCH_CLOSED` — kickoff passed or the fixture is postponed/cancelled;
+  nothing is back-filled, and the Analyze action is not offered because it
+  cannot succeed), or **no analysis has run yet** (`AWAITING_ANALYSIS` — the
+  Analyze action runs the model on stored evidence, no provider request). The
+  closed and awaiting states also carry the fixture's own facts, not a generic
+  sentence: a finished match names its stored final score and where that result
+  goes instead (settlement grades stored predictions; the result still feeds
+  future form/head-to-head evidence), an in-play match names its live minute
+  and points at the Live match panel, and an awaiting match names its kickoff
+  and that the pre-match window closes there. With
+  a stored row the section renders the prediction itself and no status strip.
 * Live football is stored as separate `prediction_kind = 'LIVE'` rows
   (`supersedes_prediction_id` points at the pre-match row for display only). The
   pre-match row is never rewritten by a live tick.
@@ -191,6 +238,23 @@ Stored per version: `model_id`, `model_name`, `model_version`, `algorithm`,
   `result_source` and `settled_at` — and only then flips `settlement_state` to
   `SETTLED`. A prediction with no usable probabilities gets `NULL` grades rather
   than a guessed "wrong".
+* The 30-day panel explains an empty window. `PerformanceService::report()`
+  publishes a `status` block whenever the window holds no settlement — a pure
+  read over stored counts naming which absence the panel is in:
+  `NO_PREDICTIONS` (no prediction row exists yet; **Generate this page** /
+  generate-on-read / the scheduled `predict` job is how one appears),
+  `PREDICTIONS_UNSETTLED` (predictions are stored but none is settled: a
+  prediction is measured only after its match finishes — the `results` sweep
+  stores the final score, the `settle` job grades the prediction, both every
+  15 minutes), or `SETTLED_OUTSIDE_WINDOW` (settlements exist, none inside the
+  window the panel describes). A measured window carries no status: the
+  figures are the information. The models screen's "30-day performance by
+  model version" section renders the same status block from the same
+  report payload, so the board and the models screen cannot disagree
+  about why the window is empty. The *Approved calibrations* zero explains
+  itself the same way — a calibration is built from settled history and
+  approved on the Models & calibration screen; predictions are published
+  uncalibrated (`CALIBRATION_PENDING`) until then.
 * The 30-day panel is `SELECT`-aggregated over settled rows: evaluated count,
   correct results, result accuracy, exact-score accuracy, average confidence,
   Brier, ECE, log loss, average data quality, average goal error, plus the
@@ -271,6 +335,35 @@ the configured number; the remainder is explicitly deferred. The scheduled
 that configured 1–50 ceiling. Today and tomorrow share the same ceiling in one
 scheduled cycle, and existing stored rows are skipped unless the stated
 regeneration policy permits a replacement.
+
+**The Day overview explains its own counters.** The console's "What is stored
+for `<date>`" tiles (`Fixtures found`, `Analyzed`, `Qualified`, `Limited
+evidence`, `Withheld`, `Awaiting analysis`) describe stored rows, so when the
+rows are absent the board states *which* absence it is in
+(`FootballIntelligence::dayStatus()`, a pure read over the board payload plus
+the last recorded `FIXTURES` sync run): no feed connected (`NO_PROVIDER`), the
+fixtures sweep has not run yet (`NEVER_SYNCED` — it runs on the `fixtures` job
+every 6 hours or via **Sync this date**), the sweep ran and the feed returned
+no fixture for the date (`SYNCED_NO_FIXTURES`), every stored fixture is past
+kickoff / postponed / cancelled (`ALL_CLOSED` — no pre-match prediction can
+ever be created; nothing is back-filled, in-play matches belong to the live
+panel and finished ones to settlement), fixtures are stored but generation
+did not run on this read (`GENERATION_OFF` — **Generate this page** is the
+action), or this read ran the engine and nothing was published
+(`ANALYZED_NONE` — withheld/closed/failed, with the reasons on the rows).
+A populated overview renders no strip: six real counts are the information.
+
+`dayStatus()` also publishes the **date-wide durable split** of the
+unanalyzed fixtures — `closed` (past kickoff or void, by the engine's own
+`refusal()` rule), `withheld` (a stored assessment for the current model) and
+`awaiting` (open, no assessment) — and the tiles use it so their exclusions
+are named for the whole selection: the *Analyzed* trend reads
+"no prediction rows · 4 past kickoff or void", the *Awaiting analysis* trend
+reads "no prediction row yet · 4 past kickoff or void" instead of the old
+page-scoped "excludes 4 answered on this page", and the *Withheld* tile
+carries the selection-wide count. Each unanalyzed fixture is exactly one of
+the three, so `analyzed + withheld + closed + awaiting` always equals
+`Fixtures found`.
 
 ## Selecting a competition, a premium league and a market
 
@@ -1012,6 +1105,7 @@ job on all of:
 | `football-live` | live | 90 s | 6 |
 | `football-results` | results | 15 m | 12 |
 | `football-statistics` | statistics | 12 h | 20 |
+| `football-odds` | odds | 15 m | 25 |
 | `football-predict` | predict | 30 m | 0 (database only) |
 | `football-settle` | settle | 15 m | 0 |
 | `football-performance` | performance | 1 h | 0 |
@@ -1054,6 +1148,22 @@ gated by the seven checks above before it touches the feed. A sweep in which eve
 job reported "nothing due" emits no audit event at all (`FOOTBALL_CRON_RUN` is
 written only when a job actually ran); a job that ran records its own row in
 `football_provider_sync_logs`, and a failure emits `FOOTBALL_JOB_FAILED`.
+
+The odds sweep (`football-odds`) is what prices the console's fixture board:
+`OddsSheetService::refreshDay()` walks every open fixture on a date —
+finished, postponed and abandoned matches are skipped before any request —
+reuses quotes still inside their freshness window unless forced, and defers
+what the budget could not cover instead of dropping it. The operator's
+**Refresh odds** button runs the same sweep and records the same `ODDS`
+sync-log row, so the board's status strip (`OddsSheetService::boardStatus()`,
+a pure read that never calls the feed) can say which absence the page is in:
+the feed cannot quote at all (`NO_PROVIDER` / `NO_ODDS_CAPABILITY`), no
+priceable fixture is stored for the date (`NO_OPEN_FIXTURES`), the sweep has
+not run yet (`NEVER_SWEPT`), it ran and the bookmakers had not priced these
+fixtures (`SWEPT_NO_QUOTES`), or quotes exist and are counted (`PRICED`),
+with the newest quote and the last sweep's stamp. An unpriced cell on the
+board is therefore always explained by the section it sits in, never left
+as a bare placeholder.
 
 A failure's text is displayed — in the sync log's error list, in the operator's
 flash message and in `football_providers.last_error` — and an HTTP client typically

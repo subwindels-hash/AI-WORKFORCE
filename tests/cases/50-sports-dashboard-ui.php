@@ -383,13 +383,116 @@ test('sports UI: the live scores board shows the match date and time', function 
     assert_equals(2, count($dash['todayIntelligence']['live']), 'both live rows reach the board');
     $html = fx_render_sports('index', ['dashboard' => $dash]);
     assert_contains('Kickoff (UTC)</th>', $html, 'the live board has a match date and time column');
-    assert_contains('<td class="mono dim live-kickoff-cell">' . gmdate('Y-m-d H:i', (int) strtotime($kickoff)) . '</td>', $html,
+    assert_contains('<td class="mono dim live-kickoff-cell live-cell-kickoff">' . gmdate('Y-m-d H:i', (int) strtotime($kickoff)) . '</td>', $html,
         'the live row prints its stored kickoff as date and time');
-    assert_contains('<td class="mono dim live-kickoff-cell">—</td>', $html,
+    assert_contains('<td class="mono dim live-kickoff-cell live-cell-kickoff">—</td>', $html,
         'a match with no stored kickoff prints — instead of a time');
     assert_contains('NoKickoffHome vs NoKickoffAway', $html);
     assert_true(!str_contains($html, 'Undefined array key'), 'no PHP warnings');
     assert_true(!str_contains($html, '1970-01-01'), 'a missing kickoff is never rendered as the epoch');
+});
+
+test('sports UI: the live board repaint is placement-safe — a poll can never shift data sideways', function () {
+    $repo = new SportsRepositoryStub();
+    $repo->ensureProvider('ui-test', 'UI Test');
+    // One in-play match in stoppage time with a complete stored state: every
+    // column gets a known value, so the assertions below can demand each value
+    // inside its own labelled cell.
+    $kickoff = gmdate("Y-m-d\TH:i:00+00:00", strtotime('today 14:30:00'));
+    $repo->matches[] = ['id' => 9110, 'provider_id' => 1, 'external_id' => 'ui-live-3', 'sport' => 'football',
+        'competition' => 'UI League', 'home_team' => 'StoppageHome', 'away_team' => 'StoppageAway', 'kickoff_at' => $kickoff,
+        'status' => 'LIVE', 'source_timestamp' => gmdate('c'), 'updated_at' => gmdate('c'),
+        'payload' => ['live' => ['minute' => 90, 'extraMinute' => 4, 'homeScore' => 2, 'awayScore' => 1, 'statusShort' => '2H']]];
+    $dash = (new SportsIntelligence($repo, fx_ui_audit()))->dashboard();
+    $html = fx_render_sports('index', ['dashboard' => $dash]);
+
+    // The stoppage-time minute is real stored provider data — printed in full,
+    // never truncated to a bare 90'.
+    assert_contains('<td class="mono dim live-cell-minute">90+4\'</td>', $html,
+        'the Minute cell prints the provider minute plus stated stoppage');
+
+    // The server-rendered row must mirror the poll handler's column contract
+    // exactly: one live-cell-* class per <td>, in the same order the <thead>
+    // declares its columns, so the poll updates cells in place instead of
+    // rebuilding rows that could drift under a different column set.
+    $liveTable = substr($html, (int) strpos($html, 'id="live-scores-table"'));
+    $liveTable = substr($liveTable, 0, (int) strpos($liveTable, '</table>'));
+    $thead = substr($liveTable, (int) strpos($liveTable, '<thead>'), (int) strpos($liveTable, '</thead>') - (int) strpos($liveTable, '<thead>'));
+    assert_equals(6, substr_count($thead, '<th'), 'the live board header declares exactly six columns');
+    $row = substr($liveTable, (int) strpos($liveTable, '<tr data-match-id'));
+    $row = substr($row, 0, (int) strpos($row, '</tr>'));
+    assert_equals(6, substr_count($row, '<td'), 'each server-rendered live row has exactly one cell per header column');
+    $expectedCellClasses = [
+        'live-cell-minute', 'live-cell-kickoff', 'live-cell-match',
+        'live-cell-competition', 'live-cell-score', 'live-cell-updated',
+    ];
+    $cursor = 0;
+    foreach ($expectedCellClasses as $i => $cellClass) {
+        $pos = strpos($row, $cellClass, $cursor);
+        assert_true($pos !== false, "live row cell {$i} carries its {$cellClass} class");
+        $cursor = $pos + strlen($cellClass);
+    }
+
+    // The poll handler must define one writer per column and refuse to paint
+    // when the served header does not match that contract — a mismatched paint
+    // is exactly how values end up under the wrong headings.
+    $js = substr($html, (int) strpos($html, 'id="live-scores-js"'));
+    $js = substr($js, 0, (int) strpos($js, '</script>'));
+    assert_equals(6, substr_count($js, "cls: '"), 'the poll handler defines exactly one writer per column');
+    foreach ($expectedCellClasses as $cellClass) {
+        assert_true(strpos($js, $cellClass) !== false, "the poll handler knows the {$cellClass} column");
+    }
+    assert_true(strpos($js, 'LIVE_CELLS.length') !== false, 'the poll handler renders through the shared column list');
+    assert_true(strpos($js, "headers.length !== LIVE_CELLS.length") !== false,
+        'the poll handler guards against a header/column mismatch before painting');
+    assert_true(strpos($js, 'updateRow') !== false && strpos($js, 'tds[i].innerHTML') !== false,
+        'existing rows are updated in place, cell by cell, not rebuilt');
+});
+
+test('sports UI: the measured-results panel explains pending settlement and offers the sweep', function () {
+    // One seeded PENDING ticket (fx_ui_today) — the state the user sees when
+    // the panel shows 0 settled tickets and every metric as —.
+    $repo = new SportsRepositoryStub();
+    fx_ui_today($repo);
+    $intel = new SportsIntelligence($repo, fx_ui_audit());
+    $dash = $intel->dashboard();
+
+    // The report says how many tickets in the window are still awaiting
+    // settlement, so the panel can explain itself instead of showing a bare 0.
+    assert_equals(1, (int) ($dash['performance']['pendingTickets'] ?? 0), 'pendingTickets counts the window\'s unsettled tickets');
+    assert_equals(0, (int) ($dash['performance']['settledTickets'] ?? -1), 'nothing is settled yet');
+
+    // Privileged identity: the explanation plus the settle-all sweep form.
+    $html = fx_render_sports('index', ['dashboard' => $dash, 'csrfToken' => 'ui-csrf-token']);
+    assert_contains('still awaiting settlement', $html, 'the empty state names the pending tickets');
+    assert_contains('settles automatically (hourly sports cron)', $html, 'and says how they settle');
+    assert_contains('<form method="post" action="/sports/settle-all">', $html, 'the settle-all form posts to the routed console action');
+    assert_contains('name="csrf_token" value="ui-csrf-token"', $html, 'the sweep form carries the CSRF token');
+    assert_contains('Settle all pending tickets from verified results (sports.settle)', $html);
+    assert_contains('SPORTS_RESULT_VERIFIED', $html, 'the note says promotions are audited');
+
+    // Read-only identity: same explanation, no form — the permission note.
+    $htmlReadOnly = fx_render_sports('index', ['dashboard' => $dash, 'csrfToken' => 'ui-csrf-token', 'caps' => fx_sports_caps_none()]);
+    assert_contains('still awaiting settlement', $htmlReadOnly);
+    assert_true(!str_contains($htmlReadOnly, 'action="/sports/settle-all"'), 'a read-only identity gets no settle-all form');
+    assert_contains('Settlement stays with identities holding <b>sports.settle</b>.', $htmlReadOnly);
+
+    // Nothing pending at all: the honest bare empty state, and no sweep form
+    // for anyone (nothing to settle).
+    $emptyRepo = new SportsRepositoryStub();
+    $emptyRepo->ensureProvider('ui-test', 'UI Test');
+    $emptyDash = (new SportsIntelligence($emptyRepo, fx_ui_audit()))->dashboard();
+    assert_equals(0, (int) ($emptyDash['performance']['pendingTickets'] ?? -1));
+    $htmlEmpty = fx_render_sports('index', ['dashboard' => $emptyDash, 'csrfToken' => 'ui-csrf-token']);
+    assert_contains('No settled records or selections yet — metrics are intentionally unavailable rather than invented.', $htmlEmpty);
+    assert_true(!str_contains($htmlEmpty, 'action="/sports/settle-all"'), 'no pending tickets means no sweep form');
+
+    // The console action is routed and guarded like every other mutation.
+    $routes = file_get_contents(FCPATH . 'application/config/routes.php');
+    assert_contains("\$route['sports/settle-all'] = 'sports/settle_all';", $routes, 'the settle-all action is routed');
+    $controller = file_get_contents(FCPATH . 'application/controllers/Sports.php');
+    assert_contains("public function settle_all()", $controller, 'the console controller has the action');
+    assert_contains("requireSportsPermission('sports.settle', 'settle all pending tickets')", $controller, 'it enforces sports.settle + CSRF like the other mutations');
 });
 
 test('sports UI: NO QUALIFIED TICKET panel names every funnel stage, the blocking field and the provider', function () {

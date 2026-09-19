@@ -176,13 +176,40 @@ class Sports extends MY_Controller
     {
         if (!$this->requireSportsPermission('sports.settle', 'settle')) return;
         try {
-            $out = $this->platform->sports->settlement->settlePending($id);
+            // The acting identity is passed through: results the sweep promotes
+            // on the way (terminal + corroborated) are audited under it.
+            $out = $this->platform->sports->settlement->settlePending($id, $this->actor());
             $this->flash('notice', sprintf('Odds prediction ticket settlement: %s (effective odds %s, P/L %s)',
                 $out['status'] ?? 'PENDING', $out['effectiveOdds'] ?? 'n/a', $out['pnl'] ?? 'n/a'));
         } catch (Throwable $e) {
             $this->flash('error', $e->getMessage());
         }
         redirect('/sports/odds-prediction-ticket');
+    }
+
+    /**
+     * Settle every pending odds prediction ticket from stored verified
+     * results (sports.settle) — the browser-facing equivalent of
+     * POST /api/sports/settle and the hourly settlement cron. Results earn
+     * verification first (terminal status + corroborated source stamp), so
+     * this is the one-click way to make the measured-results panel show real
+     * numbers once matches have finished, instead of hand-crafting per-match
+     * verify API calls.
+     */
+    public function settle_all()
+    {
+        if ($this->input->method(true) !== 'POST') { redirect('/sports'); return; }
+        if (!$this->requireSportsPermission('sports.settle', 'settle all pending tickets')) return;
+        @set_time_limit(120);
+        try {
+            $out = $this->platform->sports->settlement->settleAllPending(200, $this->actor());
+            $this->flash('notice', sprintf('Settlement sweep: %d ticket(s) finalized, %d still pending verified results%s.',
+                (int) ($out['settled'] ?? 0), (int) ($out['pending'] ?? 0),
+                !empty($out['errors']) ? ' (' . count($out['errors']) . ' error(s), see audit log)' : ''));
+        } catch (Throwable $e) {
+            $this->flash('error', $e->getMessage());
+        }
+        redirect('/sports');
     }
 
     /**
