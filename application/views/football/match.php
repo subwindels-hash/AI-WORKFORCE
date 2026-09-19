@@ -85,9 +85,37 @@ $withheldBlock = is_array($intel['withheld'] ?? null) ? $intel['withheld'] : [];
         <div class="body">
           <p class="football-section-intro">The stored pre-match prediction for this fixture, exactly as it was frozen. Nothing on this page rewrites it.</p>
           <?php if ($contract === null): ?>
+            <?php
+              /* The prediction-overview pipeline state (see
+                 FootballIntelligence::predictionStatus — a pure read over
+                 stored rows and the engine's closed-slot rule). An absent
+                 prediction is one of three different facts, each stated as
+                 itself: the engine assessed the match and refused (a finding,
+                 with the measured score and reason), the pre-match window is
+                 closed (nothing can be back-filled), or no analysis has run
+                 yet (the action below is how one appears). No prediction is
+                 invented to fill the section. */
+              $predictionStatus = is_array($prediction['statusDetail'] ?? null) ? $prediction['statusDetail'] : null;
+              $predictionState = (string) ($predictionStatus['state'] ?? '');
+              [$predictionBadgeClass, $predictionBadgeLabel] = match ($predictionState) {
+                  'WITHHELD_BY_QUALITY_GATE' => ['b-amber', 'ANALYZED — NOT PUBLISHED'],
+                  'PRE_MATCH_CLOSED' => ['b-gray', 'PRE-MATCH WINDOW CLOSED'],
+                  'AWAITING_ANALYSIS' => ['b-gray', 'AWAITING ANALYSIS'],
+                  default => ['b-gray', 'NO PREDICTION STORED'],
+              };
+            ?>
             <p><?= e((string) ($prediction['message'] ?? 'No prediction row is stored for this fixture.')) ?></p>
             <?php if (!empty($prediction['reason'])): ?><p class="football-help"><?= e((string) $prediction['reason']) ?></p><?php endif; ?>
-            <?php if ($matchId > 0): ?>
+            <?php if ($predictionStatus !== null): ?>
+              <div class="football-prediction-status" id="football-prediction-status">
+                <span class="badge <?= $predictionBadgeClass ?>"><?= e($predictionBadgeLabel) ?></span>
+                <p><?= e((string) ($predictionStatus['detail'] ?? '')) ?></p>
+              </div>
+            <?php endif; ?>
+            <?php /* The analyze action is only offered where it can succeed: a
+                   closed pre-match slot can never be written again, and the
+                   strip above says so instead of a button that refuses. */ ?>
+            <?php if ($matchId > 0 && $predictionState !== 'PRE_MATCH_CLOSED'): ?>
               <form method="post" action="/football/match/<?= $matchId ?>/analyze" class="football-inline-form" onsubmit="return confirm('Analyze this match from its stored data now?')">
                 <input type="hidden" name="csrf_token" value="<?= e($csrfToken ?? '') ?>">
                 <button class="btn primary" type="submit" <?= empty($caps['sync']) ? 'title="Requires the sports.manage permission — click to see the access message"' : '' ?>>Analyze this match — generate odds prediction</button>

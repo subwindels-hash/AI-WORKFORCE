@@ -182,6 +182,17 @@ Stored per version: `model_id`, `model_name`, `model_version`, `algorithm`,
 * Predictions are frozen at kickoff: `PredictionService::frozenReason()` refuses a
   pre-match write once the match has started, and `savePrediction` refuses to
   overwrite a settled row. Postponed or cancelled fixtures are voided, not graded.
+* **A missing prediction is a named state, not a blank.** The match page's
+  Prediction overview carries `FootballIntelligence::predictionStatus()` — a
+  pure read over the stored rows plus the engine's closed-slot rule — so an
+  absent prediction says which fact it is: the engine **assessed the match and
+  refused** (`WITHHELD_BY_QUALITY_GATE`, with the measured score and reason; a
+  finding, not an absence), the **pre-match window is closed**
+  (`PRE_MATCH_CLOSED` — kickoff passed or the fixture is postponed/cancelled;
+  nothing is back-filled, and the Analyze action is not offered because it
+  cannot succeed), or **no analysis has run yet** (`AWAITING_ANALYSIS` — the
+  Analyze action runs the model on stored evidence, no provider request). With
+  a stored row the section renders the prediction itself and no status strip.
 * Live football is stored as separate `prediction_kind = 'LIVE'` rows
   (`supersedes_prediction_id` points at the pre-match row for display only). The
   pre-match row is never rewritten by a live tick.

@@ -666,7 +666,104 @@ final class FootballIntelligence
             // unpriced markets say so explicitly; provider-price-only markets
             // never pretend to carry a WINDELS probability.
             'markets' => array_values((array) $allMarkets),
+            // Why the prediction is absent and how it can appear — the state
+            // the match page's Prediction overview explains itself with
+            // instead of a bare "no row is stored".
+            'statusDetail' => $preMatch === null ? $this->predictionStatus($fixtureId, $fixture) : null,
             'message' => $preMatch === null ? 'No prediction row is stored for this fixture' . ($generate ? ' — it was analyzed and refused (see dataQuality)' : '.') : null,
+            'generatedAt' => gmdate('c'),
+        ];
+    }
+
+    /**
+     * The prediction-overview state for one fixture — what the match page's
+     * "Prediction overview" section explains its empty state with instead of
+     * "No prediction row is stored for this fixture." Full stop. The row is
+     * absent for exactly one of three reasons, and they are different facts:
+     *
+     *  - PREDICTED              — a stored pre-match row exists; it IS the
+     *                             information (the caller renders it, not this)
+     *  - WITHHELD_BY_QUALITY_GATE — the engine completed an assessment and its
+     *                             evidence or model preconditions did not
+     *                             support publishing (measured score + reason
+     *                             carried). A finding, not an absence.
+     *  - PRE_MATCH_CLOSED       — kickoff has passed or the fixture is
+     *                             postponed/cancelled, so a pre-match
+     *                             prediction can never be created again.
+     *                             Nothing is back-filled.
+     *  - AWAITING_ANALYSIS      — stored and still open, but no engine
+     *                             assessment has run for it yet.
+     *
+     * Purely read-only: the stored rows and the engine's own closed-slot rule
+     * (`PredictionService::refusal()`). No provider request, no generation.
+     *
+     * @param array<string,mixed>|null $fixture preloaded fixture row, when the caller already has it
+     * @return array<string,mixed>
+     */
+    public function predictionStatus(int $fixtureId, ?array $fixture = null): array
+    {
+        $fixture ??= $this->repo->findFixtureById($fixtureId);
+        if ($fixture === null) {
+            return ['state' => 'NOT_FOUND', 'detail' => 'No fixture is stored under this id, so there is no prediction to read.',
+                'fixtureId' => $fixtureId, 'generatedAt' => gmdate('c')];
+        }
+        $stored = $this->repo->listPredictions(['fixtureId' => $fixtureId, 'kind' => PredictionService::KIND_PRE_MATCH], 1);
+        if ($stored !== []) {
+            return ['state' => 'PREDICTED',
+                'detail' => 'A pre-match prediction row is stored for this fixture and is rendered below, exactly as it was frozen.',
+                'fixtureId' => $fixtureId, 'generatedAt' => gmdate('c')];
+        }
+
+        // The engine's own rule for a slot that can never be written.
+        $refusal = $this->predictions()->refusal($fixture);
+        // A durable assessment from an earlier generating request: the engine
+        // answered and refused. Assessments belong to the model version that
+        // made them — a stale refusal from an older model must not label the
+        // current slot (same rule the board applies).
+        $assessment = null;
+        $modelVersionId = (int) ($this->models()->usable()['model']['id'] ?? 0);
+        try {
+            $row = $this->repo->listFixtureStatisticsFor([$fixtureId], PredictionService::ASSESSMENT_KIND)[$fixtureId] ?? null;
+            $payload = is_array($row['payload'] ?? null) ? $row['payload'] : [];
+            if ($payload !== [] && (string) ($payload['status'] ?? '') === 'ASSESSED_NO_PREDICTION'
+                && (int) ($payload['modelVersionId'] ?? 0) === $modelVersionId) {
+                $assessment = $payload;
+            }
+        } catch (\Throwable $e) {
+            $assessment = null;
+        }
+
+        $kickoff = (string) ($fixture['kickoff_at'] ?? '');
+        $state = match (true) {
+            $assessment !== null => 'WITHHELD_BY_QUALITY_GATE',
+            $refusal !== null => 'PRE_MATCH_CLOSED',
+            default => 'AWAITING_ANALYSIS',
+        };
+        $detail = match ($state) {
+            'WITHHELD_BY_QUALITY_GATE' => 'This match WAS analyzed — the engine completed an assessment and published no prediction: '
+                . (string) ($assessment['reason'] ?? 'its evidence or model preconditions did not support one.')
+                . (is_numeric($assessment['dataQuality']['score'] ?? null)
+                    ? ' Measured data quality: ' . (int) $assessment['dataQuality']['score'] . '/100'
+                        . (($assessment['dataQuality']['band'] ?? '') !== '' ? ' (' . (string) $assessment['dataQuality']['band'] . ')' : '') . '.'
+                    : '')
+                . ($refusal !== null
+                    ? ' The pre-match window has since closed, so this assessment stands as the record — nothing is back-filled.'
+                    : ' Re-running the analysis after newer evidence is stored can publish a prediction; the button below re-asks the engine.'),
+            'PRE_MATCH_CLOSED' => (string) ($refusal['reason'] ?? 'The pre-match window is closed for this fixture.')
+                . ($kickoff !== '' ? ' Kickoff was ' . substr($kickoff, 0, 16) . ' UTC.' : '')
+                . ' While the match is in play, live estimates are the in-play model\'s product (the Live match panel); once it finishes, the stored result is settlement\'s business.',
+            default => 'This fixture is stored and still open, but no analysis has run for it yet. Analyze this match — generate odds prediction runs the model on the stored evidence (no provider request) and either publishes a prediction — qualified or on limited evidence — or withholds it with the measured reason. The scheduled predict job also picks up pending fixtures automatically.',
+        };
+
+        return [
+            'state' => $state,
+            'detail' => $detail,
+            'fixtureId' => $fixtureId,
+            'code' => $state === 'WITHHELD_BY_QUALITY_GATE' ? (string) ($assessment['code'] ?? 'NO_PREDICTION')
+                : ($refusal['code'] ?? null),
+            'dataQualityScore' => is_numeric($assessment['dataQuality']['score'] ?? null) ? (int) $assessment['dataQuality']['score'] : null,
+            'kickoff' => $kickoff !== '' ? $kickoff : null,
+            'assessmentAt' => $assessment !== null ? ($assessment['generatedAt'] ?? null) : null,
             'generatedAt' => gmdate('c'),
         ];
     }
