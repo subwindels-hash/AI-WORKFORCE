@@ -19,6 +19,7 @@ $nav = [
     'how' => ['/how-it-works', 'How it works'],
     'locations' => ['/locations', 'Coverage'],
     'safety' => ['/safety', 'Safety'],
+    'reviews' => ['/reviews', 'Reviews'],
     'faq' => ['/faq', 'FAQ'],
     'contact' => ['/contact', 'Contact'],
 ];

@@ -13,6 +13,62 @@ class Site extends MY_Controller
     public function faq() { $this->page('faq', 'FAQ', 'site/faq'); }
     public function contact() { $this->page('contact', 'Contact', 'site/contact'); }
 
+    /** Public community conversation; reading never requires an account. */
+    public function reviews()
+    {
+        $this->page('reviews', 'User reviews', 'site/reviews', [
+            'reviews' => $this->AIWorkforce_model->reviews->published(100),
+            'reviewSummary' => $this->AIWorkforce_model->reviews->summary(),
+        ]);
+    }
+
+    /** Signed-in members can add a rating and public comment. */
+    public function review_submit()
+    {
+        $user = $this->currentUser();
+        if (!$user) {
+            $this->session->set_flashdata('error', 'Sign in before posting a comment.');
+            redirect('/login?return_to=%2Freviews');
+            return;
+        }
+
+        $token = $this->input->post('csrf_token');
+        $expected = (string) $this->session->userdata('csrf_token');
+        if (!is_string($token) || $expected === '' || !hash_equals($expected, $token)) {
+            $this->session->set_flashdata('error', 'Your session expired. Refresh the page and try again.');
+            redirect('/reviews');
+            return;
+        }
+
+        $rating = (int) $this->input->post('rating');
+        $body = trim((string) $this->input->post('body'));
+        $length = mb_strlen($body);
+        if ($rating < 1 || $rating > 5 || $length < 20 || $length > 1500) {
+            $this->session->set_flashdata('error', 'Choose a 1–5 star rating and enter a comment between 20 and 1,500 characters.');
+            redirect('/reviews');
+            return;
+        }
+
+        // A short server-side cooldown prevents accidental double posts and basic flooding.
+        $latest = $this->AIWorkforce_model->reviews->latestForUser((int) $user['id']);
+        if ($latest && strtotime((string) $latest['created_at']) > time() - 30) {
+            $this->session->set_flashdata('error', 'Please wait a moment before posting another comment.');
+            redirect('/reviews');
+            return;
+        }
+
+        $reviewId = $this->AIWorkforce_model->reviews->create((int) $user['id'], $rating, $body);
+        try {
+            $this->platform->model->audit->emit('USER_REVIEW_POSTED', 'A member posted a public review', [
+                'review_id' => $reviewId, 'rating' => $rating,
+            ], (string) $user['id']);
+        } catch (\Throwable $e) {
+            log_message('error', 'review audit failed: ' . $e->getMessage());
+        }
+        $this->session->set_flashdata('notice', 'Thanks — your comment is now visible to the community.');
+        redirect('/reviews');
+    }
+
     public function contact_submit()
     {
         $name = trim((string) $this->input->post('name'));
@@ -199,9 +255,9 @@ class Site extends MY_Controller
         return \AIWorkforce\Mailer::send($this, $email, $subject, $html, $text)['ok'];
     }
 
-    private function page(string $active, string $title, string $view): void
+    private function page(string $active, string $title, string $view, array $extra = []): void
     {
-        $data = [
+        $data = array_merge([
             'title' => $title,
             'active' => $active,
             'user' => $this->currentUser(),
@@ -209,7 +265,7 @@ class Site extends MY_Controller
             'error' => $this->session->flashdata('error'),
             'languages' => count($this->platform->langlearn->languages()),
             'contact' => $this->contactConfig(),
-        ];
+        ], $extra);
         $this->load->view('site/layout/header', $data);
         $this->load->view($view, $data);
         $this->load->view('site/layout/footer', $data);

@@ -11,6 +11,7 @@
       <a href="/about">About</a>
       <a href="/services">Services</a>
       <a href="/how-it-works">How it works</a>
+      <a href="/reviews">User reviews</a>
       <a href="/safety">Safety</a>
     </div>
     <div>
