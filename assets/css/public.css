@@ -399,9 +399,10 @@ img { max-width: 100%; height: auto; display: block; object-fit: cover; object-p
 .pub-social-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 9px; }
 .pub-foot .pub-social-button { --social-color: #d5deea; display: inline-flex; align-items: center; gap: 8px; min-height: 40px; margin: 0; padding: 8px 13px; border: 1px solid #ffffff2b; border-radius: 999px; color: #d5deea; background: #ffffff08; font-weight: 700; line-height: 1; transition: color .18s ease, border-color .18s ease, background .18s ease, transform .18s ease; }
 .pub-foot .pub-social-button span { display: inline; margin: 0; color: inherit; font-size: 13px; font-weight: 700; letter-spacing: 0; text-transform: none; }
-.pub-social-button svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.pub-social-button.is-facebook svg { fill: currentColor; stroke: none; }
-.pub-social-button .social-icon-dot { fill: currentColor; stroke: none; }
+/* Brand glyphs are solid 24x24 paths sized down here. The fixed box plus the
+   max-* cap means an icon can never paint outside the pill, even if a future
+   svg arrives without width/height attributes. */
+.pub-social-button svg { width: 16px; height: 16px; max-width: 16px; max-height: 16px; flex: 0 0 16px; display: block; fill: var(--social-color); stroke: none; }
 .pub-social-button.is-facebook { --social-color: #1877f2; }
 .pub-social-button.is-instagram { --social-color: #e1306c; }
 .pub-social-button.is-x { --social-color: #fff; }

@@ -164,6 +164,67 @@ test('public footer social buttons use configured official HTTPS channels', func
     assert_contains('aria-label="Follow WINDELS on', $footer, 'social buttons carry accessible names');
 });
 
+test('footer social row renders by default from application/config/social.php', function () {
+    $footer = file_get_contents(FCPATH . 'application/views/site/layout/footer.php');
+    $configPath = FCPATH . 'application/config/social.php';
+    assert_true(is_file($configPath), 'shipped social channel configuration exists');
+    // The view must read the config file, and the env variable must still win.
+    assert_contains("config->load('social', true)", $footer, 'footer loads the social config');
+    assert_contains("\$socialConfigured[\$channel['key']]", $footer, 'footer falls back to the configured channel URL');
+    assert_contains("\$url = trim((string) getenv(\$channel['env']));", $footer, 'VP_SOCIAL_* keeps the highest precedence');
+
+    // Load the config the way CodeIgniter does and validate every shipped value
+    // through the same rules the view applies: nothing dead or non-HTTPS ships.
+    $config = [];
+    require $configPath;
+    $channels = (array) ($config['channels'] ?? []);
+    assert_true(count($channels) >= 5, 'a default social destination ships for most channels');
+    $rendered = 0;
+    foreach ($channels as $key => $url) {
+        $url = trim((string) $url);
+        if ($url === '') continue; // deliberately unset (e.g. WhatsApp without a phone number)
+        assert_true(str_starts_with($url, 'https://'), "default {$key} URL is HTTPS");
+        assert_true(filter_var($url, FILTER_VALIDATE_URL) !== false, "default {$key} URL is well formed");
+        $rendered++;
+    }
+    assert_true($rendered >= 5, 'the footer social row is visible out of the box');
+});
+
+test('footer social icons are official brand marks at one small size', function () {
+    $footer = file_get_contents(FCPATH . 'application/views/site/layout/footer.php');
+    $css = file_get_contents(FCPATH . 'assets/css/public.css');
+    // Single stylesheet rule owns the size, with a hard cap so no glyph can
+    // ever paint oversized inside the pill.
+    assert_contains('.pub-social-button svg { width: 16px; height: 16px; max-width: 16px; max-height: 16px;', $css, 'social icons are capped at 16x16');
+    assert_contains('fill: var(--social-color)', $css, 'brand marks are filled in their brand colour');
+    // Every mark is a solid brand path on the 24x24 brand grid, with no inline
+    // sizing that could beat the stylesheet.
+    preg_match_all('#<svg[^>]*>#', $footer, $svgs);
+    assert_true(count($svgs[0]) >= 7, 'every channel ships an icon');
+    foreach ($svgs[0] as $svg) {
+        assert_contains('viewBox="0 0 24 24"', $svg, 'brand marks use the 24x24 grid: ' . $svg);
+        assert_false((bool) preg_match('/\swidth=/', $svg), 'social svg must not carry inline width: ' . $svg);
+        assert_false((bool) preg_match('/\sheight=/', $svg), 'social svg must not carry inline height: ' . $svg);
+        assert_contains('aria-hidden="true"', $svg, 'decorative marks are hidden from assistive tech');
+    }
+    // Official glyph signatures (first path command of each brand mark) — these
+    // are the real logos, not hand-drawn approximations.
+    $signatures = [
+        'Facebook' => 'M9.101 23.691v-7.98H6.627',
+        'X' => 'M18.901 1.153h3.68l-8.04 9.19L24 22.846',
+        'LinkedIn' => 'M20.447 20.452h-3.554v-5.569',
+        'WhatsApp' => 'M17.472 14.382c-.297-.149-1.758-.867',
+        'YouTube' => 'M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136',
+        'Telegram' => 'M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12',
+    ];
+    foreach ($signatures as $label => $needle) {
+        assert_contains($needle, $footer, "{$label} uses its official brand glyph");
+    }
+    // The old stroke-drawn placeholders are gone.
+    assert_false(str_contains($footer, 'social-icon-dot'), 'the hand-drawn Instagram approximation is replaced');
+    assert_false(str_contains($css, 'stroke-width: 1.8'), 'social marks no longer rely on stroke drawing');
+});
+
 test('auth pages are routed and protected-dashboard routes redirect to login', function () {
     $routes = file_get_contents(FCPATH . 'application/config/routes.php');
     foreach (['login', 'register', 'forgot-password', 'logout', 'account', 'access-denied', 'admin/login'] as $path) {
