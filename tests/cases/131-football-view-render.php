@@ -891,3 +891,62 @@ test('football: the models screen renders the ACTIVE — CALIBRATION PENDING str
     assert_contains('football-cell-label">Trained</td><td class="mono">20', $render['html'], 'the Trained stamp filled');
     assert_contains('football-cell-label">Approved by</td><td class="mono">admin@windels', $render['html'], 'and the approver');
 });
+
+// ─── the register explains its dashed measured columns ───────────────────────
+
+test('football: the register explains its dashed Samples, Acc. and ECE columns', function () {
+    // The live board's register state: one auto-registered DRAFT version with
+    // — for Samples, Acc. and ECE and an empty actions cell. The section must
+    // explain those dashes, not just print them.
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    [, , $module] = fx_fb_harness([fx_fb_row('fx-register-draft', gmdate('c', $kickoff), 'Manchester City', 'Everton', '10', '20')]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $summary = $module->modelSummary();
+    assert_equals(1, count($summary['versions']), 'one auto-registered version');
+    assert_null($summary['versions'][0]['validationSampleSize'] ?? null, 'it carries no evaluation yet');
+    $render = fx_fb_render_view('models', fx_fb_view_data([
+        'models' => $summary, 'performance' => $module->performance()->report(30),
+    ]));
+    assert_true($render['notices'] === [], 'the register reaches for no key the payload does not publish'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    assert_contains('Samples, Acc. and ECE', $render['html'], 'the column-explanation line renders');
+    assert_contains('none recorded yet: with no settled prediction there is nothing to measure', $render['html'],
+        'the none-evaluated clause states the actual fact');
+    assert_contains('None recorded yet for this version', $render['html'], 'the dashes carry their own tooltips');
+    assert_contains('— no action yet', $render['html'], 'a row with no available action says so instead of a silent blank');
+    assert_contains('hourly performance job', $render['html'], 'and names what records the evaluations');
+    assert_contains('Allowed transitions:', $render['html'], 'the register keeps its guard sentence');
+});
+
+test('football: an evaluated register states its coverage instead of the none-yet clause', function () {
+    // Once the hourly performance job records an evaluation, the measured
+    // columns hold numbers, the dash tooltips leave, and the help line states
+    // how many versions are evaluated.
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    [$repo, , $module] = fx_fb_harness([fx_fb_row('fx-register-eval', gmdate('c', $kickoff), 'Manchester City', 'Everton', '10', '20')]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $registry = $module->models();
+    $id = (int) $registry->ensureRegistered()['model']['id'];
+    $fixtureId = fx_131_fixture_id($repo, 'fx-register-eval');
+    $fixture = $repo->findFixtureById($fixtureId);
+    $repo->saveFixture((int) $fixture['provider_id'], [
+        'externalId' => (string) $fixture['external_id'], 'status' => 'FINISHED', 'homeScore' => 2, 'awayScore' => 0,
+    ]);
+    assert_equals('SETTLED', $module->settlements()->settleFixture($fixtureId, 'test:register')['status'],
+        'the scenario holds a settlement');
+    $module->performance()->snapshot(30, $id);
+    $summary = $module->modelSummary();
+    $samples = $summary['versions'][0]['validationSampleSize'] ?? null;
+    assert_true(is_int($samples) && $samples > 0, 'the hourly job recorded the evaluation');
+    $render = fx_fb_render_view('models', fx_fb_view_data([
+        'models' => $summary, 'performance' => $module->performance()->report(30),
+    ]));
+    assert_true($render['notices'] === [], 'renders with no missing key');
+    assert_contains('(1 of 1 version(s) evaluated)', $render['html'], 'the help line states its coverage');
+    assert_true(!str_contains($render['html'], 'None recorded yet for this version'), 'no dash tooltips remain');
+    assert_contains('<td class="num">' . $samples . '</td>', $render['html'], 'the Samples cell holds the measured number');
+});

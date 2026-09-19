@@ -175,7 +175,14 @@ settled rows and says so, and `PerformanceService::report()` returns
   until an evaluation exists. The strip renders per state
   (`DRAFT_NO_EVIDENCE` / `DRAFT_EVIDENCE_RECORDED` / `LIFECYCLE_IN_PROGRESS` /
   `APPROVED_NOT_ACTIVE` / `ACTIVE_UNCALIBRATED`); an ACTIVE, calibrated model
-  renders none — a full table is the information.
+  renders none — a full table is the information. The version **register**
+  explains its own measured columns the same way: a help line under the table
+  states that *Samples, Acc. and ECE* are each version's stored evaluation
+  (recorded automatically from settled predictions by the hourly performance
+  job, with the none-evaluated clause or the evaluated-versions count as
+  applicable), every dashed cell carries a tooltip with its specific reason,
+  and a row with no available operator action says "no action yet" instead of
+  a silent blank.
 
 Stored per version: `model_id`, `model_name`, `model_version`, `algorithm`,
 `feature_version`, `training_dataset_version`, `created_at`, `trained_at`,
