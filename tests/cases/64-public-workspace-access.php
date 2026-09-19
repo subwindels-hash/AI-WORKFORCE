@@ -9,12 +9,14 @@ test('public website routes and views exist without exposing dashboards', functi
     assert_contains("\$route['register'] = 'auth/register';", $routes);
     assert_contains("\$route['access-denied'] = 'auth/denied';", $routes);
     assert_contains("\$route['admin/dashboard'] = 'admin/index';", $routes);
-    foreach (['about', 'services', 'how-it-works', 'locations', 'safety', 'faq', 'contact'] as $path) {
+    foreach (['about', 'services', 'how-it-works', 'locations', 'safety', 'reviews', 'faq', 'contact'] as $path) {
         assert_contains("\$route['{$path}']", $routes);
     }
+    assert_contains("\$route['reviews/submit']", $routes);
     assert_true(is_file(FCPATH . 'application/controllers/Site.php'));
     assert_true(is_file(FCPATH . 'application/controllers/Workspace.php'));
     assert_true(is_file(FCPATH . 'application/views/site/home.php'));
+    assert_true(is_file(FCPATH . 'application/views/site/reviews.php'));
     assert_true(is_file(FCPATH . 'application/views/workspace/index.php'));
     $home = file_get_contents(FCPATH . 'application/views/site/home.php');
     assert_false(str_contains($home, 'href="/analysis"'));
@@ -78,6 +80,7 @@ test('member registration role is seeded in the RBAC matrix', function () {
 test('sitemap lists public pages and robots hide dashboards', function () {
     $seo = file_get_contents(FCPATH . 'application/controllers/Seo.php');
     assert_contains("'/about'", $seo);
+    assert_contains("'/reviews'", $seo);
     assert_contains("'/register'", $seo);
     assert_false(str_contains($seo, "'/strategy'"));
     assert_contains('Disallow: /dashboard', $seo);

@@ -23,7 +23,7 @@ class Seo extends MY_Controller
     public function sitemap()
     {
         $seo = $this->settings(); $base = rtrim((string) ($seo['canonical'] ?? ''), '/');
-        $paths = ['/', '/about', '/services', '/how-it-works', '/locations', '/safety', '/faq', '/contact', '/login', '/register'];
+        $paths = ['/', '/about', '/services', '/how-it-works', '/locations', '/safety', '/reviews', '/faq', '/contact', '/login', '/register'];
         $xml = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">';
         foreach ($paths as $path) $xml .= '<url><loc>' . htmlspecialchars($base . $path, ENT_XML1, 'UTF-8') . '</loc></url>';
         $xml .= '</urlset>';

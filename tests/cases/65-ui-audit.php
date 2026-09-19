@@ -125,6 +125,7 @@ test('homepage CTAs and site footer links all point at routed destinations', fun
     }
     $footer = file_get_contents(FCPATH . 'application/views/site/layout/footer.php');
     assert_false(str_contains($footer, 'href="#"'), 'footer must not contain dead href="#" links');
+    assert_contains('href="/reviews"', $footer, 'footer exposes the public reviews page');
     preg_match_all('#href="([^"]+)"#', $footer, $fm);
     $fm[1] = array_values(array_filter($fm[1], fn ($h) => $h !== '#'));
     assert_true(count($fm[1]) > 4, 'footer must expose its links');
