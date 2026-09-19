@@ -242,7 +242,10 @@ Stored per version: `model_id`, `model_name`, `model_version`, `algorithm`,
   stores the final score, the `settle` job grades the prediction, both every
   15 minutes), or `SETTLED_OUTSIDE_WINDOW` (settlements exist, none inside the
   window the panel describes). A measured window carries no status: the
-  figures are the information. The *Approved calibrations* zero explains
+  figures are the information. The models screen's "30-day performance by
+  model version" section renders the same status block from the same
+  report payload, so the board and the models screen cannot disagree
+  about why the window is empty. The *Approved calibrations* zero explains
   itself the same way — a calibration is built from settled history and
   approved on the Models & calibration screen; predictions are published
   uncalibrated (`CALIBRATION_PENDING`) until then.

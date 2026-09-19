@@ -208,6 +208,26 @@ $stateClass = static fn(string $state): string => match (strtoupper($state)) {
         </div>
         <div class="body">
         <p class="football-section-intro">What each version actually scored over the last 30 days of settled predictions. These are the stored aggregates the board reports; no figure is recomputed here.</p>
+        <?php /* The same empty-window status the board's Measured results
+               panel renders (PerformanceService's status block — a pure read
+               over stored counts). This page receives the identical report
+               payload, so the board and the models screen cannot disagree
+               about why the window is empty. Rendered only while the window
+               holds no settlement; a measured window renders its table. */ ?>
+        <?php $perfStatus = is_array($perf['status'] ?? null) ? $perf['status'] : null; ?>
+        <?php if ($perfStatus !== null && ($perfStatus['state'] ?? '') !== ''): ?>
+          <?php
+            [$perfBadgeClass, $perfBadgeLabel] = match ((string) $perfStatus['state']) {
+                'PREDICTIONS_UNSETTLED' => ['b-amber', 'AWAITING COMPLETED MATCHES'],
+                'SETTLED_OUTSIDE_WINDOW' => ['b-gray', 'NOTHING SETTLED IN THIS WINDOW'],
+                default => ['b-gray', 'NOTHING TO MEASURE YET'],
+            };
+          ?>
+          <div class="football-perf-status" id="football-models-performance-status">
+            <span class="badge <?= $perfBadgeClass ?>"><?= e($perfBadgeLabel) ?></span>
+            <p><?= e((string) ($perfStatus['detail'] ?? '')) ?></p>
+          </div>
+        <?php endif; ?>
         <?php if (($perf['state'] ?? '') !== 'MEASURED'): ?>
           <p class="dim">No settled predictions yet. Historical performance metrics will appear after predicted matches have completed.</p>
         <?php else: ?>

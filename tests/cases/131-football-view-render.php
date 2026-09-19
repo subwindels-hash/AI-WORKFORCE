@@ -1049,3 +1049,56 @@ test('football: a met minimum says READY TO FIT, and a fitted calibration drops 
     assert_contains('1 version for this model · 1 CALIBRATED', $render['html'], 'the meta counts the stored calibration');
     assert_contains('<td class="mono">T', $render['html'], 'the calibration table lists the fitted version');
 });
+
+// ─── the models screen's Measured results explains its empty window too ──────
+
+test('football: the models screen 30-day section names why its window is empty', function () {
+    // Predictions stored, none settled: the by-version table has nothing to
+    // show, and the section must say which absence it is in — the same status
+    // contract the board's Measured results panel renders, from the same
+    // report payload, so the two screens cannot disagree.
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    [, , $module] = fx_fb_harness([fx_fb_row('fx-mperf-unsettled', gmdate('c', $kickoff), 'Manchester City', 'Everton', '10', '20')]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $report = $module->performance()->report(30);
+    assert_equals('PREDICTIONS_UNSETTLED', $report['status']['state'], 'the scenario holds stored-but-unsettled predictions');
+    $render = fx_fb_render_view('models', fx_fb_view_data([
+        'models' => $module->modelSummary(), 'performance' => $report,
+    ]));
+    assert_true($render['notices'] === [], 'the strip reaches for no key the payload does not publish'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    assert_contains('id="football-models-performance-status"', $render['html'], 'the strip renders in the models 30-day section');
+    assert_contains('AWAITING COMPLETED MATCHES', $render['html'], 'with its badge');
+    assert_contains('none is settled yet', $render['html'], 'the strip states the actual fact');
+    assert_contains('results sweep stores the final score', $render['html'], 'and names the pipeline that produces a measurement');
+    assert_contains('No settled predictions yet', $render['html'], 'the honest empty-state sentence stays');
+    assert_contains('These are the stored aggregates the board reports', $render['html'], 'and the intro keeps its no-recompute promise');
+});
+
+test('football: a measured models 30-day window renders its by-version table, no strip', function () {
+    // Predict, finish, settle: the table is the information.
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    [$repo, , $module] = fx_fb_harness([fx_fb_row('fx-mperf-measured', gmdate('c', $kickoff), 'Manchester City', 'Everton', '10', '20')]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $fixtureId = fx_131_fixture_id($repo, 'fx-mperf-measured');
+    $fixture = $repo->findFixtureById($fixtureId);
+    $repo->saveFixture((int) $fixture['provider_id'], [
+        'externalId' => (string) $fixture['external_id'], 'status' => 'FINISHED', 'homeScore' => 2, 'awayScore' => 0,
+    ]);
+    assert_equals('SETTLED', $module->settlements()->settleFixture($fixtureId, 'test:mperf')['status'], 'the scenario holds a settlement');
+    $report = $module->performance()->report(30);
+    assert_equals('MEASURED', $report['state']);
+    $render = fx_fb_render_view('models', fx_fb_view_data([
+        'models' => $module->modelSummary(), 'performance' => $report,
+    ]));
+    assert_true($render['notices'] === [], 'renders with no missing key');
+    assert_true(!str_contains($render['html'], 'football-models-performance-status'), 'no strip: the by-version table is the information');
+    assert_contains('30-day performance by model version', $render['html'], 'the section renders');
+    assert_contains('<th class="num">Evaluated</th>', $render['html'], 'with its table');
+    assert_contains('the board\'s own 30-day panel shows the same stored aggregates', $render['html'],
+        'and the same-aggregates note stays');
+});
