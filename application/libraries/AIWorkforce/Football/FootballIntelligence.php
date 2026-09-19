@@ -530,6 +530,11 @@ final class FootballIntelligence
                 'calibrationVersion' => $active['calibrationVersion'] ?? null,
                 'calibrationStatus' => $active['status'] ?? CalibrationService::PENDING,
             ],
+            // Why no calibration exists yet and how one appears — the state
+            // the models screen's "Calibration versions" section explains
+            // its "0 of N" with. Computed below from the same availability
+            // block the section prints.
+            'calibrationStatus' => $this->calibrationStatus($calibrationAvailability, $calibrations),
             'calibration' => $active ?? ['status' => CalibrationService::PENDING, 'samples' => $calibrationAvailability['usable'],
                 'settledSamples' => $calibrationAvailability['settled'], 'minimum' => $calibrationAvailability['minimum'], 'calibrationVersion' => null],
             'calibrationAvailability' => $calibrationAvailability,
@@ -558,6 +563,54 @@ final class FootballIntelligence
                 'states' => ModelRegistry::STATES,
             ], $versions),
         ];
+    }
+
+    /**
+     * The calibration-evidence state behind the "Calibration versions"
+     * section's "0 of N" — what the models screen explains a missing
+     * calibration with. A calibration is fitted from settled predictions of
+     * THIS model version (each graded prediction with a recoverable raw
+     * probability vector is one sample); the fit is refused below the
+     * configured minimum, and the hourly performance job retries it
+     * automatically, so the states are:
+     *
+     *  - NO_SAMPLES           — nothing this version predicted has settled
+     *                           yet: no evidence exists to fit from
+     *  - INSUFFICIENT_SAMPLES — evidence exists but below the minimum
+     *                           (N of M); fitting is refused and says so
+     *  - FITTABLE_NOT_FITTED  — the minimum is met and no calibration is
+     *                           stored yet: the Fit calibration action fits
+     *                           one now, the hourly job also will
+     *  - null                 — a calibration is stored: the section's table
+     *                           is the information, no strip renders
+     *
+     * Purely read-only. @param array<string,mixed> $availability
+     * @param list<array<string,mixed>> $calibrations
+     * @return array<string,mixed>|null
+     */
+    private function calibrationStatus(array $availability, array $calibrations): ?array
+    {
+        if ($calibrations !== []) return null;
+        $settled = (int) ($availability['settled'] ?? 0);
+        $usable = (int) ($availability['usable'] ?? 0);
+        $missing = (int) ($availability['missingProbabilities'] ?? 0);
+        $minimum = (int) ($availability['minimum'] ?? 0);
+
+        if ($settled === 0 && $usable === 0) {
+            return ['state' => 'NO_SAMPLES',
+                'detail' => 'No prediction made by this model version has been settled yet, so there is no evidence to fit from. Evidence accrues automatically: predictions are stored before kickoff, the match finishes, the football-results job stores the final score and the football-settle job grades the prediction (both run every 15 minutes) — each graded prediction of this version becomes one calibration sample. The hourly performance job retries the fit on its own. A fit is refused below ' . $minimum . ' usable samples (' . $minimum . ' is the WINDELS_FOOTBALL_MIN_CALIBRATION_SAMPLES setting, floor 10), and the Fit calibration from stored settlements button names the exact shortfall when it refuses. Until a fit exists, confidence is published raw and labelled CALIBRATION_PENDING — never quietly adjusted.',
+                'settled' => $settled, 'usable' => $usable, 'missingProbabilities' => $missing, 'minimum' => $minimum];
+        }
+        if ($usable < $minimum) {
+            return ['state' => 'INSUFFICIENT_SAMPLES',
+                'detail' => $usable . ' of ' . $minimum . ' required settled predictions currently have recoverable raw probabilities (' . $settled . ' settled for this model in total'
+                    . ($missing > 0 ? ', ' . $missing . ' without a safe raw vector — excluded rather than guessed' : '')
+                    . '). The results and settlement jobs keep adding evidence as this version\'s predictions complete, and the hourly performance job retries the fit automatically; a fit stays refused below the minimum. Until then, displayed confidence is labelled CALIBRATION_PENDING (raw), never silently adjusted.',
+                'settled' => $settled, 'usable' => $usable, 'missingProbabilities' => $missing, 'minimum' => $minimum];
+        }
+        return ['state' => 'FITTABLE_NOT_FITTED',
+            'detail' => $usable . ' of ' . $minimum . ' usable settled samples — the minimum is met, so a calibration can be fitted now: the Fit calibration from stored settlements action (Live version section, sports.manage) fits one, and the hourly performance job also fits one automatically on its next run. The fitted temperature is only ever ≥ 1 (this module only softens confidence, never sharpens it), and the fit is stored with its measured ECE and Brier over the training window.',
+            'settled' => $settled, 'usable' => $usable, 'missingProbabilities' => $missing, 'minimum' => $minimum];
     }
 
     /**

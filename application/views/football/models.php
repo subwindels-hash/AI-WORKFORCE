@@ -140,10 +140,31 @@ $stateClass = static fn(string $state): string => match (strtoupper($state)) {
               <h3 id="calibration-heading">Calibration versions</h3>
             </div>
           </div>
-          <span class="football-section__meta"><?= count($calibrationVersions) ?> for this model · <?= (int) ($models['approvedCalibrationCount'] ?? 0) ?> usable</span>
+          <span class="football-section__meta" title="Calibration versions stored for this model version, and how many of them are fitted (CALIBRATED)."><?= count($calibrationVersions) ?> version<?= count($calibrationVersions) === 1 ? '' : 's' ?> for this model · <?= (int) ($models['approvedCalibrationCount'] ?? 0) ?> CALIBRATED</span>
         </div>
         <div class="body scroll">
         <p class="football-section-intro">Calibration adjusts displayed confidence to match observed outcomes. Until a fit exists, confidence is published raw and labelled CALIBRATION_PENDING — it is never quietly adjusted.</p>
+        <?php /* The calibration-evidence state (see
+               FootballIntelligence::calibrationStatus — pure read over the
+               same availability block the section prints). Rendered only
+               while no calibration exists: once one is stored, the table
+               below is the information. Names where samples come from, the
+               jobs that produce them and their cadence, the configured
+               minimum and the fit action. */ ?>
+        <?php $calStatus = is_array($models['calibrationStatus'] ?? null) ? $models['calibrationStatus'] : null; ?>
+        <?php if ($calStatus !== null && ($calStatus['state'] ?? '') !== ''): ?>
+          <?php
+            [$calBadgeClass, $calBadgeLabel] = match ((string) $calStatus['state']) {
+                'INSUFFICIENT_SAMPLES' => ['b-amber', 'INSUFFICIENT SAMPLES'],
+                'FITTABLE_NOT_FITTED' => ['b-green', 'READY TO FIT'],
+                default => ['b-gray', 'AWAITING SETTLED EVIDENCE'],
+            };
+          ?>
+          <div class="football-calibration-status" id="football-calibration-status">
+            <span class="badge <?= $calBadgeClass ?>"><?= e($calBadgeLabel) ?></span>
+            <p><?= e((string) ($calStatus['detail'] ?? '')) ?></p>
+          </div>
+        <?php endif; ?>
         <?php if ($calibrationVersions === []): ?>
           <p class="dim">No calibration has been fitted yet. <b><?= (int) ($calibrationAvailability['usable'] ?? 0) ?> of <?= (int) ($calibrationAvailability['minimum'] ?? 50) ?></b> required settled predictions currently have recoverable raw probabilities (<?= (int) ($calibrationAvailability['settled'] ?? 0) ?> settled for this model in total). The results and settlement jobs add evidence automatically after stored pre-match predictions finish. Until the minimum is reached, displayed confidence is labelled <b>CALIBRATION_PENDING</b> (raw), never silently adjusted.</p>
           <?php if ((int) ($calibrationAvailability['missingProbabilities'] ?? 0) > 0): ?>

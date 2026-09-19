@@ -182,7 +182,17 @@ settled rows and says so, and `PerformanceService::report()` returns
   job, with the none-evaluated clause or the evaluated-versions count as
   applicable), every dashed cell carries a tooltip with its specific reason,
   and a row with no available operator action says "no action yet" instead of
-  a silent blank.
+  a silent blank. The **Calibration versions** section explains a missing
+  calibration the same way (`FootballIntelligence::calibrationStatus()`):
+  `NO_SAMPLES` (nothing this version predicted has settled — the strip names
+  the evidence pipeline: predict before kickoff, the `results` sweep stores
+  the final score, the `settle` job grades it, both every 15 minutes; the
+  hourly performance job retries the fit; the minimum is the
+  `WINDELS_FOOTBALL_MIN_CALIBRATION_SAMPLES` setting, floor 10),
+  `INSUFFICIENT_SAMPLES` (N of M with the shortfall and the honest refusal),
+  or `FITTABLE_NOT_FITTED` (the minimum is met — the fit action and the
+  hourly job both produce one; the temperature only ever softens). Once a
+  calibration is stored the table is the information and no strip renders.
 
 Stored per version: `model_id`, `model_name`, `model_version`, `algorithm`,
 `feature_version`, `training_dataset_version`, `created_at`, `trained_at`,

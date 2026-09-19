@@ -1771,6 +1771,9 @@ a.btn[aria-disabled="true"] {
 .football-model-status { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; margin: 10px 0; border: 1px solid var(--line); border-radius: 8px; background: #0b1320; }
 .football-model-status .badge { flex: 0 0 auto; margin-top: 1px; }
 .football-model-status p { margin: 0; color: var(--dim); font-size: 11px; line-height: 1.5; max-width: 100ch; }
+.football-calibration-status { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; margin: 10px 0; border: 1px solid var(--line); border-radius: 8px; background: #0b1320; }
+.football-calibration-status .badge { flex: 0 0 auto; margin-top: 1px; }
+.football-calibration-status p { margin: 0; color: var(--dim); font-size: 11px; line-height: 1.5; max-width: 100ch; }
 .football-fixture__summary { display: grid; grid-template-columns: 1.35fr repeat(4, minmax(100px, 1fr)); border-bottom: 1px solid var(--line); }
 .football-fixture__summary > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 12px; border-right: 1px solid var(--line); }
 .football-fixture__summary > div:last-child { border-right: 0; }

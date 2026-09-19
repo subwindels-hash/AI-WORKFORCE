@@ -950,3 +950,102 @@ test('football: an evaluated register states its coverage instead of the none-ye
     assert_true(!str_contains($render['html'], 'None recorded yet for this version'), 'no dash tooltips remain');
     assert_contains('<td class="num">' . $samples . '</td>', $render['html'], 'the Samples cell holds the measured number');
 });
+
+// ─── the Calibration versions section explains its missing evidence ──────────
+
+test('football: the calibration section names the evidence pipeline when nothing has settled', function () {
+    // The live models screen's state: no calibration, 0 of 50 usable, 0
+    // settled for the model. The section must say where samples come from
+    // and what refuses below the minimum — not just "0 of 50".
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    [, , $module] = fx_fb_harness([fx_fb_row('fx-cal-none', gmdate('c', $kickoff), 'Manchester City', 'Everton', '10', '20')]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $summary = $module->modelSummary();
+    assert_equals('NO_SAMPLES', $summary['calibrationStatus']['state'], 'nothing this version predicted has settled');
+    $render = fx_fb_render_view('models', fx_fb_view_data([
+        'models' => $summary, 'performance' => $module->performance()->report(30),
+    ]));
+    assert_true($render['notices'] === [], 'the strip reaches for no key the payload does not publish'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    assert_contains('id="football-calibration-status"', $render['html'], 'the strip renders in the calibration section');
+    assert_contains('AWAITING SETTLED EVIDENCE', $render['html'], 'with its badge');
+    assert_contains('football-results job stores the final score', $render['html'], 'the strip names the evidence pipeline');
+    assert_contains('every 15 minutes', $render['html'], 'with its cadence');
+    assert_contains('WINDELS_FOOTBALL_MIN_CALIBRATION_SAMPLES', $render['html'], 'and the setting behind the minimum');
+    assert_contains('hourly performance job retries the fit', $render['html'], 'and that the retry is automatic');
+    assert_contains('No calibration has been fitted yet', $render['html'], 'the honest empty-state paragraph stays');
+    assert_contains('0 versions for this model · 0 CALIBRATED', $render['html'], 'the section meta labels its counts as what they are');
+});
+
+test('football: partial calibration evidence is reported as insufficient, with the shortfall', function () {
+    // One settled prediction: 1 of 50 — evidence exists, the fit is refused.
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    [$repo, , $module] = fx_fb_harness([fx_fb_row('fx-cal-partial', gmdate('c', $kickoff), 'Manchester City', 'Everton', '10', '20')]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $fixtureId = fx_131_fixture_id($repo, 'fx-cal-partial');
+    $fixture = $repo->findFixtureById($fixtureId);
+    $repo->saveFixture((int) $fixture['provider_id'], [
+        'externalId' => (string) $fixture['external_id'], 'status' => 'FINISHED', 'homeScore' => 2, 'awayScore' => 0,
+    ]);
+    assert_equals('SETTLED', $module->settlements()->settleFixture($fixtureId, 'test:cal')['status'], 'the scenario holds a settlement');
+    $summary = $module->modelSummary();
+    $status = $summary['calibrationStatus'];
+    assert_equals('INSUFFICIENT_SAMPLES', $status['state']);
+    assert_equals(1, $status['usable']);
+    assert_true(str_contains($status['detail'], '1 of 50'), 'the shortfall is stated in samples');
+    assert_true(str_contains($status['detail'], 'fit stays refused below the minimum'), 'and the refusal is honest');
+    $render = fx_fb_render_view('models', fx_fb_view_data([
+        'models' => $summary, 'performance' => $module->performance()->report(30),
+    ]));
+    assert_contains('INSUFFICIENT SAMPLES', $render['html'], 'the badge names the state');
+    assert_contains('1 of 50 required settled predictions', $render['html'], 'and the render carries the shortfall');
+});
+
+test('football: a met minimum says READY TO FIT, and a fitted calibration drops the strip', function () {
+    // 12 settled predictions with the minimum at 10: the fit is possible —
+    // the state says so. After fitting, the table is the information and no
+    // strip may render.
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    $rows = [];
+    for ($i = 0; $i < 12; $i++) {
+        $rows[] = fx_fb_row('fx-cal-many-' . $i, gmdate('c', $kickoff), 'Manchester City', 'Everton', '10', '20');
+    }
+    [$repo, , $module] = fx_fb_harness($rows);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $providerId = (int) ($repo->listProviders()[0]['id'] ?? 1);
+    foreach ($repo->listFixtures(['date' => $day], 200) as $fixture) {
+        $repo->saveFixture($providerId, ['externalId' => (string) $fixture['external_id'],
+            'status' => 'FINISHED', 'homeScore' => 2, 'awayScore' => 0]);
+    }
+    $module->settlements()->settleDue(200, 0, 'test:calmany');
+    assert_equals(12, count($repo->listSettlements([], 50)), 'the scenario settled a real sample');
+    $id = (int) $module->models()->ensureRegistered()['model']['id'];
+    $lenient = new \AIWorkforce\Football\FootballIntelligence($repo, $module->providerManager(), null,
+        new \AIWorkforce\Football\FootballConfiguration(['WINDELS_FOOTBALL_MIN_CALIBRATION_SAMPLES' => '10']));
+    $summary = $lenient->modelSummary();
+    $status = $summary['calibrationStatus'];
+    assert_equals('FITTABLE_NOT_FITTED', $status['state'], '12 usable of a 10 minimum');
+    assert_true(str_contains($status['detail'], 'minimum is met'), 'the state says the threshold is crossed');
+    assert_true(str_contains($status['detail'], 'only softens confidence'), 'and states the softening constraint');
+    $render = fx_fb_render_view('models', fx_fb_view_data([
+        'models' => $summary, 'performance' => $lenient->performance()->report(30),
+    ]));
+    assert_contains('READY TO FIT', $render['html'], 'the badge names the available action');
+
+    assert_equals(\AIWorkforce\Football\CalibrationService::CALIBRATED, $lenient->calibration()->fit($id, null, 'tester')['status'],
+        'the scenario fits a calibration');
+    $summary = $lenient->modelSummary();
+    assert_null($summary['calibrationStatus'], 'a stored calibration is the information — no strip');
+    $render = fx_fb_render_view('models', fx_fb_view_data([
+        'models' => $summary, 'performance' => $lenient->performance()->report(30),
+    ]));
+    assert_true(!str_contains($render['html'], 'football-calibration-status'), 'no strip once fitted');
+    assert_contains('1 version for this model · 1 CALIBRATED', $render['html'], 'the meta counts the stored calibration');
+    assert_contains('<td class="mono">T', $render['html'], 'the calibration table lists the fitted version');
+});
