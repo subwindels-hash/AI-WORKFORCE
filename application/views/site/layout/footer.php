@@ -35,6 +35,12 @@ $socialDefinitions = [
         'icon' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 17-7-4 16-5-5-3 2 .5-4.5L17 7 8.5 12.5 3 11Z"/></svg>',
     ],
     [
+        'key' => 'whatsapp',
+        'label' => 'WhatsApp',
+        'env' => 'VP_SOCIAL_WHATSAPP',
+        'icon' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.6a8.5 8.5 0 0 1-12.6 7.5L3 20.5l1.3-4.7a8.5 8.5 0 1 1 16.2-4.2Z"/><path d="M8.1 7.7c.2-.5.4-.5.8-.5h.5l1.1 2.5c.1.3 0 .5-.2.7l-.8 1c.9 1.8 2.1 3 4 3.8l.9-1.1c.2-.2.4-.3.7-.2l2.3 1.1c.3.2.4.4.3.7-.3 1.4-1.3 2-2.6 2-3.6 0-8.5-4.1-8.5-8 0-.8.4-1.6 1.5-2Z"/></svg>',
+    ],
+    [
         'key' => 'youtube',
         'label' => 'YouTube',
         'env' => 'VP_SOCIAL_YOUTUBE',

@@ -149,6 +149,7 @@ test('public footer social buttons use configured official HTTPS channels', func
         'X' => 'X',
         'LINKEDIN' => 'LinkedIn',
         'TELEGRAM' => 'Telegram',
+        'WHATSAPP' => 'WhatsApp',
         'YOUTUBE' => 'YouTube',
     ];
     foreach ($channels as $key => $label) {

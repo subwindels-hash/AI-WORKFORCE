@@ -407,6 +407,7 @@ img { max-width: 100%; height: auto; display: block; object-fit: cover; object-p
 .pub-social-button.is-x { --social-color: #fff; }
 .pub-social-button.is-linkedin { --social-color: #0a66c2; }
 .pub-social-button.is-telegram { --social-color: #229ed9; }
+.pub-social-button.is-whatsapp { --social-color: #25d366; }
 .pub-social-button.is-youtube { --social-color: #ff0033; }
 .pub-foot .pub-social-button:hover { color: var(--social-color); border-color: var(--social-color); background: #ffffff0e; text-decoration: none; transform: translateY(-1px); }
 .pub-foot .pub-social-button:focus-visible { outline: 3px solid #5b8aff66; outline-offset: 3px; }
