@@ -106,9 +106,8 @@ foreach ($socialDefinitions as $channel) {
       </div>
       <div class="pub-social-links">
         <?php foreach ($socialChannels as $channel): ?>
-          <a class="pub-social-button is-<?= e($channel['key']) ?>" href="<?= e($channel['url']) ?>" target="_blank" rel="noopener noreferrer" aria-label="Follow WINDELS on <?= e($channel['label']) ?>">
+          <a class="pub-social-button is-<?= e($channel['key']) ?>" href="<?= e($channel['url']) ?>" target="_blank" rel="noopener noreferrer" aria-label="Follow WINDELS on <?= e($channel['label']) ?>" title="<?= e($channel['label']) ?>">
             <?= $channel['icon'] ?>
-            <span><?= e($channel['label']) ?></span>
           </a>
         <?php endforeach; ?>
       </div>

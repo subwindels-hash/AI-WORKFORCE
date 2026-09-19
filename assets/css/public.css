@@ -401,9 +401,9 @@ svg { max-width: 100%; }
 .pub-social-copy { flex: none; }
 .pub-social h2 { margin: 0; color: #fff; font-size: 16px; letter-spacing: -.01em; }
 .pub-social-copy p { margin: 3px 0 0; font-size: 12px; }
-.pub-social-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 9px; }
-.pub-foot .pub-social-button { --social-color: #d5deea; display: inline-flex; align-items: center; gap: 8px; min-height: 40px; margin: 0; padding: 8px 13px; border: 1px solid #ffffff2b; border-radius: 999px; color: #d5deea; background: #ffffff08; font-weight: 700; line-height: 1; transition: color .18s ease, border-color .18s ease, background .18s ease, transform .18s ease; }
-.pub-foot .pub-social-button span { display: inline; margin: 0; color: inherit; font-size: 13px; font-weight: 700; letter-spacing: 0; text-transform: none; }
+.pub-social-links { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
+.pub-foot .pub-social-button { --social-color: #d5deea; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; min-height: 40px; min-width: 40px; margin: 0; padding: 0; border: 1px solid #ffffff2b; border-radius: 999px; color: #d5deea; background: #ffffff08; font-weight: 700; line-height: 1; transition: color .18s ease, border-color .18s ease, background .18s ease, transform .18s ease; }
+.pub-foot .pub-social-button span { display: none; }
 /* Brand glyphs are solid 24x24 paths sized down here. The fixed box plus the
    max-* cap means an icon can never paint outside the pill, even if a future
    svg arrives without width/height attributes. */
@@ -447,5 +447,5 @@ svg { max-width: 100%; }
   .review-item header { align-items: flex-start; flex-wrap: wrap; }
   .review-item time { width: 100%; margin-left: 56px; margin-top: -12px; }
   .pub-social { align-items: flex-start; flex-direction: column; gap: 18px; }
-  .pub-social-links { justify-content: flex-start; }
+  .pub-social-links { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 10px; }
 }
