@@ -25,6 +25,7 @@ final class SchemaInstaller
         'admin_inbox',
         'direct_messages',
         'multiplier_intelligence',
+        'user_reviews',
     ];
 
     /** Every table created by the module files. Installers verify this list. */
@@ -58,7 +59,7 @@ final class SchemaInstaller
         'lottery_backtests', 'lottery_model_versions',
         'admin_activity_logs', 'impersonation_sessions', 'platform_settings', 'api_providers',
         'contact_messages', 'contact_message_replies', 'email_templates',
-        'direct_messages',
+        'direct_messages', 'user_reviews',
         'user_broker_connections',
         'crash_game_providers', 'crash_game_provider_health', 'crash_game_rounds',
         'crash_game_models', 'crash_game_predictions', 'crash_game_agent_executions',
@@ -80,7 +81,7 @@ final class SchemaInstaller
     // Bumped again for football_fixtures.live_confirmed_at: a stamped database
     // would otherwise skip the upgrade pass and never gain the column the Live
     // Match freshness gate now reads.
-    private const STAMP_VERSION = '2026-09-15-handicap-lineless-odds-purge-v1';
+    private const STAMP_VERSION = '2026-09-19-public-user-reviews-v1';
 
     public static function databaseDir(): string
     {

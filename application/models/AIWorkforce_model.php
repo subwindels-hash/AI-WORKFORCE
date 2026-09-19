@@ -28,6 +28,7 @@ class AIWorkforce_model extends CI_Model
     public object $notifications;
     public object $langlearn;
     public object $messages;
+    public object $reviews;
 
     public function __construct()
     {
@@ -2070,6 +2071,49 @@ class AIWorkforce_model extends CI_Model
 
             public function deleteForUser(int $userId): void {
                 $this->db->where('user_id', $userId)->delete('direct_messages');
+            }
+        };
+
+        // Public community reviews. Only published rows are exposed by this repository.
+        $this->reviews = new class($db) {
+            public function __construct(private object $db) {}
+
+            public function published(int $limit = 100): array {
+                return $this->db
+                    ->select('r.id, r.rating, r.body, r.created_at, u.display_name, u.username, u.profile_image')
+                    ->from('user_reviews r')
+                    ->join('users u', 'u.id = r.user_id', 'left')
+                    ->where('r.status', 'published')
+                    ->order_by('r.created_at', 'DESC')->order_by('r.id', 'DESC')
+                    ->limit(max(1, min(200, $limit)))->get()->result_array();
+            }
+
+            public function summary(): array {
+                $row = $this->db->select('COUNT(*) AS review_count, AVG(rating) AS rating_average', false)
+                    ->where('status', 'published')->get('user_reviews')->row_array();
+                return [
+                    'count' => (int) ($row['review_count'] ?? 0),
+                    'average' => round((float) ($row['rating_average'] ?? 0), 1),
+                ];
+            }
+
+            public function latestForUser(int $userId): ?array {
+                $row = $this->db->where('user_id', $userId)->order_by('created_at', 'DESC')
+                    ->order_by('id', 'DESC')->limit(1)->get('user_reviews')->row_array();
+                return $row ?: null;
+            }
+
+            public function create(int $userId, int $rating, string $body): int {
+                $now = gmdate('c');
+                $this->db->insert('user_reviews', [
+                    'user_id' => $userId,
+                    'rating' => $rating,
+                    'body' => $body,
+                    'status' => 'published',
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]);
+                return (int) $this->db->insert_id();
             }
         };
     }
