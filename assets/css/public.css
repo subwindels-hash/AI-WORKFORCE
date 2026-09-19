@@ -416,13 +416,20 @@ svg { max-width: 100%; }
    max-* cap means an icon can never paint outside the pill, even if a future
    svg arrives without width/height attributes. */
 .pub-social-button svg { width: 16px; height: 16px; max-width: 16px; max-height: 16px; flex: 0 0 16px; display: block; fill: var(--social-color); stroke: none; }
+/* Official brand colours, straight from each brand's own guidelines. */
 .pub-social-button.is-facebook { --social-color: #1877f2; }
+/* Instagram's mark is a gradient, not a flat colour: the flat pink below was
+   an approximation. The real glyph paints itself via the linearGradient in
+   its own svg, so this value is only the fallback (and the hover ring). */
 .pub-social-button.is-instagram { --social-color: #e1306c; }
+/* X's official mark is pure black. On this navy footer black is invisible,
+   and the X brand guidelines direct you to the white mark on dark
+   backgrounds, so white IS the correct official colour here. */
 .pub-social-button.is-x { --social-color: #fff; }
 .pub-social-button.is-linkedin { --social-color: #0a66c2; }
-.pub-social-button.is-telegram { --social-color: #229ed9; }
+.pub-social-button.is-telegram { --social-color: #26a5e4; }
 .pub-social-button.is-whatsapp { --social-color: #25d366; }
-.pub-social-button.is-youtube { --social-color: #ff0033; }
+.pub-social-button.is-youtube { --social-color: #ff0000; }
 .pub-foot .pub-social-button:hover { color: var(--social-color); border-color: var(--social-color); background: #ffffff0e; text-decoration: none; transform: translateY(-1px); }
 .pub-foot .pub-social-button:focus-visible { outline: 3px solid #5b8aff66; outline-offset: 3px; }
 .pub-legal { margin-top: 28px; color: #8fa0b3; font-size: 12px; }

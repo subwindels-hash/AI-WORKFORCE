@@ -238,6 +238,51 @@ test('footer social icons are official brand marks at one small size', function 
     assert_false(str_contains($css, 'stroke-width: 1.8'), 'social marks no longer rely on stroke drawing');
 });
 
+test('footer social marks paint each brand its official colour', function () {
+    $footer = file_get_contents(FCPATH . 'application/views/site/layout/footer.php');
+    $css = file_get_contents(FCPATH . 'assets/css/public.css');
+
+    // Official values from each brand's own guidelines. YouTube is pure red
+    // (#ff0000, not the #ff0033 pink-red that shipped) and Telegram is
+    // #26a5e4 (not the older #229ed9).
+    $brands = [
+        'facebook' => '#1877f2',
+        'linkedin' => '#0a66c2',
+        'telegram' => '#26a5e4',
+        'whatsapp' => '#25d366',
+        'youtube'  => '#ff0000',
+    ];
+    foreach ($brands as $key => $hex) {
+        assert_contains(
+            ".pub-social-button.is-{$key} { --social-color: {$hex}; }",
+            $css,
+            "the {$key} mark uses its official brand colour {$hex}"
+        );
+    }
+    // X's official mark is black; on this navy footer the brand guidelines
+    // call for the white mark, so white is the correct official rendering.
+    assert_contains('.pub-social-button.is-x { --social-color: #fff; }', $css, 'the X mark is the official white-on-dark logo');
+
+    // The glyphs must actually take that colour.
+    assert_contains('fill: var(--social-color)', $css, 'brand marks are filled in their brand colour');
+
+    // Instagram's real mark is a gradient, not a flat colour, so its path
+    // paints from an embedded linearGradient. A path-level fill beats the
+    // stylesheet's fill, which is exactly what makes this work.
+    assert_contains('linearGradient id="pub-ig-gradient"', $footer, 'Instagram ships its official gradient');
+    assert_contains('fill="url(#pub-ig-gradient)"', $footer, 'the Instagram glyph paints from the gradient');
+    foreach (['#ffdd55', '#ff543e', '#c837ab', '#3771c8'] as $stop) {
+        assert_contains($stop, $footer, "the Instagram gradient carries its {$stop} stop");
+    }
+    // Only Instagram overrides the fill; every other mark still inherits the
+    // stylesheet colour so a brand tweak stays a one-line CSS change.
+    assert_equals(1, substr_count($footer, 'fill="url('), 'only the Instagram mark hard-codes a fill');
+
+    // The retired approximations must not come back.
+    assert_false(str_contains($css, '--social-color: #ff0033'), 'the off-brand YouTube red is gone');
+    assert_false(str_contains($css, '--social-color: #229ed9'), 'the stale Telegram blue is gone');
+});
+
 test('footer social row is icon-only and laid out landscape', function () {
     $footer = file_get_contents(FCPATH . 'application/views/site/layout/footer.php');
     $css = file_get_contents(FCPATH . 'assets/css/public.css');
