@@ -374,3 +374,80 @@ test('football: a measured window carries no status, and an out-of-window settle
     assert_equals(1, $status['settledAllTime'], 'the all-time count is what names the state');
     assert_true(str_contains($status['detail'], 'none inside the last 30 days'), 'the state says the window, not the history, is empty');
 });
+
+// ─── the models screen's Live version names why its dashes are empty ─────────
+
+test('football: a fresh DRAFT model version\'s empty fields are explained, not just dashed', function () {
+    // The state the live models screen shows: a version registered from the
+    // deployed configuration, every lifecycle stamp and metric still "—".
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    [, , $module] = fx_fb_harness([fx_fb_row('fx-models-draft', gmdate('c', $kickoff), 'Manchester City', 'Everton', '10', '20')]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $summary = $module->modelSummary();
+    $model = $summary['activeModel'];
+    assert_not_null($model, 'analyzing a fixture registers the deployed configuration as DRAFT');
+    assert_equals(ModelRegistry::DRAFT, (string) $model['status']);
+    $status = $summary['lifecycleStatus'];
+    assert_equals('DRAFT_NO_EVIDENCE', $status['state'], 'nothing measured, nothing transitioned');
+    assert_equals(0, $status['usableSamples'], 'no settled prediction exists to measure with');
+    assert_true(str_contains($status['detail'], 'never as an approved model'), 'the state says how the row came to exist');
+    assert_true(str_contains($status['detail'], 'hourly performance job'), 'and which job fills the measured figures');
+    assert_true(str_contains($status['detail'], 'refuses Train/Validate'), 'and that the registry orders the chain after settled history');
+    assert_true(str_contains($status['detail'], 'Fit calibration'), 'and where the calibration version comes from');
+    assert_true(str_contains($status['detail'], (string) $model['version']), 'and names the version it describes');
+});
+
+test('football: the lifecycle status advances with the operator chain', function () {
+    [$repo, $module] = fx_fb_settled(2, 0);
+    $registry = $module->models();
+    $id = (int) $registry->ensureRegistered()['model']['id'];
+
+    // The hourly performance job records the evaluation from settled history.
+    $snapshot = $module->performance()->snapshot(30, $id);
+    assert_equals('MEASURED', $snapshot['report']['state']);
+    $status = $module->modelSummary()['lifecycleStatus'];
+    assert_equals('DRAFT_EVIDENCE_RECORDED', $status['state'], 'measured figures exist; the stamps wait on operators');
+    assert_true(str_contains($status['detail'], 'settled prediction(s) evaluated'), 'the state cites the evaluation it describes');
+
+    assert_equals('OK', $registry->transition($id, ModelRegistry::TRAINED, 'tester')['status']);
+    $status = $module->modelSummary()['lifecycleStatus'];
+    assert_equals('LIFECYCLE_IN_PROGRESS', $status['state']);
+    assert_true(str_contains($status['detail'], 'VALIDATED, CALIBRATED, APPROVED, ACTIVE'), 'the remaining stamps are named in order');
+
+    assert_equals('OK', $registry->transition($id, ModelRegistry::VALIDATED, 'tester')['status']);
+    assert_equals('OK', $registry->approve($id, 'admin@windels')['status']);
+    $status = $module->modelSummary()['lifecycleStatus'];
+    assert_equals('APPROVED_NOT_ACTIVE', $status['state']);
+    assert_true(str_contains($status['detail'], 'activation'), 'the state names the step that remains');
+
+    assert_equals('OK', $registry->activate($id, 'admin@windels')['status']);
+    $status = $module->modelSummary()['lifecycleStatus'];
+    assert_equals('ACTIVE_UNCALIBRATED', $status['state'], 'live, but the calibration pair is still empty');
+    assert_true(str_contains($status['detail'], 'CALIBRATION_PENDING'), 'the state names the label the predictions carry');
+    assert_true(str_contains($status['detail'], 'Fit calibration'), 'and the action that fills it');
+});
+
+test('football: an ACTIVE model with an approved calibration carries no lifecycle status', function () {
+    // The full chain over real settled history: measured → trained → validated
+    // → calibrated → approved → activated. The table is full — the figures are
+    // the information, so no strip may render.
+    [$repo, $module] = fx_fb_many_settlements(12);
+    $registry = $module->models();
+    $id = (int) $registry->ensureRegistered()['model']['id'];
+    $module->performance()->snapshot(30, $id);
+    $lenient = fx_fb_module_with($repo, $module, ['WINDELS_FOOTBALL_MIN_CALIBRATION_SAMPLES' => '10']);
+    assert_equals(CalibrationService::CALIBRATED, $lenient->calibration()->fit($id, null, 'tester')['status'],
+        'the scenario fits a calibration from the settled history');
+    foreach ([ModelRegistry::TRAINED, ModelRegistry::VALIDATED, ModelRegistry::CALIBRATED] as $state) {
+        assert_equals('OK', $lenient->models()->transition($id, $state, 'tester')['status'], 'earned ' . $state);
+    }
+    assert_equals('OK', $lenient->models()->approve($id, 'admin@windels')['status']);
+    assert_equals('OK', $lenient->models()->activate($id, 'admin@windels')['status']);
+
+    $summary = $lenient->modelSummary();
+    assert_equals(ModelRegistry::ACTIVE, (string) $summary['activeModel']['status']);
+    assert_equals(CalibrationService::CALIBRATED, (string) $summary['activeModel']['calibrationStatus']);
+    assert_null($summary['lifecycleStatus'], 'a full lifecycle table is the information — no strip');
+});

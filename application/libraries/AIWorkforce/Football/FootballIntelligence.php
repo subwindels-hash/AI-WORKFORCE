@@ -501,6 +501,10 @@ final class FootballIntelligence
             'state' => (string) $usable['state'],
             'label' => (string) $usable['label'],
             'reason' => $usable['reason'],
+            // Why the lifecycle fields are empty and how they fill — the state
+            // the models screen's "Live version" section explains its dashes
+            // with. Computed below from the same rows the table prints.
+            'lifecycleStatus' => $this->lifecycleStatus($model, $calibrationAvailability, $active),
             'activeModel' => $model === null ? null : [
                 'id' => $modelVersionId,
                 'modelId' => (string) ($model['model_id'] ?? ''),
@@ -554,6 +558,85 @@ final class FootballIntelligence
                 'states' => ModelRegistry::STATES,
             ], $versions),
         ];
+    }
+
+    /**
+     * The model-lifecycle state behind the "Live version" table's dashes —
+     * what the models screen explains its empty fields with. Every dash in
+     * that table is one of two kinds, and they fill differently:
+     *
+     *  - measured figures (Training dataset version, Validation sample size,
+     *    Accuracy, Log loss, Brier score, ECE, Last evaluated) are recorded
+     *    automatically from settled predictions by the hourly performance
+     *    job — with none settled yet there is nothing to measure;
+     *  - lifecycle stamps (Trained, Validated, Calibrated, Approved,
+     *    Approved by, Activated) are earned by operator actions in the
+     *    version register, and the registry REFUSES Train/Validate until an
+     *    evaluation is recorded — the chain cannot skip settled history.
+     *
+     *  - DRAFT_NO_EVIDENCE        — registered from the deployed scoring
+     *                               configuration; nothing measured, nothing
+     *                               transitioned (the fresh-board state)
+     *  - DRAFT_EVIDENCE_RECORDED  — measured figures exist; the stamps wait
+     *                               on operator transitions
+     *  - LIFECYCLE_IN_PROGRESS    — TRAINED/VALIDATED/CALIBRATED; the
+     *                               remaining stamps are named
+     *  - APPROVED_NOT_ACTIVE      — approved; activation remains
+     *  - ACTIVE_UNCALIBRATED      — answering predictions; the calibration
+     *                               pair is what stays empty
+     *  - null                     — ACTIVE and calibrated: the table is
+     *                               full, the figures are the information
+     *
+     * Purely read-only. @param array<string,mixed>|null $model raw model row
+     * @param array<string,mixed> $availability calibrationAvailability block
+     * @param array<string,mixed>|null $calibration active calibration row
+     * @return array<string,mixed>|null
+     */
+    private function lifecycleStatus(?array $model, array $availability, ?array $calibration): ?array
+    {
+        if ($model === null) return null;
+        $status = strtoupper((string) ($model['status'] ?? ModelRegistry::DRAFT));
+        $version = (string) ($model['model_version'] ?? '');
+        $usableSamples = (int) ($availability['usable'] ?? 0);
+        $minimum = (int) ($availability['minimum'] ?? 0);
+        $calibrationPending = ($calibration['status'] ?? CalibrationService::PENDING) !== CalibrationService::CALIBRATED;
+
+        if ($status === ModelRegistry::ACTIVE) {
+            if (!$calibrationPending) return null;
+            return ['state' => 'ACTIVE_UNCALIBRATED',
+                'detail' => 'This is the version answering predictions. The remaining empty fields are the calibration pair: a calibration is fitted from settled history via Fit calibration ('
+                    . $usableSamples . ' of ' . $minimum . ' usable settled samples so far) and approved on this screen; until then confidence is published raw and labelled CALIBRATION_PENDING — never silently adjusted.',
+                'status' => $status, 'version' => $version, 'usableSamples' => $usableSamples, 'minimum' => $minimum];
+        }
+
+        $evidence = (int) ($model['validation_sample_size'] ?? 0) > 0;
+        if ($status === ModelRegistry::DRAFT) {
+            $state = $evidence ? 'DRAFT_EVIDENCE_RECORDED' : 'DRAFT_NO_EVIDENCE';
+            $detail = $evidence
+                ? 'The measured figures for this version are recorded (' . (int) ($model['validation_sample_size'] ?? 0) . ' settled prediction(s) evaluated). The remaining empty fields are the operator-earned lifecycle stamps: Trained, Validated, Calibrated, Approved and Activated each fill when that transition succeeds in the version register — approval requires measured accuracy, log loss, Brier and ECE over stored settlements, and CALIBRATED requires a fitted calibration. Until activation, predictions continue against the current live version.'
+                : 'This version was registered automatically from the deployed scoring configuration' . ($version !== '' ? ' (' . $version . ')' : '')
+                    . ' when the engine first analyzed a fixture — never as an approved model. The empty fields fill in a fixed order. First the measured figures (Training dataset version, Validation sample size, Accuracy, Log loss, Brier score, ECE, Last evaluated): the hourly performance job records them from settled predictions, and with none settled yet there is nothing to measure. Then the lifecycle stamps (Trained, Validated, Calibrated, Approved, Activated): each is earned by an operator action in the version register, and the registry refuses Train/Validate until an evaluation is recorded — the chain cannot skip settled history. The calibration version fills when a calibration is fitted from that history (Fit calibration; '
+                    . $usableSamples . ' of ' . $minimum . ' usable settled samples so far). Meanwhile predictions run against this DRAFT version with raw confidence labelled CALIBRATION_PENDING.';
+            return ['state' => $state, 'detail' => $detail, 'status' => $status, 'version' => $version,
+                'usableSamples' => $usableSamples, 'minimum' => $minimum];
+        }
+
+        if ($status === ModelRegistry::APPROVED) {
+            return ['state' => 'APPROVED_NOT_ACTIVE',
+                'detail' => 'The version is approved' . (!empty($model['approved_by']) ? ' by ' . (string) $model['approved_by'] : '')
+                    . '; activation — which retires the previous ACTIVE version — is the last operator step in the version register. Until then predictions run against the currently ACTIVE version.',
+                'status' => $status, 'version' => $version, 'usableSamples' => $usableSamples, 'minimum' => $minimum];
+        }
+
+        // TRAINED / VALIDATED / CALIBRATED: mid-chain.
+        $chain = [ModelRegistry::TRAINED, ModelRegistry::VALIDATED, ModelRegistry::CALIBRATED, ModelRegistry::APPROVED, ModelRegistry::ACTIVE];
+        $position = array_search($status, $chain, true);
+        $after = $position === false ? $chain : array_slice($chain, (int) $position + 1);
+        return ['state' => 'LIFECYCLE_IN_PROGRESS',
+            'detail' => 'The version has reached ' . $status . '. The remaining stamps (' . implode(', ', $after)
+                . ') fill as an operator completes each transition in the version register: approval requires measured accuracy, log loss, Brier and ECE over stored settlements'
+                . ($calibrationPending ? ', and CALIBRATED requires a fitted calibration (Fit calibration; ' . $usableSamples . ' of ' . $minimum . ' usable settled samples)' : '') . '.',
+            'status' => $status, 'version' => $version, 'usableSamples' => $usableSamples, 'minimum' => $minimum];
     }
 
     /** @return array<string,mixed> */

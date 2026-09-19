@@ -163,6 +163,19 @@ settled rows and says so, and `PerformanceService::report()` returns
   ACTIVE version in the same action, with the reason stored.
 * Nothing is ever hard-coded as approved: `ModelRegistry` refuses transitions whose
   evidence is missing, and the console shows the refusal reason.
+* **The models screen explains its dashes.** The "Live version" table's empty
+  fields are two different kinds, and `FootballIntelligence::lifecycleStatus()`
+  (a pure read, published in `modelSummary()`) says which is which: the
+  **measured figures** (Training dataset version, Validation sample size,
+  Accuracy, Log loss, Brier, ECE, Last evaluated) are recorded automatically
+  from settled predictions by the hourly performance job — with none settled
+  there is nothing to measure — while the **lifecycle stamps** (Trained,
+  Validated, Calibrated, Approved, Approved by, Activated) are earned by
+  operator transitions in the version register, which refuse Train/Validate
+  until an evaluation exists. The strip renders per state
+  (`DRAFT_NO_EVIDENCE` / `DRAFT_EVIDENCE_RECORDED` / `LIFECYCLE_IN_PROGRESS` /
+  `APPROVED_NOT_ACTIVE` / `ACTIVE_UNCALIBRATED`); an ACTIVE, calibrated model
+  renders none — a full table is the information.
 
 Stored per version: `model_id`, `model_name`, `model_version`, `algorithm`,
 `feature_version`, `training_dataset_version`, `created_at`, `trained_at`,

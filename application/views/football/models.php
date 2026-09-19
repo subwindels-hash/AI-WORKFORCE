@@ -64,6 +64,31 @@ $stateClass = static fn(string $state): string => match (strtoupper($state)) {
           <?php endif; ?>
         </p>
         <?php if (!empty($models['reason'])): ?><p class="football-help"><?= e((string) $models['reason']) ?></p><?php endif; ?>
+        <?php /* The lifecycle state behind the table's dashes (see
+               FootballIntelligence::lifecycleStatus — pure read over the same
+               rows the table prints). Rendered only while fields remain
+               empty: an ACTIVE, calibrated model needs no apology. Names
+               which dashes are measured figures (auto-recorded from settled
+               predictions by the hourly performance job) and which are
+               operator-earned lifecycle stamps, and the guards that order
+               them. */ ?>
+        <?php $lifecycle = is_array($models['lifecycleStatus'] ?? null) ? $models['lifecycleStatus'] : null; ?>
+        <?php if ($lifecycle !== null && ($lifecycle['state'] ?? '') !== ''): ?>
+          <?php
+            [$lifecycleBadgeClass, $lifecycleBadgeLabel] = match ((string) $lifecycle['state']) {
+                'DRAFT_NO_EVIDENCE' => ['b-amber', 'DRAFT — AWAITING SETTLED EVIDENCE'],
+                'DRAFT_EVIDENCE_RECORDED' => ['b-violet', 'DRAFT — MEASURED FIGURES RECORDED'],
+                'LIFECYCLE_IN_PROGRESS' => ['b-violet', 'LIFECYCLE IN PROGRESS'],
+                'APPROVED_NOT_ACTIVE' => ['b-green', 'APPROVED — ACTIVATION REMAINS'],
+                'ACTIVE_UNCALIBRATED' => ['b-amber', 'ACTIVE — CALIBRATION PENDING'],
+                default => ['b-gray', 'LIFECYCLE'],
+            };
+          ?>
+          <div class="football-model-status" id="football-model-status">
+            <span class="badge <?= $lifecycleBadgeClass ?>"><?= e($lifecycleBadgeLabel) ?></span>
+            <p><?= e((string) ($lifecycle['detail'] ?? '')) ?></p>
+          </div>
+        <?php endif; ?>
         <?php if ($active === null): ?>
           <p class="dim">No model version is registered yet. The engine registers the deployed scoring configuration as <b>DRAFT</b> the first time it analyzes a fixture — never as an approved model.</p>
         <?php else: ?>

@@ -827,3 +827,67 @@ test('football: a measured performance window renders its figures and no strip',
     // match does not approve a calibration).
     assert_contains('Approved calibrations 0', $render['html'], 'the calibration zero still explains itself');
 });
+
+// ─── the models screen renders the lifecycle state behind its dashes ─────────
+
+test('football: the models screen renders the strip for a fresh DRAFT version', function () {
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    [, , $module] = fx_fb_harness([fx_fb_row('fx-models-view', gmdate('c', $kickoff), 'Manchester City', 'Everton', '10', '20')]);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $render = fx_fb_render_view('models', fx_fb_view_data([
+        'models' => $module->modelSummary(),
+        'performance' => $module->performance()->report(30),
+    ]));
+    assert_true($render['notices'] === [], 'the strip reaches for no key the payload does not publish'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    assert_contains('id="football-model-status"', $render['html'], 'the strip renders in the Live version section');
+    assert_contains('DRAFT — AWAITING SETTLED EVIDENCE', $render['html'], 'with its badge');
+    assert_contains('never as an approved model', $render['html'], 'the strip says how the row came to exist');
+    assert_contains('hourly performance job', $render['html'], 'and how the measured figures fill');
+    // The dashes stay honest — the strip explains them, it does not replace them.
+    assert_contains('football-cell-label">Trained</td><td class="mono">—</td>', $render['html'], 'the Trained dash still renders');
+    assert_contains('football-cell-label">Activated</td><td class="mono">—</td>', $render['html'], 'the Activated dash still renders');
+    assert_contains('CALIBRATION_PENDING', $render['html'], 'the calibration badge the predictions carry is visible');
+    assert_contains('Allowed transitions: DRAFT → TRAINED → VALIDATED → CALIBRATED → APPROVED → ACTIVE', $render['html'],
+        'the register keeps its own guard sentence');
+});
+
+test('football: the models screen renders the ACTIVE — CALIBRATION PENDING strip', function () {
+    // One settled prediction, then the operator chain to activation: the model
+    // is live but uncalibrated, and the strip says exactly that.
+    [$repo, , $module] = fx_fb_harness([fx_fb_row('fx-models-active', gmdate('c', time() + 7200), 'Manchester City', 'Everton', '10', '20')]);
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    fx_fb_sync_today($module, $day);
+    $module->predictions()->predictDay($day);
+    $registry = $module->models();
+    $id = (int) $registry->ensureRegistered()['model']['id'];
+    $fixtureId = fx_131_fixture_id($repo, 'fx-models-active');
+    $fixture = $repo->findFixtureById($fixtureId);
+    $repo->saveFixture((int) $fixture['provider_id'], [
+        'externalId' => (string) $fixture['external_id'], 'status' => 'FINISHED', 'homeScore' => 2, 'awayScore' => 0,
+    ]);
+    $settlement = $module->settlements()->settleFixture($fixtureId, 'test:models');
+    assert_equals('SETTLED', $settlement['status'], 'the scenario holds a settlement');
+    $module->performance()->snapshot(30, $id);
+    foreach ([\AIWorkforce\Football\ModelRegistry::TRAINED, \AIWorkforce\Football\ModelRegistry::VALIDATED] as $state) {
+        assert_equals('OK', $registry->transition($id, $state, 'tester')['status'], 'earned ' . $state);
+    }
+    assert_equals('OK', $registry->approve($id, 'admin@windels')['status']);
+    assert_equals('OK', $registry->activate($id, 'admin@windels')['status']);
+
+    $render = fx_fb_render_view('models', fx_fb_view_data([
+        'models' => $module->modelSummary(),
+        'performance' => $module->performance()->report(30),
+    ]));
+    assert_true($render['notices'] === [], 'renders with no missing key'
+        . ($render['notices'] === [] ? '' : ' — first: ' . (string) reset($render['notices'])));
+    assert_contains('ACTIVE — CALIBRATION PENDING', $render['html'], 'the badge names the remaining gap');
+    assert_contains('This is the version answering predictions', $render['html'], 'the strip names what ACTIVE means');
+    assert_contains('Fit calibration', $render['html'], 'and the action that fills the calibration pair');
+    // The earned stamps are no longer dashed.
+    assert_contains('football-cell-label">Trained</td><td class="mono">20', $render['html'], 'the Trained stamp filled');
+    assert_contains('football-cell-label">Approved by</td><td class="mono">admin@windels', $render['html'], 'and the approver');
+});
