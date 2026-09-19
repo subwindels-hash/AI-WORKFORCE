@@ -31,6 +31,11 @@ body.public {
 a { color: var(--sky); text-decoration: none; }
 a:hover { text-decoration: underline; }
 img { max-width: 100%; height: auto; display: block; object-fit: cover; object-position: center; }
+/* Safety net for inline icons. An <svg> with a viewBox but no width/height
+   renders at the browser's default replaced-element box (~150-300px), so a
+   single missing wrapper rule paints a giant glyph over the page. The public
+   stylesheet gets the same guard the dashboard one has. */
+svg { max-width: 100%; }
 .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .92em; }
 
 .pub-nav {

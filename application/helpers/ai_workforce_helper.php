@@ -171,3 +171,21 @@ function ai_workforce_protection_chip(array $status): array
         default => ['icon' => '🟢', 'label' => 'Automatic Protection: NORMAL', 'tone' => 'ok', 'blocking' => false],
     };
 }
+
+/**
+ * Cache-busted URL for a file under /assets.
+ *
+ * .htaccess serves CSS/JS with `max-age=604800` (7 days), so a corrected
+ * stylesheet can sit unseen in browser caches for a week — a fix that nobody
+ * can see is not a fix. Appending the file's mtime makes the URL change the
+ * moment the file does, and keeps the long cache lifetime for everyone else.
+ * Falls back to the plain path if the file cannot be stat'ed.
+ */
+if (!function_exists('asset_url')) {
+    function asset_url(string $path): string
+    {
+        $path = '/' . ltrim($path, '/');
+        $stamp = @filemtime(FCPATH . ltrim($path, '/'));
+        return $stamp ? $path . '?v=' . $stamp : $path;
+    }
+}

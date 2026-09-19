@@ -197,16 +197,29 @@ test('footer social icons are official brand marks at one small size', function 
     // ever paint oversized inside the pill.
     assert_contains('.pub-social-button svg { width: 16px; height: 16px; max-width: 16px; max-height: 16px;', $css, 'social icons are capped at 16x16');
     assert_contains('fill: var(--social-color)', $css, 'brand marks are filled in their brand colour');
-    // Every mark is a solid brand path on the 24x24 brand grid, with no inline
-    // sizing that could beat the stylesheet.
+    // Every mark is a solid brand path on the 24x24 brand grid, and carries the
+    // same intrinsic 16x16 floor the dashboard icons use. An <svg> with a
+    // viewBox but no width/height renders at the browser's default
+    // replaced-element box (~150-300px), so the stylesheet rule above was the
+    // ONLY thing keeping these small — and public.css is served with a 7-day
+    // max-age. One stale or missing stylesheet and all seven marks painted
+    // giant. CSS still wins over presentation attributes, so the floor never
+    // changes the normal 16px rendering; it only bounds the failure mode.
     preg_match_all('#<svg[^>]*>#', $footer, $svgs);
     assert_true(count($svgs[0]) >= 7, 'every channel ships an icon');
     foreach ($svgs[0] as $svg) {
         assert_contains('viewBox="0 0 24 24"', $svg, 'brand marks use the 24x24 grid: ' . $svg);
-        assert_false((bool) preg_match('/\swidth=/', $svg), 'social svg must not carry inline width: ' . $svg);
-        assert_false((bool) preg_match('/\sheight=/', $svg), 'social svg must not carry inline height: ' . $svg);
+        assert_contains('width="16"', $svg, 'social svg carries an intrinsic width floor: ' . $svg);
+        assert_contains('height="16"', $svg, 'social svg carries an intrinsic height floor: ' . $svg);
+        assert_false(
+            (bool) preg_match('/\s(?:width|height)="(?!16")/', $svg),
+            'the only inline size allowed is the 16px floor: ' . $svg
+        );
         assert_contains('aria-hidden="true"', $svg, 'decorative marks are hidden from assistive tech');
     }
+    // public.css needs the same global guard ai_workforce.css has, so an
+    // unsized icon anywhere on the marketing site cannot render at 300px.
+    assert_true((bool) preg_match('/^svg \{ max-width: 100%; \}/m', $css), 'public.css carries a global svg guard');
     // Official glyph signatures (first path command of each brand mark) — these
     // are the real logos, not hand-drawn approximations.
     $signatures = [
@@ -223,6 +236,32 @@ test('footer social icons are official brand marks at one small size', function 
     // The old stroke-drawn placeholders are gone.
     assert_false(str_contains($footer, 'social-icon-dot'), 'the hand-drawn Instagram approximation is replaced');
     assert_false(str_contains($css, 'stroke-width: 1.8'), 'social marks no longer rely on stroke drawing');
+});
+
+test('the public stylesheet is cache-busted so a corrected icon size reaches users', function () {
+    // .htaccess serves css with `max-age=604800`. Without a changing URL a
+    // returning visitor keeps the old public.css for up to a week and still
+    // sees the oversized icons, so the size fix is not actually shipped.
+    $htaccess = (string) file_get_contents(FCPATH . '.htaccess');
+    assert_contains('max-age=604800', $htaccess, 'assets are served with a long cache lifetime');
+
+    $header = (string) file_get_contents(FCPATH . 'application/views/site/layout/header.php');
+    assert_contains("asset_url('assets/css/public.css')", $header, 'public stylesheet is requested through the cache-buster');
+    assert_false(
+        (bool) preg_match('#href="/assets/css/public\.css"#', $header),
+        'the plain, uncacheable-busted stylesheet URL must not come back'
+    );
+
+    // The helper is autoloaded (config/autoload.php) so views can call it.
+    assert_contains("'ai_workforce'", (string) file_get_contents(FCPATH . 'application/config/autoload.php'), 'the helper is autoloaded');
+    assert_true(function_exists('asset_url'), 'asset_url() is defined by the autoloaded helper');
+
+    // It appends a version that changes with the file, and degrades to the
+    // plain path when the file cannot be stat'ed.
+    $url = asset_url('assets/css/public.css');
+    assert_true((bool) preg_match('#^/assets/css/public\.css\?v=\d+$#', $url), 'asset_url stamps the real file mtime: ' . $url);
+    assert_equals('/assets/css/does-not-exist.css', asset_url('assets/css/does-not-exist.css'), 'a missing file degrades to the plain path');
+    assert_equals($url, asset_url('/assets/css/public.css'), 'a leading slash is normalised, not doubled');
 });
 
 test('auth pages are routed and protected-dashboard routes redirect to login', function () {
