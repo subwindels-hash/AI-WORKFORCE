@@ -763,6 +763,25 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
         </div>
         <div class="body">
           <p class="football-section-intro">Measured from stored settlements only. Unsettled predictions are excluded, and unavailable measurements remain blank rather than being estimated.</p>
+          <?php /* The empty-window pipeline state (see PerformanceService's
+                 status block — pure stored counts). Rendered only when the
+                 window holds no settlement: a measured window needs no
+                 apology. Names which absence the panel is in and how a
+                 measurement appears; no figure is estimated to look busy. */ ?>
+          <?php $perfStatus = is_array($perf['status'] ?? null) ? $perf['status'] : null; ?>
+          <?php if ($perfStatus !== null && ($perfStatus['state'] ?? '') !== ''): ?>
+            <?php
+              [$perfBadgeClass, $perfBadgeLabel] = match ((string) $perfStatus['state']) {
+                  'PREDICTIONS_UNSETTLED' => ['b-amber', 'AWAITING COMPLETED MATCHES'],
+                  'SETTLED_OUTSIDE_WINDOW' => ['b-gray', 'NOTHING SETTLED IN THIS WINDOW'],
+                  default => ['b-gray', 'NOTHING TO MEASURE YET'],
+              };
+            ?>
+            <div class="football-perf-status" id="football-perf-status">
+              <span class="badge <?= $perfBadgeClass ?>"><?= e($perfBadgeLabel) ?></span>
+              <p><?= e((string) ($perfStatus['detail'] ?? '')) ?></p>
+            </div>
+          <?php endif; ?>
           <dl class="football-performance-list">
             <div><dt>Predictions evaluated</dt><dd class="mono"><?= $count($perf['evaluatedPredictions'] ?? null) ?></dd></div>
             <div><dt>Correct results</dt><dd class="mono"><?= $count($perf['correctResults'] ?? null) ?></dd></div>
@@ -779,6 +798,14 @@ $pager = static function (array $pagination, string $viewDate, array $carry): st
           </dl>
           <?php if (($perf['state'] ?? '') !== 'MEASURED'): ?><p class="football-help"><?= e((string) ($perf['message'] ?? 'No settled predictions yet. Historical performance metrics will appear after predicted matches have completed.')) ?></p><?php endif; ?>
           <?php if (!empty($perf['note'])): ?><p class="football-help"><?= e((string) $perf['note']) ?></p><?php endif; ?>
+          <?php /* The Approved calibrations zero explains itself: a calibration
+                 is built from settled history and approved by an operator.
+                 Until then probabilities are published uncalibrated and say
+                 so (CALIBRATION_PENDING on every prediction). */ ?>
+          <?php $calAvailability = is_array($models['calibrationAvailability'] ?? null) ? $models['calibrationAvailability'] : []; ?>
+          <?php if ((int) ($models['approvedCalibrationCount'] ?? 0) === 0 && $calAvailability !== []): ?>
+            <p class="football-help">Approved calibrations 0 — a calibration is built from settled history (<?= (int) ($calAvailability['usable'] ?? 0) ?> usable settled sample<?= (int) ($calAvailability['usable'] ?? 0) === 1 ? '' : 's' ?> of the <?= (int) ($calAvailability['minimum'] ?? 0) ?> minimum) and approved on the Models &amp; calibration screen. Predictions are published uncalibrated meanwhile and say so.</p>
+          <?php endif; ?>
         </div>
       </section>
 

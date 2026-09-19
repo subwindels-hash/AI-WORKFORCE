@@ -202,6 +202,20 @@ Stored per version: `model_id`, `model_name`, `model_version`, `algorithm`,
   `result_source` and `settled_at` — and only then flips `settlement_state` to
   `SETTLED`. A prediction with no usable probabilities gets `NULL` grades rather
   than a guessed "wrong".
+* The 30-day panel explains an empty window. `PerformanceService::report()`
+  publishes a `status` block whenever the window holds no settlement — a pure
+  read over stored counts naming which absence the panel is in:
+  `NO_PREDICTIONS` (no prediction row exists yet; **Generate this page** /
+  generate-on-read / the scheduled `predict` job is how one appears),
+  `PREDICTIONS_UNSETTLED` (predictions are stored but none is settled: a
+  prediction is measured only after its match finishes — the `results` sweep
+  stores the final score, the `settle` job grades the prediction, both every
+  15 minutes), or `SETTLED_OUTSIDE_WINDOW` (settlements exist, none inside the
+  window the panel describes). A measured window carries no status: the
+  figures are the information. The *Approved calibrations* zero explains
+  itself the same way — a calibration is built from settled history and
+  approved on the Models & calibration screen; predictions are published
+  uncalibrated (`CALIBRATION_PENDING`) until then.
 * The 30-day panel is `SELECT`-aggregated over settled rows: evaluated count,
   correct results, result accuracy, exact-score accuracy, average confidence,
   Brier, ECE, log loss, average data quality, average goal error, plus the

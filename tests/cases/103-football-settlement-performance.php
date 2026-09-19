@@ -316,3 +316,61 @@ test('football: activating a new version retires the one it replaces', function 
     assert_equals(ModelRegistry::ACTIVE, $usable['state']);
     assert_equals($nextId, (int) ($usable['model']['id'] ?? 0), 'and the pipeline predicts with the ACTIVE version from now on');
 });
+
+// ─── the empty performance window names which absence it is in ───────────────
+
+test('football: an empty performance window says why it is empty and how it fills', function () {
+    // Fresh module: no prediction exists at all — the first absence.
+    $repo = new FootballRepositoryStub();
+    $module = new \AIWorkforce\Football\FootballIntelligence($repo, new \AIWorkforce\Sports\Providers\SportsProviderManager(), null, new FootballConfiguration());
+    $report = $module->performance()->report(30);
+    assert_equals('NO_SETTLED_PREDICTIONS', $report['state']);
+    $status = $report['status'];
+    assert_equals('NO_PREDICTIONS', $status['state'], 'with no prediction row there is nothing to measure');
+    assert_equals(0, $status['predictionsStored']);
+    assert_true(str_contains($status['detail'], 'nothing to measure'), 'the state states the actual fact');
+    assert_true(str_contains($status['detail'], 'Generate this page'), 'and names how a prediction appears');
+
+    // Predictions exist but none settled: the second absence.
+    $kickoff = time() + 7200;
+    $day = gmdate('Y-m-d', $kickoff);
+    [, , $settlingModule] = fx_fb_harness([
+        fx_fb_row('fx-perf-unsettled-1', gmdate('c', $kickoff), 'Manchester City', 'Everton', '10', '20'),
+        fx_fb_row('fx-perf-unsettled-2', gmdate('c', $kickoff + 900), 'Brighton', 'Burnley', '30', '40'),
+    ]);
+    fx_fb_sync_today($settlingModule, $day);
+    $predictedCount = count($settlingModule->predictions()->predictDay($day)['predictions'] ?? []);
+    assert_true($predictedCount >= 1, 'the scenario holds predictions to settle later');
+    $report = $settlingModule->performance()->report(30);
+    $status = $report['status'];
+    assert_equals('PREDICTIONS_UNSETTLED', $status['state'], 'predictions exist, none is settled');
+    assert_equals((int) $status['predictionsStored'], (int) $settlingModule->performance()->report(30)['status']['predictionsStored']);
+    assert_true($status['predictionsStored'] >= $predictedCount, 'the count covers the stored rows');
+    assert_true(str_contains($status['detail'], 'none is settled yet'), 'the state states the actual fact');
+    assert_true(str_contains($status['detail'], 'results sweep stores the final score'), 'and names the pipeline that produces a measurement');
+    assert_true(str_contains($status['detail'], 'settle job grades the prediction'), 'both stages of it');
+    // The generic honest message stays (the console contract asserts it).
+    assert_equals(PerformanceService::EMPTY_MESSAGE, $report['message']);
+});
+
+test('football: a measured window carries no status, and an out-of-window settlement says so', function () {
+    // Settle one prediction for real: the window is measured, no status strip.
+    [$repo, $module, , , , $settlement] = fx_fb_settled(2, 0);
+    assert_equals('SETTLED', $settlement['status']);
+    $report = $module->performance()->report(30);
+    assert_equals('MEASURED', $report['state']);
+    assert_null($report['status'], 'measured figures are the information — no apology strip');
+
+    // Backdate the settlement beyond the window: settlements exist, just not
+    // in the last 30 days — a third, different absence.
+    foreach ($repo->settlements as &$row) {
+        $row['settled_at'] = gmdate('c', time() - 40 * 86400);
+    }
+    unset($row);
+    $report = $module->performance()->report(30);
+    assert_equals('NO_SETTLED_PREDICTIONS', $report['state']);
+    $status = $report['status'];
+    assert_equals('SETTLED_OUTSIDE_WINDOW', $status['state']);
+    assert_equals(1, $status['settledAllTime'], 'the all-time count is what names the state');
+    assert_true(str_contains($status['detail'], 'none inside the last 30 days'), 'the state says the window, not the history, is empty');
+});
